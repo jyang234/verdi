@@ -333,7 +333,7 @@ func TestUnprovenBoardFixture_Handler_Negative_MissingFixture(t *testing.T) {
 // the running harness passes.
 func TestControlServer_WiresUnprovenBoardFixture(t *testing.T) {
 	neutralizeCIEnvForTest(t)
-	c := newControlServer(t.TempDir(), testModuleRoot)
+	c := newControlServer(t.TempDir(), testModuleRoot, "")
 	t.Cleanup(c.unprovenBoard.stop)
 	req := httptest.NewRequest(http.MethodGet, "/unproven-board-fixture", nil)
 	rec := httptest.NewRecorder()

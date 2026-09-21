@@ -119,3 +119,25 @@ func provisionSharedStore(ctx context.Context, moduleRoot, scratch string, after
 		readinessRequestPath: readinessRequestPath,
 	}, nil
 }
+
+// sharedServeEnv is the environment `verdi serve` gets over a shared-shape
+// store: the ambient process environment (already CI-neutralized by
+// main.go's neutralizeCIEnv) plus the three injection seams, in this
+// order — the canned review feed (workbench.CommentFeed's canned-file
+// implementation: REVIEW_SPEC reads as under MR review with the three
+// fixtures.ts comments), the control server's open-MR feed the directory
+// home consults per render (openmrfeed.go's httpOpenMRFeed, loopback
+// only), and the canned diagram verification report the rail consumes —
+// no network (CLAUDE.md). A pure function of its inputs, shared by the
+// shared serve (main.go) and the readiness-pilot fixture
+// (readinesspilotfixture.go) so their postures cannot drift; the ambient
+// slice is never mutated.
+func sharedServeEnv(ambient []string, store sharedStore, openMRFeedURL string) []string {
+	env := make([]string, 0, len(ambient)+3)
+	env = append(env, ambient...)
+	return append(env,
+		"VERDI_REVIEW_FEED="+store.feedPath,
+		"VERDI_OPENMR_FEED="+openMRFeedURL,
+		"VERDI_DIAGRAM_VERIFICATION="+store.verificationPath,
+	)
+}

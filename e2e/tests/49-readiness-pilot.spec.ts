@@ -15,6 +15,19 @@ import { addSticky, expectAutosaved } from "./helpers";
 // Closed instrumentation vocabulary (unchanged): readiness-opened,
 // area-inspected, concern-inspected, board-link-followed,
 // cli-fallback-copied, stale-notice-inspected — page memory only.
+//
+// Because the page derives per request, its exact-array oracles below
+// describe a FRESH store — and by the time the alphabetical full run
+// reaches this file, earlier suites have left open board stickies, a
+// spike claim, an extra open question and an edited spec in the shared
+// store, all of which the page honestly shows. So every test here (except
+// the all-proven one, which has its own fixture) runs against the
+// ISOLATED readiness-pilot store (cmd/e2eharness/readinesspilotfixture.go,
+// R-RR1-23): the real `verdi serve` over a store provisioned by the
+// shared store's own sequence, in the shared serve's own posture,
+// discovered through the control server — never the shared serve. The
+// board the cockpit links to is that isolated serve's board, so the
+// edit test's probe lands in the isolated store too.
 
 // Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
 // harness fixtures (provision_board.go's refi-decline-flow design branch
@@ -109,6 +122,20 @@ const ALL_PROVEN = {
   ],
 };
 
+// The isolated readiness-pilot serve's base URL (http://127.0.0.1:<port>/),
+// started lazily by the control server on first use and reused thereafter.
+async function readinessPilotBase(page: Page): Promise<string> {
+  const res = await page.request.get(`${CONTROL_URL}/readiness-pilot-fixture`);
+  expect(res.ok()).toBe(true);
+  const base = (await res.text()).trim();
+  expect(base).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+  return base;
+}
+
+async function readinessPilotURL(page: Page): Promise<string> {
+  return (await readinessPilotBase(page)) + "readiness";
+}
+
 async function allProvenReadinessURL(page: Page): Promise<string> {
   const res = await page.request.get(
     `${CONTROL_URL}/readiness-all-proven-fixture`,
@@ -169,7 +196,7 @@ async function derivedHead(page: Page): Promise<string> {
 test("orientation and rail answer where-am-I with plain labels", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Orientation: exact title first, current step, exact purpose copy.
   await expect(page.locator("h2.readiness-title")).toHaveText(TARGET_TITLE);
@@ -226,7 +253,7 @@ test("orientation and rail answer where-am-I with plain labels", async ({
 test("focus list shows exactly three priorities and the exact disclosed remainder", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Exactly the first three, in the pinned order, ranked 1..3.
   expect(await focusIds(page)).toEqual(ATTENTION_QUEUE); // complete list is in the DOM…
@@ -284,7 +311,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
 test("focus and completed checks are lossless, disjoint, and complete", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const queueIds = await focusIds(page);
   expect(queueIds).toEqual(ATTENTION_QUEUE);
@@ -315,7 +342,7 @@ test("focus and completed checks are lossless, disjoint, and complete", async ({
 test("plain state labels pair with exact formal technical details", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Every chip pairs its formal modifier class with the plain label.
   const chips = await page
@@ -356,7 +383,7 @@ test("plain state labels pair with exact formal technical details", async ({
 test("a spike-claimed open question is non-blocking/eventual; the unclaimed one stays blocking (ac-10)", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.locator("details.readiness-more > summary").click();
 
   const claimed = page.locator('[data-concern-id="shape/question/oq-2"]');
@@ -381,7 +408,7 @@ test("a spike-claimed open question is non-blocking/eventual; the unclaimed one 
 test("every eventual review blocker is non-blocking with Timing eventual in its technical details (ac-1)", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.locator("details.readiness-more > summary").click();
 
   for (const id of EVENTUAL_REVIEW_BLOCKERS) {
@@ -404,7 +431,7 @@ test("every eventual review blocker is non-blocking with Timing eventual in its 
 test("board destination opens the editable board in a new tab and both tabs keep their state", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const before = await pilotEvents(page);
   expect(before[0]).toMatchObject({ sequence: 1, event: "readiness-opened" });
 
@@ -444,7 +471,7 @@ test("board destination opens the editable board in a new tab and both tabs keep
 test("middle-button appends exactly one event; right-click appends none", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const boardLink = page.locator(".readiness-board-link").first();
 
   const beforeMiddle = await pilotEvents(page);
@@ -469,7 +496,7 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   page,
   context,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: new URL(page.url()).origin,
   });
@@ -502,7 +529,7 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
 });
 
 test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.emulateMedia({ reducedMotion: "reduce" });
 
   // The only CLI-destination landmark in this fixture now sits past the
@@ -561,7 +588,7 @@ test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
 test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and page-memory-only posture", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.waitForLoadState("networkidle");
 
   const requests: string[] = [];
@@ -622,7 +649,8 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
 test("an edit through the existing board leaves the open cockpit tab unchanged while the next request derives it afresh at the same HEAD", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  const base = await readinessPilotBase(page);
+  await page.goto(`${base}readiness`);
   const head = await derivedHead(page);
 
   // The derivation stamp (ac-2): plain label first, the exact HEAD this
@@ -636,7 +664,7 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
   await expect(notice).not.toContainText("Startup snapshot");
   await expect(notice).not.toContainText("restart verdi serve");
 
-  const bodyBefore = await (await page.request.get("/readiness")).text();
+  const bodyBefore = await (await page.request.get(`${base}readiness`)).text();
   expect(bodyBefore).not.toMatch(/data-concern-id="shape\/board\/question\//);
   const eventsBefore = await pilotEvents(page);
   const domBefore = await page.evaluate(
@@ -653,7 +681,7 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
     "readiness pilot probe: an open board question",
   );
 
-  // From here the shared store carries the probe. Every assertion runs
+  // From here the isolated store carries the probe. Every assertion runs
   // inside the try so that a failure anywhere below still reaches the
   // finally, which deletes the probe through the same board exactly once
   // — a red here must never leak a shape/board/question/<id> concern into
@@ -675,7 +703,7 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
     // But the NEXT request derives afresh (ac-2): the same HEAD — the
     // sticky is working-tree scratch, nothing was committed — and the new
     // open board question is now a shape concern of its own.
-    const bodyAfter = await (await page.request.get("/readiness")).text();
+    const bodyAfter = await (await page.request.get(`${base}readiness`)).text();
     expect(bodyAfter).not.toBe(bodyBefore);
     expect(bodyAfter).toContain(`Derived at HEAD ${head} for this request.`);
     expect(bodyAfter).toMatch(
@@ -697,7 +725,7 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
   // Deleting the probe restored the store, and the same ref at the same
   // HEAD derives identical bytes again (ac-2) — so every later test
   // inherits the pinned posture, not this probe.
-  const bodyRestored = await (await page.request.get("/readiness")).text();
+  const bodyRestored = await (await page.request.get(`${base}readiness`)).text();
   expect(bodyRestored).toBe(bodyBefore);
 });
 
@@ -705,7 +733,7 @@ test("420px shows exactly the first three priorities before expansion", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const visible = page.locator(".readiness-queue [data-concern-id]:visible");
   await expect(visible).toHaveCount(3);
@@ -777,7 +805,7 @@ test("light and dark schemes keep the cockpit legible with identical facts", asy
     });
 
   await page.emulateMedia({ colorScheme: "light" });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const light = await palette();
   const lightIds = await focusIds(page);
 
@@ -800,7 +828,7 @@ test("light and dark schemes keep the cockpit legible with identical facts", asy
 test("keyboard traversal reaches technical details for every priority and completed check", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Expand the remainder with the keyboard so every priority's control
   // is in the tab order.
@@ -836,7 +864,7 @@ test("420px: pinned rail hides nothing, anchors reveal disclosed rows, long valu
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const widths = await page.evaluate(() => ({
     doc: document.documentElement.scrollWidth,

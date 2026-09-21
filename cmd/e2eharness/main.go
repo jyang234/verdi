@@ -116,7 +116,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	storeRoot, feedPath, verificationPath, readinessRequestPath := store.storeRoot, store.feedPath, store.verificationPath, store.readinessRequestPath
+	storeRoot, readinessRequestPath := store.storeRoot, store.readinessRequestPath
 
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
@@ -133,7 +133,8 @@ func run() error {
 	// git calls its handlers make (delete-branch; the lazily-provisioned
 	// empty-glance and vocab fixture stores) are cancelled by an interrupt
 	// too — not just the provisioning done inline above.
-	ctrl := newControlServer(storeRoot, moduleRoot)
+	openMRFeedURL := "http://" + controlAddr + "/openmrs"
+	ctrl := newControlServer(storeRoot, moduleRoot, openMRFeedURL)
 	// The unproven-board fixture (unprovenboard.go) spawns its own `verdi
 	// serve` on first use; reap it with the harness so no orphaned listener
 	// outlives the run (the same guarantee the shared serve gets below).
@@ -141,6 +142,9 @@ func run() error {
 	// The spec-import fixture (specimportfixture.go) spawns its own serve
 	// the same way; reap it with the harness too.
 	defer ctrl.specImport.stop()
+	// The readiness-pilot fixture (readinesspilotfixture.go) spawns its own
+	// serve over its own shared-shape store; reap it with the harness too.
+	defer ctrl.readinessPilot.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),
@@ -176,17 +180,11 @@ func run() error {
 	serveCmd.Cancel = func() error { return serveCmd.Process.Signal(syscall.SIGTERM) }
 	serveCmd.WaitDelay = 5 * time.Second
 	serveCmd.Dir = storeRoot
-	// The hermetic review-mode feed (workbench.CommentFeed's canned-file
-	// implementation): REVIEW_SPEC reads as under MR review, with the
-	// three fixtures.ts comments — no network (CLAUDE.md).
-	serveCmd.Env = append(os.Environ(),
-		"VERDI_REVIEW_FEED="+feedPath,
-		// The directory home's hermetic in-review feed (openmrfeed.go's
-		// httpOpenMRFeed) — served by the control server above, loopback
-		// only, no network (CLAUDE.md).
-		"VERDI_OPENMR_FEED=http://"+controlAddr+"/openmrs",
-		"VERDI_DIAGRAM_VERIFICATION="+verificationPath,
-	)
+	// The shared serve's environment (sharedServeEnv, sharedstore.go): the
+	// hermetic review-mode feed, the directory home's hermetic in-review
+	// feed served by the control server above, and the canned diagram
+	// verification report — loopback only, no network (CLAUDE.md).
+	serveCmd.Env = sharedServeEnv(os.Environ(), store, openMRFeedURL)
 	serveCmd.Stdout = os.Stdout
 	serveCmd.Stderr = os.Stderr
 	if err := serveCmd.Start(); err != nil {

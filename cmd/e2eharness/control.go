@@ -27,6 +27,14 @@ package main
 //     no default branch resolves, so the served board's lifecycle is
 //     UNPROVEN (MVP release amendment R2; merge-signaled acceptance AC-7)
 //     — see unprovenboard.go. main.go stops it with the harness.
+//   - GET  /readiness-pilot-fixture returns the base URL of a separate
+//     `verdi serve` subprocess over an ISOLATED store provisioned by the
+//     shared store's own sequence (provisionSharedStore) and started with
+//     the shared serve's own posture — the fresh readiness derivation the
+//     readiness pilot suite's exact oracles describe, which the shared
+//     store no longer shows once earlier suites have written to it
+//     (R-RR1-23) — see readinesspilotfixture.go. main.go stops it with
+//     the harness.
 
 import (
 	"log"
@@ -58,9 +66,14 @@ type controlServer struct {
 	readinessAllProven *readinessAllProvenFixture
 	unprovenBoard      *unprovenBoardFixture
 	specImport         *specImportFixture
+	readinessPilot     *readinessPilotFixture
 }
 
-func newControlServer(storeRoot, moduleRoot string) *controlServer {
+// newControlServer wires the fixtures. openMRFeedURL is this server's own
+// /openmrs endpoint as `verdi serve` reaches it (main.go resolves the
+// address; control.go never holds it), handed to the readiness-pilot
+// fixture so its serve consults the same feed the shared serve does.
+func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServer {
 	return &controlServer{
 		storeRoot:          storeRoot,
 		emptyGlance:        newEmptyGlanceFixture(),
@@ -68,6 +81,7 @@ func newControlServer(storeRoot, moduleRoot string) *controlServer {
 		readinessAllProven: newReadinessAllProvenFixture(),
 		unprovenBoard:      newUnprovenBoardFixture(moduleRoot),
 		specImport:         newSpecImportFixture(moduleRoot),
+		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
 	}
 }
 
@@ -97,6 +111,11 @@ func (c *controlServer) handler() http.Handler {
 	mux.HandleFunc("/spec-import-fixture", c.specImport.handler)
 	mux.HandleFunc("/spec-import-fixture/info", c.specImport.infoHandler)
 	mux.HandleFunc("/spec-import-fixture/tamper", c.specImport.tamperHandler)
+	// The isolated readiness-pilot store (readinesspilotfixture.go): the
+	// shipped binary's own `verdi serve` over a fresh shared-shape store,
+	// in the shared serve's own posture — the pristine derivation the
+	// readiness pilot suite's oracles pin, untouched by earlier suites.
+	mux.HandleFunc("/readiness-pilot-fixture", c.readinessPilot.handler)
 	return mux
 }
 
