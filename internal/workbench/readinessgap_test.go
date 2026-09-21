@@ -88,15 +88,17 @@ func readinessGapCapsBridge() *scriptedCapsBridge {
 }
 
 // renderReadinessGap renders the gap witness's exact committed text layout:
-// a three-line header comment (R-RR1-20's third line disclosing the design
-// bridge is wired for this derivation), then the wall-only, loader-only,
-// and blocking-disagreement sections, each a sorted, two-space-indented
-// list of families.
+// a four-line header comment (R-RR1-20's third line disclosing the design
+// bridge is wired for this derivation; R-RR1-21's fourth line disclosing
+// that this Go fixture stands in for ac-5's e2e harness fixture), then the
+// wall-only, loader-only, and blocking-disagreement sections, each a
+// sorted, two-space-indented list of families.
 func renderReadinessGap(wallOnly, loaderOnly, disagreement []string) string {
 	var b strings.Builder
 	b.WriteString("# readiness gap — the wall shell versus the continuous derivation (spec/readiness-recovery ac-5)\n")
 	b.WriteString("# This is a GAP LIST, not parity. The post-design workbench lane consumes it; a change here must be deliberate.\n")
 	b.WriteString("# Derived on the claim-wall fixture with the design bridge wired (R-RR1-20); families neither side emits on that fixture are not listed.\n")
+	b.WriteString("# Fixture: the claim-wall Go fixture stands in for ac-5's e2e harness fixture (R-RR1-21, SI-209) because the harness provisioner is cmd/e2eharness's package main and unimportable from a Go test; families a side emits only under conditions this fixture lacks (for example shape/board needs an open sticky) are not listed, and the harness fixture's own gap is inherited unproven by the post-design workbench lane.\n")
 	b.WriteString("wall-only:\n")
 	for _, f := range wallOnly {
 		fmt.Fprintf(&b, "  %s\n", f)
