@@ -656,6 +656,12 @@ existing text corroborated, not just asserted).
   the base). The deviation is kept here as a record of the method lesson
   — a reduction that discards operands cannot answer questions about
   operands — not as an open gap.
+- **`index_carry_foreign` (a field the investigation plan names verbatim)
+  is replaced by the four-valued `index_carry`** in `declarations.yaml`
+  and oq-3 (fix round 1, F-1). This is the spike's own decision about
+  ac-1's field list, disclosed in `declarations.yaml`'s header, oq-3's
+  answer, the status summary and the lane report; it is recorded here too
+  because this section is where a reader looks for plan departures.
 - **`close`'s plain/CI publish path was not dynamically exercised.**
   `--force-local` is this run's only observed `close` mutation path;
   `refs_move` for the plain, CI-gated `PublishRollup` path is recorded as
@@ -702,7 +708,7 @@ existing text corroborated, not just asserted).
 
 No open question landed as NOT ANSWERED; oq-3 is the one
 ANSWERED-WITH-CAVEAT. Several sub-parts are explicitly UNMEASURED rather
-than guessed (`close`'s plain/CI publish `refs_move`; `policy_adopt`'s exact
-branch name; `align`/`upstream`'s non-gitx capability confirmed reachable by
-source but not dynamically triggered in either trial) — each is named
+than guessed (`close`'s plain/CI publish `refs_move`; `align`/`upstream`'s
+non-gitx capability confirmed reachable by source but not dynamically
+triggered in either trial) — each is named
 inline above and in `declarations.yaml`, never silently filled.
