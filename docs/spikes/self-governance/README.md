@@ -223,7 +223,8 @@ place of ac-2.
 ## oq-3 — is the rung a schema change?
 
 **Status: ANSWERED-WITH-CAVEAT** (caveat: the amendment-order half turns
-on which spec co-1's "artifact contract" names; both readings are given).
+on which spec co-1's "artifact contract" names; three candidate readings
+are given and checked, none of them dispositive).
 
 **Attribute or schema:** schema. Every existing `Claim` attribute already
 carries fixed, unrelated meaning: `Family` and `Operator` are closed
