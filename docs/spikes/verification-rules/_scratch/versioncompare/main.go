@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
@@ -68,7 +69,17 @@ func compare(root, a, b string) {
 	fmt.Printf("%s links[type=supersedes].ref = %q\n", b, supersedesB)
 
 	identical, different, onlyA, onlyB := 0, 0, 0, 0
-	for id, oa := range mA {
+	// Sort ids before iterating (VR-6 correction): Go map iteration order
+	// is randomized per run, and a committed evidence file whose lines
+	// reorder on every regeneration invites a false "does not reproduce"
+	// reading even when its totals are unchanged.
+	idsA := make([]string, 0, len(mA))
+	for id := range mA {
+		idsA = append(idsA, id)
+	}
+	sort.Strings(idsA)
+	for _, id := range idsA {
+		oa := mA[id]
 		ob, ok := mB[id]
 		if !ok {
 			onlyA++
@@ -85,7 +96,12 @@ func compare(root, a, b string) {
 			fmt.Printf("    %s: %s\n", b, ob.text)
 		}
 	}
+	idsB := make([]string, 0, len(mB))
 	for id := range mB {
+		idsB = append(idsB, id)
+	}
+	sort.Strings(idsB)
+	for _, id := range idsB {
 		if _, ok := mA[id]; !ok {
 			onlyB++
 			fmt.Printf("  ONLY IN %s: %s\n", b, id)

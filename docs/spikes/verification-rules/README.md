@@ -254,9 +254,11 @@ structural changes to shared code, neither scoped to bindings alone.
 the real inventory above; retained for its missing-witness output
 sample.** Trial in the worktree (constraint 2: reverted before commit, kept as
 `seam-b.patch`, 69 lines, plus `seam-b-baseline.out`/
-`seam-b-with-marker.out`, 17 lines each). Added a 34-line gate test,
+`seam-b-with-marker.out`, 17 lines each). Added a 45-line gate test
+(`seam-b.patch`'s own hunk header: `@@ -0,0 +1,45 @@`; an earlier draft
+said 34 lines, corrected per independent review VR-8),
 `internal/readinesspilot/clausewitness_test.go` (`TestClauseWitnessCoverage`,
-comfortably near the story's "~30 lines"), that walks `internal/**/*_test.go`
+somewhat over the story's "~30 lines"), that walks `internal/**/*_test.go`
 for `// verdi:clause <ref>` comments and reports each of co-2's nine
 refs found or missing:
 
@@ -272,7 +274,7 @@ refs found or missing:
   `TestDeriveHappyPath` in `internal/readinesspilot/derive_test.go`.
   Rerun: exit 1 still (8 remain missing, correctly), but c9 now reports
   `WITNESSED`. Mechanism proven both directions.
-- **Blast radius:** one new test file (~34 lines) + one seven-line
+- **Blast radius:** one new 45-line test file + one seven-line
   comment block above an existing test signature (zero behavior change —
   comments only). No product non-test file touched; no shared package's
   parsing grammar touched.
@@ -284,7 +286,7 @@ changes) and works unconditionally today; its cost is a second citation
 idiom alongside `verdi.bindings.yaml` (a marker convention with no
 `verdi lint` integration yet — the story's own plan says the real gate
 test is "built under test in the feature's plan", so this spike's
-34-line version is a prototype, not the delivered rule). Seam A remains
+45-line version is a prototype, not the delivered rule). Seam A remains
 available later as a deliberate, ratified grammar change if clause-level
 bindings become common enough to justify touching the shared ref grammar
 — not rejected outright, just not the smallest reversible option today.
@@ -353,9 +355,17 @@ exit 0, `versioncompare.out`): all **58** aligned acceptance-criterion/
 constraint pairs across the four available transitions (GLG v1→v2,
 v2→v3; comparative-spike-experiments v1→v2, v2→v3) are **byte-identical
 text, zero additions, zero removals** — matching each successor's own
-`supersession:` manifest (`carried:` names every existing ac-/co- id,
-`amended: []`, `amended_advisory: []`, every time). The only structural
-change any transition makes is pure **addition** of new decisions
+`supersession:` manifest **for that object class specifically**
+(`carried:` names every existing ac-/co- id, `amended: []`,
+`amended_advisory: []`, every time, at the ac/co level). The manifests
+are not empty overall — CSE-v2 declares `amended: [{id: dc-10}]` and
+`removed: [{id: oq-1}]`, CSE-v3 declares `amended: [{id: dc-21}]` — but
+every one of those entries is a **decision or open-question** id, never
+an acceptance criterion or constraint (an earlier draft of this sentence
+dropped the "for that object class" qualifier, reading as if the whole
+manifest were empty every time; corrected per independent review VR-7).
+The only structural change any transition makes to an ac/co-level object
+is pure **addition** of new decisions elsewhere in the same revision
 (GLG v2 adds dc-16..26; v3 adds dc-27; CSE v2 adds dc-20..28 and removes
 oq-1; CSE v3 adds nothing) — never a rewording or removal of an existing
 criterion or constraint.
@@ -400,22 +410,33 @@ of that judgment, not assume this spike settled it.
 
 Full table, citations, and the per-row reasoning: `required-fields.md`
 (command outputs: `required-fields-evidence.out`, 45 lines). Summary: of
-**8** fields 02's Common frontmatter table marks `# required`
-(unconditional or conditional) — `id`, `title`, `status`, `owners`,
-`problem`, `outcome`, `frozen`, `provenance` — the decoder:
+**9** fields 02's frontmatter tables mark `# required` (unconditional or
+conditional; 8 in §Common frontmatter, a 9th — `supersession` — in
+§Kind registry's feature-spec block, added per independent review VR-5:
+`required-fields-evidence.out`'s own grep already showed 9 hits and an
+earlier draft's table used only 8, without saying so) — `id`, `title`,
+`status`, `owners`, `problem`, `outcome`, `frozen`, `provenance`,
+`supersession` — the decoder:
 
 - **rejects absence unconditionally for 3** (`id`, `title`, `owners` —
   `internal/artifact/common.go`'s `validateBase`);
 - **enforces the conditional correctly and bidirectionally for 1**
   (`frozen` — `requireFrozen`, used by every kind, rejects both wrongful
   absence and wrongful presence);
-- **never enforces presence at all for 1**, despite the table's
-  unconditional-sounding "required iff generated" — `provenance`'s
+- **never enforces presence at all for 2**, despite table entries that
+  read as unconditional or conditional requirements — `provenance`'s
   top-level presence (`common.go:342-350` validates it only if non-nil;
   no `requireProvenance`-shaped helper exists anywhere: `grep -rn
   requireProvenance internal/artifact/*.go` = 0 hits; the one
   Frozen/Provenance pairing check that does exist, `board.go:80`, is a
-  board-record-specific XOR, not a generated-artifact rule);
+  board-record-specific XOR, not a generated-artifact rule) and
+  `supersession`'s presence on a superseding revision (`spec.go:395`
+  validates its contents only if non-nil; checked whether `internal/
+  lint` VL-015 backstops this the way `requireFrozen` backstops `frozen`
+  — it does not: `vl015.go:48` skips a document outright when
+  `Supersession == nil` rather than requiring it be non-nil, so a
+  revision with a `supersedes` link but no `supersession:` block passes
+  both the decoder and lint silently);
 - **splits by kind/class for 3** (`status`, `problem`, `outcome`):
   every non-spec kind and spec/component still reject absence exactly as
   02 says; spec/story rejects absence (`spec.go:419-434`, explicit
@@ -518,7 +539,8 @@ spike's write set.
   distinction specifically**, not for alignment (which is mechanical and
   already shipped as VL-015); the caveat above should travel with that
   closure.
-- oq-5 → ac-4's enumerating test: the eight-row table above is the
+- oq-5 → ac-4's enumerating test: the nine-row table above is the
   starting fixture; UAT-008 is row `status`, and the `problem`/`outcome`
-  spec/feature gap is a new row for the same ratification request to
+  spec/feature gap and the unbacked `supersession` row are two more new
+  rows for the same ratification request to
   adjudicate alongside it.

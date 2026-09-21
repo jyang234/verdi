@@ -2,77 +2,77 @@
 ===== guided-lifecycle-governance vs guided-lifecycle-governance-v2 =====
 guided-lifecycle-governance status=""; guided-lifecycle-governance-v2 status=""
 guided-lifecycle-governance-v2 links[type=supersedes].ref = "spec/guided-lifecycle-governance"
-  IDENTICAL   co-2
-  IDENTICAL   co-4
-  IDENTICAL   co-6
-  IDENTICAL   co-3
   IDENTICAL   ac-1
   IDENTICAL   ac-2
-  IDENTICAL   ac-4
-  IDENTICAL   ac-6
-  IDENTICAL   ac-8
   IDENTICAL   ac-3
-  IDENTICAL   co-5
-  IDENTICAL   co-7
+  IDENTICAL   ac-4
   IDENTICAL   ac-5
+  IDENTICAL   ac-6
   IDENTICAL   ac-7
+  IDENTICAL   ac-8
   IDENTICAL   co-1
+  IDENTICAL   co-2
+  IDENTICAL   co-3
+  IDENTICAL   co-4
+  IDENTICAL   co-5
+  IDENTICAL   co-6
+  IDENTICAL   co-7
   totals: identical=15 different=0 only-guided-lifecycle-governance=0 only-guided-lifecycle-governance-v2=0
 
 ===== guided-lifecycle-governance-v2 vs guided-lifecycle-governance-v3 =====
 guided-lifecycle-governance-v2 status=""; guided-lifecycle-governance-v3 status=""
 guided-lifecycle-governance-v3 links[type=supersedes].ref = "spec/guided-lifecycle-governance-v2"
-  IDENTICAL   co-6
-  IDENTICAL   co-7
-  IDENTICAL   ac-4
-  IDENTICAL   ac-8
   IDENTICAL   ac-1
   IDENTICAL   ac-2
-  IDENTICAL   ac-6
-  IDENTICAL   co-4
   IDENTICAL   ac-3
+  IDENTICAL   ac-4
   IDENTICAL   ac-5
+  IDENTICAL   ac-6
   IDENTICAL   ac-7
+  IDENTICAL   ac-8
   IDENTICAL   co-1
-  IDENTICAL   co-3
-  IDENTICAL   co-5
   IDENTICAL   co-2
+  IDENTICAL   co-3
+  IDENTICAL   co-4
+  IDENTICAL   co-5
+  IDENTICAL   co-6
+  IDENTICAL   co-7
   totals: identical=15 different=0 only-guided-lifecycle-governance-v2=0 only-guided-lifecycle-governance-v3=0
 
 ===== comparative-spike-experiments vs comparative-spike-experiments-v2 =====
 comparative-spike-experiments status=""; comparative-spike-experiments-v2 status=""
 comparative-spike-experiments-v2 links[type=supersedes].ref = "spec/comparative-spike-experiments"
-  IDENTICAL   co-5
-  IDENTICAL   co-6
   IDENTICAL   ac-1
   IDENTICAL   ac-2
   IDENTICAL   ac-3
   IDENTICAL   ac-4
   IDENTICAL   ac-5
-  IDENTICAL   ac-7
-  IDENTICAL   co-2
-  IDENTICAL   co-7
   IDENTICAL   ac-6
+  IDENTICAL   ac-7
   IDENTICAL   co-1
+  IDENTICAL   co-2
   IDENTICAL   co-3
   IDENTICAL   co-4
+  IDENTICAL   co-5
+  IDENTICAL   co-6
+  IDENTICAL   co-7
   totals: identical=14 different=0 only-comparative-spike-experiments=0 only-comparative-spike-experiments-v2=0
 
 ===== comparative-spike-experiments-v2 vs comparative-spike-experiments-v3 =====
 comparative-spike-experiments-v2 status=""; comparative-spike-experiments-v3 status=""
 comparative-spike-experiments-v3 links[type=supersedes].ref = "spec/comparative-spike-experiments-v2"
-  IDENTICAL   co-3
-  IDENTICAL   co-6
-  IDENTICAL   co-7
+  IDENTICAL   ac-1
+  IDENTICAL   ac-2
   IDENTICAL   ac-3
   IDENTICAL   ac-4
   IDENTICAL   ac-5
   IDENTICAL   ac-6
+  IDENTICAL   ac-7
   IDENTICAL   co-1
   IDENTICAL   co-2
+  IDENTICAL   co-3
   IDENTICAL   co-4
   IDENTICAL   co-5
-  IDENTICAL   ac-1
-  IDENTICAL   ac-2
-  IDENTICAL   ac-7
+  IDENTICAL   co-6
+  IDENTICAL   co-7
   totals: identical=14 different=0 only-comparative-spike-experiments-v2=0 only-comparative-spike-experiments-v3=0
