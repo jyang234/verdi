@@ -201,6 +201,65 @@ func TestComputeBadges_NonStorySkipsLadder(t *testing.T) {
 	}
 }
 
+// TestComputeBadges_FeatureWallCarriesEvidenceSlots is ac-7/R-RR2-3's own
+// witness at the ComputeBadges entry point (compute.go:59's hoisted call):
+// a feature-class wall gets a populated EvidenceSlots map — the same
+// per-kind card data a story wall already carries — computed BEFORE, and
+// independent of, the story-only ladder return that skips spec-stale/
+// pending-supersession for this class.
+func TestComputeBadges_FeatureWallCarriesEvidenceSlots(t *testing.T) {
+	root, fm := writeStoreSpec(t, "widget-feature-slots", featureSlotSpecFixture)
+	raw, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", "widget-feature-slots", "spec.md"))
+	if err != nil {
+		t.Fatalf("read spec.md: %v", err)
+	}
+	got, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-feature-slots"), digestOf(raw), fm, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputeBadges: %v", err)
+	}
+	if got.EvidenceSlots == nil {
+		t.Fatalf("EvidenceSlots = nil, want a populated map on a feature-class wall (ac-7)")
+	}
+	ac1, ok := got.EvidenceSlots["ac-1"]
+	if !ok || len(ac1) != 1 || ac1[0].Kind != "attestation" || !ac1[0].Empty {
+		t.Fatalf("EvidenceSlots[ac-1] = %+v, want one empty attestation slot (no attestation file on disk)", ac1)
+	}
+	// The matching fold:empty-slot badge rides ByObject like every other
+	// card badge (dc-3: one attachment path).
+	found := false
+	for _, b := range got.ByObject["ac-1"] {
+		if b.Source == "fold:empty-slot" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ByObject[ac-1] = %+v, want a fold:empty-slot badge", got.ByObject["ac-1"])
+	}
+	// Still no ladder flags on a feature-class wall (unchanged by the
+	// hoist): the ladder return below the slot compute still gates on
+	// class == story.
+	for _, r := range got.CaseFile {
+		if r.Source == "ladder:spec-stale" || r.Source == "ladder:pending-supersession" {
+			t.Fatalf("CaseFile = %+v, want no ladder badge on a feature-class wall", got.CaseFile)
+		}
+	}
+	if len(got.Disclosures) != 0 {
+		t.Fatalf("Disclosures = %+v, want none on a feature-class wall", got.Disclosures)
+	}
+}
+
+const featureSlotSpecFixture = `---
+id: spec/widget-feature-slots
+kind: spec
+class: feature
+title: "Widget feature (evidence slots)"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "widgets are attested", evidence: [attestation] }
+---
+# Widget feature (evidence slots)
+`
+
 const featureSpecFixture = `---
 id: spec/widget-feature
 kind: spec

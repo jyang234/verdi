@@ -2,6 +2,7 @@ package readinesspilot
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -82,7 +83,15 @@ type Input struct {
 	Board      BoardFacts
 	Journey    journey.Record
 	Conflict   policyconflict.Report
-	Fallbacks  Fallbacks
+	// ConflictUnavailable, when non-empty, is a witness sentence explaining
+	// why no policy-conflict report was supplied for this derivation
+	// (R-RR1-5: the readiness loader's context request is optional). Conflict
+	// must then stay the pure zero value: deriveContext emits exactly the
+	// single unproven context/verdict concern carrying this witness, instead
+	// of deriving mechanical/semantic/disclosure rows from a report that was
+	// never evaluated. Leave empty when Conflict carries a real report.
+	ConflictUnavailable string
+	Fallbacks           Fallbacks
 	// SpikeWord is the resolved display word for the spike pseudo-class
 	// (spec/vocabulary-surfaces; model.DisplayClass("spike") at the
 	// adapter), supplied by the caller so this package's claimed-question
@@ -138,7 +147,7 @@ func Derive(input Input) (Snapshot, error) {
 		CurrentFocus:  currentFocus,
 		Attention:     attention,
 		AllConcerns:   concerns,
-		StaleNotice:   fmt.Sprintf("Startup snapshot at %s; restart verdi serve after an edit.", input.Target.Head),
+		StaleNotice:   fmt.Sprintf("Derived at HEAD %s for this request.", input.Target.Head),
 	}
 	if err := snapshot.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("readinesspilot: derived invalid snapshot: %w", err)
@@ -240,7 +249,14 @@ func (in Input) validate() error {
 	if err := in.Journey.Validate(); err != nil {
 		return fmt.Errorf("readinesspilot: journey operand: %w", err)
 	}
-	if err := in.Conflict.Validate(); err != nil {
+	if in.ConflictUnavailable != "" {
+		if containsControl(in.ConflictUnavailable) {
+			return fmt.Errorf("readinesspilot: conflict unavailable witness must be control-free")
+		}
+		if !reflect.DeepEqual(in.Conflict, policyconflict.Report{}) {
+			return fmt.Errorf("readinesspilot: conflict unavailable witness set alongside a non-zero conflict report")
+		}
+	} else if err := in.Conflict.Validate(); err != nil {
 		return fmt.Errorf("readinesspilot: policy conflict operand: %w", err)
 	}
 	return nil
@@ -327,6 +343,18 @@ func deriveSuccess(input Input) []Concern {
 }
 
 func deriveContext(input Input) []Concern {
+	if input.ConflictUnavailable != "" {
+		// R-RR1-5: no context request was supplied for this derivation, so
+		// no conflict request was ever synthesized (inventing adapter,
+		// grants, or scope would be authority the store never declared).
+		// The check-context area carries exactly this one unproven concern
+		// — no mechanical/semantic/disclosure rows, because there is no
+		// evaluated report to derive them from.
+		return []Concern{newConcern(
+			"context/verdict", AreaContext, StateUnproven, true, TimingCurrent, "",
+			"Policy-conflict verdict", []string{input.ConflictUnavailable}, cliDestination(StateUnproven, input.Fallbacks.Context),
+		)}
+	}
 	verdictState := StateProven
 	switch input.Conflict.Verdict {
 	case policyconflict.VerdictBlockedViolated:
@@ -413,7 +441,48 @@ func deriveReview(input Input) []Concern {
 		"Lifecycle and safe-action posture can advance review", witnesses,
 		cliDestination(actionState, input.Fallbacks.Review),
 	))
+	concerns = append(concerns, eventualDerivationConcern(input))
 	return concerns
+}
+
+// eventualDerivationConcern states, on its own, whether the journey's
+// eventual-blocker section was derived from EVERY declared source
+// (spec/readiness-recovery ac-1, co-6; SI-213 / R-RRF-1).
+//
+// It is deliberately independent of lifecycle, profile and safe-action
+// state. Before R-RRF-1 the only carrier of the journey's eventual
+// disclosures was review/action's fallback branch, which a known
+// lifecycle with an adopted profile and an available safe action does not
+// enter — so a derivation that could not compute its outcome floor read
+// as all-proven readiness with empty attention (independent review
+// 2026-09-21 R1). Partial knowledge is not proof, whatever else is going
+// well.
+//
+// review/action keeps its own condition and witnesses unchanged: on an
+// underived section both concerns speak, and saying the same true thing
+// twice is honest duplication, not a defect.
+func eventualDerivationConcern(input Input) Concern {
+	eventual := input.Journey.Blockers.Eventual
+	state := StateProven
+	witnesses := []string{}
+	if !eventual.Derived || len(eventual.Unavailable) > 0 {
+		state = StateUnproven
+		// An underived section names no individual source (the journey
+		// schema forbids it); its disclosures carry the reason instead.
+		witnesses = mergeStrings(eventual.Unavailable, underivedDisclosures(eventual))
+	}
+	return newConcern(
+		"review/eventual-derivation", AreaReview, state, true, TimingCurrent, "",
+		"Eventual closure blockers derived from every declared source", witnesses,
+		cliDestination(state, input.Fallbacks.Review),
+	)
+}
+
+func underivedDisclosures(eventual journey.EventualBlockers) []string {
+	if eventual.Derived {
+		return nil
+	}
+	return eventual.Disclosures
 }
 
 func presenceConcern(id, provenSummary, missingSummary string, present bool, input Input, boardCorrectable bool) Concern {

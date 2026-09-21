@@ -135,33 +135,52 @@ func LoadAttestationState(storeRoot, storySlug, acID string) (AttestationState, 
 }
 
 // AttestationScaffold bundles RenderAttestationScaffold's inputs (spec/
-// attest-helper ac-1/dc-2): every field here is structure the caller
-// (cmd/verdi's attest verb) already resolved or derived —
+// attest-helper ac-1/dc-2, widened to feature criteria by spec/
+// readiness-recovery ac-6 / R-RR2-1): every field here is structure the
+// caller (cmd/verdi's attest verb) already resolved or derived —
 // RenderAttestationScaffold itself does no resolution and no I/O, and
-// never invents a claim (parent spec/closure-ergonomics dc-2).
+// never invents a claim (parent spec/closure-ergonomics dc-2, extended to
+// the quoted-criterion section by guided-lifecycle-governance-v3 dc-12).
 type AttestationScaffold struct {
-	// StorySlug is store.RefSlug(story.Story) — the <storySlug> half of
-	// the compound id/path (I-6, the D6-16/D6-18-corrected convention).
+	// StorySlug is the <storySlug> half of the compound id/path (I-6, the
+	// D6-16/D6-18-corrected convention): for a story (Class == ClassStory
+	// or the empty zero value) it is store.RefSlug(story.Story); for a
+	// feature (Class == ClassFeature) it is the feature spec's own name
+	// (artifact.ParseRef(spec.ID).Name) — the same segment VL-022's
+	// FoldFeature path probes (R-RR2-2).
 	StorySlug string
 	// ACID is the acceptance-criterion id the attestation is for (e.g.
 	// "ac-2").
 	ACID string
-	// StoryRefArg is the raw <story-ref> the operator typed at the CLI
-	// (either form storyresolve.Resolve accepts — a scheme-prefixed story
-	// ref or a spec ref) — echoed into the title and instructional body
-	// prose so the scaffold reads back exactly what was invoked.
+	// StoryRefArg is the raw <spec-ref> the operator typed at the CLI
+	// (a scheme-prefixed story ref, a story spec ref, or a feature spec
+	// ref — R-RR2-4) — echoed into the title and instructional body prose
+	// so the scaffold reads back exactly what was invoked.
 	StoryRefArg string
-	// VerifiesRef is the resolved story spec's own canonical ref (e.g.
+	// VerifiesRef is the resolved spec's own canonical ref (e.g.
 	// "spec/borrower-update-api") — the verifies edge's target.
 	VerifiesRef string
-	// Owners is copied VERBATIM from the resolved story spec's own
-	// owners: (dc-2: never invented, never an [unassigned] placeholder).
+	// Owners is copied VERBATIM from the resolved spec's own owners:
+	// (dc-2: never invented, never an [unassigned] placeholder).
 	Owners []string
 	// Frozen is the frozen stamp: At is today (YYYY-MM-DD), Commit is git
 	// HEAD at scaffold time (dc-2, ADJ-30: a convenience the operator
 	// updates to the tree they actually verified against when authoring
 	// the claim — legally mutable until this file's first commit).
 	Frozen artifact.Frozen
+	// Class selects the render shape: ClassStory (and the empty zero
+	// value, so untouched callers stay byte-stable) renders today's story
+	// bytes exactly; ClassFeature appends the quoted-criterion section
+	// below (R-RR2-1). No other class is meaningful here.
+	Class artifact.SpecClass
+	// CriterionText is, feature only, the criterion's own accepted text
+	// (spec.AcceptanceCriteria[i].Text), quoted verbatim into the body's
+	// appended section — never a claim, never paraphrased.
+	CriterionText string
+	// EvidenceKinds is, feature only, the criterion's own declared
+	// evidence kinds (spec.AcceptanceCriteria[i].Evidence), disclosed
+	// alongside the quoted criterion text.
+	EvidenceKinds []artifact.EvidenceKind
 }
 
 // attestationScaffoldBody is the fixed instructional prose every scaffold
@@ -197,13 +216,35 @@ const attestationScaffoldBody = "%s\n" +
 // dc-2) — every word beyond the fixed instructional prose is structure
 // derived from identifiers already on hand.
 //
+// in.Class == artifact.ClassFeature (spec/readiness-recovery ac-6, R-RR2-1)
+// appends one more thing to the body: a delimited, explicitly-labeled
+// "Criterion under attestation (accepted text, quoted for context):"
+// section carrying in.CriterionText and in.EvidenceKinds. dc-2's
+// never-a-claim contract extends to that section exactly as guided-
+// lifecycle-governance-v3 dc-12 requires: quoted context is the spec's own
+// accepted words, copied verbatim, never the claim — every line of
+// in.CriterionText is emitted as its own "> "-quoted line (split on "\n",
+// never interpreted), so a criterion carrying its own "---"-shaped or
+// YAML-shaped text can never be mistaken for a second frontmatter block or
+// otherwise change how the rest of the document parses. Every other class
+// (ClassStory and the empty zero value, so untouched callers before this
+// change stay byte-stable) renders exactly the bytes this function always
+// rendered (R-RR2-1's byte-contract pin,
+// TestRenderAttestationScaffold_StoryBytesUnchanged).
+//
 // Hand-rendered, never yaml.Marshal'd (the module-wide posture:
 // internal/align/render.go, internal/workbench/commitdesign.go's
 // renderObligation), so field order and flow-mapping style are pinned
 // exactly, byte for byte, rather than left to a library's own formatting.
 func RenderAttestationScaffold(in AttestationScaffold) string {
 	id := fmt.Sprintf("attestation/%s--%s", in.StorySlug, in.ACID)
-	title := fmt.Sprintf("unauthored attestation scaffold: %s %s", in.StoryRefArg, in.ACID)
+
+	var title string
+	if in.Class == artifact.ClassFeature {
+		title = fmt.Sprintf("unauthored outcome attestation scaffold: %s %s", in.StoryRefArg, in.ACID)
+	} else {
+		title = fmt.Sprintf("unauthored attestation scaffold: %s %s", in.StoryRefArg, in.ACID)
+	}
 
 	quotedOwners := make([]string, len(in.Owners))
 	for i, o := range in.Owners {
@@ -222,5 +263,50 @@ func RenderAttestationScaffold(in AttestationScaffold) string {
 	fmt.Fprintf(&b, "frozen: { at: %s, commit: %s }\n", in.Frozen.At, in.Frozen.Commit)
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, attestationScaffoldBody, UnauthoredAttestationMarker, in.StoryRefArg, in.ACID)
+	if in.Class == artifact.ClassFeature {
+		b.WriteString(renderCriterionSection(in.CriterionText, in.EvidenceKinds))
+	}
+	return b.String()
+}
+
+// renderCriterionSection renders the feature-only quoted-criterion section
+// appended after the fixed instructional body prose (R-RR2-1): a labeled
+// heading, the criterion text as zero or more "> "-quoted lines (never
+// interpreted — quoting, not templating), and, only when at least one is
+// declared, the criterion's own declared evidence kinds. Never claim-shaped:
+// every word here is either fixed prose or the criterion's own accepted
+// text/evidence kinds, copied verbatim (dc-2, guided-lifecycle-governance-v3
+// dc-12).
+//
+// criterionText is normalized before quoting (review fix round 1, M-3):
+// CRLF is folded to LF (so a stray "\r" never reaches a quoted line) and
+// trailing newlines are trimmed (so an empty or newline-only criterion text
+// renders no "> " line at all, rather than one or more bare "> " lines).
+// Interior blank lines are left alone — only the trailing run is trimmed.
+//
+// When kinds is empty, the "Declared evidence kinds:" line is omitted
+// entirely (review fix round 1, M-2) — R-RR2-2 explicitly contemplates a
+// feature criterion that declares no evidence kind at all, and a label with
+// nothing after it is worse than no label.
+func renderCriterionSection(criterionText string, kinds []artifact.EvidenceKind) string {
+	var b strings.Builder
+	b.WriteString("\nCriterion under attestation (accepted text, quoted for context):\n")
+	normalized := strings.TrimRight(strings.ReplaceAll(criterionText, "\r\n", "\n"), "\n")
+	if normalized != "" {
+		for _, line := range strings.Split(normalized, "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	if len(kinds) > 0 {
+		kindWords := make([]string, len(kinds))
+		for i, k := range kinds {
+			kindWords[i] = string(k)
+		}
+		b.WriteString("\nDeclared evidence kinds: ")
+		b.WriteString(strings.Join(kindWords, ", "))
+		b.WriteString("\n")
+	}
 	return b.String()
 }

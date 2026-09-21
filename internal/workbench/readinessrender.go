@@ -137,7 +137,7 @@ func writeReadinessOrientation(b *strings.Builder, snap readinesspilot.Snapshot)
 		}
 	}
 	b.WriteString(`</p>`)
-	b.WriteString(`<p class="readiness-purpose">This is a startup snapshot of readiness for the current design work.</p>`)
+	b.WriteString(`<p class="readiness-purpose">This page derives readiness for the current design work on every request.</p>`)
 	writeReadinessTargetTech(b, snap)
 	b.WriteString(`</div>`)
 	writeReadinessStale(b, snap)
@@ -158,13 +158,15 @@ func writeReadinessTargetTech(b *strings.Builder, snap readinesspilot.Snapshot) 
 	b.WriteString(`</dl></details>`)
 }
 
-// writeReadinessStale writes the startup-snapshot notice: the snapshot's
-// own stale text (it names the exact HEAD and tells the author to
-// restart verdi serve after an edit), keyboard-reachable so its
-// inspection is observable to the pilot instrumentation.
+// writeReadinessStale writes the derivation stamp (spec/readiness-recovery
+// ac-2): the snapshot's own StaleNotice text, which names the exact HEAD
+// this request's derivation looked at. The class names, role, data
+// attribute, and tabindex are the pilot's original chrome — kept so the
+// stale-notice-inspected instrumentation and the CSS are untouched (co-4);
+// only the visible label and the accessible name say what the line is.
 func writeReadinessStale(b *strings.Builder, snap readinesspilot.Snapshot) {
-	b.WriteString(`<aside class="readiness-stale" role="note" tabindex="0" data-readiness-stale="1" aria-label="Startup snapshot notice">`)
-	b.WriteString(`<span class="readiness-stale-text"><strong>Startup snapshot.</strong> `)
+	b.WriteString(`<aside class="readiness-stale" role="note" tabindex="0" data-readiness-stale="1" aria-label="Derivation stamp">`)
+	b.WriteString(`<span class="readiness-stale-text"><strong>Derivation stamp.</strong> `)
 	b.WriteString(stdhtml.EscapeString(snap.StaleNotice))
 	b.WriteString(`</span></aside>`)
 }

@@ -1,16 +1,22 @@
 package workbench
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
@@ -71,7 +77,31 @@ func newAcceptedWallFixtureWithReadiness(t *testing.T, snap *readinesspilot.Snap
 			".verdi/specs/active/" + documentWallName + "/spec.md": documentWallSpec,
 		},
 	}})
-	return NewHandlerWith(repo.Dir, Deps{Readiness: snap}), repo, documentWallName
+	var loader ReadinessLoader
+	if snap != nil {
+		loader = fixedSnapshotLoader{snap: *snap}
+	}
+	return NewHandlerWith(repo.Dir, Deps{ReadinessLoader: loader}), repo, documentWallName
+}
+
+// fixedSnapshotLoader is a test-only ReadinessLoader returning the same
+// snapshot for any ref (never an error) — the guard that keeps a foreign
+// snapshot from leaking (specdoc.WithReadiness's TargetRef tripwire,
+// R-RR1-8) is exercised by the guard itself, not by this fake refusing a
+// mismatched ref.
+type fixedSnapshotLoader struct{ snap readinesspilot.Snapshot }
+
+func (f fixedSnapshotLoader) Load(context.Context, string) (readinesspilot.Snapshot, error) {
+	return f.snap, nil
+}
+
+// erroringReadinessLoader is a test-only ReadinessLoader that always
+// fails with err, for proving a loader failure degrades to a disclosure
+// rather than failing the whole render.
+type erroringReadinessLoader struct{ err error }
+
+func (e erroringReadinessLoader) Load(context.Context, string) (readinesspilot.Snapshot, error) {
+	return readinesspilot.Snapshot{}, e.err
 }
 
 // decodeStrictJSON decodes body into v with unknown fields and trailing
@@ -209,12 +239,13 @@ func TestBoardDocument_DownloadMatchesSnapshotMarkdown(t *testing.T) {
 		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
 	}
 	var decoded struct {
-		Revision string `json:"revision"`
-		HTML     string `json:"html"`
-		Markdown string `json:"markdown"`
-		Kind     string `json:"kind"`
-		Ref      string `json:"ref"`
-		Proposed bool   `json:"proposed"`
+		Revision    string   `json:"revision"`
+		HTML        string   `json:"html"`
+		Markdown    string   `json:"markdown"`
+		Kind        string   `json:"kind"`
+		Ref         string   `json:"ref"`
+		Proposed    bool     `json:"proposed"`
+		Disclosures []string `json:"disclosures"`
 	}
 	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
 		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)
@@ -244,12 +275,232 @@ func TestBoardDocument_ReadinessGatedByTarget(t *testing.T) {
 	if !strings.Contains(page.body, "readiness snapshot for") || !strings.Contains(page.body, "Define the work") {
 		t.Fatalf("matching snapshot must render:\n%s", page.body)
 	}
-	// The branch mount carries the same snapshot (branchboard.go passes
-	// deps.Readiness to every per-branch instance; a branch checked out at
-	// the serving root dispatches into the serving instance).
+	// The branch mount carries the same loader (branchboard.go passes
+	// deps.ReadinessLoader to every per-branch instance; a branch checked
+	// out at the serving root dispatches into the serving instance).
 	page = getStatus(t, h, "/b/main/board/spec/"+name+"/document")
 	if page.code != http.StatusOK || !strings.Contains(page.body, "readiness snapshot for") || !strings.Contains(page.body, "Define the work") {
 		t.Fatalf("branch mount must render the matching snapshot: %d\n%s", page.code, page.body)
+	}
+}
+
+// twoSpecReadinessFixtureSpec is a minimal, journey-project-able feature
+// spec (Problem/Outcome/AC — internal/readinessload's own required shape,
+// spec/readiness-recovery ac-2): title distinguishes A from B so a
+// rendered document's own Readiness section proves WHICH spec's facts it
+// carries.
+func twoSpecReadinessFixtureSpec(id, title string) string {
+	return `---
+id: spec/` + id + `
+kind: spec
+title: "` + title + `"
+owners: [platform-team]
+class: feature
+problem: { text: "Problem for ` + title + `.", anchor: problem }
+outcome: { text: "Outcome for ` + title + `.", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "AC for ` + title + `.", evidence: [static], anchor: ac-1 }
+---
+# ` + title + `
+
+## Problem
+
+Problem for ` + title + `.
+
+## Outcome
+
+Outcome for ` + title + `.
+
+## ac-1
+
+AC for ` + title + `.
+`
+}
+
+// newTwoSpecReadinessFixture builds a store with two independent accepted
+// feature specs and a real internal/readinessload.Loader wired into the
+// board (never a fake) — the per-ref proof (R-RR1-8: "every consumer asks
+// for its own ref") needs two GENUINELY DIFFERENT derivations, not one
+// snapshot replayed under two names.
+func newTwoSpecReadinessFixture(t *testing.T) (h http.Handler, root, specA, specB string) {
+	t.Helper()
+	root, specA, specB = newTwoSpecReadinessStore(t)
+	loader := readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: BranchBoardHref}}
+	return NewHandlerWith(root, Deps{ReadinessLoader: loader}), root, specA, specB
+}
+
+// newTwoSpecReadinessStore builds that same two-spec store without wiring
+// any loader, for the tests that need to construct their own posture (a
+// request-bound loader, below).
+func newTwoSpecReadinessStore(t *testing.T) (root, specA, specB string) {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	specA, specB = "wall-alpha", "wall-bravo"
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Message: "adopt store with two accepted specs",
+		Files: map[string]string{
+			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\n",
+			".verdi/specs/active/" + specA + "/spec.md": twoSpecReadinessFixtureSpec(specA, "Wall Alpha"),
+			".verdi/specs/active/" + specB + "/spec.md": twoSpecReadinessFixtureSpec(specB, "Wall Bravo"),
+		},
+	}})
+	return repo.Dir, specA, specB
+}
+
+// TestBoardDocument_ReadinessPerRefWithRealLoader is spec/readiness-
+// recovery ac-4/R-RR1-8: the Document tab asks the shared loader for ITS
+// OWN served spec on every request — spec A's document carries A's own
+// derived readiness (naming A, never B) and spec B's carries B's, over
+// the SAME loader instance, proving the loader is not pinned to one ref.
+func TestBoardDocument_ReadinessPerRefWithRealLoader(t *testing.T) {
+	h, _, specA, specB := newTwoSpecReadinessFixture(t)
+
+	pageA := getStatus(t, h, "/board/spec/"+specA+"/document")
+	if pageA.code != http.StatusOK {
+		t.Fatalf("spec A document: %d\n%s", pageA.code, pageA.body)
+	}
+	if !strings.Contains(pageA.body, "## Readiness") || !strings.Contains(pageA.body, "readiness snapshot for `spec/"+specA+"`") {
+		t.Fatalf("spec A document must carry ITS OWN readiness (spec/%s):\n%s", specA, pageA.body)
+	}
+	if strings.Contains(pageA.body, "spec/"+specB) {
+		t.Fatalf("spec A document must not name spec B at all:\n%s", pageA.body)
+	}
+
+	pageB := getStatus(t, h, "/board/spec/"+specB+"/document")
+	if pageB.code != http.StatusOK {
+		t.Fatalf("spec B document: %d\n%s", pageB.code, pageB.body)
+	}
+	if !strings.Contains(pageB.body, "## Readiness") || !strings.Contains(pageB.body, "readiness snapshot for `spec/"+specB+"`") {
+		t.Fatalf("spec B document must carry ITS OWN readiness (spec/%s):\n%s", specB, pageB.body)
+	}
+	if strings.Contains(pageB.body, "spec/"+specA) {
+		t.Fatalf("spec B document must not name spec A at all:\n%s", pageB.body)
+	}
+}
+
+// TestBoardDocument_ReadinessLoaderBoundToAnotherSpecsRequest is R-RR1-15
+// at the consumer that made the defect reachable: `verdi serve
+// --context-request <a request for spec A>` threads ONE request-bound
+// loader into the board, so spec B's Document tab and /readiness?spec=B
+// both run through a loader carrying A's request. B must still derive its
+// own readiness — the request binds to A only. Before the fix the loader
+// refused every ref but A's, so B's document silently lost its Readiness
+// section and ?spec=B answered 503 for as long as that server ran; the
+// /readiness (no query, so the default spec A) leg is the positive
+// control: the SAME loader still serves the request's own spec.
+func TestBoardDocument_ReadinessLoaderBoundToAnotherSpecsRequest(t *testing.T) {
+	root, specA, specB := newTwoSpecReadinessStore(t)
+	requestPath := writeDesignContextRequest(t, root, "spec/"+specA)
+	loader := readinessload.Loader{Root: root, Opts: readinessload.Options{
+		BoardHref: BranchBoardHref, ContextRequestPath: requestPath,
+	}}
+	h := NewHandlerWith(root, Deps{ReadinessLoader: loader, ReadinessDefaultSpec: "spec/" + specA})
+
+	page := getStatus(t, h, "/board/spec/"+specB+"/document")
+	if page.code != http.StatusOK {
+		t.Fatalf("spec B document under a loader bound to spec A's request: %d\n%s", page.code, page.body)
+	}
+	if !strings.Contains(page.body, "readiness snapshot for `spec/"+specB+"`") {
+		t.Fatalf("spec B document must still carry ITS OWN derived readiness:\n%s", page.body)
+	}
+
+	route := getStatus(t, h, "/readiness?spec="+specB)
+	if route.code != http.StatusOK {
+		t.Fatalf("/readiness?spec=%s under a loader bound to spec A's request: %d\n%s", specB, route.code, route.body)
+	}
+	if !strings.Contains(route.body, "spec/"+specB) {
+		t.Fatalf("/readiness?spec=%s must render spec B's own readiness:\n%s", specB, route.body)
+	}
+
+	// Control against vacuity: the request really is bound to this loader.
+	// Asked for the request's OWN spec (no query, so the default spec A),
+	// the same loader takes the whole request path and reaches the
+	// policy-conflict evaluation — a step a no-request derivation never
+	// performs at all. This minimal two-spec store adopts no constitution,
+	// so that evaluation cannot complete and the route discloses the
+	// failure honestly (R-RR1-9); a store that can evaluate is proven
+	// elsewhere (internal/readinessload's own
+	// TestLoad_RequestForAnotherSpecDerivesAsIfAbsent positive control and
+	// cmd/verdi's TestDocumentParity_ServedWithContextRequest). Without
+	// this leg, a loader that silently dropped ContextRequestPath would
+	// pass everything above.
+	own := getStatus(t, h, "/readiness")
+	if own.code != http.StatusServiceUnavailable || !strings.Contains(own.body, "evaluating policy conflicts") {
+		t.Fatalf("the request's own spec %s must take the request path through the SAME loader (reaching the conflict evaluation this store cannot satisfy), got %d:\n%s", specA, own.code, own.body)
+	}
+}
+
+// writeDesignContextRequest writes a canonical design-phase
+// verdi.context-compile-request/v1 document for spec into root, through
+// internal/contextcompile's own EncodeRequest seam (never a hand-typed
+// JSON literal), and returns its path.
+func writeDesignContextRequest(t *testing.T, root, spec string) string {
+	t.Helper()
+	data, err := contextcompile.EncodeRequest(contextcompile.Request{
+		Schema:  contextcompile.RequestSchema,
+		Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		Phase:   contextcompile.PhaseDesign,
+		Scope:   policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:    spec,
+	})
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	path := filepath.Join(root, "readiness-request.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write request file: %v", err)
+	}
+	return path
+}
+
+// TestBoardDocument_ReadinessLoaderErrorBecomesDisclosure is R-RR1-9's
+// document-tab half: a loader failure never fails the render — it
+// degrades to a "readiness: <err>" disclosure and the section states its
+// own absence, exactly like any other unavailable fact.
+func TestBoardDocument_ReadinessLoaderErrorBecomesDisclosure(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Message: "adopt store with one accepted spec",
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.config/v1\nforge: none\n",
+			".verdi/specs/active/" + documentWallName + "/spec.md": documentWallSpec,
+		},
+	}})
+	wantErr := errors.New("boom: readiness derivation failed")
+	h := NewHandlerWith(repo.Dir, Deps{ReadinessLoader: erroringReadinessLoader{err: wantErr}})
+
+	page := getStatus(t, h, "/board/spec/"+documentWallName+"/document")
+	if page.code != http.StatusOK {
+		t.Fatalf("a readiness failure must not fail the whole render: %d\n%s", page.code, page.body)
+	}
+	if !strings.Contains(page.body, "Readiness was not supplied for this render.") {
+		t.Fatalf("readiness section must state its own absence on a loader error:\n%s", page.body)
+	}
+
+	snap := getStatus(t, h, "/board/spec/"+documentWallName+"/document/snapshot")
+	if snap.code != http.StatusOK {
+		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
+	}
+	var decoded struct {
+		Revision    string   `json:"revision"`
+		HTML        string   `json:"html"`
+		Markdown    string   `json:"markdown"`
+		Kind        string   `json:"kind"`
+		Ref         string   `json:"ref"`
+		Proposed    bool     `json:"proposed"`
+		Disclosures []string `json:"disclosures"`
+	}
+	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
+		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)
+	}
+	found := false
+	for _, d := range decoded.Disclosures {
+		if d == "readiness: "+wantErr.Error() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("snapshot disclosures = %v, want one naming %q", decoded.Disclosures, "readiness: "+wantErr.Error())
 	}
 }
 

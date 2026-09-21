@@ -1,11 +1,16 @@
 package workbench
 
 import (
+	"context"
+	"errors"
+	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/readinesspilot"
@@ -45,7 +50,7 @@ func readinessFixture() readinesspilot.Snapshot {
 			readinessConcernAction(),
 			readinessConcernSignoff(),
 		},
-		StaleNotice: "Startup snapshot at " + readinessFixtureHead + "; restart verdi serve after an edit.",
+		StaleNotice: "Derived at HEAD " + readinessFixtureHead + " for this request.",
 	}
 }
 
@@ -150,7 +155,7 @@ func readinessAllProvenFixture() readinesspilot.Snapshot {
 		CurrentFocus: "",
 		Attention:    []readinesspilot.Concern{},
 		AllConcerns:  []readinesspilot.Concern{problem, contributor, verdict, action},
-		StaleNotice:  "Startup snapshot at " + readinessFixtureHead + "; restart verdi serve after an edit.",
+		StaleNotice:  "Derived at HEAD " + readinessFixtureHead + " for this request.",
 	}
 }
 
@@ -204,7 +209,7 @@ func TestReadinessRender_OrientationLeadsWithTitle(t *testing.T) {
 	// precede the target technical metadata.
 	title := strings.Index(html, `<h2 class="readiness-title">Pilot decline flow</h2>`)
 	step := strings.Index(html, `Step 1 of 4 — Define the work`)
-	purpose := strings.Index(html, `This is a startup snapshot of readiness for the current design work.`)
+	purpose := strings.Index(html, `This page derives readiness for the current design work on every request.`)
 	target := strings.Index(html, `readiness-target-tech`)
 	if title < 0 || step < 0 || purpose < 0 || target < 0 {
 		t.Fatalf("page is missing orientation pieces (title=%d step=%d purpose=%d target=%d)", title, step, purpose, target)
@@ -591,17 +596,39 @@ func TestReadinessRender_DestinationActionsUsable(t *testing.T) {
 	}
 }
 
-func TestReadinessRender_StaleNoticeNamesHead(t *testing.T) {
+// TestReadinessRender_DerivationStampNamesHead is spec/readiness-recovery
+// ac-2: the page's notice is a derivation stamp naming the HEAD this
+// request looked at — never a startup notice telling the author to
+// restart. The chrome (class names, role, data attribute, tabindex) is
+// unchanged so the stale-notice-inspected instrumentation and the CSS
+// keep working; only the visible label and the accessible name move.
+// The stamp-text assertion below repeats the fixture's own StaleNotice, so
+// it proves pass-through and escaping only; the wording oracle is
+// TestLoad_AnyBranchNoRequest (internal/readinessload/load_test.go:140),
+// which pins the sentence where it is produced.
+func TestReadinessRender_DerivationStampNamesHead(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	notice := sectionOf(t, html, `class="readiness-stale"`, `</aside>`)
-	if !strings.Contains(notice, readinessFixtureHead) {
-		t.Fatalf("stale notice does not name the exact HEAD:\n%s", notice)
+	for _, want := range []string{
+		"Derived at HEAD " + readinessFixtureHead + " for this request.",
+		`<strong>Derivation stamp.</strong>`,
+		`aria-label="Derivation stamp"`,
+		`role="note"`,
+		`data-readiness-stale="1"`,
+		`class="readiness-stale-text"`,
+		`tabindex="0"`,
+	} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("derivation stamp is missing %q:\n%s", want, notice)
+		}
 	}
-	if !strings.Contains(notice, "restart") || !strings.Contains(notice, "verdi serve") {
-		t.Fatalf("stale notice does not tell the author to restart verdi serve:\n%s", notice)
+	for _, forbidden := range []string{"Startup snapshot", "restart"} {
+		if strings.Contains(notice, forbidden) {
+			t.Fatalf("derivation stamp still carries the startup notice text %q:\n%s", forbidden, notice)
+		}
 	}
-	if !strings.Contains(notice, `tabindex="0"`) {
-		t.Fatalf("stale notice is not keyboard-reachable:\n%s", notice)
+	if strings.Contains(strings.ToLower(html), "startup snapshot") {
+		t.Fatalf("page still describes itself as a startup snapshot (any case):\n%s", html)
 	}
 }
 
@@ -661,7 +688,7 @@ func TestReadinessRender_KeyboardLandmarksAndScript(t *testing.T) {
 
 func TestReadinessRoute_GetHappy(t *testing.T) {
 	snap := readinessFixture()
-	h := NewHandlerWith(t.TempDir(), Deps{Readiness: &snap})
+	h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: fixedSnapshotLoader{snap: snap}, ReadinessDefaultSpec: snap.TargetRef})
 	req := httptest.NewRequest(http.MethodGet, "/readiness", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -692,9 +719,198 @@ func TestReadinessRoute_MissingSnapshot503(t *testing.T) {
 	}
 }
 
+// TestReadinessRoute_QuerySpecDerivesPerRequest is spec/readiness-recovery
+// ac-2/ac-4: the readiness route asks the loader fresh for every request
+// (never a startup-frozen snapshot) — a counting fake proves two GETs
+// trigger two loads, ?spec=<name> passes exactly "spec/"+name, an unknown
+// spec surfaces the loader's own error text as a 503, and a process with
+// no loader wired at all keeps the existing 503 disclosure unchanged.
+func TestReadinessRoute_QuerySpecDerivesPerRequest(t *testing.T) {
+	snap := readinessFixture()
+	get := func(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	t.Run("two GETs trigger two loads", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader, ReadinessDefaultSpec: snap.TargetRef})
+		first := get(t, h, "/readiness")
+		second := get(t, h, "/readiness")
+		if first.Code != http.StatusOK || second.Code != http.StatusOK {
+			t.Fatalf("status = %d, %d, want 200, 200", first.Code, second.Code)
+		}
+		if loader.calls != 2 {
+			t.Fatalf("loader.calls = %d, want exactly 2 (one per GET)", loader.calls)
+		}
+	})
+
+	t.Run("?spec=x passes spec/x", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness?spec=pilot")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		if len(loader.refs) != 1 || loader.refs[0] != "spec/pilot" {
+			t.Fatalf("loader.refs = %v, want exactly [\"spec/pilot\"]", loader.refs)
+		}
+	})
+
+	t.Run("unknown spec surfaces the loader's own error as a 503", func(t *testing.T) {
+		wantErr := errors.New("readinessload: loading readiness: gathering repository facts: no such spec")
+		loader := erroringReadinessLoader{err: wantErr}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader, ReadinessDefaultSpec: "spec/pilot"})
+		rec := get(t, h, "/readiness?spec=nope")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), wantErr.Error()) {
+			t.Fatalf("503 body does not carry the loader's own error text:\n%s", rec.Body.String())
+		}
+	})
+
+	t.Run("a bad spec name is a 400, never reaches the loader", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness?spec=Not%20A%20Valid%20Name")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+		if loader.calls != 0 {
+			t.Fatalf("loader.calls = %d, want 0 (a bad name must never reach the loader)", loader.calls)
+		}
+		_, parseErr := artifact.ParseRef("spec/Not A Valid Name")
+		if parseErr == nil {
+			t.Fatal("fixture no longer malformed: ParseRef accepted it")
+		}
+		if !strings.Contains(rec.Body.String(), stdhtml.EscapeString(parseErr.Error())) {
+			t.Fatalf("the 400 page must disclose WHY the name was refused (%q):\n%s", parseErr.Error(), rec.Body.String())
+		}
+	})
+
+	// A pinned or fragment ?spec= parses fine but is not a whole spec ref,
+	// which is the route's own shape rule: the loader refuses it one layer
+	// down (readinessload: "not an unpinned whole spec ref") and that
+	// arrives as a 503 — the wrong code for a malformed query, and a
+	// derivation attempt the handler never had to make. The gate owns both.
+	for _, tc := range []struct{ name, query, want string }{
+		{name: "pinned", query: "pilot@" + strings.Repeat("a", 40), want: "commit pin"},
+		{name: "fragment", query: "pilot#ac-1", want: "fragment"},
+	} {
+		t.Run("a "+tc.name+" spec ref is a 400, never reaches the loader", func(t *testing.T) {
+			loader := &countingReadinessLoader{snap: snap}
+			h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+			rec := get(t, h, "/readiness?spec="+url.QueryEscape(tc.query))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if loader.calls != 0 {
+				t.Fatalf("loader.calls = %d, want 0 (a %s ref must never reach the loader)", loader.calls, tc.name)
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("the 400 page must disclose why a %s ref was refused (naming %q):\n%s", tc.name, tc.want, rec.Body.String())
+			}
+		})
+	}
+
+	t.Run("a valid ?spec= reaches the loader in canonical form", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		if rec := get(t, h, "/readiness?spec=pilot"); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		parsed, err := artifact.ParseRef("spec/pilot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(loader.refs) != 1 || loader.refs[0] != parsed.String() {
+			t.Fatalf("loader.refs = %v, want exactly the parsed ref's own canonical form [%q]", loader.refs, parsed.String())
+		}
+	})
+
+	t.Run("no loader keeps the existing 503 disclosure unchanged", func(t *testing.T) {
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessDefaultSpec: "spec/pilot"})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNotWired.Error())) {
+			t.Fatalf("503 page does not carry the no-loader disclosure verbatim: %s", body)
+		}
+		if strings.Contains(body, "no spec was named") {
+			t.Fatalf("no-loader 503 page wrongly blames a missing spec name: %s", body)
+		}
+	})
+
+	// The check order is a contract: loader-nil is tested before ref-empty,
+	// so a process with neither a loader nor a named spec reports the
+	// not-wired disclosure, never the no-spec one. There is no loader, so
+	// there is no call counter to read; the body alone pins the order.
+	t.Run("a nil loader with no spec named is the not-wired 503", func(t *testing.T) {
+		h := NewHandlerWith(t.TempDir(), Deps{})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNotWired.Error())) {
+			t.Fatalf("503 page does not carry the no-loader disclosure verbatim: %s", body)
+		}
+		if strings.Contains(body, "no spec was named") {
+			t.Fatalf("nil loader with no spec named must report not-wired first, not the missing spec: %s", body)
+		}
+	})
+
+	// co-6: a loader that IS wired but has nothing to derive — no ?spec=
+	// and no default — is a different missing fact from "no loader", and
+	// the disclosure must say which one it is and how to supply it.
+	t.Run("a wired loader with no spec named is a 503 naming the missing spec", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
+		}
+		if loader.calls != 0 {
+			t.Fatalf("loader.calls = %d, want 0 (nothing was named, so nothing is derived)", loader.calls)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNoSpec.Error())) {
+			t.Fatalf("503 page does not carry the no-spec disclosure verbatim: %s", body)
+		}
+		for _, want := range []string{"no spec was named", "?spec=", "--context-request"} {
+			if !strings.Contains(body, stdhtml.EscapeString(want)) {
+				t.Fatalf("503 page does not tell the author how to name a spec (%q): %s", want, body)
+			}
+		}
+		if strings.Contains(body, "without the readiness pilot wired") {
+			t.Fatalf("no-spec 503 page wrongly claims no loader is wired: %s", body)
+		}
+	})
+}
+
+// countingReadinessLoader is a test-only ReadinessLoader recording every
+// ref it was asked to Load, in order, and always returning the same fixed
+// snapshot.
+type countingReadinessLoader struct {
+	snap  readinesspilot.Snapshot
+	calls int
+	refs  []string
+}
+
+func (c *countingReadinessLoader) Load(_ context.Context, ref string) (readinesspilot.Snapshot, error) {
+	c.calls++
+	c.refs = append(c.refs, ref)
+	return c.snap, nil
+}
+
 func TestReadinessRoute_WrongMethod405(t *testing.T) {
 	snap := readinessFixture()
-	h := NewHandlerWith(t.TempDir(), Deps{Readiness: &snap})
+	h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: fixedSnapshotLoader{snap: snap}, ReadinessDefaultSpec: snap.TargetRef})
 	for _, path := range []string{"/readiness", "/assets/readiness.js"} {
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 			req := httptest.NewRequest(method, path, nil)

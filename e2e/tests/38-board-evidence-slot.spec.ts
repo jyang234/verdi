@@ -227,3 +227,48 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
     );
   });
 });
+
+// Readiness-recovery wave 2, R-RR2-3: wallbadge computes evidence slots
+// on EVERY class before its story-only ladder return, keyed for a
+// feature by the feature's own name (the segment VL-022's FoldFeature
+// path probes). The harness design wall (SHOWCASE.DESIGN_SPEC,
+// refi-decline-flow) is a FEATURE whose three criteria each declare the
+// attestation kind and none has an attestation on disk — so every
+// criterion card wears the attestation kind's own empty chip. The chip
+// markup and text are unchanged (co-4: a data change through existing
+// chip markup); the story-wall assertions above stay the byte contract
+// for the story class.
+test.describe("evidence slot: a feature wall's criteria wear the attestation slot", () => {
+  test("each criterion card on the design wall shows an empty attestation chip", async ({
+    page,
+  }) => {
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-board-mode",
+      "authoring",
+    );
+
+    for (const acId of SHOWCASE.AC_IDS) {
+      const card = page.getByTestId(`card-${acId}`);
+      await expect(card).toBeVisible();
+
+      // The attestation kind's slot chip, keyed on the existing testid
+      // and data-slot-state contract — never on prose for state.
+      const chip = card.getByTestId(slotChipTestId(acId, "attestation"));
+      await expect(chip).toHaveCount(1);
+      await expect(chip).toHaveAttribute("data-slot-state", "empty");
+      await expect(chip).toHaveText("no attestation");
+
+      // The chip sits INSIDE the attestation kind's one obligation row
+      // (ac-3/dc-2: demand and holdings on the same line), and that row
+      // is the card's only attestation row.
+      const row = card.locator('.obligation[data-obligation-kind="attestation"]');
+      await expect(row).toHaveCount(1);
+      await expect(row.getByTestId(slotChipTestId(acId, "attestation"))).toHaveCount(1);
+
+      // dc-4: presence only — no verdict word reaches the chip.
+      await expect(chip).not.toContainText("pass");
+      await expect(chip).not.toContainText("fail");
+    }
+  });
+});

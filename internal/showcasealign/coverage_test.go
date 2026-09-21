@@ -212,12 +212,17 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// --reaffirm round-trips preserving the original log entry.
 	"cli:waive": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
-	// cli:spec (merge-signaled spec acceptance, Task 5): added alongside
-	// the new verb itself — TestCLIShowcaseSpecState (cli_showcase_test.go)
-	// drives `verdi spec state` against the real, already-landed
-	// spec/stale-decline feature from examples/showcase, proving the
-	// read-only Git-derived-state projection resolves accepted-pending-
-	// build/exact against real showcase content, never a synthetic fixture.
+	// cli:spec (merge-signaled spec acceptance, Task 5; extended by spec/
+	// readiness-recovery ac-4): added alongside the new verb itself —
+	// TestCLIShowcaseSpecState (cli_showcase_test.go) drives `verdi spec
+	// state` against the real, already-landed spec/stale-decline feature
+	// from examples/showcase, proving the read-only Git-derived-state
+	// projection resolves accepted-pending-build/exact against real
+	// showcase content, never a synthetic fixture. TestCLIShowcaseSpecDoc
+	// (same file) drives `verdi spec doc` against the real spec/escrow-
+	// autopay feature, proving the default render's own real internal/
+	// readinessload.Loader derives a genuinely populated ## Readiness
+	// section (naming its own source line) against the provisioned store.
 	"cli:spec": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
 	// cli:journey (GLG v3 AC-1, journey-projection delivery unit): added
@@ -310,11 +315,14 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"mcp:search_artifacts": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_artifact":     {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	// mcp:get_document (spec-documents Wave 2 Task 3, spec/spec-documents
-	// ac-5): the get_document subtest in mcp_showcase_test.go renders
-	// spec/escrow-autopay (the corpus's real accepted feature spec) via
-	// the live tool, asserting the real ref/kind/commit/proposed stamp and
-	// its real ac-1 criterion text, plus that kind: tasks narrows the
-	// section set against the same real content.
+	// ac-5; extended by spec/readiness-recovery ac-4): the get_document
+	// subtest in mcp_showcase_test.go renders spec/escrow-autopay (the
+	// corpus's real accepted feature spec) via the live tool, wired with a
+	// real internal/readinessload.Loader (never nil), asserting the real
+	// ref/kind/commit/proposed stamp, its real ac-1 criterion text, a
+	// genuinely populated ## Readiness section naming its own source line,
+	// and that kind: tasks narrows the section set against the same real
+	// content.
 	"mcp:get_document":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_links":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_matrix":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},

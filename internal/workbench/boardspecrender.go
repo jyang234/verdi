@@ -449,10 +449,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if feature {
 			writeScopingReceipts(&b, p, c)
 		}
-		// A STORY AC card discloses its evidence obligations (ac-2) —
-		// populated for story-wall AC cards only (attachObligations), so a
-		// non-empty list is a sufficient guard; the render never re-checks
-		// class.
+		// An AC card discloses its evidence obligations (ac-2) — populated
+		// for every class's AC cards that declare evidence kinds
+		// (attachObligations, R-RR2-7), so a non-empty list is a
+		// sufficient guard; the render never re-checks class.
 		if len(c.Obligations) > 0 {
 			writeObligations(&b, c)
 		}

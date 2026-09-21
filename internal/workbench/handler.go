@@ -123,11 +123,12 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// renders as preview").
 	mux.HandleFunc("/matrix/{story...}", matrixHandler(root))
 
-	// The Wave 3.5 readiness pilot cockpit: a GET-only render of the
-	// startup snapshot injected via Deps.Readiness (nil discloses an
+	// The Wave 3.5 readiness pilot cockpit: a GET-only render, derived
+	// fresh per request through Deps.ReadinessLoader for ?spec=<name> or
+	// Deps.ReadinessDefaultSpec (nil loader, or neither name, discloses an
 	// honest 503). Method checks live in the handler, matching the
 	// method-prefix note above.
-	mux.HandleFunc("/readiness", readinessHandler(deps.Readiness))
+	mux.HandleFunc("/readiness", readinessHandler(deps.ReadinessLoader, deps.ReadinessDefaultSpec))
 
 	// The mechanical spec importer's browser adapter (spec-import-contract
 	// "Browser routes"; specimport.go): the import page, the two strict
@@ -146,7 +147,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// design branch's managed worktree (spec/draft-boards ac-1/dc-1: the
 	// existing board server rooted at the branch's tree, never a second
 	// board implementation).
-	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates, model: deps.Model, design: deps.Design, readiness: deps.Readiness}
+	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates, model: deps.Model, design: deps.Design, readinessLoader: deps.ReadinessLoader}
 	for _, rt := range boardSpecRoutes() {
 		mux.HandleFunc(rt.suffix, rt.handler(bs))
 	}

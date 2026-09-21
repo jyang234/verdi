@@ -16,6 +16,12 @@ func TestReasonCodeClass(t *testing.T) {
 		{"obligation-fold-green-unproven", ClassMechanical},
 		{"obligation-design-unresolved", ClassMechanical},
 		{"obligation-unknown-kind", ClassUnknown},
+		{"stub-unreconciled", ClassMechanical},
+		{"outcome-floor-unsatisfied", ClassJudgmental},
+		{"question-claimed-by-spike", ClassMechanical},
+		{"conflict-mechanical-unresolved", ClassMechanical},
+		{"conflict-semantic-unresolved", ClassJudgmental},
+		{"exemption-ineffective", ClassGovernance},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.code), func(t *testing.T) {
@@ -43,7 +49,10 @@ func TestReasonCodeClassUnknownCodeFailsClosed(t *testing.T) {
 
 func TestReasonCodes(t *testing.T) {
 	want := []ReasonCode{
+		"conflict-mechanical-unresolved",
+		"conflict-semantic-unresolved",
 		"default-branch-unresolved",
+		"exemption-ineffective",
 		"forge-facts-unavailable",
 		"lifecycle-state-unproven",
 		"obligation-author-vouch-unproven",
@@ -51,7 +60,10 @@ func TestReasonCodes(t *testing.T) {
 		"obligation-design-unresolved",
 		"obligation-fold-green-unproven",
 		"obligation-unknown-kind",
+		"outcome-floor-unsatisfied",
 		"principal-resolution-unproven",
+		"question-claimed-by-spike",
+		"stub-unreconciled",
 	}
 	got := ReasonCodes()
 	if len(got) != len(want) {

@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
-	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/atomicfile"
-	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -23,9 +21,15 @@ type contextConflictProviderFactory func(context.Context, string, policyconflict
 // cmdContextConflict exposes the one Task-9 evaluator as a read-only CLI
 // inspection surface. Dependency construction stays behind a narrow factory
 // seam so parser/output behavior can be exercised without replacing package
-// globals or bypassing the real request codec.
+// globals or bypassing the real request codec. Provider construction itself
+// is internal/readinessload.NewConflictProvider (moved from this file's old
+// newLocalContextConflictProvider, spec/readiness-recovery Task 2): `verdi
+// context conflict` is a JudgeRun caller, exactly like it always was — it
+// may launch the manifest's configured judge on a cache miss.
 func cmdContextConflict(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return cmdContextConflictWithFactory(args, stdin, stdout, stderr, newLocalContextConflictProvider)
+	return cmdContextConflictWithFactory(args, stdin, stdout, stderr, func(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return readinessload.NewConflictProvider(ctx, root, request, readinessload.JudgeRun, resolveConflictActors)
+	})
 }
 
 func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stderr io.Writer, factory contextConflictProviderFactory) int {
@@ -47,7 +51,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, "context conflict: --out requires a value")
 		return 2
 	}
-	if hasOut && hasDotDotElement(outArg) {
+	if hasOut && store.HasDotDotElement(outArg) {
 		fmt.Fprintln(stderr, "context conflict:", errContextOutDotDot)
 		return 2
 	}
@@ -179,41 +183,6 @@ func contextConflictManagedProjectionPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func newLocalContextConflictProvider(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
-	manifest, err := loadManifest(root)
-	if err != nil {
-		return nil, err
-	}
-	var primary policyconflict.Judge
-	if manifest.Align != nil && len(manifest.Align.JudgeCmd) != 0 {
-		timeout := align.DefaultJudgeTimeout
-		if manifest.Align.JudgeTimeoutSeconds != 0 {
-			timeout = time.Duration(manifest.Align.JudgeTimeoutSeconds) * time.Second
-		}
-		primary = policyconflict.JudgeAdapter{
-			Role:    string(policyconflict.JudgePrimary),
-			Adapter: contextConflictRequestAdapter(request),
-			Model:   "align.judge_cmd",
-			Argv:    append([]string(nil), manifest.Align.JudgeCmd...),
-			Timeout: timeout,
-			Root:    root,
-			Runner:  contextConflictJudgeRunner{delegate: align.ExecJudgeRunner{}},
-		}
-	}
-	actors, err := resolveConflictActors(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	return policyconflict.NewService(root, policyconflict.ServiceDeps{
-		Compiler:   contextcompile.NewCompiler(),
-		Refs:       contextConflictRefResolver{},
-		Primary:    primary,
-		TreeHasher: contextConflictTreeHasher{},
-		Dates:      contextConflictDateSource{},
-		Actors:     actors,
-	}), nil
-}
-
 // resolveConflictActors resolves the store's local-operator actor claim
 // (actorlocal.go) against the resolved governance profile, wired once here
 // so `context conflict`, `build start`, `gate`, and `close` all share it
@@ -240,58 +209,4 @@ func resolveConflictActors(ctx context.Context, root string) ([]governanceprinci
 		return nil, err
 	}
 	return resolveLocalActors(ctx, root, profile)
-}
-
-func contextConflictRequestAdapter(request policyconflict.Request) contextcompile.AdapterRef {
-	if request.Target.AcceptedContext != nil {
-		return request.Target.AcceptedContext.Adapter
-	}
-	if request.Target.AcceptanceCandidate != nil {
-		return request.Target.AcceptanceCandidate.Adapter
-	}
-	return contextcompile.AdapterRef{}
-}
-
-type contextConflictJudgeRunner struct{ delegate align.JudgeRunner }
-
-func (r contextConflictJudgeRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
-	if r.delegate == nil {
-		return nil, 0, errors.New("context conflict judge runner is nil")
-	}
-	result, err := r.delegate.RunJudge(ctx, argv, stdin)
-	return result.Stdout, result.ExitCode, err
-}
-
-type contextConflictTreeHasher struct{}
-
-func (contextConflictTreeHasher) TreeHash(ctx context.Context, root string) (string, error) {
-	services, err := store.DiscoverServices(root)
-	if err != nil {
-		return "", err
-	}
-	return store.TreeHash(ctx, root, services)
-}
-
-type contextConflictDateSource struct{}
-
-func (contextConflictDateSource) TodayUTC(ctx context.Context) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return time.Now().UTC().Format("2006-01-02"), nil
-}
-
-// contextConflictRefResolver makes absent local graph proof explicit. Exact
-// ref equality is settled before this port is called; every different pair
-// remains unknown and is therefore sent to semantic evaluation, never treated
-// as favorable overlap/disjointness. Managed callers may inject a stronger
-// graph resolver directly into ServiceDeps.
-type contextConflictRefResolver struct{}
-
-func (contextConflictRefResolver) Relate(context.Context, string, string) (policyconflict.ScopeState, []string, error) {
-	return policyconflict.ScopeUnknown, []string{"ref-relation-unproven"}, nil
-}
-
-func (contextConflictRefResolver) Covers(context.Context, string, string) (policyconflict.ProofState, []string, error) {
-	return policyconflict.ProofUnproven, []string{"ref-coverage-unproven"}, nil
 }

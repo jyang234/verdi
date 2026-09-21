@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/journey"
 )
@@ -1099,5 +1101,191 @@ func TestCmdJourney_StoryRef_UnmatchedExitsTwo(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "default branch") {
 		t.Fatalf("stderr = %q, but the story-ref form never searches the default branch", stderr.String())
+	}
+}
+
+// TestCmdJourney_EventualBlockersDerived proves the CLI end to end wires
+// the real eventual-blocker derivation (spec/readiness-recovery ac-1,
+// internal/journey/eventual.go): journeyFeatureSpecMD declares no
+// attestation kind on its single AC and plants no evidence records at
+// all, so that AC's outcome floor is unsatisfied (neither an authored
+// attestation nor a passing outcome record) — the record's eventual
+// section must be Derived: true and must name outcome-floor/ac-1, never
+// the retired Derived: false stub.
+func TestCmdJourney_EventualBlockersDerived(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": journeyFeatureSpecMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/payments"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	rec, err := journey.Decode(bytes.TrimRight(stdout.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if !rec.Blockers.Eventual.Derived {
+		t.Fatalf("Blockers.Eventual.Derived = false, want true (the eventual section is no longer a hard-coded stub): %+v", rec.Blockers.Eventual)
+	}
+	if journeyFindBlocker(rec.Blockers.Eventual.Items, "outcome-floor/ac-1") == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1 (no attestation, no passing outcome record planted for this fixture's only AC)", journeyBlockerIDs(rec.Blockers.Eventual.Items))
+	}
+}
+
+// journeyDigitStubFeatureSpecMD declares a stub whose slug begins with a
+// DIGIT — legal by internal/artifact's own simpleNameRe
+// (^[a-z0-9]+(?:-[a-z0-9]+)*$) and refused by nothing in internal/lint.
+const journeyDigitStubFeatureSpecMD = `---
+id: spec/auth
+kind: spec
+class: feature
+title: "Auth"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+stubs:
+  - { slug: 2fa-login, acceptance_criteria: [ac-1] }
+---
+# body
+`
+
+// TestCmdJourney_DigitLeadingStubSlugStillProjects is C1's end-to-end
+// regression, driven through the CLI verb itself: a feature whose stub
+// slug begins with a digit and has no implementing story used to compose
+// the blocker id "stub-unreconciled/2fa-login", which fails the journey
+// id grammar (record.go's blockerIDRe requires each segment to start with
+// a letter) — so Record.Validate refused the assembled record and
+// `verdi journey` exited 2 on a perfectly legal store. The id segment is
+// normalized now; exit 0, and the raw slug is still named to the
+// operator.
+func TestCmdJourney_DigitLeadingStubSlugStillProjects(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/auth/spec.md": journeyDigitStubFeatureSpecMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/auth"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	rec, err := journey.Decode(bytes.TrimRight(stdout.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	blocker := journeyFindBlocker(rec.Blockers.Eventual.Items, "stub-unreconciled/s-2fa-login")
+	if blocker == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want stub-unreconciled/s-2fa-login", journeyBlockerIDs(rec.Blockers.Eventual.Items))
+	}
+	if !strings.Contains(blocker.ClearingCondition, "2fa-login") {
+		t.Fatalf("clearing condition = %q, want the raw slug named", blocker.ClearingCondition)
+	}
+	if blocker.Transition != "close" {
+		t.Fatalf("transition = %q, want close (the gate that consumes stub reconciliation)", blocker.Transition)
+	}
+}
+
+// journeyOutcomeFeatureSpecMD is wave 1's TestProject_FeatureEventualFromStore
+// recipe (internal/journey/project_test.go's eventualFixtureFeatureSpecMD),
+// reduced to a single AC declaring attestation: the smallest fixture whose
+// outcome-floor/ac-1 eventual blocker exists at all and can be driven
+// through its full three-valued lifecycle (spec/readiness-recovery ac-7).
+const journeyOutcomeFeatureSpecMD = `---
+id: spec/journey-outcome
+kind: spec
+class: feature
+title: "Journey outcome"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "the fixture outcome holds", evidence: [attestation] }
+---
+# Journey outcome
+`
+
+// TestCmdJourney_OutcomeFloorBlockerFollowsTheScaffold is ac-7's own
+// end-to-end readiness proof, driven through the real verb entry points
+// (runAttest — Task 1's `verdi attest`, cmdJourney), never a direct fold
+// call: a feature AC's outcome-floor/<ac-id> eventual blocker's witness
+// tracks evidence.LoadAttestationState's three-valued state exactly —
+// absent with no file at all, unauthored once `verdi attest` scaffolds it
+// (the marker still present), and cleared once the marker is replaced
+// with a claim and committed.
+func TestCmdJourney_OutcomeFloorBlockerFollowsTheScaffold(t *testing.T) {
+	repo := buildJourneyRepo(t, map[string]string{".verdi/specs/active/journey-outcome/spec.md": journeyOutcomeFeatureSpecMD})
+	ctx := context.Background()
+
+	// 1. Absent: no attestation file exists at all.
+	var stdout1, stderr1 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout1, &stderr1); got != 0 {
+		t.Fatalf("cmdJourney (absent) = %d, want 0; stderr=%s", got, stderr1.String())
+	}
+	rec1, err := journey.Decode(bytes.TrimRight(stdout1.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout1.String())
+	}
+	b1 := journeyFindBlocker(rec1.Blockers.Eventual.Items, "outcome-floor/ac-1")
+	if b1 == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1", journeyBlockerIDs(rec1.Blockers.Eventual.Items))
+	}
+	if len(b1.Witnesses) == 0 || !strings.Contains(b1.Witnesses[0], "attestation is absent") {
+		t.Fatalf("outcome-floor/ac-1 witnesses = %v, want \"attestation is absent\"", b1.Witnesses)
+	}
+
+	// 2. Scaffolded, unauthored: `verdi attest spec/journey-outcome ac-1`
+	// (runAttest — the same entry point cmdAttest dispatches to, mirroring
+	// attest_test.go's own convention).
+	var attestOut, attestErr bytes.Buffer
+	if got := runAttest(ctx, repo.Dir, "spec/journey-outcome", "ac-1", nil, &attestOut, &attestErr); got != 0 {
+		t.Fatalf("runAttest = %d, want 0; stdout=%s stderr=%s", got, attestOut.String(), attestErr.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout2, &stderr2); got != 0 {
+		t.Fatalf("cmdJourney (unauthored) = %d, want 0; stderr=%s", got, stderr2.String())
+	}
+	rec2, err := journey.Decode(bytes.TrimRight(stdout2.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout2.String())
+	}
+	b2 := journeyFindBlocker(rec2.Blockers.Eventual.Items, "outcome-floor/ac-1")
+	if b2 == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1 (scaffolded, still unauthored)", journeyBlockerIDs(rec2.Blockers.Eventual.Items))
+	}
+	if len(b2.Witnesses) == 0 || !strings.Contains(b2.Witnesses[0], "attestation is unauthored") {
+		t.Fatalf("outcome-floor/ac-1 witnesses = %v, want \"attestation is unauthored\"", b2.Witnesses)
+	}
+
+	// 3. Authored and committed: replace the sentinel marker with a
+	// one-line first-person claim (co-3/DC-12: Verdi never writes or
+	// suggests the claim — this test, the human stand-in, does).
+	path := filepath.Join(repo.Dir, ".verdi", "attestations", "journey-outcome", "ac-1.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading scaffolded attestation: %v", err)
+	}
+	if !strings.Contains(string(raw), evidence.UnauthoredAttestationMarker) {
+		t.Fatalf("scaffolded attestation does not carry the unauthored marker:\n%s", raw)
+	}
+	authored := strings.Replace(string(raw), evidence.UnauthoredAttestationMarker, "I verified ac-1 holds by manual review.", 1)
+	if err := os.WriteFile(path, []byte(authored), 0o644); err != nil {
+		t.Fatalf("authoring the attestation: %v", err)
+	}
+	commitAllOnCurrentBranch(t, repo.Dir, "author ac-1 attestation")
+
+	var stdout3, stderr3 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout3, &stderr3); got != 0 {
+		t.Fatalf("cmdJourney (authored) = %d, want 0; stderr=%s", got, stderr3.String())
+	}
+	rec3, err := journey.Decode(bytes.TrimRight(stdout3.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout3.String())
+	}
+	// The blocker is gone because it CLEARED, not because the third
+	// record came back empty: the same spec is still the projected
+	// target, class and path included.
+	if rec3.Target != rec1.Target {
+		t.Fatalf("rec3.Target = %+v, want the same projected spec as the first record %+v (the blocker must clear, never vanish with the projection)", rec3.Target, rec1.Target)
+	}
+	if b3 := journeyFindBlocker(rec3.Blockers.Eventual.Items, "outcome-floor/ac-1"); b3 != nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want NO outcome-floor/ac-1 blocker once the attestation is authored: %+v", journeyBlockerIDs(rec3.Blockers.Eventual.Items), b3)
 	}
 }

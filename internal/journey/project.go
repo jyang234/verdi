@@ -9,17 +9,37 @@ import (
 
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyauthority"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// Project resolves arg to a target spec (GatherFacts) and derives the
-// complete journey Record over its facts plus cfg.Model — the operating-
-// model catalog that is the ONLY source of candidate transitions and
-// actions (DC-3). Project takes no locks and writes no files: every field
-// is pure derivation over already-gathered facts (facts.go/derive.go); the
-// returned Record's Digest is unset — call Canonical to validate, stamp,
-// and canonically encode it.
+// Extras carries request-time facts a caller may supply to a projection,
+// beyond what GatherFacts itself can resolve from the repository alone
+// (R-RR1-2). Conflict is the optional policy-conflict report a caller
+// (the readiness loader, a later task) already evaluated; nil means "not
+// supplied," never "supplied empty" — ProjectWith discloses the absence
+// rather than silently treating it as a clean report (CO-1).
+type Extras struct {
+	Conflict *policyconflict.Report
+}
+
+// Project is ProjectWith with no extras: the projection this delivery
+// unit's own callers (verdi journey, cmd/verdi/readiness_snapshot.go) use
+// today, and the one every other package importing journey should keep
+// using unless it has already resolved a policy-conflict report of its
+// own to supply.
 func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (Record, error) {
+	return p.ProjectWith(ctx, cfg, arg, Extras{})
+}
+
+// ProjectWith resolves arg to a target spec (GatherFacts) and derives the
+// complete journey Record over its facts, cfg.Model — the operating-model
+// catalog that is the ONLY source of candidate transitions and actions
+// (DC-3) — and extras. ProjectWith takes no locks and writes no files:
+// every field is pure derivation over already-gathered facts
+// (facts.go/derive.go/eventual.go); the returned Record's Digest is unset
+// — call Canonical to validate, stamp, and canonically encode it.
+func (p Projector) ProjectWith(ctx context.Context, cfg *store.Config, arg string, extras Extras) (Record, error) {
 	facts, err := p.GatherFacts(ctx, cfg, arg)
 	if err != nil {
 		return Record{}, err
@@ -52,6 +72,10 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 	}
 
 	candidates, classDeclared := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
+	// DC-15: the from-state every transition walk starts at is joined
+	// through specstate's own Result.ArtifactStatus(), never re-derived
+	// here — the SAME join candidateTransitions performs internally.
+	lifecycleState := string(facts.LifecycleResult.ArtifactStatus())
 	current := deriveBlockers(facts.Repository.DefaultBranch.Known, profileAdopted, facts.LifecycleResult, candidates, owner)
 	current = mergeObligationQualityBlockers(current, deriveObligationQualityBlockers(qualityFacts, owner))
 	principals := derivePrincipals(candidates)
@@ -87,8 +111,20 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		Lifecycle:  facts.Lifecycle,
 		Evidence:   facts.Evidence,
 		Blockers: Blockers{
-			Current:  current,
-			Eventual: deriveEventual(),
+			Current: current,
+			Eventual: deriveEventual(eventualInput{
+				Class:            facts.Target.Class,
+				Model:            cfg.Model,
+				State:            lifecycleState,
+				Owner:            owner,
+				Candidates:       candidates,
+				LaterTransitions: laterTransitions(cfg.Model, facts.Target.Class, lifecycleState, candidates),
+				Spec:             facts.Spec,
+				Stubs:            facts.Stubs,
+				Fold:             facts.FeatureFold,
+				Conflict:         extras.Conflict,
+				Unavailable:      facts.EventualUnavailable,
+			}),
 		},
 		Principals:  principals,
 		Actions:     actions,

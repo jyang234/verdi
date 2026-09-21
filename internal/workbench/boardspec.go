@@ -40,6 +40,21 @@ type StateResolver interface {
 	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
 }
 
+// ReadinessLoader is the per-request readiness port (spec/readiness-
+// recovery ac-2/ac-4, 04 §port pattern: defined at this consumer, never a
+// shared interface package — internal/mcpserve declares an identical one
+// for itself). Every caller asks for its OWN ref (R-RR1-8): the /readiness
+// route asks for ?spec=<name> or the injected default spec, and the
+// Document tab asks for the spec it is rendering — never a single ref
+// reused across unrelated requests. internal/readinessload.Loader is the
+// one production implementation; nil means no loader is wired for this
+// process (a fresh checkout with no store, or a caller that deliberately
+// leaves readiness unwired), which both consumers below render as an
+// honest absence rather than a panic.
+type ReadinessLoader interface {
+	Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error)
+}
+
 // Deps carries the workbench's injected collaborators (04 §port
 // pattern: interfaces defined at the consumer, wired by the caller).
 type Deps struct {
@@ -98,13 +113,21 @@ type Deps struct {
 	// editor blocks (verification informs, never gates).
 	DiagramVerifier DiagramVerifier
 
-	// Readiness is the Wave 3.5 pilot's startup snapshot: derived once by
-	// the caller (cmd/verdi's serve path via readinesspilot.Derive) and
-	// injected immutable — the cockpit page renders it verbatim and never
-	// recomputes readiness. nil means the pilot is not wired: GET
-	// /readiness discloses that honestly with a 503 page rather than
-	// rendering anything vacuous.
-	Readiness *readinesspilot.Snapshot
+	// ReadinessLoader derives readiness fresh for whichever ref a request
+	// names (spec/readiness-recovery ac-2/ac-4): the cockpit's ?spec=<name>
+	// route and default-spec render, and the Document tab's own served
+	// spec, each call Load with their own ref. nil means no loader is
+	// wired: GET /readiness discloses that honestly with a 503 page rather
+	// than rendering anything vacuous, and the Document tab renders its
+	// Readiness section as "not supplied".
+	ReadinessLoader ReadinessLoader
+
+	// ReadinessDefaultSpec is the ref GET /readiness renders when the
+	// request carries no ?spec= query (typically the spec named by
+	// `verdi serve --context-request`, set by cmd/verdi's serve wiring).
+	// Empty means no default: the route falls back to the existing 503
+	// disclosure unless a query supplies one.
+	ReadinessDefaultSpec string
 
 	// Design is the ASD application bridge (Wave 6 Task 2): the one typed
 	// application core (internal/designapp, injected by cmd/verdi's serve
@@ -132,11 +155,11 @@ type boardSpecServer struct {
 	// renders bare ids everywhere (spec/vocabulary-surfaces' fallback).
 	model *model.Model
 
-	// readiness is Deps.Readiness (the startup snapshot, or nil): the
-	// Document tab hands it to the shared loader, which supplies it to the
-	// document only when its TargetRef names the served spec. Nothing
-	// here recomputes readiness.
-	readiness *readinesspilot.Snapshot
+	// readinessLoader is Deps.ReadinessLoader (or nil): the Document tab
+	// calls Load for its own served spec each request and hands the result
+	// to specdocload, which supplies it to the document only when its
+	// TargetRef names the served spec (R-RR1-8's tripwire guard).
+	readinessLoader ReadinessLoader
 
 	// reviewUnavailable, when non-empty, is a disclosed reason the review
 	// feed is CONFIGURED (a forge is named in verdi.yaml) but cannot be
@@ -469,10 +492,11 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 	return proj, git, asd, nil
 }
 
-// attachObligations enriches a STORY board's AC cards with their evidence
-// obligations (spec/obligation-wall ac-2), so what each AC demands is read on
-// the wall itself (feature co-3, legible-without-the-sidecar) rather than
-// recovered by opening the obligation file. For each evidence kind an AC
+// attachObligations enriches a board's AC cards — every class alike, story
+// and feature (R-RR2-7, SI-210) — with their evidence obligations
+// (spec/obligation-wall ac-2), so what each AC demands is read on the wall
+// itself (feature co-3, legible-without-the-sidecar) rather than recovered
+// by opening the obligation file. For each evidence kind an AC
 // DECLARES it projects onto that card either the kind's authored obligation
 // (title + prose) or a disclosed "no obligation" marker — the wall-receipts
 // posture (dc-2): the read surface DISCLOSES, it never refuses; the
@@ -488,16 +512,18 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 // three-valued posture, propagated here as loadBoard's error, never silently
 // swallowed.
 //
-// This is a no-op on any non-story wall: obligations attach to STORY
-// acceptance criteria (a feature AC wears its coverage receipt instead), so
-// gating on class here mirrors the projection's own feature/story split. It
-// runs AFTER buildProjection — the projector stays a pure function of its
-// four in-memory inputs; this store-derived enrichment lives in the I/O
-// layer, exactly like proj.Notices.
+// No class gate (R-RR2-7): a feature AC card carries one view per declared
+// kind exactly as a story card does — the loader is spec-name generic, so a
+// feature kind with no obligation document on disk reads as the same
+// disclosed "no obligation" fact — and the evidence-slot chip (spec/
+// evidence-slot ac-7's feature-wall widening) has its row to land on;
+// the feature card still wears its coverage receipt beside it. The
+// story-only concern that remains story-only is the ladder-flag compute
+// in internal/wallbadge, not this attachment. It runs AFTER
+// buildProjection — the projector stays a pure function of its four
+// in-memory inputs; this store-derived enrichment lives in the I/O layer,
+// exactly like proj.Notices.
 func attachObligations(proj *BoardProjection, root, specName string, fm *artifact.SpecFrontmatter) error {
-	if fm.Class != artifact.ClassStory {
-		return nil
-	}
 	declaredKinds := make(map[string][]artifact.EvidenceKind, len(fm.AcceptanceCriteria))
 	for _, ac := range fm.AcceptanceCriteria {
 		declaredKinds[ac.ID] = ac.Evidence

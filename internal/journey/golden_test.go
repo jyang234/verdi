@@ -40,6 +40,32 @@ func goldenRecord(t *testing.T) Record {
 		ClearingCondition: "elaborate the obligation quality for ac-2/runtime",
 		Transition:        "build:start",
 	})
+	// spec/readiness-recovery ac-1: the eventual-blocker section is real
+	// now (eventual.go), not the retired hard-coded stub — the golden
+	// fixture must exercise its now-populated shape. validRecord's own
+	// base Eventual value deliberately stays Derived: false (many of
+	// record_test.go's negative-path mutations build on that base
+	// unchanged), so the "real, derived" shape is overridden here instead,
+	// the same way every other field below is.
+	r.Blockers.Eventual = EventualBlockers{
+		Derived: true,
+		Items: []Blocker{
+			{
+				ID:                "outcome-floor/ac-2",
+				Reason:            ReasonOutcomeFloorUnsatisfied,
+				Class:             ClassJudgmental,
+				Witnesses:         []string{"AC ac-2: outcome floor unsatisfied; attestation is absent"},
+				Owner:             Owner{Declared: "Jane Doe", Attribution: attr},
+				ClearingCondition: "author attestations/example/ac-2.md or land a passing outcome record for ac-2",
+				Transition:        "close",
+			},
+		},
+		Disclosures: []string{noConflictReportDisclosure},
+		// SI-213 / R-RRF-1: the additive unavailable-source list. The
+		// golden shape is the complete derivation — every declared source
+		// computed — so it is explicitly empty rather than absent.
+		Unavailable: []string{},
+	}
 	r.Principals.ProfileAdopted = true
 	r.Principals.SelectedProfileID = "solo-default"
 	r.Principals.SelectedProfileDigest = testSelectedProfileDigest

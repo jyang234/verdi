@@ -293,19 +293,9 @@ func deriveBlockers(defaultBranchKnown, profileAdopted bool, result specstate.Re
 	return out
 }
 
-// deriveEventual returns the record's eventual-blocker section: never
-// derived by this delivery unit (journey-projection, GLG's Delivery
-// sequence step 1) — a later delivery unit (GLG AC-6, continuous-
-// readiness) supplies it. An underived section discloses itself (CO-1).
-func deriveEventual() EventualBlockers {
-	return EventualBlockers{
-		Derived: false,
-		Items:   []Blocker{},
-		Disclosures: []string{
-			"eventual closure blockers are not derived by this delivery unit; a later delivery unit (GLG AC-6, continuous-readiness) supplies them",
-		},
-	}
-}
+// deriveEventual lives in eventual.go (spec/readiness-recovery ac-1): the
+// record's eventual-blocker section is now really derived from declared
+// requirements, not a hard-coded stub.
 
 // derivePrincipals derives the record's principals section: one
 // RequiredRole per DISTINCT (transition, obligation) pair drawn from every

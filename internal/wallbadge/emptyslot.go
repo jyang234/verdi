@@ -1,24 +1,28 @@
-// The empty-evidence-slot compute (spec/evidence-slot): for each of a
-// STORY spec's acceptance criteria, the fold-derived record state of
-// every DECLARED evidence kind, and a fold:empty-slot derivation record
-// for each AC holding at least one empty slot. "Empty" is the REAL
-// fold's definition and only there (dc-1/co-3): records load through the
-// fold's own loader (evidence.LoadRecordsWithSources) from the derived
-// tree, filter through the fold's own per-AC candidate filter
+// The empty-evidence-slot compute (spec/evidence-slot, widened to feature
+// walls by spec/readiness-recovery ac-7/R-RR2-3): for each of a spec's
+// acceptance criteria — story or feature class alike — the fold-derived
+// record state of every DECLARED evidence kind, and a fold:empty-slot
+// derivation record for each AC holding at least one empty slot. "Empty"
+// is the REAL fold's definition and only there (dc-1/co-3): records load
+// through the fold's own loader (evidence.LoadRecordsWithSources) from the
+// derived tree, filter through the fold's own per-AC candidate filter
 // (evidence.RecordsForAC), reduce through evidence.Current, and a kind
 // is empty exactly when that current set holds no record of the kind —
 // attestation-kind emptiness is evidence.LoadAttestationState's answer,
 // with only the Authored state counting as held (spec/attest-helper dc-3:
 // an unauthored `verdi attest` scaffold is not yet evidence, so it renders
-// exactly as if no file existed at all). Never a wall-side
+// exactly as if no file existed at all), read at attestationSlugFor(fm)'s
+// class-appropriate path — a story's own story-ref slug, or a feature's
+// own name (R-RR2-2/R-RR2-3: the same segment VL-022's FoldFeature path
+// probes), never the other class's path. Never a wall-side
 // reimplementation: if the fold's definition of "current" changes, this
 // compute changes with it.
 //
-// A story wall with NO derived tree at all is the ordinary authoring
-// state (derived records land at build time): every declared kind is a
-// calm empty slot, never an error — and the derivation record still
-// names the location probed, so the receipt is honest about what was
-// looked at and found absent (dc-1).
+// A wall with NO derived tree at all is the ordinary authoring state
+// (derived records land at build time): every declared kind is a calm
+// empty slot, never an error — and the derivation record still names the
+// location probed, so the receipt is honest about what was looked at and
+// found absent (dc-1).
 package wallbadge
 
 import (
@@ -52,8 +56,9 @@ type SlotState struct {
 	Records int
 }
 
-// EmptySlotBadges computes, for one STORY spec, every AC's per-declared-
-// kind slot state (keyed by AC id, in the AC's own declared kind order)
+// EmptySlotBadges computes, for one spec (story or feature class,
+// R-RR2-3), every AC's per-declared-kind slot state (keyed by AC id, in
+// the AC's own declared kind order)
 // and one fold:empty-slot derivation record per AC holding at least one
 // empty slot (ac-2/dc-3): Target is the AC's own id (the card the badge
 // anchors to), Inputs name the spec (specRelPath at specRevision, the
@@ -87,7 +92,7 @@ func EmptySlotBadges(ctx context.Context, root, specRelPath, specRevision string
 
 	derivedRel := store.DerivedSpecRelDir(store.RefSlug(fm.ID))
 	derivedRoot := filepath.Join(root, filepath.FromSlash(derivedRel))
-	storySlug := store.RefSlug(fm.Story)
+	attestationSlug := attestationSlugFor(fm)
 
 	// Probe the derived tree first: a missing tree is the ordinary
 	// authoring state (dc-1) and needs no git at all, while a present
@@ -138,7 +143,7 @@ func EmptySlotBadges(ctx context.Context, root, specRelPath, specRevision string
 				// the slot — an unauthored `verdi attest` scaffold is not
 				// yet evidence (parent spec/closure-ergonomics dc-2), so it
 				// renders exactly as if no file existed at all.
-				state, err := evidence.LoadAttestationState(root, storySlug, ac.ID)
+				state, err := evidence.LoadAttestationState(root, attestationSlug, ac.ID)
 				if err != nil {
 					return nil, nil, fmt.Errorf("wallbadge: empty-slot: %w", err)
 				}
@@ -172,6 +177,31 @@ func EmptySlotBadges(ctx context.Context, root, specRelPath, specRevision string
 		})
 	}
 	return slots, badges, nil
+}
+
+// attestationSlugFor is the <slug> path/id segment an attestation's
+// AttestationPath probe reads for fm (R-RR2-3, mirroring cmd/verdi/
+// attest.go's own class switch and the exact segment VL-022's FoldFeature
+// path probes): a story's own story-ref slug (store.RefSlug(fm.Story)); a
+// feature's own name (artifact.ParseRef(fm.ID).Name — never the empty
+// story-ref-derived slug a feature carries no obligation to set); any
+// other class (component, or an unparseable feature id) has no
+// attestation-kind consumer at all, so it returns "" rather than guessing
+// — LoadAttestationState against "" simply never finds a file, the same
+// calm absent state a class with no attestation slot already renders.
+func attestationSlugFor(fm *artifact.SpecFrontmatter) string {
+	switch fm.Class {
+	case artifact.ClassStory:
+		return store.RefSlug(fm.Story)
+	case artifact.ClassFeature:
+		ref, err := artifact.ParseRef(fm.ID)
+		if err != nil {
+			return ""
+		}
+		return ref.Name
+	default:
+		return ""
+	}
 }
 
 // emptySlotLabel is the chip's short text — a count, never the kind

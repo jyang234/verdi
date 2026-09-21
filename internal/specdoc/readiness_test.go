@@ -20,7 +20,7 @@ func readinessFixture() readinesspilot.Snapshot {
 			{ID: "shape/question/oq-2", Area: readinesspilot.AreaShape, State: readinesspilot.StateUnproven, Blocking: true, Timing: readinesspilot.TimingCurrent, Summary: "Declared open question remains unresolved", Witnesses: []string{"oq-2"}},
 			{ID: "shape/question/oq-1", Area: readinesspilot.AreaShape, State: readinesspilot.StateUnproven, Blocking: false, Timing: readinesspilot.TimingEventual, Summary: "Declared open question is claimed by spike stubs and remains unresolved", Witnesses: []string{"oq-1", "audit-probe"}},
 		},
-		StaleNotice: "Startup snapshot; restart verdi serve after an edit.",
+		StaleNotice: "Derived at HEAD " + strings.Repeat("a", 40) + " for this request.",
 	}
 }
 
@@ -85,7 +85,7 @@ func TestBuildAndRenderReadiness(t *testing.T) {
 		"| Define success | proven |",
 		"1. Declared open question remains unresolved — Define the work; blocking; current; unproven; witnesses: oq-2",
 		"2. Declared open question is claimed by spike stubs and remains unresolved — Define the work; advisory; eventual; unproven; witnesses: oq-1, audit-probe",
-		"Startup snapshot; restart verdi serve after an edit.",
+		"Derived at HEAD " + strings.Repeat("a", 40) + " for this request.",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("missing %q in:\n%s", want, md)
@@ -304,11 +304,11 @@ func TestRenderReadinessEdgeCases(t *testing.T) {
 					Summary:   "First line\nSecond | line",
 					Witnesses: []string{"oq-3\n| forged", "audit-probe"},
 				}},
-				StaleNotice: "Startup snapshot.\r\n\r\nRestart | verdi serve.",
+				StaleNotice: "Derived at HEAD " + strings.Repeat("f", 40) + "\r\n\r\nfor this | request.",
 			}),
 			want: []string{
 				"1. First line Second \\| line — Define the work; blocking; current; unproven; witnesses: oq-3 \\| forged, audit-probe <a id=\"shape/question/oq-3\"></a>\n",
-				"Startup snapshot. Restart \\| verdi serve.\n\n",
+				"Derived at HEAD " + strings.Repeat("f", 40) + " for this \\| request.\n\n",
 			},
 		},
 	}

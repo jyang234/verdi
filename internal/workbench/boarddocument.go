@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 )
@@ -32,27 +33,43 @@ const (
 // already carries the stamp (commit, proposed posture, engine), so any
 // change a reader could see moves the token.
 type documentSnapshot struct {
-	Revision string `json:"revision"`
-	HTML     string `json:"html"`
-	Markdown string `json:"markdown"`
-	Kind     string `json:"kind"`
-	Ref      string `json:"ref"`
-	Proposed bool   `json:"proposed"`
+	Revision    string   `json:"revision"`
+	HTML        string   `json:"html"`
+	Markdown    string   `json:"markdown"`
+	Kind        string   `json:"kind"`
+	Ref         string   `json:"ref"`
+	Proposed    bool     `json:"proposed"`
+	Disclosures []string `json:"disclosures"`
 }
 
 // loadDocument renders the working tree of the checkout this server
 // serves (root mount: the serving checkout; branch mount: that branch's
 // worktree), stamped with its HEAD and marked proposed unless the bytes
 // are the exact accepted bytes on the default branch — the loader's own
-// ModeWorkingTree rule, never re-derived here. Readiness reaches the
-// document only when the served snapshot targets this spec (the loader
-// gates on TargetRef). Loader disclosures are not surfaced separately:
-// the document says, section by section, which facts were unavailable.
+// ModeWorkingTree rule, never re-derived here. When a ReadinessLoader is
+// wired, readiness is derived fresh for THIS document's own ref
+// (spec/readiness-recovery ac-4, R-RR1-8: every consumer asks for its own
+// ref) — never a shared or foreign snapshot. A derivation error never
+// fails the render: it becomes a "readiness: <err>" disclosure and the
+// section states its own absence, exactly like any other degraded fact a
+// document is not a verdict over (R-RR1-9).
 func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind specdoc.Kind) (documentSnapshot, error) {
 	if !specNameRe.MatchString(name) {
 		return documentSnapshot{}, fmt.Errorf("workbench: spec %q not found: %w", name, ErrBoardNotFound)
 	}
-	res, err := specdocload.Load(ctx, specdocload.Request{Root: s.root, Name: name, Mode: specdocload.ModeWorkingTree, Kind: kind, Model: s.model, Readiness: s.readiness})
+
+	var readiness *readinesspilot.Snapshot
+	var readinessDisclosure string
+	if s.readinessLoader != nil {
+		snap, rerr := s.readinessLoader.Load(ctx, "spec/"+name)
+		if rerr != nil {
+			readinessDisclosure = "readiness: " + rerr.Error()
+		} else {
+			readiness = &snap
+		}
+	}
+
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: s.root, Name: name, Mode: specdocload.ModeWorkingTree, Kind: kind, Model: s.model, Readiness: readiness})
 	if err != nil {
 		return documentSnapshot{}, err
 	}
@@ -65,7 +82,11 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 	if err != nil {
 		return documentSnapshot{}, err
 	}
-	snap := documentSnapshot{HTML: html, Markdown: md, Kind: string(kind), Ref: doc.Stamp.Ref, Proposed: doc.Stamp.Proposed}
+	disclosures := append([]string(nil), res.Disclosures...)
+	if readinessDisclosure != "" {
+		disclosures = append(disclosures, readinessDisclosure)
+	}
+	snap := documentSnapshot{HTML: html, Markdown: md, Kind: string(kind), Ref: doc.Stamp.Ref, Proposed: doc.Stamp.Proposed, Disclosures: disclosures}
 	rev, err := canonjson.Digest(struct {
 		Ref, Kind, Markdown string
 	}{snap.Ref, snap.Kind, snap.Markdown})

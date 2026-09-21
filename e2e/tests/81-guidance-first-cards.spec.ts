@@ -203,7 +203,21 @@ test("/readiness keeps the summary primary and Concern, Timing, Blocking in the 
   await openRemainder(page);
   const rows = page.locator("article[data-concern-id]");
   const n = await rows.count();
+  // R-RR1-18's order-independence pin. Playwright runs these suites
+  // alphabetically, so suite 50 has already edited the served store's
+  // spec bytes by the time this one reads /readiness back. The cached
+  // policy-conflict report the server warmed up at startup was computed
+  // over the PRE-edit bytes, which used to make the loader fail and the
+  // page render no rows at all. A digest mismatch is now a cache miss, so
+  // the page still derives: rows are present, and the check-context area
+  // carries its verdict row in the unproven state. State is read from the
+  // article's own state class and id attribute, never innerText (lane
+  // rule); no markup, CSS, JS or harness fixture is touched by this pin.
   expect(n).toBeGreaterThan(0);
+  const unprovenContext = page.locator(
+    'article[data-concern-id^="context/"].readiness-concern--unproven',
+  );
+  expect(await unprovenContext.count()).toBeGreaterThan(0);
   for (let i = 0; i < n; i++) {
     const row = rows.nth(i);
     const id = (await row.getAttribute("data-concern-id"))!;

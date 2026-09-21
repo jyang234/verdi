@@ -171,7 +171,7 @@ func TestSpecImportFixture_Handler_Negative_WrongMethod(t *testing.T) {
 // mounted on the control server's own mux (no subprocess: the method
 // guards answer first).
 func TestControlServer_WiresSpecImportFixture(t *testing.T) {
-	c := newControlServer(t.TempDir(), testModuleRoot)
+	c := newControlServer(t.TempDir(), testModuleRoot, "")
 	t.Cleanup(c.specImport.stop)
 	for _, path := range []string{"/spec-import-fixture", "/spec-import-fixture/info"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)

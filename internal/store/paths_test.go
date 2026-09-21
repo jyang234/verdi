@@ -470,3 +470,40 @@ func TestImportPaths_RelIsSlashOfAbsBelowRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestHasDotDotElement covers the belt-and-braces path-traversal ban
+// element-wise in both directions: every spelling that carries a real ".."
+// path element, and every honest name that merely CONTAINS two dots and
+// must stay allowed. Moved from cmd/verdi/context_test.go's own
+// TestHasDotDotElement when the function it tests moved here (fix round 1,
+// Minor 12): cmd/verdi and internal/readinessload now share this one
+// definition instead of each keeping a copy.
+func TestHasDotDotElement(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"..", true},
+		{"../x.json", true},
+		{"a/../x.json", true},
+		{"a/b/..", true},
+		{"./a/../b/x.json", true},
+		{filepath.Join("a", "b") + string(filepath.Separator) + ".." + string(filepath.Separator) + "x.json", true},
+
+		{"", false},
+		{"x.json", false},
+		{"./x.json", false},
+		{"a/b/x.json", false},
+		{"..notes.json", false},
+		{"notes...json", false},
+		{"a..b/x.json", false},
+		{"...", false},
+		{"/abs/path/x.json", false},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := HasDotDotElement(tc.in); got != tc.want {
+				t.Fatalf("HasDotDotElement(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
