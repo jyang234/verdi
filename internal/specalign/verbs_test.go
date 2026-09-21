@@ -131,6 +131,29 @@
 // BEFORE resolving a store root or touching any file — the same
 // hermetic-bare-invocation property model/spec/journey/context/
 // experiment/harness already rely on in the default case below.
+//
+// BINDING NOTE — this inventory keys only on verb NAMES: `inV0`/`outOfV0`
+// above are bare verb strings, and TestV0CLIVerbInventory only proves each
+// named verb dispatches (never "not implemented") or, for the two
+// out-of-scope verbs, prints the exact out-of-scope message. No usage
+// string is asserted anywhere in this file, so nothing here can pin an
+// argument grammar — including `attest`'s. The shipped verb accepts
+// `verdi attest <spec-ref> <ac-id>`, admitting a story ref, a story spec
+// ref, or a feature spec ref (spec/readiness-recovery ac-6, R-RR2-4,
+// ledger SI-211), which DIVERGES from verdi-surfaces §CLI's
+// `verdi attest <story-ref> <ac-id>` row (still story-only, "a declared
+// (story, AC) pair of an active `class: story` spec"). The divergence is
+// deliberate and disclosed, not an oversight: both specifications are
+// accepted, and reconciling them requires a verdi-surfaces amendment —
+// owner-routed, outside this wave's write set — the same precedent this
+// repo already set at internal/specalign/mcptools_test.go's own BINDING
+// NOTE for the ASD MCP-tool rows. Until that amendment lands, the
+// operative contract for `attest`'s argument grammar is the shipped verb
+// (cmd/verdi/attest.go), cmd/verdi/help.go's usage row,
+// docs/guide-claims.yaml's 7.3-attest entry, and this note — not
+// verdi-surfaces' table. No assertion is added here to pin the grammar
+// string: this file's inventory mechanism has nothing to key it on, and a
+// fake assertion would not be a witness.
 package specalign
 
 import (
