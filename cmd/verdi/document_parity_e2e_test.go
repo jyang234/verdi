@@ -481,9 +481,17 @@ func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
 //     served surfaces (they agree byte for byte), and diverges from a CLI
 //     that carries no request — in EXACTLY the Readiness section and
 //     nowhere else, which stripReadinessSection states rather than
-//     assumes. That divergence is inherent to ac-4's own "the startup spec
-//     when --context-request is given": the CLI has no such flag, so the
-//     two readings answer different questions about the same ref.
+//     assumes. That divergence is a RECORDED SPEC CONFLICT, not an
+//     accepted exception: ac-4 promises byte-identical readiness on all
+//     four surfaces, ac-3 keeps --context-request as a served-only startup
+//     pre-run, and verdi-surfaces §CLI gives `verdi spec doc` no request
+//     flag, so the CLI cannot answer the question the served surfaces
+//     answer for X. Ledger SI-215 (R-RRF-4) records the conflict as
+//     disclosed-as-unproven for ac-4's startup-spec CLI arm and routes
+//     the resolution (a CLI request flag, or an amendment defining parity
+//     over equivalent request inputs) to the owner with SI-211. Until
+//     that lands this arm pins the SHIPPED divergence so a change in it
+//     is visible, and asserts nothing about its conformance.
 //
 // Both request-bound legs run through Options.ConflictProvider (R-RR1-14's
 // hermetic seam, readinessLoadPassProviderFunc) so no judge process is
