@@ -24,7 +24,9 @@ func WithObserver(ctx context.Context, obs Observer) context.Context {
 }
 
 // observe notifies the context's observer, if any. Called at the top of
-// run and of ConfigValue (the one exec site that bypasses run).
+// all three of gitx's exec sites: run, ConfigValue, and runStdin
+// (plumbing.go) — R-RR3-2 amended after Task 1 review corrected the
+// original premise that ConfigValue was the only exec site bypassing run.
 func observe(ctx context.Context, dir string, args []string) {
 	if obs, ok := ctx.Value(observerKey{}).(Observer); ok && obs != nil {
 		obs.Observe(dir, args)
