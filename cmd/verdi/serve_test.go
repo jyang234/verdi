@@ -60,11 +60,20 @@ func TestServeStartupRequestLine(t *testing.T) {
 		}
 	})
 
-	t.Run("a ref that already carries the prefix is never doubled", func(t *testing.T) {
+	// Re-review I1: the subtest that used to sit here passed the SAME
+	// already-prefixed ref as the one above, so it duplicated that case and
+	// left startupRequestTarget's prefix-ADDING arm unexecuted through the
+	// real path. It now supplies the unprefixed form, so the two subtests
+	// between them drive both arms end to end and still land on the same
+	// pinned bytes.
+	t.Run("an unprefixed ref reaches stdout with exactly one prefix", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		deps := newDeps(t, "spec/startup-target", func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { return 0 })
+		deps := newDeps(t, "startup-target", func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { return 0 })
 		if code := cmdServeWithDeps([]string{"--context-request", "request.json"}, &stdout, &stderr, deps); code != 0 {
 			t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+		}
+		if stdout.String() != startupRequestLine {
+			t.Fatalf("stdout = %q, want exactly %q — an unprefixed warm-up ref must reach stdout as a whole ref", stdout.String(), startupRequestLine)
 		}
 		if bytes.Contains(stdout.Bytes(), []byte("spec/spec/")) {
 			t.Fatalf("stdout = %q, want no doubled ref prefix", stdout.String())
@@ -108,4 +117,33 @@ func TestServeStartupRequestLine(t *testing.T) {
 			t.Fatalf("stdout = %q, want nothing after a failed warm-up", stdout.String())
 		}
 	})
+}
+
+// TestStartupRequestTarget is re-review I1: R-RR1-16's ref renderer gets
+// its own happy-and-negative table (CLAUDE.md's per-function rule) rather
+// than only being observed through cmdServeWithDeps. The empty input is
+// pinned as the CHARACTERIZATION of today's behaviour, not as a desired
+// output: ContextRequestSpec returns the request's own `spec` field, which
+// every request the decoder accepts carries as a whole ref, so "" is
+// unreachable in production. The degenerate "spec/" it renders names no
+// spec and claims no wrong target, so the function is left as it is; a
+// guard here would be dead code pretending to a reachable state.
+func TestStartupRequestTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ref  string
+		want string
+	}{
+		{name: "already a whole ref: never doubled", ref: "spec/x", want: "spec/x"},
+		{name: "bare name: prefixed exactly once", ref: "x", want: "spec/x"},
+		{name: "empty (unreachable in production): the degenerate prefix alone", ref: "", want: "spec/"},
+		{name: "a name that merely starts with the letters", ref: "specimen", want: "spec/specimen"},
+		{name: "an already-prefixed nested name", ref: "spec/startup-target", want: "spec/startup-target"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := startupRequestTarget(tc.ref); got != tc.want {
+				t.Fatalf("startupRequestTarget(%q) = %q, want %q", tc.ref, got, tc.want)
+			}
+		})
+	}
 }

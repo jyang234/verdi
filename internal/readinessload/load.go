@@ -22,18 +22,25 @@ import (
 const noContextRequestWitness = "no context request supplied for this derivation"
 
 // staleConflictReportWitness is R-RR1-18's fixed witness sentence for a
-// cached policy-conflict report whose target content digest does not match
-// the spec bytes on disk. That report cannot speak for these bytes, which
-// is the SAME epistemic state as a cache miss — so the derivation
-// discloses it as unproven rather than failing operationally (CLAUDE.md's
+// policy-conflict report whose target content digest does not match the
+// spec bytes on disk. That report cannot speak for these bytes, which is
+// the SAME epistemic state as a cache miss — so the derivation discloses
+// it as unproven rather than failing operationally (CLAUDE.md's
 // three-valued honesty: disclosed-as-unproven over an operational
-// failure). It deliberately carries no path, digest or control character:
+// failure).
+//
+// It deliberately does NOT say "cached" (re-review M2): the digest check
+// runs over every provider result, including a JudgeRun warm-up whose own
+// read of the spec raced an edit, so a freshly computed report reaches
+// this sentence too and an operator told the CACHE is stale would look in
+// the wrong place. The epistemic claim and the destination hold either
+// way. It also carries no path, digest or control character:
 // readinesspilot rejects control characters, and the digests, while
 // deterministic, tell an operator nothing they can act on. The
 // context-conflict verb named here is the destination that refreshes the
 // report, and it is exactly the verb the request-bound contextFallback
 // vector already points at.
-const staleConflictReportWitness = "the cached policy-conflict report was computed for different spec bytes than the ones on disk; re-run the context-conflict verb to refresh it"
+const staleConflictReportWitness = "the policy-conflict report was computed for different spec bytes than the ones on disk; re-run the context-conflict verb to refresh it"
 
 // noContextRequestCLI is R-RR1-5's fixed context/verdict destination when
 // no request was supplied: an instructive vector naming the verb and flag a
@@ -265,8 +272,10 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 		candidate := report.Input.Target.Candidate
 		if candidate.ContentDigest != readinessDigest(specBytes) {
 			// R-RR1-18: a digest MISMATCH is the same epistemic state as a
-			// cache MISS — the cached report was computed over different
-			// spec bytes, so it cannot speak for the ones on disk. It used
+			// cache MISS — the report was computed over different spec
+			// bytes (whether it came from the D4 cache or from a judge run
+			// that raced an edit), so it cannot speak for the ones on
+			// disk. It used
 			// to be a loader error, which meant a single spec edit blanked
 			// the entire readiness page (and, through one server-wide
 			// loader, kept blanking it for every other spec too). The

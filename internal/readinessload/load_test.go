@@ -1181,10 +1181,12 @@ func TestLoad_ShapeDestinationRewrite(t *testing.T) {
 	})
 }
 
-// TestLoad_StaleConflictReportIsACacheMissNotAnError is R-RR1-18: a cached
+// TestLoad_StaleConflictReportIsACacheMissNotAnError is R-RR1-18: a
 // policy-conflict report whose target content digest does not match the
 // spec bytes on disk is in exactly the same epistemic state as a cache
-// MISS — it cannot speak for these bytes. It used to be a loader error,
+// MISS — it cannot speak for these bytes, whether it came from the D4
+// cache or from a judge run whose own read raced an edit (re-review M2:
+// which is why the witness never says "cached"). It used to be a loader error,
 // which meant a single spec edit blanked the whole readiness page (and,
 // through one server-wide loader, kept blanking it). CLAUDE.md's
 // three-valued honesty makes disclosed-as-unproven the required answer
@@ -1208,7 +1210,7 @@ func TestLoad_StaleConflictReportIsACacheMissNotAnError(t *testing.T) {
 
 	snap, err := l.load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath})
 	if err != nil {
-		t.Fatalf("a stale cached report must be a cache miss, not a loader error, got: %v", err)
+		t.Fatalf("a stale report must be a cache miss, not a loader error, got: %v", err)
 	}
 	if err := snap.Validate(); err != nil {
 		t.Fatalf("snapshot Validate: %v", err)
@@ -1236,7 +1238,11 @@ func TestLoad_StaleConflictReportIsACacheMissNotAnError(t *testing.T) {
 
 	// The witness is display prose the readiness pilot must accept: no
 	// path, no digest, no control character.
-	for _, forbidden := range []string{repo.Dir, requestPath, "sha256:", "\n", "\t"} {
+	// M2: the branch also covers a freshly run judge whose read raced an
+	// edit, so the sentence must not name a cache. Path, digest and
+	// control characters stay out of it (readinesspilot rejects control
+	// characters; digests tell an operator nothing they can act on).
+	for _, forbidden := range []string{repo.Dir, requestPath, "sha256:", "cached", "\n", "\t"} {
 		if strings.Contains(staleConflictReportWitness, forbidden) {
 			t.Fatalf("witness %q must not contain %q", staleConflictReportWitness, forbidden)
 		}
