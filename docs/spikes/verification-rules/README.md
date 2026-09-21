@@ -123,14 +123,69 @@ readiness file, (c2) no cache, (c3) no status field, (c4) no transition,
 (c5) no receipt, (c6) no event log, (c7) no artifact kind, (c8) no
 invented recovery lifecycle state, (c9) a projection is never authority.
 
-**Witnessed today: 0 of 9.** The readiness-recovery feature has no
-implementation anywhere in this checkout — `grep -rli "readiness.recovery\|recover
---apply\|readinessrecovery" --include="*.go" .` = 0 hits, `internal/
-readinessload` (the package the brief names) does not exist (see
-Deviations); `internal/readinesspilot` is a different, pre-existing
-"Wave 3.5" projection package unrelated to readiness-recovery. There is
-nothing to cite yet, by either seam — the trial below is necessarily a
-mechanism proof, not a real-witness inventory.
+**Witnessed today, real inventory: 4 of 9 (by this spike's own inference;
+0 of 9 by the wave-1 author's own attribution).** `internal/readinessload`
+does not exist at this lane's base (5f60c76c — see Deviations) but is
+reachable read-only in this repository at `e963f4d0` on local branch
+`agent/readiness-recovery-wave-1` (independent review VR-2; confirmed:
+`git log -1 --oneline e963f4d0` resolves without a fetch, refs are
+shared across worktrees). Full trial, run in a throwaway `/tmp` clone
+detached at that commit — never in this worktree, never committed —
+below (### Real witness inventory).
+
+### Real witness inventory (`internal/readinessload` @ `e963f4d0`)
+
+Setup: `git clone -q --no-hardlinks <this worktree> /tmp/vr-witness-clone
+&& cd /tmp/vr-witness-clone && git checkout -q --detach e963f4d0` (exit
+0); the package has `conflict.go`, `facts.go`, `load.go`, `options.go`,
+and three test files (`conflict_test.go`, `fixture_test.go`,
+`load_test.go`). It has exactly **one** co-2 witness mechanism,
+`assertNoPersistence` (`load_test.go:818`, called from two test
+functions), whose own doc comment (`load_test.go:810`) says it "proves
+co-2 directly" — but that attribution is to co-2 **as a whole**; the
+wave-1 author never named any of the nine sub-clauses, because co-2 is
+not enumerated into named clauses in the frontmatter today — exactly the
+gap oq-1/oq-3 examine. This spike inferred, and clearly labeled as its
+own inference rather than the author's, which of the nine that one
+mechanism's own behavior (a full, name-independent `.verdi/data`-tree
+size/path sweep before and after `Load()`, not a substring filter —
+`load_test.go:810-817`'s own doc comment names this as the fix over its
+"predecessor[, which] only failed on a path whose NAME happened to
+contain the substring \"readiness\"") structurally covers: **c1 (no
+readiness file), c2 (no cache), c5 (no receipt), c6 (no event log)** —
+all file-shaped additions the sweep would catch regardless of name.
+**c3 (status field), c4 (transition), c7 (artifact kind), c8 (invented
+recovery lifecycle state), and c9 (projection never authority) have no
+witness anywhere in the package** — `git grep -n "recover --apply\|
+\"recover\""` at `e963f4d0` = 0 hits (no recovery-execution code exists
+yet on this branch at all, so c8 is structurally out of this package's
+scope), and nothing tests a schema-field addition, a new `artifact.Kind`,
+or the projection's non-authoritative status as its own claim.
+
+Real run (`seam-b-wave1.patch`, 81 lines — the new gate test plus the
+four inferred marker lines above `assertNoPersistence`, applied only in
+the `/tmp` clone, never in this worktree): baseline
+(`seam-b-wave1-baseline.out`, 14 lines) is 9/9 `MISSING WITNESS`, exit 1;
+with the four inferred markers (`seam-b-wave1-with-markers.out`, 14
+lines) reports `WITNESSED` for c1/c2/c5/c6 and `MISSING WITNESS` for
+c3/c4/c7/c8/c9, exit 1 (5 still missing, correctly). The package's full
+test suite (`go test ./internal/readinessload/...`, run in the same
+clone) passes apart from this one new gate test, confirming the marker
+comments caused zero behavior change. This real inventory answers the
+story's "what answered means" for oq-2 directly: 4 of 9 clauses have a
+structurally-inferable witness today, 5 have none, and the one witness
+that exists was never itself broken down by clause — which is the
+concrete case for building the clauses: field this spike also drafts
+(oq-3), independent of which citation seam wins.
+
+**The Seam A/Seam B mechanism trial below is retained as a fallback**
+against `internal/readinesspilot` (a different, pre-existing "Wave 3.5"
+projection package, unrelated to readiness-recovery, present at this
+lane's own base) — it predates the real inventory above and is kept
+because it is still the only trial that shows what a MISSING marker's
+`go test` output looks like when nothing at all is witnessed, useful for
+either seam regardless of which codebase has code to cite. Every
+placement in it remains explicitly synthetic, not a real witness.
 
 ### Seam A: bindings fragments
 
@@ -183,9 +238,11 @@ resolution layer for clause ids nested one level inside their parent
 object (nothing today resolves ids inside `clauses:` at all). Two
 structural changes to shared code, neither scoped to bindings alone.
 
-### Seam B: test-side markers + gate test
+### Seam B: test-side markers + gate test (synthetic fallback trial)
 
-Real trial in the worktree (constraint 2: reverted before commit, kept as
+**Synthetic fallback, superseded as the primary witness-count source by
+the real inventory above; retained for its missing-witness output
+sample.** Trial in the worktree (constraint 2: reverted before commit, kept as
 `seam-b.patch`, 69 lines, plus `seam-b-baseline.out`/
 `seam-b-with-marker.out`, 17 lines each). Added a 34-line gate test,
 `internal/readinesspilot/clausewitness_test.go` (`TestClauseWitnessCoverage`,
@@ -392,18 +449,20 @@ spike's write set.
    "how many spec files exist on disk"; it is not the right denominator
    for "how many distinct clauses need enumeration", which is what oq-1's
    backlog answers.
-2. **`internal/readinessload` does not exist** (oq-2's lane specifics
-   name it as the package holding co-2's witnessing tests). The nearest
-   readiness-named package, `internal/readinesspilot`, is a different,
+2. **`internal/readinessload` does not exist at this lane's base**
+   (5f60c76c) but does exist, reachable read-only without a fetch, at
+   `e963f4d0` on local branch `agent/readiness-recovery-wave-1` —
+   originally missed (this spike's first pass searched only the base
+   checkout and its own worktree, never `git branch -a`/`git log
+   <sha>` against refs other worktrees have checked out), corrected per
+   independent review VR-2. The nearest readiness-named package reachable
+   AT this lane's base, `internal/readinesspilot`, remains a different,
    pre-existing "Wave 3.5" projection feature, confirmed unrelated by its
-   own package doc comment. The readiness-recovery feature named in
-   `spec/readiness-recovery` (whose spec.md itself DOES exist and DID
-   supply co-2's real text) has no implementation anywhere in this
-   checkout — `MEMORY.md`-adjacent context places its build on a separate,
-   unmerged branch. Substitution made: Seam B's trial used
-   `internal/readinesspilot` as the nearest real Go package to prove the
-   marker-and-gate-test mechanism, with every synthetic placement labeled
-   as such in both the code comment and this README; see oq-2.
+   own package doc comment — it is kept as the fallback trial's location
+   (oq-2 "Seam B: test-side markers + gate test (synthetic fallback
+   trial)"), superseded as the primary witness-count source by a real
+   trial against `e963f4d0` in a `/tmp` clone (oq-2 "Real witness
+   inventory"), per VR-2's ruling.
 3. **Seam A's trial target widened from "VL-003" to "VL-003 as invoked
    through the real decode-then-lint pipeline."** Rather than standing up
    a full scratch store directory and running the built binary's `lint`
@@ -425,7 +484,8 @@ spike's write set.
 | `labels.md` | oq-1 top-20 hand labels + raw and deduplicated FP-rate-vs-threshold tables |
 | `_scratch/dedup/main.go`, `dedup.out` | oq-1 post-review dedup recomputation (VR-1): distinct/live-distinct populations, deduplicated sample |
 | `_scratch/seamA/main.go`, `seam-a.out` | oq-2 Seam A trial (real `artifact` calls) |
-| `seam-b.patch`, `seam-b-baseline.out`, `seam-b-with-marker.out` | oq-2 Seam B trial (reverted before commit) |
+| `seam-b-wave1.patch`, `seam-b-wave1-baseline.out`, `seam-b-wave1-with-markers.out` | oq-2 real witness inventory against `internal/readinessload` @ `e963f4d0` (VR-2), run in a `/tmp` clone, never in this worktree |
+| `seam-b.patch`, `seam-b-baseline.out`, `seam-b-with-marker.out` | oq-2 Seam B synthetic fallback trial against `internal/readinesspilot` (reverted before commit) |
 | `_fence-copies/02-artifact-contract.{original,draft}.md`, `02-clauses.diff` | oq-3 frontmatter delta |
 | `_scratch/versioncompare/main.go`, `versioncompare.out`, `versioned-specs-alignment.md` | oq-4 alignment + classification |
 | `required-fields.md`, `required-fields-evidence.out` | oq-5 required-field table |
