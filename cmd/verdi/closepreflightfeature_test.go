@@ -61,7 +61,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		// record), never a separate per-kind attestation/behavioral remedy.
 		derivedRoot := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/close-feature-fixture"))) + "/"
 		featureSlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md"))
-		wantFloor := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath + ", or any passing outcome record under " + derivedRoot
+		wantFloor := "ac-2 outcome floor unsatisfied: no attestation at " + featureSlugPath + "; scaffold it with `verdi attest <feature-ref> ac-2`, or provide any passing outcome record under " + derivedRoot
 		if !strings.Contains(pstdout.String(), wantFloor) {
 			t.Fatalf("preflight stdout missing the OR-floor outcome-floor disclosure %q:\n%s", wantFloor, pstdout.String())
 		}
@@ -216,8 +216,8 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		// The exact line, INCLUDING the excluded-sha suffix: the prefix alone
 		// would pass against a deleted excluded-commit branch, so the full-line
 		// assertion is what makes this a genuine witness for that branch (th-4).
-		wantExcluded := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath +
-			", or any passing outcome record under " + derivedRoot +
+		wantExcluded := "ac-2 outcome floor unsatisfied: no attestation at " + featureSlugPath +
+			"; scaffold it with `verdi attest <feature-ref> ac-2`, or provide any passing outcome record under " + derivedRoot +
 			" (found but excluded as non-ancestor: [" + sibling + "])"
 		if !strings.Contains(pstdout.String(), wantExcluded) {
 			t.Fatalf("preflight stdout missing the feature found-but-excluded disclosure %q:\n%s", wantExcluded, pstdout.String())
@@ -262,7 +262,7 @@ func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *te
 
 	derivedRoot := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/close-feature-fixture"))) + "/"
 	featureSlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md"))
-	want := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath + ", or any passing outcome record under " + derivedRoot
+	want := "ac-2 outcome floor unsatisfied: no attestation at " + featureSlugPath + "; scaffold it with `verdi attest <feature-ref> ac-2`, or provide any passing outcome record under " + derivedRoot
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout missing the FeatureSlug-keyed OR-floor disclosure %q:\n%s", want, stdout.String())
 	}

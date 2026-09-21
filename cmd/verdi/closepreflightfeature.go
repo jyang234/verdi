@@ -140,7 +140,8 @@ func renderFeatureFloorGap(acID string, floor evidence.FloorResult, slug, derive
 		if floor.Attestation == evidence.AttestationUnauthored {
 			return fmt.Sprintf("%s outcome floor unsatisfied: a scaffold is present at %s but the claim is unauthored (sentinel present) — author it, or provide any passing outcome record under %s", acID, path, derivedRel) + excludedNote
 		}
-		return fmt.Sprintf("%s outcome floor unsatisfied: needs an authored outcome attestation at %s, or any passing outcome record under %s", acID, path, derivedRel) + excludedNote
+		// vocab:identity — CLI usage grammar (<feature-ref> is a literal usage placeholder, R-RR2-5)
+		return fmt.Sprintf("%s outcome floor unsatisfied: no attestation at %s; scaffold it with `verdi attest <feature-ref> %s`, or provide any passing outcome record under %s", acID, path, acID, derivedRel) + excludedNote
 	}
 	return fmt.Sprintf("%s outcome floor unsatisfied: needs any passing outcome record under %s", acID, derivedRel) + excludedNote
 }

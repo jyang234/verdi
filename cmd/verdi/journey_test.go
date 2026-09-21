@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/journey"
 )
@@ -1179,5 +1181,105 @@ func TestCmdJourney_DigitLeadingStubSlugStillProjects(t *testing.T) {
 	}
 	if blocker.Transition != "close" {
 		t.Fatalf("transition = %q, want close (the gate that consumes stub reconciliation)", blocker.Transition)
+	}
+}
+
+// journeyOutcomeFeatureSpecMD is wave 1's TestProject_FeatureEventualFromStore
+// recipe (internal/journey/project_test.go's eventualFixtureFeatureSpecMD),
+// reduced to a single AC declaring attestation: the smallest fixture whose
+// outcome-floor/ac-1 eventual blocker exists at all and can be driven
+// through its full three-valued lifecycle (spec/readiness-recovery ac-7).
+const journeyOutcomeFeatureSpecMD = `---
+id: spec/journey-outcome
+kind: spec
+class: feature
+title: "Journey outcome"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "the fixture outcome holds", evidence: [attestation] }
+---
+# Journey outcome
+`
+
+// TestCmdJourney_OutcomeFloorBlockerFollowsTheScaffold is ac-7's own
+// end-to-end readiness proof, driven through the real verb entry points
+// (runAttest — Task 1's `verdi attest`, cmdJourney), never a direct fold
+// call: a feature AC's outcome-floor/<ac-id> eventual blocker's witness
+// tracks evidence.LoadAttestationState's three-valued state exactly —
+// absent with no file at all, unauthored once `verdi attest` scaffolds it
+// (the marker still present), and cleared once the marker is replaced
+// with a claim and committed.
+func TestCmdJourney_OutcomeFloorBlockerFollowsTheScaffold(t *testing.T) {
+	repo := buildJourneyRepo(t, map[string]string{".verdi/specs/active/journey-outcome/spec.md": journeyOutcomeFeatureSpecMD})
+	ctx := context.Background()
+
+	// 1. Absent: no attestation file exists at all.
+	var stdout1, stderr1 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout1, &stderr1); got != 0 {
+		t.Fatalf("cmdJourney (absent) = %d, want 0; stderr=%s", got, stderr1.String())
+	}
+	rec1, err := journey.Decode(bytes.TrimRight(stdout1.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout1.String())
+	}
+	b1 := journeyFindBlocker(rec1.Blockers.Eventual.Items, "outcome-floor/ac-1")
+	if b1 == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1", journeyBlockerIDs(rec1.Blockers.Eventual.Items))
+	}
+	if len(b1.Witnesses) == 0 || !strings.Contains(b1.Witnesses[0], "attestation is absent") {
+		t.Fatalf("outcome-floor/ac-1 witnesses = %v, want \"attestation is absent\"", b1.Witnesses)
+	}
+
+	// 2. Scaffolded, unauthored: `verdi attest spec/journey-outcome ac-1`
+	// (runAttest — the same entry point cmdAttest dispatches to, mirroring
+	// attest_test.go's own convention).
+	var attestOut, attestErr bytes.Buffer
+	if got := runAttest(ctx, repo.Dir, "spec/journey-outcome", "ac-1", nil, &attestOut, &attestErr); got != 0 {
+		t.Fatalf("runAttest = %d, want 0; stdout=%s stderr=%s", got, attestOut.String(), attestErr.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout2, &stderr2); got != 0 {
+		t.Fatalf("cmdJourney (unauthored) = %d, want 0; stderr=%s", got, stderr2.String())
+	}
+	rec2, err := journey.Decode(bytes.TrimRight(stdout2.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout2.String())
+	}
+	b2 := journeyFindBlocker(rec2.Blockers.Eventual.Items, "outcome-floor/ac-1")
+	if b2 == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1 (scaffolded, still unauthored)", journeyBlockerIDs(rec2.Blockers.Eventual.Items))
+	}
+	if len(b2.Witnesses) == 0 || !strings.Contains(b2.Witnesses[0], "attestation is unauthored") {
+		t.Fatalf("outcome-floor/ac-1 witnesses = %v, want \"attestation is unauthored\"", b2.Witnesses)
+	}
+
+	// 3. Authored and committed: replace the sentinel marker with a
+	// one-line first-person claim (co-3/DC-12: Verdi never writes or
+	// suggests the claim — this test, the human stand-in, does).
+	path := filepath.Join(repo.Dir, ".verdi", "attestations", "journey-outcome", "ac-1.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading scaffolded attestation: %v", err)
+	}
+	if !strings.Contains(string(raw), evidence.UnauthoredAttestationMarker) {
+		t.Fatalf("scaffolded attestation does not carry the unauthored marker:\n%s", raw)
+	}
+	authored := strings.Replace(string(raw), evidence.UnauthoredAttestationMarker, "I verified ac-1 holds by manual review.", 1)
+	if err := os.WriteFile(path, []byte(authored), 0o644); err != nil {
+		t.Fatalf("authoring the attestation: %v", err)
+	}
+	commitAllOnCurrentBranch(t, repo.Dir, "author ac-1 attestation")
+
+	var stdout3, stderr3 bytes.Buffer
+	if got := cmdJourney([]string{"--json", "spec/journey-outcome"}, &stdout3, &stderr3); got != 0 {
+		t.Fatalf("cmdJourney (authored) = %d, want 0; stderr=%s", got, stderr3.String())
+	}
+	rec3, err := journey.Decode(bytes.TrimRight(stdout3.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout3.String())
+	}
+	if b3 := journeyFindBlocker(rec3.Blockers.Eventual.Items, "outcome-floor/ac-1"); b3 != nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want NO outcome-floor/ac-1 blocker once the attestation is authored: %+v", journeyBlockerIDs(rec3.Blockers.Eventual.Items), b3)
 	}
 }
