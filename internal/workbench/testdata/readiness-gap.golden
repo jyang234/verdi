@@ -1,0 +1,17 @@
+# readiness gap — the wall shell versus the continuous derivation (spec/readiness-recovery ac-5)
+# This is a GAP LIST, not parity. The post-design workbench lane consumes it; a change here must be deliberate.
+wall-only:
+  context/capabilities
+  review/acceptance
+  review/worktree
+  success/criteria
+loader-only:
+  context/verdict
+  review/action
+  review/blocker/<id>
+  review/role/<id>
+  shape/board
+  shape/mutation
+  shape/provenance
+  success/contributor/<id>
+blocking-disagreement:
