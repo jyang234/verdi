@@ -36,13 +36,15 @@ func failingPortProjector(reconcileErr, foldErr func(root string) error) Project
 	return p
 }
 
-// TestProject_PortErrorsBecomeDisclosures is co-6's proof: a Reconcile
-// error and a Fold error each become a disclosure — in
-// Facts.EventualDisclosures and in the projected record's own eventual
-// section — and neither is ever a projection failure. The feature-only
+// TestProject_PortErrorsAreNeverProjectionFailures is co-6's proof: a
+// Reconcile error and a Fold error each become a stated, unavailable
+// source — in Facts.EventualUnavailable and in the projected record's own
+// eventual section (SI-213 moved these sentences out of Disclosures; the
+// sibling TestProject_PortErrorsBecomeUnavailableSources pins where they
+// land) — and neither is ever a projection failure. The feature-only
 // sources simply derive nothing, and the record still validates and
 // round-trips.
-func TestProject_PortErrorsBecomeDisclosures(t *testing.T) {
+func TestProject_PortErrorsAreNeverProjectionFailures(t *testing.T) {
 	repo := buildEventualFixtureRepo(t)
 	cfg := openConfig(t, repo.Dir)
 	p := failingPortProjector(
@@ -58,12 +60,12 @@ func TestProject_PortErrorsBecomeDisclosures(t *testing.T) {
 		t.Fatalf("Stubs = %v, FeatureFold = %v, want both nil when their ports errored", facts.Stubs, facts.FeatureFold)
 	}
 	for _, want := range []string{"reconcile exploded", "fold exploded"} {
-		if !containsSubstring(facts.EventualDisclosures, want) {
-			t.Fatalf("EventualDisclosures = %v, want one naming %q", facts.EventualDisclosures, want)
+		if !containsSubstring(facts.EventualUnavailable, want) {
+			t.Fatalf("EventualUnavailable = %v, want one naming %q", facts.EventualUnavailable, want)
 		}
 	}
-	if len(facts.EventualDisclosures) != 2 {
-		t.Fatalf("EventualDisclosures = %v, want exactly the two port errors", facts.EventualDisclosures)
+	if len(facts.EventualUnavailable) != 2 {
+		t.Fatalf("EventualUnavailable = %v, want exactly the two port errors", facts.EventualUnavailable)
 	}
 
 	rec, err := p.Project(context.Background(), cfg, "spec/checkout")
@@ -74,8 +76,8 @@ func TestProject_PortErrorsBecomeDisclosures(t *testing.T) {
 		t.Fatal("Derived = false: an unavailable source is disclosed, not presented as an underived section")
 	}
 	for _, want := range []string{"reconcile exploded", "fold exploded"} {
-		if !containsSubstring(rec.Blockers.Eventual.Disclosures, want) {
-			t.Fatalf("record disclosures = %v, want one naming %q", rec.Blockers.Eventual.Disclosures, want)
+		if !containsSubstring(rec.Blockers.Eventual.Unavailable, want) {
+			t.Fatalf("record unavailable = %v, want one naming %q", rec.Blockers.Eventual.Unavailable, want)
 		}
 	}
 	for _, b := range rec.Blockers.Eventual.Items {
@@ -121,18 +123,21 @@ func TestProject_PortFactsReachTheRecord(t *testing.T) {
 	if len(rec.Blockers.Eventual.Disclosures) != 1 || !strings.Contains(rec.Blockers.Eventual.Disclosures[0], "no policy-conflict report") {
 		t.Fatalf("disclosures = %v, want only the no-report disclosure", rec.Blockers.Eventual.Disclosures)
 	}
+	if len(rec.Blockers.Eventual.Unavailable) != 0 {
+		t.Fatalf("unavailable = %v, want none: every declared source computed", rec.Blockers.Eventual.Unavailable)
+	}
 }
 
-// TestGatherFacts_EventualDisclosuresAreRootIndependent is I4: a port
+// TestGatherFacts_EventualUnavailableIsRootIndependent is I4: a port
 // error carries this process's own ABSOLUTE store path (internal/index's
 // "index: walking <root>/.verdi", internal/evidence's "evidence: reading
 // <derivedRoot>"), and that text flows into the record and its digest.
 // Two checkouts of the same store at different paths must still derive
-// identical bytes (the plan's line 21, CO-2/CO-4), so every eventual
-// disclosure routes through sanitizeDisclosures exactly as the lifecycle
-// disclosures already do.
-func TestGatherFacts_EventualDisclosuresAreRootIndependent(t *testing.T) {
-	gather := func(t *testing.T) (root string, disclosures []string) {
+// identical bytes (the plan's line 21, CO-2/CO-4), so every unavailable-
+// source sentence routes through sanitizeDisclosures exactly as the
+// lifecycle disclosures already do.
+func TestGatherFacts_EventualUnavailableIsRootIndependent(t *testing.T) {
+	gather := func(t *testing.T) (root string, unavailable []string) {
 		t.Helper()
 		repo := buildEventualFixtureRepo(t)
 		cfg := openConfig(t, repo.Dir)
@@ -146,7 +151,7 @@ func TestGatherFacts_EventualDisclosuresAreRootIndependent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GatherFacts: %v", err)
 		}
-		return cfg.Root, facts.EventualDisclosures
+		return cfg.Root, facts.EventualUnavailable
 	}
 
 	rootA, first := gather(t)
@@ -429,5 +434,50 @@ func TestProject_EventualFoldReadsAuthoritativeEvidenceOnly(t *testing.T) {
 					got, tt.wantBlocker, tt.source, after.Blockers.Eventual.Items, after.Blockers.Eventual.Disclosures)
 			}
 		})
+	}
+}
+
+// --- R-RRF-1 / SI-213: a failed source is unavailable, not a disclosure ---
+
+// TestProject_PortErrorsBecomeUnavailableSources is SI-213's gathering-side
+// proof: a Reconcile error and a Fold error each name a source that COULD
+// NOT BE COMPUTED, so they travel in Facts.EventualUnavailable and in the
+// record's own blockers.eventual.unavailable — never mixed in among the
+// benign disclosures beside them, where a consumer cannot tell a partial
+// derivation from a complete one (independent review 2026-09-21 R1). The
+// section stays Derived: true and the record still validates.
+func TestProject_PortErrorsBecomeUnavailableSources(t *testing.T) {
+	repo := buildEventualFixtureRepo(t)
+	cfg := openConfig(t, repo.Dir)
+	p := failingPortProjector(
+		func(string) error { return fmt.Errorf("reconcile exploded") },
+		func(string) error { return fmt.Errorf("fold exploded") },
+	)
+
+	facts, err := p.GatherFacts(context.Background(), cfg, "spec/checkout")
+	if err != nil {
+		t.Fatalf("GatherFacts: %v", err)
+	}
+	if len(facts.EventualUnavailable) != 2 {
+		t.Fatalf("EventualUnavailable = %v, want exactly the two port errors", facts.EventualUnavailable)
+	}
+
+	rec, err := p.Project(context.Background(), cfg, "spec/checkout")
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if !rec.Blockers.Eventual.Derived {
+		t.Fatal("Derived = false: an unavailable source is named, not presented as an underived section")
+	}
+	for _, want := range []string{"reconcile exploded", "fold exploded"} {
+		if !containsSubstring(rec.Blockers.Eventual.Unavailable, want) {
+			t.Fatalf("unavailable = %v, want one naming %q", rec.Blockers.Eventual.Unavailable, want)
+		}
+		if containsSubstring(rec.Blockers.Eventual.Disclosures, want) {
+			t.Fatalf("disclosures = %v, must not carry the failed-source sentence %q: a partial derivation is unreadable when it hides among benign disclosures", rec.Blockers.Eventual.Disclosures, want)
+		}
+	}
+	if _, err := Canonical(rec); err != nil {
+		t.Fatalf("Canonical: %v", err)
 	}
 }

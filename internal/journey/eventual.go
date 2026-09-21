@@ -88,7 +88,7 @@ type eventualInput struct {
 	Spec *artifact.SpecFrontmatter
 	// Stubs is the feature's stub reconciliation, when computable
 	// (nil when the target is not a feature, or reconciliation errored —
-	// Facts.EventualDisclosures carries the disclosure for the latter).
+	// Facts.EventualUnavailable names the source for the latter).
 	Stubs *evidence.StubReconciliation
 	// Fold is the feature's outcome-floor fold, when computable (same nil
 	// convention as Stubs).
@@ -98,10 +98,13 @@ type eventualInput struct {
 	// empty report still derives its zero conflict-sourced items without
 	// the no-report disclosure).
 	Conflict *policyconflict.Report
-	// Disclosures are pre-existing disclosures the caller already resolved
-	// (Facts.EventualDisclosures: a stub-reconciliation or outcome-floor
-	// fold error) — merged into the returned section's own Disclosures.
-	Disclosures []string
+	// Unavailable names the eventual SOURCES the caller could not compute
+	// at all (Facts.EventualUnavailable: a stub-reconciliation or
+	// outcome-floor fold error) — carried through to the returned
+	// section's own Unavailable list, never merged into its Disclosures
+	// (SI-213 / R-RRF-1: a partial derivation must stay distinguishable
+	// from a complete one).
+	Unavailable []string
 }
 
 // lifecycleFor returns class's declared lifecycle. A nil model, a nil
@@ -315,11 +318,12 @@ func duplicateBlockerIDDisclosure(id string) string {
 // unimplemented behavior or a manufactured future failure. Each item names
 // the transition whose gate CONSUMES it (R-RR1-12), never a shared "first
 // later verb" and never the literal "unknown". The section is always
-// Derived: true (a partial derivation still discloses what it could not
-// evaluate — CO-1 — rather than presenting the whole section as underived).
+// Derived: true (a partial derivation still NAMES what it could not
+// evaluate, in Unavailable — CO-1/co-6 — rather than presenting the whole
+// section as underived).
 func deriveEventual(in eventualInput) EventualBlockers {
 	var items []Blocker
-	disclosures := append([]string(nil), in.Disclosures...)
+	var disclosures []string
 	seen := map[string]bool{}
 	add := func(bs ...Blocker) {
 		for _, b := range bs {
@@ -407,6 +411,7 @@ func deriveEventual(in eventualInput) EventualBlockers {
 		Derived:     true,
 		Items:       items,
 		Disclosures: sortDedupStrings(disclosures),
+		Unavailable: sortDedupStrings(in.Unavailable),
 	}
 }
 

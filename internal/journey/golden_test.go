@@ -61,6 +61,10 @@ func goldenRecord(t *testing.T) Record {
 			},
 		},
 		Disclosures: []string{noConflictReportDisclosure},
+		// SI-213 / R-RRF-1: the additive unavailable-source list. The
+		// golden shape is the complete derivation — every declared source
+		// computed — so it is explicitly empty rather than absent.
+		Unavailable: []string{},
 	}
 	r.Principals.ProfileAdopted = true
 	r.Principals.SelectedProfileID = "solo-default"

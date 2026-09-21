@@ -125,7 +125,7 @@ var _ StubReconciler = (*fakeStubReconciler)(nil)
 // incidentally, never intentionally. gatherEventualFeatureFacts already
 // treats a Reconcile error as an ordinary, disclosed absence — never a
 // hard failure — so this fake's error simply becomes one more
-// EventualDisclosures entry those tests do not examine. A test that
+// EventualUnavailable entry those tests do not examine. A test that
 // specifically exercises stub-reconciliation wiring supplies its own
 // reconcileFn instead of this fake.
 func noOpStubReconciler() *fakeStubReconciler {

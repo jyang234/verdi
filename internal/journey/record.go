@@ -174,13 +174,28 @@ type Blocker struct {
 	Transition        string       `json:"transition"`
 }
 
-// EventualBlockers is the closure-blocker section. An underived section
-// must disclose itself (CO-1): when Derived is false, Items must be empty
-// and Disclosures must be non-empty.
+// EventualBlockers is the closure-blocker section, as `verdi journey
+// --json` serializes it: "derived", "items", "disclosures", and
+// "unavailable". An underived section must disclose itself (CO-1): when
+// Derived is false, Items must be empty and Disclosures must be
+// non-empty.
+//
+// Unavailable (spec/readiness-recovery co-6, SI-213 / R-RRF-1) is the
+// three-valued honesty seam BELOW that whole-section rule: a section that
+// derived everything it could, while one named source could not be
+// computed at all, is a PARTIAL derivation. Each such source contributes
+// one sanitized sentence here, kept apart from Disclosures so a consumer
+// can tell partial knowledge from complete knowledge — mixing the two
+// lets a readiness consumer read a partial derivation as all-proven
+// (independent review 2026-09-21 R1). A false Derived makes the section
+// unavailable AS A WHOLE, and Disclosures then says why, so Unavailable
+// must be empty in that case. Always present in the canonical bytes; []
+// when every declared source derived.
 type EventualBlockers struct {
 	Derived     bool      `json:"derived"`
 	Items       []Blocker `json:"items"`
 	Disclosures []string  `json:"disclosures"`
+	Unavailable []string  `json:"unavailable"`
 }
 
 // Blockers is the record's blockers section: current blockers plus
@@ -501,12 +516,29 @@ func (eb EventualBlockers) validate() error {
 	if !isSortedDeduped(eb.Disclosures) {
 		return fmt.Errorf("journey: blockers.eventual.disclosures: must be sorted and deduplicated")
 	}
+	if eb.Unavailable == nil {
+		return fmt.Errorf("journey: blockers.eventual.unavailable: must be non-nil (an explicitly empty set is [])")
+	}
+	for i, u := range eb.Unavailable {
+		if u == "" {
+			return fmt.Errorf("journey: blockers.eventual.unavailable[%d]: must be non-empty", i)
+		}
+	}
+	if !isSortedDeduped(eb.Unavailable) {
+		return fmt.Errorf("journey: blockers.eventual.unavailable: must be sorted and deduplicated")
+	}
 	if !eb.Derived {
 		if len(eb.Items) != 0 {
 			return fmt.Errorf("journey: blockers.eventual: derived is false but items is non-empty")
 		}
 		if len(eb.Disclosures) == 0 {
 			return fmt.Errorf("journey: blockers.eventual: derived is false but disclosures is empty: an underived section must disclose itself")
+		}
+		// SI-213: an underived section is unavailable as a whole; naming
+		// individual unavailable sources beside it would claim a partial
+		// derivation that did not happen.
+		if len(eb.Unavailable) != 0 {
+			return fmt.Errorf("journey: blockers.eventual: derived is false but unavailable is non-empty: an underived section is unavailable as a whole and says so through disclosures")
 		}
 	}
 	return nil
