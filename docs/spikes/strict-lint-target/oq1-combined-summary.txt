@@ -52,7 +52,8 @@ different moment) reports 50.19s cold / 5.66s warm / 14.98s shared — a
 different exact reading (different load, different cold-cache warm-up
 cost at that moment) but the same qualitative shape: roughly an
 order-of-magnitude-plus gap between cold and any warm state, confirming
-cache state, not load average, is what dominates this number.
+cache state sets the shape of this number and load average moves the
+cold figure by almost 3x (18.62s / 32.65s / 50.19s cold at rising load).
 
 ## Disclosed: a 2-finding, cache-state-dependent discrepancy (not one of the seven findings; recorded for honesty)
 
@@ -79,13 +80,13 @@ is internally consistent at 1050 both times.
 The original per-linter table's ~1s figures (each linter run alone,
 `--enable-only`, warm ambient cache) is not what `make lint-strict` will
 execute and is roughly two orders of magnitude below the real budget: a
-single combined run over ./... costs up to **~33s cold** (a fresh CI
+single combined run over ./... costs up to **~50s cold** (a fresh CI
 runner, first invocation) and **~1.3-1.5s warm** (every subsequent local
 or CI run once golangci-lint's own cache is populated — which
 `.github/workflows/merge-gate.yml`'s golangci-lint install step does not
 currently cache across runs; only the binary itself is cached, per that
 workflow's `Cache golangci-lint` step name, not its analysis cache). co-3's
-budget should be stated as a range, ~1.5s-~33s, with the top bound being
+budget should be stated as a range, ~1.5s-~50s, with the top bound being
 the cold-CI-runner case and the mechanism for staying near the bottom
 (caching golangci-lint's own analysis cache directory across CI runs, not
 just its binary) named as a co-3 follow-up, not assumed.

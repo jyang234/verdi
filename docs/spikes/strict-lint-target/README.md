@@ -129,9 +129,12 @@ two `exhaustive` findings, disclosed but not chased further in
 The independent review's own re-derivation (different moment, same
 machine) reports 50.19s cold / 5.66s warm / 14.98s shared — different
 exact seconds (different ambient load at that moment) but the same
-qualitative shape, corroborating that cache state, not load, dominates.
-**co-3's budget should be stated as a range, roughly 1.3s–33s, with the
-top bound being the cold-CI-runner case**, and staying near the bottom in
+qualitative shape. Cache state sets the shape; load average moves the
+cold figure by almost 3x (three cold runs: 18.62s at load ~3.6, 32.65s at
+load ~41, 50.19s at load ~32–70), so neither alone explains the number.
+**co-3's budget should be stated as a range, roughly 1.3s–50s, with the
+top bound being the highest observed cold run (50.19s), the cold-CI-runner
+case**, and staying near the bottom in
 practice requires caching golangci-lint's own analysis cache directory
 across CI runs (`.github/workflows/merge-gate.yml` currently caches only
 the golangci-lint *binary*, per its `Cache golangci-lint` step, not its
