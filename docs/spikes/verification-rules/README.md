@@ -202,7 +202,7 @@ Real code, real calls (`_scratch/seamA/main.go`, `go run
    `artifact.DecodeBindings` of a scratch `verdi.bindings.yaml` carrying
    all nine `co-2/c1..c9` entries both fail the same way, at decode time,
    with a clear, actionable, fail-closed error — this is also exactly
-   what `internal/lint` VL-003 would report (`internal/lint/snapshot.go:134`
+   what `internal/lint` VL-003 would report (`internal/lint/snapshot.go:135`
    calls `artifact.DecodeBindings`; line 137 assigns its error verbatim to
    `Snapshot.RootBindingsErr`; `vl003.go:235` wraps it as
    `Finding{Rule: "VL-003", Path: "verdi.bindings.yaml (root)", Message:
