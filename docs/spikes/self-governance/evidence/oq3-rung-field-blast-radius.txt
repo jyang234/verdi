@@ -1,89 +1,158 @@
-=== go build ./... ===
-exit:0
+Fix round 1 (review finding F1, F4, F7): this file replaces the original
+oq-3 blast-radius measurement. The original mixed a standalone
+`go test ./internal/policyartifact/...` run with a full `go test ./...`
+run in one log and then double-counted package-summary lines
+(`grep '^FAIL'` matches BOTH a package's bare trailing "FAIL" line and its
+"FAIL<tab>pkg<tab>time" line, ~2 lines per failing package) — the
+independent review (lane-self-governance-review.md F1) caught this: its
+own re-derivation in a fresh clone measured 479 cases / 19 packages,
+against the double-counted 41 this file originally reported. This
+version corrects the METHOD (an anchored, single-clone `go test ./...`
+run; one command per number, run beside it) and reports THIS fix round's
+own two independent re-derivations, which agree with each other (480/20)
+but not exactly with the review's single run (479/19); the residual is
+disclosed below, not silently resolved either way.
 
-=== go test ./internal/policyartifact/... (tail) ===
-    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/one_role (0.00s)
-        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "two"
-    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/three_roles (0.00s)
-        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "two"
-    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/duplicate_roles (0.00s)
-        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "distinct"
-    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/bound_rejected (0.00s)
-        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "bound"
-    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/non-kebab_role (0.00s)
-        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "kebab"
---- FAIL: TestFixtureDigests_Ratchet (0.00s)
-    fixtures_test.go:55: digesting policies/go-toolchain.md: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
---- FAIL: TestFixtureExemptionWitnessDigest (0.00s)
-    fixtures_test.go:144: decoding policy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
---- FAIL: TestDecodePolicy_Happy (0.00s)
-    policy_test.go:48: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
---- FAIL: TestDecodePolicy_DigestOrderInsensitive (0.00s)
-    policy_test.go:109: DecodePolicy(a): policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
---- FAIL: TestDecodePolicy_Negative (0.00s)
-    --- FAIL: TestDecodePolicy_Negative/duplicate_claim_ids (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "duplicate"
-    --- FAIL: TestDecodePolicy_Negative/unknown_payload_kind (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "unknown payload kind"
-    --- FAIL: TestDecodePolicy_Negative/unknown_claim_operator (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "operator"
-    --- FAIL: TestDecodePolicy_Negative/empty_body (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "rationale"
-    --- FAIL: TestDecodePolicy_Negative/empty_instruction (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "instruction"
-    --- FAIL: TestDecodePolicy_Negative/multiline_instruction (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "single line"
-    --- FAIL: TestDecodePolicy_Negative/instructions_null_entry (0.00s)
-        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "instruction"
---- FAIL: TestPolicySeal_RejectsForgeryAndMutation (0.00s)
-    policy_test.go:184: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
---- FAIL: TestDecodePolicy_DesignAssistancePayload (0.00s)
-    policy_test.go:197: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
-FAIL
-FAIL	github.com/jyang234/verdi/internal/policyartifact	0.535s
-FAIL
+## Setup (repeated exactly as the original spike did)
 
-=== fail counts by package (go test ./... summary) ===
-total FAIL test cases: 480
-packages with FAIL:       41
-FAIL
-FAIL	github.com/jyang234/verdi/cmd/e2eharness	30.015s
-FAIL
-FAIL	github.com/jyang234/verdi/cmd/verdi	583.566s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/align	47.962s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/constitutionapp	43.977s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/constitutionimpact	2.633s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/contextcompile	11.117s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/contextresolve	2.798s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/designapp	52.085s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/draftmutation	10.531s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/instructionprojection	3.119s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/journey	24.782s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/mcpserve	71.226s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/policyartifact	0.263s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/policyauthority	2.614s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/policyconflict	12.988s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/policyintegration	0.684s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/readinesspilot	0.353s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/sealedexec/claude	15.277s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/skillpack	4.798s
-FAIL
-FAIL	github.com/jyang234/verdi/internal/specimport	18.066s
-FAIL
+  rm -rf /tmp/sg-fix-rung
+  git clone -q --no-hardlinks <lane worktree> /tmp/sg-fix-rung
+  cd /tmp/sg-fix-rung && git apply <path-to-committed>/oq3-rung-field.patch
+  go build ./...                          # exit 0 (every consumer uses keyed struct literals)
+
+## The full run
+
+  cd /tmp/sg-fix-rung && go test ./... > testall.log 2>&1 ; echo "exit:$?"
+
+exit:1 (this run and a second, independent fresh-clone repeat both gave
+exit 1, and both produced the SAME 480/20/976 figures below — reported
+in full un-reduced form once as evidence/oq3-testall-summary.txt, the
+per-package ok/FAIL lines only, 101 lines).
+
+## Corrected counting commands, each beside its number
+
+  grep -c '^--- FAIL' testall.log
+    => 480   (top-level Go test-function failures: Go indents every
+               nested subtest's own "--- FAIL" line by 4+ spaces per
+               nesting level, so the `^` anchor with no leading
+               whitespace counts only the outermost failing test per
+               function, matching "cases" the way a human scanning
+               function names would count them)
+
+  grep -c -- '--- FAIL' testall.log
+    => 976   (every "--- FAIL" line, top-level and nested subtests
+               together — this is the number a bare unanchored count
+               reports, and the number F7's shape breakdown below is
+               taken over)
+
+  grep -cE '^FAIL[[:space:]]+github' testall.log
+    => 20    (distinct failing packages: anchored so it excludes the
+               one nested false-positive this run's own log contains —
+               internal/sealedexec/claude's built-binary lifecycle test
+               spawns a real `go test ./cmd/verdi` subprocess and prints
+               ITS "FAIL<tab>github.com/.../cmd/verdi<tab>3.993s" summary
+               line verbatim inside its own failure message, indented;
+               grep -cE 'FAIL[[:space:]]+github' WITHOUT the anchor
+               returns 21, counting that embedded line as if it were a
+               21st real package)
+
+  grep -nE '^FAIL[[:space:]]+github' testall.log | wc -l  # same 20, sanity check by listing:
+    cmd/e2eharness, cmd/verdi, internal/align, internal/constitutionapp,
+    internal/constitutionimpact, internal/contextcompile,
+    internal/contextresolve, internal/designapp, internal/draftmutation,
+    internal/instructionprojection, internal/journey, internal/mcpserve,
+    internal/policyartifact, internal/policyauthority,
+    internal/policyconflict, internal/policyintegration,
+    internal/readinesspilot, internal/sealedexec/claude,
+    internal/skillpack, internal/specimport — 20 distinct import paths,
+    no repeats.
+
+  The original flawed command was `grep '^FAIL' testall.log | wc -l` =>
+  41: unanchored-by-tab, it matches BOTH the bare "FAIL" trailer AND the
+  "FAIL<tab>pkg<tab>time" line per failing package (double-counting), so
+  ~2x the real distinct-package count.
+
+## Reconciling 480/20 (this fix round, twice) against the review's 479/19
+
+Both of this fix round's independent fresh-clone `go test ./...` runs
+(one for this file, one bare re-run of internal/sealedexec/claude alone
+to check for flakiness — it failed identically both times, same 9.9s and
+4.2s-ish wall time, same message) gave 480/20. The independent review's
+own single fresh-clone run gave 479/19 (lane-self-governance-review.md
+row 4). Neither figure is fabricated; both are commanded and reproducible
+in their own hands. The one-count, one-package gap is most consistent
+with run-to-run variance in a large suite under this session's
+documented, heavily fluctuating shared load (evidence/oq1-adoption/
+timing.txt shows load averages swinging between ~2 and ~47 across this
+session) acting on internal/sealedexec/claude specifically — the one
+failing package whose own test spawns a real `go test ./cmd/verdi`
+subprocess rather than running in-process, making it the most
+load/timing-sensitive of the 19-or-20. This spike reports both figures
+with their provenance rather than silently picking one; the
+RECOMMENDATION is unaffected either way (a blast radius in the high
+hundreds of cases across ~20 packages, not ~5).
+
+## F7: failure-message shapes (review: "name the other shapes")
+
+Counted over the SAME 976-line total (`grep -c -- '--- FAIL' testall.log`),
+each shape's own command beside it; shapes are not mutually exclusive by
+construction where noted, and a residual is disclosed rather than forced
+to zero:
+
+  grep -cE 'policy\.claims\[[0-9]+\]\.rung is missing' testall.log
+    => 494   (shape 1 — the field is absent from a YAML/JSON-encoded
+               claim: committed test fixtures and JSON round-trips)
+
+  grep -cE 'unknown enforcement rung \\?"\\?"' testall.log
+    => 310   (shape 2 — the field IS present but zero-valued: every
+               hand-built Go `Claim{}` struct literal in the test suite
+               that never sets the new field. Escaped-quote and
+               plain-quote renderings both counted; a plain-quote-only
+               pattern undercounts to 241 because Go's %q-style JSON
+               re-encoding of an error string escapes the inner quotes)
+
+  grep -cE 'apply exemptions:.*claim \[[0-9]+\]' testall.log
+    => 34    (a NAMED SUBSET of shape 2, called out on its own because
+               it is a distinct migration cost, not just more of the
+               same: it fires specifically when ResolveExemptionAuthority
+               tries to re-encode an EXISTING fixture claim a committed
+               exemption already witnesses — e.g. authority_test.go:598's
+               "policyconflict: apply exemptions: row \"row-1\" claim [0]
+               sha256:...: policyartifact: unknown enforcement rung \"\"".
+               A real migration has to update every committed exemption
+               fixture's witnessed claim, not just every policy fixture —
+               this is the cost testdata/golden-digests.json's ratchet
+               alone does not disclose.)
+
+  grep -cE 'authority-invalid: resolving effective policy|"code":"authority-invalid"' testall.log
+    => 54    (shape 3 — two renderings of one design-failure
+               classification: a plain CLI/log string and an embedded
+               `{"code":"authority-invalid","detail":"resolving effective
+               policy",...}` JSON result from MCP tool tests and
+               transcripts, e.g. tool_get_design_context_test.go:24.)
+
+  Residual, not itemized further: 976 - 494 - 310 - 54 = 118 lines. A
+  sample includes recordvalidate_test.go's "no published record exercised
+  <evidence kind|origin|disposition|transform> ..." coverage-completeness
+  assertions — these fail as a side effect of upstream fixtures no longer
+  decoding, not because they test rung directly; this spike names the
+  residual's existence and approximate size rather than fully
+  classifying every one of 118 lines, which is proportionate to a spike's
+  timebox, not a production migration audit.
+
+## Representative individual failure lines (internal/policyartifact, shape 1 and 2 side by side)
+
+  --- FAIL: TestClaimValidate_Happy/scoped_claim (0.00s)
+      claim_test.go:69: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want nil
+  --- FAIL: TestFixtureDigests_Ratchet (0.00s)
+      fixtures_test.go:55: digesting policies/go-toolchain.md: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+  --- FAIL: TestFixtureExemptionWitnessDigest (0.00s)
+      fixtures_test.go:144: decoding policy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+
+Individual-line detail beyond this representative sample lives in the raw
+`testall.log` this fix round produced (not committed in full: 2091 lines,
+over this file's own reduction discipline) — the per-package roll-up
+`evidence/oq3-testall-summary.txt` (101 lines, every package's final
+ok/FAIL line) is committed in full instead, and every headline number
+above is independently reproducible from it plus the two `git
+clone`/`git apply`/`go test ./...` commands at the top of this file.

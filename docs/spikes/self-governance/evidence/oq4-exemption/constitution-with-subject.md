@@ -8,7 +8,7 @@ selected_profile: starter-solo
 environments: [local]
 catalog:
   roles: [author, reviewer, policy-owner]
-  transitions: [accept, policy-disposition-approval]
+  transitions: [accept, policy-disposition-approval, policy-exemption-approval]
   evidence_sources: []
   escalation_metrics: []
 subjects:
@@ -18,7 +18,11 @@ subjects:
   resource: []
   identity: []
   evidence: []
-adapters: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
 template: {identity: "embedded:policy-constitution.md", digest: "sha256:58f1ff20d7680c1d9cc0a5fe03e5c428978bbafe3e6ac78c54b471df134dc6eb"}
 ---
 Starter constitution written by `verdi policy adopt --starter`. It selects

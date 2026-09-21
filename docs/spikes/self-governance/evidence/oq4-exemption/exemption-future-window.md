@@ -13,11 +13,16 @@ compensating_controls:
   - "gofmt -l . and go vet ./... still run in every CI job."
 approvals:
   - role: policy-owner
-    principal: principal/github-org/c3Bpa2Utb3BlcmF0b3I
+    principal: principal/local/c3Bpa2Utb3BlcmF0b3JAZXhhbXBsZS5pbnZhbGlk
 expiry: "2027-06-30"
 template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}
 ---
 spec/self-governance oq-4 scratch fixture: the real golangci-lint parity
 exception (process-audit PA-004/PA-016) modeled as a bounded departure
 from the golangci-lint-standard-set claim, with a review window (expiry)
-with a future window (2027-06-30).
+in the future (2027-06-30). The approval principal is the canonical
+principal ID governanceprincipal.CanonicalPrincipalID("local",
+"spike-operator@example.invalid") derives — this clone's own bound Git
+identity under the starter-solo profile's policy-owner role mapping, so
+fix round 1's re-run (review finding F2) proves authorization as well as
+the bound, isolating the review-window variable this section reports on.

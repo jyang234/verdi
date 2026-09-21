@@ -1,6 +1,6 @@
 {
   "schema": "verdi.process-disclosure-index/v1-draft",
-  "source": "docs/superpowers/sdd/2026-09-19-readiness-recovery-wave-1/progress.md",
+  "source": "verdi-wt/readiness-recovery-w1/.superpowers/sdd/2026-09-19-readiness-recovery-wave-1/progress.md",
   "items": [
     {"id": "process-disclosure/readiness-recovery-wave-1/closefeature-stub-glue", "reason": "process-disclosure-open", "class": "mechanical", "witnesses": ["progress.md:26"], "owner": {"declared": "platform-team"}, "clearing_condition": "closefeature.go's stub-reconciliation glue is replaced by the journey adapter re-walking stories, or explicitly re-accepted", "transition": "close"},
     {"id": "process-disclosure/readiness-recovery-wave-1/fixtures-test-untouched", "reason": "process-disclosure-open", "class": "mechanical", "witnesses": ["progress.md:26"], "owner": {"declared": "platform-team"}, "clearing_condition": "fixtures_test.go is updated, or the golden-demonstration rationale is recorded permanently", "transition": "close"},

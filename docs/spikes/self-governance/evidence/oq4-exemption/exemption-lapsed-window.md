@@ -13,11 +13,14 @@ compensating_controls:
   - "gofmt -l . and go vet ./... still run in every CI job."
 approvals:
   - role: policy-owner
-    principal: principal/github-org/c3Bpa2Utb3BlcmF0b3I
+    principal: principal/local/c3Bpa2Utb3BlcmF0b3JAZXhhbXBsZS5pbnZhbGlk
 expiry: "2026-01-01"
 template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}
 ---
-spec/self-governance oq-4 scratch fixture: the real golangci-lint parity
-exception (process-audit PA-004/PA-016) modeled as a bounded departure
-from the golangci-lint-standard-set claim, with a review window (expiry)
-that has already lapsed as of 2026-09-20 (today).
+spec/self-governance oq-4 scratch fixture: the same claim, same
+compensating control, same approval as exemption-future-window.md in
+this directory — the ONLY field this variant changes is expiry, now
+lapsed as of 2026-09-20 (today). Every other input held constant, so
+fix round 1's paired conflict-path re-run (review finding F2) isolates
+the review window as the one variable behind the two reports' different
+`resolution.bound`/`removed_claims` outcome.

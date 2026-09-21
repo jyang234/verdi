@@ -1,0 +1,481 @@
+{
+    "digest": "sha256:37c05e2aaa3185a8cec9b4f667cc3897c561843b5045916228ad9a8924d90c84",
+    "disclosures": [
+        {
+            "code": "actor-resolution-unproven",
+            "witnesses": []
+        },
+        {
+            "code": "local-operator-asserted",
+            "witnesses": [
+                "local"
+            ]
+        },
+        {
+            "code": "opaque-harness-vendor-base",
+            "witnesses": []
+        },
+        {
+            "code": "repository-remote-unknown",
+            "witnesses": []
+        }
+    ],
+    "input": {
+        "constitution_digest": "sha256:c198a58c0b1968acb2579a2680a59e401d136c8ab9b684672194be2a14dded0a",
+        "effective_policy_digest": "sha256:d8aebd00b832f295beb4a48913b26aa1073c1280a80471716ba997d52445ab7a",
+        "evaluated_on": "2026-09-21",
+        "policy_entries": [
+            {
+                "digest": "sha256:c63cc0033d9d9ab6195842b134281eed0e85fc600f3f2a156f844665ed7727b5",
+                "id": "policy-exemption/golangci-lint-standard-set",
+                "kind": "exemption"
+            },
+            {
+                "digest": "sha256:367452733cfc5545104cb9e071f99beeb3212a281cef0df5b29973882fa78e16",
+                "id": "policy/starter",
+                "kind": "policy"
+            }
+        ],
+        "profile": {
+            "class": "solo",
+            "digest": "sha256:4a0cd8c8641e338b3e2a907608a6374dd7dd38fb02b8bd9f5c10d12885490f19",
+            "id": "starter-solo"
+        },
+        "repository": {
+            "branch": {
+                "known": true,
+                "value": "policy/adopt"
+            },
+            "default_branch": {
+                "head": "5f60c76c56b16858f7321d287514b195b2f59d71",
+                "known": true,
+                "name": "main",
+                "ref": "origin/main"
+            },
+            "dirty": {
+                "known": true,
+                "value": false
+            },
+            "head": {
+                "known": true,
+                "value": "5954ec7223ef0c1f8395504a25c5c70b08414c09"
+            },
+            "relationship": "ahead",
+            "remote_origin": {
+                "known": false,
+                "value": ""
+            },
+            "source": "remote-ref",
+            "staged": {
+                "known": true,
+                "value": false
+            },
+            "worktree": {
+                "managed": false,
+                "name": ""
+            }
+        },
+        "target": {
+            "accepted": {
+                "manifest_digest": "sha256:6a33a7ab7cd45c6b9faf686cd7f11e2332432ef1c5741f6c9f8d9cc5202eb8bd"
+            },
+            "kind": "accepted-context"
+        }
+    },
+    "mechanical": [
+        {
+            "after": {
+                "domain": "discrete-set",
+                "forbidden": [],
+                "open_domain": false,
+                "required": [],
+                "state": "satisfiable",
+                "values": [
+                    "standard"
+                ],
+                "witnesses": [
+                    "standard"
+                ]
+            },
+            "before": {
+                "domain": "discrete-set",
+                "forbidden": [],
+                "open_domain": false,
+                "required": [],
+                "state": "satisfiable",
+                "values": [
+                    "standard"
+                ],
+                "witnesses": [
+                    "standard"
+                ]
+            },
+            "claims": [
+                {
+                    "claim": {
+                        "family": "configuration",
+                        "id": "golangci-lint-standard-set",
+                        "operator": "equals",
+                        "overridable": false,
+                        "scope": {
+                            "environments": [],
+                            "paths": [],
+                            "phases": [
+                                "build"
+                            ],
+                            "refs": []
+                        },
+                        "subject": "golangci-lint-linter-set",
+                        "values": [
+                            "standard"
+                        ]
+                    },
+                    "claim_digest": "sha256:9f1d0fb5b3aa53e6f1543730bd1f856491ccc4c602e84bee50adcc75583f1e44",
+                    "policy_digest": "sha256:367452733cfc5545104cb9e071f99beeb3212a281cef0df5b29973882fa78e16",
+                    "policy_id": "policy/starter"
+                }
+            ],
+            "domain": "discrete-set",
+            "exemptions": [
+                {
+                    "digest": "sha256:c63cc0033d9d9ab6195842b134281eed0e85fc600f3f2a156f844665ed7727b5",
+                    "id": "policy-exemption/golangci-lint-standard-set",
+                    "removed_claims": [],
+                    "resolution": {
+                        "authorization": "proven",
+                        "bound": "violated-with-witness",
+                        "freshness": "proven",
+                        "match": "proven",
+                        "scope": "proven"
+                    }
+                }
+            ],
+            "family": "configuration",
+            "id": "configuration:golangci-lint-linter-set#complete",
+            "reasons": [
+                "mechanical-satisfiable"
+            ],
+            "scope": {
+                "dimensions": [
+                    {
+                        "dimension": "phase",
+                        "intersection": [
+                            "build"
+                        ],
+                        "left": [
+                            "build"
+                        ],
+                        "right": [
+                            "build"
+                        ],
+                        "state": "overlap",
+                        "witnesses": [
+                            "build"
+                        ]
+                    },
+                    {
+                        "dimension": "environment",
+                        "intersection": [],
+                        "left": [],
+                        "right": [],
+                        "state": "overlap",
+                        "witnesses": []
+                    },
+                    {
+                        "dimension": "path",
+                        "intersection": [],
+                        "left": [],
+                        "right": [],
+                        "state": "overlap",
+                        "witnesses": []
+                    },
+                    {
+                        "dimension": "ref",
+                        "intersection": [],
+                        "left": [],
+                        "right": [],
+                        "state": "overlap",
+                        "witnesses": []
+                    }
+                ],
+                "state": "overlap"
+            },
+            "state": "proven",
+            "subject": "golangci-lint-linter-set"
+        }
+    ],
+    "schema": "verdi.policy-conflict-report/v1",
+    "semantic": [
+        {
+            "claims": [
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "constraint",
+                    "digest": "sha256:d8b633fa623e5658cd240597f12d76fccb8d7a202924791319c3344f7d46b88b",
+                    "id": "spec/self-governance#co-1",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#co-1"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "constraint",
+                    "digest": "sha256:dacfa742e6e770f9c87dd3f69e30a4c304d9ab07bb8a212784bef13adae8011a",
+                    "id": "spec/self-governance#co-2",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#co-2"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "constraint",
+                    "digest": "sha256:07d61d2a588729aafd44ea00d7494269408d33f5d6a83b2222b897b12b38a0ee",
+                    "id": "spec/self-governance#co-3",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#co-3"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "constraint",
+                    "digest": "sha256:dfbc3d87b06cbbfecbd09faeaee18ef66e6d28a0375e2c119c65b4f91e11a0c1",
+                    "id": "spec/self-governance#co-4",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#co-4"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "decision",
+                    "digest": "sha256:9f96be945cfc10b4555642183b0ae76308701d8f2c0c3cff03f6c3b088c7c70b",
+                    "id": "spec/self-governance#dc-1",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#dc-1"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "decision",
+                    "digest": "sha256:fab01916158eb1212edc165dc3ceb9012cce040a901dec94c1bf4d3b005d0a91",
+                    "id": "spec/self-governance#dc-2",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#dc-2"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "decision",
+                    "digest": "sha256:67b6f5908c0a2f596c7c28d7b59e7d463990900cb045db458271f8e042d6f07f",
+                    "id": "spec/self-governance#dc-3",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#dc-3"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "open-question",
+                    "digest": "sha256:5420cfafac7ab84ff05ac4284dd574792badb71742016540ca4fb8bbb7f48eec",
+                    "id": "spec/self-governance#oq-1",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#oq-1"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "open-question",
+                    "digest": "sha256:5c5a42499b7d0178b6aaf43fbb46488c4df8440ed10b22c802e30a93ab1ecf76",
+                    "id": "spec/self-governance#oq-2",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#oq-2"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "open-question",
+                    "digest": "sha256:e3c2851d38d7ae5ec25a1806f631533f8804de1dbcf34a271355471d56e63019",
+                    "id": "spec/self-governance#oq-3",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#oq-3"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "open-question",
+                    "digest": "sha256:26d6ce710a75f2e59f682a3f1c6c98e2a9bdeea300fbfafa79e3c4c3123f6d8a",
+                    "id": "spec/self-governance#oq-4",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#oq-4"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "open-question",
+                    "digest": "sha256:da3dfba7b259c8ace2af692074c553e77355f63545fa3570687716b0059c6bc1",
+                    "id": "spec/self-governance#oq-5",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#oq-5"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "spec-outcome",
+                    "digest": "sha256:233c7022c33a351680a4a3b9c31b76b71c0681775547c584656dad68cd98e654",
+                    "id": "spec/self-governance#outcome",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#outcome"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ec9849b871423f2dbd88647ea347510d2fd39498d23112212e486450c3a9acc1",
+                    "category": "spec-problem",
+                    "digest": "sha256:c84ea3a555f5a7ecf30a86e578b6459710bc2786ef72c36b424d43038b0c187e",
+                    "id": "spec/self-governance#problem",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance#problem"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ff894e68f751b89c40a1e0dae8f05833ad532572f5f493e654f067ba70fd88e6",
+                    "category": "spec-outcome",
+                    "digest": "sha256:27d50dcd63f5d925da8dd805a7cd7bb9141d380a3b1fad1dee6003b7a2d74922",
+                    "id": "spec/self-governance-spike#outcome",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance-spike#outcome"
+                        ]
+                    },
+                    "values": []
+                },
+                {
+                    "authority_digest": "sha256:ff894e68f751b89c40a1e0dae8f05833ad532572f5f493e654f067ba70fd88e6",
+                    "category": "spec-problem",
+                    "digest": "sha256:81a5777f94d83d2793ef11606a8bf69aa2de8988bb478da6bce7da657972c1f6",
+                    "id": "spec/self-governance-spike#problem",
+                    "scope": {
+                        "environments": [],
+                        "paths": [],
+                        "phases": [],
+                        "refs": [
+                            "spec/self-governance-spike#problem"
+                        ]
+                    },
+                    "values": []
+                }
+            ],
+            "dispositions": [],
+            "id": "sha256:b22025f9a03b972e784df334be165bdc1888ebb9a0498ad33a0e77d200eadc45",
+            "input_id": "sha256:b22025f9a03b972e784df334be165bdc1888ebb9a0498ad33a0e77d200eadc45",
+            "primary": {
+                "adapter": {
+                    "id": "codex",
+                    "version": "1"
+                },
+                "command_digest": "sha256:2408e1bc7adee35f3b15a363d6b430cabedbda69e03451425efefc296db0645e",
+                "input_digest": "sha256:b22025f9a03b972e784df334be165bdc1888ebb9a0498ad33a0e77d200eadc45",
+                "model": "align.judge_cmd",
+                "prompt_digest": "sha256:327a3dde69ff044c153ef1d1a13866624489dcc5da751dd573ffada22ef65f16",
+                "raw_digest": "sha256:c7aed80e61995d5e454607a910ad0f9aa6281b77b005f4bd6f45b33f0040f82a",
+                "raw_result": "{\"findings\":[],\"recommendation\":\"no-conflict\",\"schema\":\"verdi.policy-conflict-judge-result/v1\"}\n",
+                "result": {
+                    "findings": [],
+                    "recommendation": "no-conflict",
+                    "schema": "verdi.policy-conflict-judge-result/v1"
+                },
+                "role": "primary"
+            },
+            "reasons": [
+                "disposition-required"
+            ],
+            "state": "unproven",
+            "unknown_mechanicals": []
+        }
+    ],
+    "verdict": "blocked-unproven"
+}
