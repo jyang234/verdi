@@ -46,6 +46,10 @@ Gate #2 at 4c9a9f68, serial: `verify OK`, exit 0 (09:22:07–09:53:24). e2e 330 
 - `review/eventual-derivation` is blocking: a store whose fold genuinely fails moves the review area off proven for the first time (intended co-6 behaviour, a visible posture change).
 - SI-217 (ac-4 startup-spec CLI arm) and SI-213 (`verdi attest <spec-ref>` grammar) both await owner amendments; SI-211 (ac-5 harness-fixture substitution) stands as disclosed.
 
+## Ledger renumber and the owner's amendments (2026-09-21, after closure)
+
+main took SI-207 and SI-208 on 2026-09-21 (PR #340) while the readiness rows SI-207..215 sat unmerged; one of main's numbers is cited inside ritual-write-scope-v2's accepted text, so the readiness rows shifted by two to SI-209..217 (every citation in code, tests, goldens, plans, and reports moved with them; reviewer-authored reports at the workspace root keep the numbers they cited at the time). origin/main is merged into this branch with the ledger resolved in numeric order. The owner's rulings — SI-213 (attest row ratified into verdi-surfaces §CLI) and SI-217 option (d) (ac-4 amended by the rung-4 supersession spec/readiness-recovery-v2 with its conflict record) — are authored on `design/readiness-recovery-v2`, reviewed and closed by the independent reviewer, and gated as a combined tree with this branch. Next free number: SI-218.
+
 ## Next authorized action
 
 READY_FOR_OWNER_RISK_GATE — owner review/merge of `agent/readiness-recovery-wave-1` then `agent/readiness-recovery-wave-2` (wave 2 now contains wave 1 and this correction wave; merging wave 2 alone yields the same tree); owner decisions on SI-217 and SI-213; wave 3 (ac-8..ac-10, recovery, Tier 3 with an owner risk gate) is unplanned and unauthorized; nothing pushed by the controller. Lane worktrees `verdi-wt/readiness-recovery-fix-a` and `-fix-b` remain attached (merged; removal not authorized).
