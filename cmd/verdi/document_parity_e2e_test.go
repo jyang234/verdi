@@ -488,11 +488,11 @@ func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
 //     doc`'s flag set; verdi-surfaces §CLI has no row for it) gives it no
 //     request flag, so the CLI cannot answer the question the served
 //     surfaces answer for X. After a commit makes the request's `expected`
-//     claim stale (SI-216) the served side reads the stale-expected
-//     witness instead of an evaluation — the same conflict, second shape. Ledger SI-217 (R-RRF-4) records the conflict as
+//     claim stale (SI-214) the served side reads the stale-expected
+//     witness instead of an evaluation — the same conflict, second shape. Ledger SI-215 (R-RRF-4) records the conflict as
 //     disclosed-as-unproven for ac-4's startup-spec CLI arm and routes
 //     the resolution (a CLI request flag, or an amendment defining parity
-//     over equivalent request inputs) to the owner with SI-213. Until
+//     over equivalent request inputs) to the owner with SI-211. Until
 //     that lands this arm pins the SHIPPED divergence so a change in it
 //     is visible, and asserts nothing about its conformance. The owner
 //     chose the amendment on 2026-09-21: spec/readiness-recovery-v2 ac-4

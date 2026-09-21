@@ -745,9 +745,9 @@ func TestEvidenceKindParityWithArtifact(t *testing.T) {
 	}
 }
 
-// --- R-RRF-1 / SI-215: the eventual section's unavailable-source list -----
+// --- R-RRF-1 / SI-213: the eventual section's unavailable-source list -----
 
-// TestEventualUnavailableValidateHappyPath is SI-215's positive shape: a
+// TestEventualUnavailableValidateHappyPath is SI-213's positive shape: a
 // DERIVED section may name the sources it could not compute, kept apart
 // from the benign disclosures beside them.
 func TestEventualUnavailableValidateHappyPath(t *testing.T) {
@@ -765,7 +765,7 @@ func TestEventualUnavailableValidateHappyPath(t *testing.T) {
 
 // TestEventualUnavailableValidateNegative is the negative half: the list is
 // explicit (never nil), ordered, deduplicated, free of empty entries, and —
-// SI-215's own rule — empty whenever Derived is false, because an underived
+// SI-213's own rule — empty whenever Derived is false, because an underived
 // section is unavailable AS A WHOLE and says so through Disclosures.
 func TestEventualUnavailableValidateNegative(t *testing.T) {
 	tests := []struct {

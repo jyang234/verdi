@@ -94,7 +94,7 @@ type Facts struct {
 	// computed at all — today the two Stubs/FeatureFold gathering errors,
 	// and nothing else feeds it. It becomes the record's
 	// blockers.eventual.unavailable list, deliberately apart from that
-	// section's Disclosures (SI-215 / R-RRF-1: a partial derivation must
+	// section's Disclosures (SI-213 / R-RRF-1: a partial derivation must
 	// be distinguishable from a complete one), and never the projection's
 	// own error return.
 	EventualUnavailable []string
@@ -164,7 +164,7 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 // value stays nil and the source yields no eventual items for this record
 // (eventual.go's stubUnreconciledBlockers/outcomeFloorBlockers both treat
 // a nil input as "nothing to derive from," not an error of their own).
-// The third return value is that unavailable-source list (SI-215), which
+// The third return value is that unavailable-source list (SI-213), which
 // the record carries as blockers.eventual.unavailable rather than as an
 // ordinary disclosure: "this source was not computed" and "this evaluated
 // fact is worth stating" are different claims, and a consumer that cannot

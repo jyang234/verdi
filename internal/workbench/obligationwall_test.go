@@ -203,7 +203,7 @@ func TestAttachObligations_LoadsDeclaredKinds(t *testing.T) {
 	}
 }
 
-// TestAttachObligations_AttachesOffStoryClass proves R-RR2-7 (SI-212): the
+// TestAttachObligations_AttachesOffStoryClass proves R-RR2-7 (SI-210): the
 // obligation row is no longer a story-only concept. A feature wall's AC
 // cards carry one view per declared kind — here scopingProjectionFixtureSpec's
 // ac-1/ac-2 each declare attestation — with Present reflecting the store

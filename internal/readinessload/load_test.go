@@ -553,7 +553,7 @@ func TestLoad_BindsAbsentExpectedToCurrentBranchAndHead(t *testing.T) {
 }
 
 // TestLoad_ExpectedMismatchPostureIsTheExplicitOption is R-RRF-3's
-// (SI-216) single knob, from both sides. The moved pin
+// (SI-214) single knob, from both sides. The moved pin
 // (TestLoad_RefusesExpectedMismatch) becomes the strict row: the refusal
 // survives, but only under Options.RequireExpectedMatch, which `verdi
 // serve`'s startup warm-up alone sets. Every per-request load leaves the
@@ -652,7 +652,7 @@ func TestLoad_ExpectedMismatchPostureIsTheExplicitOption(t *testing.T) {
 // fixed format naming both repositories, and control-free for any request
 // contextcompile's decoder accepts (readinesspilot rejects a
 // control-bearing witness outright, so this property is load-bearing, not
-// cosmetic). It carries no path and no digest, for SI-210's reasons.
+// cosmetic). It carries no path and no digest, for SI-208's reasons.
 func TestStaleExpectedRepositoryWitness(t *testing.T) {
 	head1, head2 := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	for _, tc := range []struct {
@@ -687,7 +687,7 @@ func TestStaleExpectedRepositoryWitness(t *testing.T) {
 			if i := strings.IndexFunc(got, unicode.IsControl); i >= 0 {
 				t.Fatalf("witness %q carries a control character at %d — readinesspilot refuses it", got, i)
 			}
-			// SI-210's reasoning: the request-bound destination already
+			// SI-208's reasoning: the request-bound destination already
 			// names the file, and a digest tells an operator nothing they
 			// can act on.
 			for _, forbidden := range []string{"sha256:", ".json", "/"} {
@@ -711,8 +711,8 @@ func TestStaleExpectedRepositoryWitness(t *testing.T) {
 // a 503 readiness page and a missing Readiness section in the Document
 // tab and MCP — until the server was restarted, and editing the request
 // file could not repair a running server because the bytes are retained
-// deliberately. R-RRF-3 (SI-216) makes the mismatch the ac-3
-// ConflictUnavailable posture instead (the SI-210 shape): the context
+// deliberately. R-RRF-3 (SI-214) makes the mismatch the ac-3
+// ConflictUnavailable posture instead (the SI-208 shape): the context
 // area alone goes unproven and every other area derives at the
 // repository this derivation actually read.
 func TestLoad_PinnedStartupRequestSurvivesAnOrdinaryCommit(t *testing.T) {

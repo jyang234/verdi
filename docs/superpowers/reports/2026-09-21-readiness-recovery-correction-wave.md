@@ -3,17 +3,17 @@
 Status: COMPLETE — READY_FOR_OWNER_RISK_GATE (gate `verify OK` at 4c9a9f68; not pushed; on `agent/readiness-recovery-wave-2`, which contains wave 1).
 Trigger: the independent review `docs/superpowers/reports/2026-09-21-readiness-recovery-independent-review.md` (workspace root; probes beside it) returned REQUEST CHANGES with five findings originating in wave 1 and inherited by wave 2.
 Risk tier: Tier 3 for R1/R2 (readiness misrepresenting authority; fresh Opus fixer + fresh Opus re-reviewer), Tier 2 for R3/R5, Fable lane for the e2e oracle.
-Base..Head: wave-2 close a2b37547 → rulings 46a01563 → lane merges 6f3c4372 (A), 540d459b (B) → e2e oracle bd6c7609 → SI-217 correction 4c9a9f68 → this docs-only close commit.
-Ledger: SI-215 (eventual section gains `unavailable`; `review/eventual-derivation` concern), SI-216 (stale `expected` claim is disclosed, not an error; warm-up stays strict), SI-217 (ac-3/ac-4 startup-spec CLI/served divergence is a recorded spec conflict, owner-routed with SI-213). Plan rulings R-RRF-1..5 in the wave-1 plan's amendments.
+Base..Head: wave-2 close a2b37547 → rulings 46a01563 → lane merges 6f3c4372 (A), 540d459b (B) → e2e oracle bd6c7609 → SI-215 correction 4c9a9f68 → this docs-only close commit.
+Ledger: SI-213 (eventual section gains `unavailable`; `review/eventual-derivation` concern), SI-214 (stale `expected` claim is disclosed, not an error; warm-up stays strict), SI-215 (ac-3/ac-4 startup-spec CLI/served divergence is a recorded spec conflict, owner-routed with SI-211). Plan rulings R-RRF-1..5 in the wave-1 plan's amendments.
 
 ## Adjudication
 
 | Finding | Ruling | Disposition |
 |---|---|---|
-| R1 [P1] partial derivation hidden from readiness | SI-215 / R-RRF-1 | Fixed (lane A) |
+| R1 [P1] partial derivation hidden from readiness | SI-213 / R-RRF-1 | Fixed (lane A) |
 | R2 [P1] local-only evidence clears closure debt | R-RRF-2: journey fold `Preview: false` (closure folds `source: ci` only) — a wave-1 plan defect, not a spec ambiguity | Fixed (lane A) |
-| R3 [P2] pinned startup request disables readiness after a commit | SI-216 / R-RRF-3 (the SI-210 shape) | Fixed (lane B) |
-| R4 [P2] parity test contradicts ac-4 | SI-217 / R-RRF-4: no conforming reading exists without a `verdi spec doc` request flag (spec-documents ac-2 declares none) or an ac-4 amendment; disclosed-as-unproven, owner decision | Recorded; comment-only code change |
+| R3 [P2] pinned startup request disables readiness after a commit | SI-214 / R-RRF-3 (the SI-208 shape) | Fixed (lane B) |
+| R4 [P2] parity test contradicts ac-4 | SI-215 / R-RRF-4: no conforming reading exists without a `verdi spec doc` request flag (spec-documents ac-2 declares none) or an ac-4 amendment; disclosed-as-unproven, owner decision | Recorded; comment-only code change |
 | R5 [P2] ineffective clearing condition | R-RRF-5: offer the attestation route only when the criterion declares the attestation kind | Fixed (lane A) |
 
 ## Lanes and accepted ranges
@@ -37,19 +37,19 @@ Gate #2 at 4c9a9f68, serial: `verify OK`, exit 0 (09:22:07–09:53:24). e2e 330 
 
 ## Residual risks carried to the owner gate
 
-- Re-review Minor 2: the duplicate-blocker-id and row-id-collision disclosures are information-losing derivations that stay in `disclosures` with `derived: true`, outside the new concern (conforms to SI-215 as written).
+- Re-review Minor 2: the duplicate-blocker-id and row-id-collision disclosures are information-losing derivations that stay in `disclosures` with `derived: true`, outside the new concern (conforms to SI-213 as written).
 - Re-review Minor 3: no single test spans fold failure → readiness snapshot across packages; the join is one assignment in `readinessload`, verified by reading.
 - Re-review Minor 5: `verdi.journey/v1` gained a required serialized field (`unavailable`) without a version bump; strict decode makes old and new records mutually incompatible; co-2 forbids persisted records and the one fixture was regenerated, so no live surface exists today.
 - Lane B: `cmd/verdi/conflictgate.go` keeps the hard `expected` refusal for the one-shot `gate` verb (a different posture from serve's per-request disclosure; a separate decision if one posture is wanted).
 - A served readiness page whose startup request has gone stale now shows `context/verdict` unproven instead of a 503; the startup refusal and the two-repository witness are the mitigations.
 - R2 makes the outcome-floor debt strictly harder to clear (advisory local passes no longer read as journey progress; `verdi matrix --preview` still shows them).
 - `review/eventual-derivation` is blocking: a store whose fold genuinely fails moves the review area off proven for the first time (intended co-6 behaviour, a visible posture change).
-- SI-217 (ac-4 startup-spec CLI arm) and SI-213 (`verdi attest <spec-ref>` grammar) both await owner amendments; SI-211 (ac-5 harness-fixture substitution) stands as disclosed.
+- SI-215 (ac-4 startup-spec CLI arm) and SI-211 (`verdi attest <spec-ref>` grammar) both await owner amendments; SI-209 (ac-5 harness-fixture substitution) stands as disclosed.
 
-## Ledger renumber and the owner's amendments (2026-09-21, after closure)
+## Ledger collision and the owner's amendments (2026-09-21, after closure)
 
-main took SI-207 and SI-208 on 2026-09-21 (PR #340) while the readiness rows SI-207..215 sat unmerged; one of main's numbers is cited inside ritual-write-scope-v2's accepted text, so the readiness rows shifted by two to SI-209..217 (every citation in code, tests, goldens, plans, and reports moved with them; reviewer-authored reports at the workspace root keep the numbers they cited at the time). origin/main is merged into this branch with the ledger resolved in numeric order. The owner's rulings — SI-213 (attest row ratified into verdi-surfaces §CLI) and SI-217 option (d) (ac-4 amended by the rung-4 supersession spec/readiness-recovery-v2 with its conflict record) — are authored on `design/readiness-recovery-v2`, reviewed and closed by the independent reviewer, and gated as a combined tree with this branch. Next free number: SI-218.
+PRs #339/#340 merged rows numbered SI-207 and SI-208 on 2026-09-21 while the readiness rows SI-207..215 (recorded 2026-09-19/20) sat unmerged. This branch briefly renumbered its rows to SI-209..217 (f3cbbd93) and merged main; main then resolved the same collision by first-recorded precedence (PR #341: its two rows became SI-216 and SI-217), so this branch reverted to SI-207..215 and merged that main. The readiness rows keep their original numbers; SI-216/217 are main's; the next free number is SI-218. Reviewer-authored reports at the workspace root cite the numbers current when they were written. The owner's rulings — SI-211 (attest row ratified into verdi-surfaces §CLI) and SI-215 option (d) (ac-4 amended by the rung-4 supersession spec/readiness-recovery-v2 with its conflict record) — are authored on `design/readiness-recovery-v2` (PR #343), reviewed and closed by the independent reviewer, and gated as a combined tree with this branch (PR #342).
 
 ## Next authorized action
 
-READY_FOR_OWNER_RISK_GATE — owner review/merge of `agent/readiness-recovery-wave-1` then `agent/readiness-recovery-wave-2` (wave 2 now contains wave 1 and this correction wave; merging wave 2 alone yields the same tree); owner decisions on SI-217 and SI-213; wave 3 (ac-8..ac-10, recovery, Tier 3 with an owner risk gate) is unplanned and unauthorized; nothing pushed by the controller. Lane worktrees `verdi-wt/readiness-recovery-fix-a` and `-fix-b` remain attached (merged; removal not authorized).
+READY_FOR_OWNER_RISK_GATE — owner review/merge of `agent/readiness-recovery-wave-1` then `agent/readiness-recovery-wave-2` (wave 2 now contains wave 1 and this correction wave; merging wave 2 alone yields the same tree); owner decisions on SI-215 and SI-211; wave 3 (ac-8..ac-10, recovery, Tier 3 with an owner risk gate) is unplanned and unauthorized; nothing pushed by the controller. Lane worktrees `verdi-wt/readiness-recovery-fix-a` and `-fix-b` remain attached (merged; removal not authorized).

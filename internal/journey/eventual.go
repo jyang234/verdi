@@ -33,7 +33,7 @@ const (
 
 // acceptedStatus and closedStatus are the two lifecycle STATE ids this
 // derivation resolves transitions by TARGET rather than by verb name
-// (R-RR1-12, ledger SI-209: "do not hard-code merge" — a store may rename
+// (R-RR1-12, ledger SI-207: "do not hard-code merge" — a store may rename
 // a verb's display word, and a later model may name the acceptance
 // transition differently). Both are joined through specstate's own
 // Result.ArtifactStatus mapping (DC-15), never written here as a second
@@ -102,7 +102,7 @@ type eventualInput struct {
 	// at all (Facts.EventualUnavailable: a stub-reconciliation or
 	// outcome-floor fold error) — carried through to the returned
 	// section's own Unavailable list, never merged into its Disclosures
-	// (SI-215 / R-RRF-1: a partial derivation must stay distinguishable
+	// (SI-213 / R-RRF-1: a partial derivation must stay distinguishable
 	// from a complete one).
 	Unavailable []string
 }
@@ -150,7 +150,7 @@ func reachableStates(lifecycle model.Lifecycle, state string) map[string]bool {
 
 // laterTransitions returns the transitions FORWARD-REACHABLE from state in
 // class's declared lifecycle, minus the immediate candidates — R-RR1-11
-// (ledger SI-209), superseding the original "every declared transition
+// (ledger SI-207), superseding the original "every declared transition
 // minus the candidates" reading, which named transitions already BEHIND
 // the state (an accepted feature's own acceptance verb among them). Order
 // is the model's own declared transition order, never candidateTransitions'
@@ -197,7 +197,7 @@ func transitionToState(lifecycle model.Lifecycle, state string) (model.Transitio
 // class at one lifecycle state, plus the disclosure (if any) naming what
 // could not be resolved. resolved false means no verb could be named at
 // all, so every source that must name one derives nothing — the literal
-// "unknown" is never emitted (SI-209).
+// "unknown" is never emitted (SI-207).
 type eventualScopeResult struct {
 	closureVerb string
 	policyVerb  string
@@ -215,7 +215,7 @@ type eventualScopeResult struct {
 	disclosure   string
 }
 
-// resolveEventualScope resolves R-RR1-12's verb table (ledger SI-209):
+// resolveEventualScope resolves R-RR1-12's verb table (ledger SI-207):
 //
 //   - closureVerb — the transition whose target is the CLOSED state. Stub
 //     reconciliation, the outcome floor and a spike-claimed question are

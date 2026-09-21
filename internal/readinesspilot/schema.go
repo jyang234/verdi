@@ -332,7 +332,7 @@ func concernIdentity(id string, timing Timing) (AreaID, bool, bool, error) {
 		return AreaReview, false, false, nil
 	case id == "review/action":
 		return AreaReview, false, true, nil
-	// SI-215 / R-RRF-1: the completeness of the journey's own eventual
+	// SI-213 / R-RRF-1: the completeness of the journey's own eventual
 	// derivation, blocking and current — a readiness conclusion drawn over
 	// a partial derivation is not a conclusion. Not journey-derived in the
 	// work-class sense: it describes the derivation, not one blocker.

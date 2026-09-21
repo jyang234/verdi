@@ -97,7 +97,7 @@ type Options struct {
 	PredecodedRequest *PredecodedRequest
 	// RequireExpectedMatch turns a supplied request's optional `expected`
 	// branch/HEAD claim that no longer matches the checkout back into an
-	// operational error, instead of R-RRF-3's (SI-216) disclosure. It is
+	// operational error, instead of R-RRF-3's (SI-214) disclosure. It is
 	// the one knob that separates the two postures, and it is explicit
 	// precisely because the two callers need opposite answers:
 	//
