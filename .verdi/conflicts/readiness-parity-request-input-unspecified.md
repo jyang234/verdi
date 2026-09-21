@@ -3,7 +3,7 @@ id: conflict/readiness-parity-request-input-unspecified
 kind: conflict
 title: "readiness-recovery ac-4 promises four-surface byte parity the CLI cannot meet without a context request"
 status: superseded
-frozen: { at: 2026-09-21, commit: 18da23e0a1ae55544c09f78928b43ef5efc3112c }
+frozen: { at: 2026-09-21, commit: d72c55c66838d0b64b253681f10b94df6ce67b8d }
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/readiness-recovery }
