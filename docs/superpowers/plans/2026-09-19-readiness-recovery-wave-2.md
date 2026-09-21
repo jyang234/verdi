@@ -128,3 +128,4 @@ Commit series: `Compute evidence slots on feature walls under the feature's own 
 ## Amendments during execution
 
 Recorded here by the controller as they happen; where a code block here disagrees with HEAD, HEAD is right.
+- Task 2 (R-RR2-6, controller preflight 2026-09-21): the VL-022 fixtures live at the repo root, `testdata/violations/VL-022/<case>/` (the only fixture home, CLAUDE.md), not under `internal/lint/testdata/`; `vl022_test.go` reaches them through `violationsDir`. The two new cases are `testdata/violations/VL-022/feature-misslug/` and `testdata/violations/VL-022/feature-undeclared-kind/`; the File structure table's path is corrected accordingly.
