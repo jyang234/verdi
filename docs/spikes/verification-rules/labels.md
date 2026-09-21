@@ -62,8 +62,52 @@ entirely, not instances of one class).
 The curve is **not monotonic**: T=17 regresses above T=16 because the
 claims=17 band (5 items, all TRUE) drops out while the claims=18 band (3
 items, 2 FALSE) is still included one step earlier. This is small-sample
-(n=20) noise, disclosed here rather than smoothed over. T=16 is the
-lowest (most inclusive, largest-backlog) threshold at which the labeled
-false-positive rate first falls under one in five; it does not stay under
-20% at every higher T by construction, only from T=18 up. See
-`README.md` oq-1 for the recommendation and caveat.
+(n=20) noise, disclosed here rather than smoothed over.
+
+**Correction (post-review, lane-verification-rules-review.md VR-1): the
+table above double-counts duplicate texts and its threshold does not
+survive deduplication.** Rows 10, 11, 15, 19, and 20 above are each
+byte-identical text to an earlier-numbered row (10/11 to #9, 15 to #14,
+19/20 to #18 — oq-4's own finding that every carried AC/constraint is
+byte-identical across a family's version revisions, applied to the
+sample itself). Counting each physical copy as an independent judgment
+inflates the sample from 15 real distinct texts to 20, and inflates every
+threshold's apparent backlog by the same duplication. Deduplicated:
+
+## Deduplicated false-positive rate by candidate threshold (15 distinct judgments)
+
+Full recomputation: `_scratch/dedup/main.go`, `go run
+./docs/spikes/verification-rules/_scratch/dedup .` — exit 0, output
+`dedup.out` (64 lines). Confirms 206 distinct texts corpus-wide (of 277
+scored) and reduces the top-20 sample to exactly 15 distinct judgments
+(9 TRUE / 6 FALSE, 40.0% unconditioned FP rate — higher than the raw
+table's 35.0%, because four of the five removed duplicates were TRUE
+rows, which had been diluting the FALSE share):
+
+| T (flag claims>T) | distinct sample above T | false among them | FP rate | corpus backlog at T (distinct-206 basis) |
+|---|---|---|---|---|
+| 13 | 15 | 6 | 40.0% | 16 |
+| 14 | 14 | 6 | 42.9% | 14 |
+| 15 | 11 | 3 | 27.3% | 11 |
+| 16 | 10 | 2 | **20.0%** | 10 |
+| 17 | 7 | 2 | 28.6% | 7 |
+| **18** | **4** | **0** | **0.0%** | **4** |
+| 19 | 3 | 0 | 0.0% | 3 |
+
+On the deduplicated basis, T=16 sits **at**, not under, one in five
+(20.0% exactly) — the story's rule ("falls under one in five") does not
+select it. **T=18 is the first threshold that is genuinely under 20%,
+giving backlog 4** (identical to the raw-basis T=18 backlog, since none
+of the top-4 raw items are versioned-family duplicates in the first
+place). A `live-distinct` population (dropping any object whose spec
+directory is itself a frozen predecessor — i.e. the target of some other
+spec's `links: {type: supersedes}` — and re-pointing to a live sibling
+with identical text where one exists) produces **exactly the same sweep
+as distinct-206 at every threshold** (`dedup.out`: 0 objects dropped) —
+because oq-4 already proved every carried AC/constraint text propagates
+unchanged to its family's live head, so "distinct" and "excluding frozen
+predecessors" turn out to be the same filter for this corpus's AC/
+constraint population specifically (they would diverge if a future
+revision ever removed or amended a carried clause without a live
+successor carrying identical text). See `README.md` oq-1 for which basis
+the recommendation adopts.

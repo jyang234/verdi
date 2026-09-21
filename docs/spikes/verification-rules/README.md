@@ -12,13 +12,24 @@ file under `docs/spikes/verification-rules/`; nothing under
 
 **Status: ANSWERED-WITH-CAVEAT.**
 
-**Recommendation: threshold the under-enumeration lint at claims > 16**
-(the calibrated mechanical claim count, defined below), giving a **backlog
-of 12** criteria/constraints out of **277** scored across **39** active
-spec directories (not 28 — see Deviations). The naive "more than three
-claims" cut the story also asks about is far too broad to use directly:
-it flags **231/277 (83%)** of the corpus, because ordinary AC/constraint
-prose already carries 2-3 commas as a matter of style.
+**Recommendation: threshold the under-enumeration lint at claims > 18 on
+the deduplicated (distinct-text) basis, giving a backlog of 4.** Two
+bases are reported below, per the independent review's correction
+(lane-verification-rules-review.md VR-1): a **raw** basis over all 277
+scored objects (T=16, backlog 12, calibrated on the original 20-item
+hand-labeled sample) and a **deduplicated** basis over the corpus's 206
+distinct texts (T=18, backlog 4, calibrated on the 15 distinct judgments
+that sample actually contains once its 5 duplicate rows are collapsed).
+**The deduplicated basis is the one this spike adopts**, because the raw
+basis double-counts: 71 of the 277 scored objects (26%) are byte-
+duplicates, 70 of them from the five `-vN` version-revision directories
+that carry every AC/constraint forward unchanged (oq-4's own finding,
+applied here) — flagging the same clause's text three times because it
+happens to be carried across three spec revisions is not three backlog
+items. The naive "more than three claims" cut the story also asks about
+is far too broad to use directly on either basis: it flags **231/277
+(83%)** of the raw corpus, because ordinary AC/constraint prose already
+carries 2-3 commas as a matter of style.
 
 **Method** (`_scratch/measure/main.go`, `go run
 ./docs/spikes/verification-rules/_scratch/measure .` — exit 0, full
@@ -42,32 +53,56 @@ up (e.g. 22 objects score exactly 9, 23 score exactly 8).
 FALSE (mechanical over-count — a closed-taxonomy completeness claim, or a
 one-consequence disjunction, read as N claims by the proxies) using an
 explicit written rule (top-level semicolon/`and` segments only; a
-segment whose payload is one enumerated set is one claim, not N).
-Result: **13 TRUE / 7 FALSE (35% unconditioned false-positive rate)**.
-False-positive rate by candidate threshold, from those 20 labels:
+segment whose payload is one enumerated set is one claim, not N). Five of
+those 20 rows are byte-identical text to an earlier-numbered row (rows
+10/11 duplicate #9, row 15 duplicates #14, rows 19/20 duplicate #18 —
+`labels.md` already named this at authoring time but did not carry it
+through to the threshold arithmetic below; see `_scratch/dedup/main.go`,
+`go run ./docs/spikes/verification-rules/_scratch/dedup .` — exit 0,
+`dedup.out`, for the full recomputation). **Raw basis (20 labeled rows,
+duplicates counted separately): 13 TRUE / 7 FALSE, 35.0% unconditioned.
+Deduplicated basis (15 distinct judgments): 9 TRUE / 6 FALSE, 40.0%
+unconditioned** — a higher rate, because four of the five removed
+duplicates were TRUE rows.
 
-| T (flag claims>T) | labeled sample | false | FP rate | corpus backlog at T |
-|---|---|---|---|---|
-| 13 | 20 | 7 | 35.0% | 23 |
-| 14 | 17 | 7 | 41.2% | 17 |
-| 15 | 13 | 3 | 23.1% | 13 |
-| **16** | **12** | **2** | **16.7%** | **12** |
-| 17 | 7 | 2 | 28.6% | 7 |
-| 18 | 4 | 0 | 0.0% | 4 |
+| T (flag claims>T) | raw sample (n=20) | raw FP rate | raw backlog (of 277) | distinct sample (n=15) | distinct FP rate | distinct backlog (of 206) |
+|---|---|---|---|---|---|---|
+| 13 | 20 | 35.0% | 23 | 15 | 40.0% | 16 |
+| 14 | 17 | 41.2% | 17 | 14 | 42.9% | 14 |
+| 15 | 13 | 23.1% | 13 | 11 | 27.3% | 11 |
+| 16 | 12 | 16.7% | 12 | 10 | **20.0%** | 10 |
+| 17 | 7 | 28.6% | 7 | 7 | 28.6% | 7 |
+| **18** | 4 | 0.0% | 4 | **4** | **0.0%** | **4** |
 
-T=16 is the lowest (most inclusive) threshold at which the sample's
-false-positive rate first drops under one in five, matching the story's
-instruction ("choose the threshold where hand-labelled false positives
-fall under one in five... report the count above threshold as the
-backlog"). **Caveat, disclosed rather than smoothed over:** the curve is
-not monotonic (T=17 regresses to 28.6%, a small-sample artifact of a
-5-item all-TRUE band at claims=17 dropping out while a 3-item
-2-FALSE-of-3 band at claims=18 is still counted at T=16 and T=17 both);
-this calibration rests on 20 single-rater hand labels with no independent
-cross-check, and a differently-labeled top 20 could move T by one or two.
-`spec/verification-rules` ac-2 should treat T=16/backlog=12 as a starting
+On the **raw** basis, T=16 is the lowest threshold under one in five
+(16.7%). On the **deduplicated** basis this spike adopts, T=16 sits *at*,
+not under, one in five (20.0% exactly — the story's rule requires
+strictly under), so the deduplicated stopping rule selects **T=18,
+backlog 4** instead. A `live-distinct` population (additionally dropping
+any object whose spec directory is itself a frozen predecessor —
+oq-4 — and re-pointing to a live sibling with identical text) produces
+the *identical* sweep to distinct-206 at every threshold (`dedup.out`:
+zero objects dropped), because oq-4 already proved every carried
+AC/constraint propagates byte-identically to its family's live head, so
+for this corpus's AC/constraint population "distinct" and "excludes
+frozen predecessors" are the same filter.
+
+**Caveat, disclosed rather than smoothed over:** neither curve is
+monotonic (raw T=17 regresses to 28.6%; deduplicated T=17 regresses
+identically, both a small-sample artifact of a 5-item all-TRUE band at
+claims=17 dropping out while a claims=18 band with 2 FALSE members is
+still counted one step earlier); this calibration rests on 15-20
+single-rater hand labels with no independent cross-check, and a
+differently-labeled sample could move T by one or two either way.
+`spec/verification-rules` ac-2 should treat T=18/backlog=4 as a starting
 point the feature's own larger-sample lint work re-validates, not a
-final number.
+final number. At T=18 specifically the raw and distinct bases agree (4
+either way, per the table above), because none of the top-4 raw items
+happen to belong to a versioned family — but a real lint rule still has
+to decide, independently of this spike, whether "backlog" for its own
+purposes always means distinct clause-texts or every physical file
+location an under-enumerated clause appears in (the two bases diverge at
+lower thresholds, e.g. 12 raw vs. 10 distinct at T=16).
 
 ## oq-2 — citation seam: bindings fragments vs. test-side markers
 
@@ -347,9 +382,16 @@ spike's write set.
    `verification-rules-spike` — a spike is its own story-class spec
    object, always a separate directory from its parent feature) = **28**.
    The story's "28" reads as a count of distinct spec *families*, not raw
-   directories; oq-1's measurement scores all 39 directories (every real
-   decodable object in the corpus), which is the more complete reading of
-   "across the active specs" and is the superset of any 28-family count.
+   directories. oq-1's measurement deliberately scores all 39 directories
+   (every real decodable object in the corpus) as its raw population, but
+   — as the independent review's VR-1 finding makes explicit — scoring
+   every version-revision copy of a carried, byte-identical clause is
+   exactly the "family" double-count "28" already excludes; it is not a
+   more complete reading, it is why oq-1 also reports a deduplicated
+   basis and adopts it. 39 directories is the correct denominator for
+   "how many spec files exist on disk"; it is not the right denominator
+   for "how many distinct clauses need enumeration", which is what oq-1's
+   backlog answers.
 2. **`internal/readinessload` does not exist** (oq-2's lane specifics
    name it as the package holding co-2's witnessing tests). The nearest
    readiness-named package, `internal/readinesspilot`, is a different,
@@ -379,8 +421,9 @@ spike's write set.
 
 | file | what it is |
 |---|---|
-| `_scratch/measure/main.go`, `measure.out` | oq-1 mechanical measurement + histogram + threshold sweep |
-| `labels.md` | oq-1 top-20 hand labels + FP-rate-vs-threshold table |
+| `_scratch/measure/main.go`, `measure.out` | oq-1 mechanical measurement + histogram + raw threshold sweep |
+| `labels.md` | oq-1 top-20 hand labels + raw and deduplicated FP-rate-vs-threshold tables |
+| `_scratch/dedup/main.go`, `dedup.out` | oq-1 post-review dedup recomputation (VR-1): distinct/live-distinct populations, deduplicated sample |
 | `_scratch/seamA/main.go`, `seam-a.out` | oq-2 Seam A trial (real `artifact` calls) |
 | `seam-b.patch`, `seam-b-baseline.out`, `seam-b-with-marker.out` | oq-2 Seam B trial (reverted before commit) |
 | `_fence-copies/02-artifact-contract.{original,draft}.md`, `02-clauses.diff` | oq-3 frontmatter delta |
@@ -390,9 +433,10 @@ spike's write set.
 
 ## Spec seed follow-through
 
-- oq-1 → `spec/verification-rules` ac-2's threshold: recommend **16**
-  (backlog 12), with the calibration caveat above carried into that
-  decision, not hidden.
+- oq-1 → `spec/verification-rules` ac-2's threshold: recommend **18 on
+  the deduplicated basis** (backlog 4; raw-basis T=16/backlog=12 recorded
+  alongside it, not adopted), with the calibration caveat above carried
+  into that decision, not hidden.
 - oq-2 → ac-1's citation seam: recommend **Seam B**.
 - oq-3 → the co-1 ratification request: the 46-line `02-clauses.diff` is
   the draft amendment; the consumer table above sizes the accompanying
