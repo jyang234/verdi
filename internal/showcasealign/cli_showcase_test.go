@@ -657,6 +657,78 @@ func TestCLIShowcaseAttest(t *testing.T) {
 	}
 }
 
+// TestCLIShowcaseAttestFeature (spec/readiness-recovery ac-6, R-RR2-1/
+// R-RR2-4) drives `verdi attest` against a real, committed class: feature
+// spec from examples/showcase — spec/loan-workflow's own declared ac-1
+// ("workflow status changes are visible within one minute", evidence:
+// [runtime, attestation]) — proving the widened grammar end to end on real
+// showcase content, mirroring TestCLIShowcaseAttest's story-form proof
+// above. The scaffold lands at the feature's own name segment
+// (attestations/loan-workflow/ac-1.md, not any story-ref slug), carries a
+// verifies edge to spec/loan-workflow, the unauthored marker, and the
+// criterion's own accepted text quoted verbatim — read straight from the
+// real committed spec.md, never hand-typed, so a spec-body edit cannot
+// silently desync this test from its own fixture. `verdi lint` afterward
+// still exits 0: the scaffold is a legal attestation file, and VL-022 (as
+// of this task) skips a feature-targeting verifies edge by construction
+// (ADJ-51) — R-RR2-2/Task 2 is what widens VL-022 itself.
+func TestCLIShowcaseAttestFeature(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	specData := readShowcaseFile(t, ".verdi/specs/active/loan-workflow/spec.md")
+	fm, _, err := artifact.SplitFrontmatter([]byte(specData))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(spec/loan-workflow): %v", err)
+	}
+	specDecoded, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec(spec/loan-workflow): %v", err)
+	}
+	var wantCriterionText string
+	for _, ac := range specDecoded.AcceptanceCriteria {
+		if ac.ID == "ac-1" {
+			wantCriterionText = ac.Text
+			break
+		}
+	}
+	if wantCriterionText == "" {
+		t.Fatalf("test setup: spec/loan-workflow's real committed spec.md does not declare ac-1")
+	}
+
+	stdout, stderr, code := runBinary(t, root, "attest", "spec/loan-workflow", "ac-1")
+	if code != 0 {
+		t.Fatalf("verdi attest (feature): exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	path := filepath.Join(root, ".verdi", "attestations", "loan-workflow", "ac-1.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading scaffolded feature attestation at the real fold path %s: %v", path, err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "id: attestation/loan-workflow--ac-1") {
+		t.Fatalf("scaffold id wrong:\n%s", content)
+	}
+	if !strings.Contains(content, `ref: "spec/loan-workflow"`) {
+		t.Fatalf("scaffold verifies edge wrong:\n%s", content)
+	}
+	if !strings.Contains(content, "<!-- verdi:attestation-unauthored -->") {
+		t.Fatalf("scaffold missing the unauthored marker (parent spec/closure-ergonomics dc-2):\n%s", content)
+	}
+	if !strings.Contains(content, "> "+wantCriterionText) {
+		t.Fatalf("scaffold does not quote spec/loan-workflow's own real committed ac-1 text %q:\n%s", wantCriterionText, content)
+	}
+	if !strings.Contains(stdout, path) {
+		t.Fatalf("verdi attest stdout missing the scaffolded path:\n%s", stdout)
+	}
+
+	lintStdout, lintStderr, lintCode := runBinary(t, root, "lint")
+	if lintCode != 0 {
+		t.Fatalf("verdi lint after scaffolding the feature attestation: exit %d, want 0 (the scaffold is a legal attestation file)\nstdout:\n%s\nstderr:\n%s", lintCode, lintStdout, lintStderr)
+	}
+}
+
 // TestCLIShowcaseDisposition drives `verdi disposition` (cli:disposition,
 // spec/disposition-verb) against the REAL committed
 // borrower-update-mobile/deviation-report.md — the only LIVING (non-frozen)

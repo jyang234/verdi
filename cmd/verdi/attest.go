@@ -1,14 +1,18 @@
-// verdi attest <story-ref> <ac-id> (05 §CLI; spec/attest-helper ac-1..ac-4;
-// spec/closure-ergonomics ac-2): given a (story, AC) pair, scaffolds a
-// correctly-slugged, correctly-placed attestation skeleton at the exact
-// path internal/evidence's fold reads (I-6/I-31) — frontmatter complete
-// except for the claim, which is left in an explicit, machine-recognizable
-// UNAUTHORED state (evidence.UnauthoredAttestationMarker). Refuses outright
-// (exit 1, verdict) when the pair does not exist or an attestation already
-// sits at the path; every other failure is operational (exit 2). Writes
-// exactly one file to the working tree and commits nothing (dc-2, co-2):
-// an attestation is authored once, in place, before its first commit — not
-// a multi-commit design surface the way a draft spec is.
+// verdi attest <spec-ref> <ac-id> (05 §CLI; spec/attest-helper ac-1..ac-4;
+// spec/closure-ergonomics ac-2; widened to feature criteria by spec/
+// readiness-recovery ac-6, R-RR2-4): given a (story-or-feature, AC) pair,
+// scaffolds a correctly-slugged, correctly-placed attestation skeleton at
+// the exact path internal/evidence's fold reads (I-6/I-31, R-RR2-2's
+// feature-name segment) — frontmatter complete except for the claim, which
+// is left in an explicit, machine-recognizable UNAUTHORED state
+// (evidence.UnauthoredAttestationMarker); a feature-class target's body
+// also quotes the criterion's own accepted text and declared evidence
+// kinds (R-RR2-1). Refuses outright (exit 1, verdict) when the pair does
+// not exist or an attestation already sits at the path; every other
+// failure is operational (exit 2). Writes exactly one file to the working
+// tree and commits nothing (dc-2, co-2): an attestation is authored once,
+// in place, before its first commit — not a multi-commit design surface
+// the way a draft spec is.
 //
 // Kept in its own file per the lint.go/sync.go/matrix.go/dex.go convention,
 // so dispatch.go's diff for wiring this verb in stays a one-line change.
@@ -38,7 +42,7 @@ import (
 // malformed invocation fails fast and identically regardless of cwd.
 func cmdAttest(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "usage: verdi attest <story-ref> <ac-id>")
+		fmt.Fprintln(stderr, "usage: verdi attest <spec-ref> <ac-id>")
 		return 2
 	}
 	storyRefArg, acID := args[0], args[1]
@@ -76,19 +80,33 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.M
 		return 1
 	}
 
-	storySlug := store.RefSlug(spec.Story)
+	// The slug is the <storySlug> path/id segment (I-6): a story's own
+	// store.RefSlug(story.Story), or — R-RR2-1/R-RR2-2, spec/readiness-
+	// recovery ac-6 — a feature's own spec name, the same segment VL-022's
+	// FoldFeature path probes.
+	var slug string
+	if spec.Class == artifact.ClassFeature {
+		specRef, err := artifact.ParseRef(spec.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, "attest: internal error: resolved spec has an invalid id:", err)
+			return 2
+		}
+		slug = specRef.Name
+	} else {
+		slug = store.RefSlug(spec.Story)
+	}
 
 	// The pre-check (ac-2's "check"): a nice, specific error on the common
 	// case. The atomic O_CREATE|O_EXCL open below (ac-2's "write") is the
 	// actual race-safety backstop for a file appearing in between — dc-2's
 	// "never overwrite a human record" made mechanically race-safe (I-12).
-	exists, err := attestationAlreadyExists(root, storySlug, acID)
+	exists, err := attestationAlreadyExists(root, slug, acID)
 	if err != nil {
 		fmt.Fprintln(stderr, "attest:", err)
 		return 2
 	}
 	if exists {
-		fmt.Fprintf(stderr, "attest: an attestation already exists at %s — nothing written\n", attestationPath(root, storySlug, acID))
+		fmt.Fprintf(stderr, "attest: an attestation already exists at %s — nothing written\n", attestationPath(root, slug, acID))
 		return 1
 	}
 
@@ -98,8 +116,8 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.M
 		return 2
 	}
 
-	content := evidence.RenderAttestationScaffold(evidence.AttestationScaffold{
-		StorySlug:   storySlug,
+	scaffold := evidence.AttestationScaffold{
+		StorySlug:   slug,
 		ACID:        acID,
 		StoryRefArg: storyRefArg,
 		VerifiesRef: spec.ID,
@@ -111,7 +129,18 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.M
 		// determinism rule targets. Routed through the shared constructor
 		// for structural consistency with every other Frozen mint.
 		Frozen: artifact.NewFrozen(time.Now().UTC().Format("2006-01-02"), head),
-	})
+	}
+	if spec.Class == artifact.ClassFeature {
+		scaffold.Class = artifact.ClassFeature
+		for _, ac := range spec.AcceptanceCriteria {
+			if ac.ID == acID {
+				scaffold.CriterionText = ac.Text
+				scaffold.EvidenceKinds = ac.Evidence
+				break
+			}
+		}
+	}
+	content := evidence.RenderAttestationScaffold(scaffold)
 
 	// Self-validate the exact bytes before ever touching disk (AC-4;
 	// CLAUDE.md: "never fake success") — the same pre-write posture
@@ -126,7 +155,7 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.M
 		return 2
 	}
 
-	path := attestationPath(root, storySlug, acID)
+	path := attestationPath(root, slug, acID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fmt.Fprintln(stderr, "attest:", err)
 		return 2
@@ -158,24 +187,30 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.M
 	}
 
 	fmt.Fprintf(stdout, "attest: scaffolded %s\n", path)
-	fmt.Fprintln(stdout, "attest: unauthored — replace the marker with your own first-person claim before this AC can fold as evidenced")
+	if spec.Class == artifact.ClassFeature {
+		fmt.Fprintln(stdout, "attest: unauthored — replace the marker with your own first-person outcome claim before this criterion's outcome floor is satisfied")
+	} else {
+		fmt.Fprintln(stdout, "attest: unauthored — replace the marker with your own first-person claim before this AC can fold as evidenced")
+	}
 	return 0
 }
 
 // classifyPair resolves storyRefArg and acID against root's active store,
-// returning exactly one of three outcomes: the resolved story spec on
-// success (refusal == "", opErr == nil); a non-empty, human-readable refusal
-// reason on any of AC-2's "(story, AC) pair does not exist" VERDICT shapes
-// (the story-ref does not resolve, the resolved spec is not class: story —
-// including a component spec, re-worded in attest's own terms rather than
-// leaking storyresolve's matrix framing, ADJ-51 finding 3 — or the resolved
-// story does not declare acID); or a non-nil OPERATIONAL error (opErr) when
-// resolution itself fails on machinery — a spec present but unreadable or
-// undecodable, or a store listing that fails (ADJ-51 finding 1). The caller
-// maps opErr to exit 2 and any non-empty refusal to exit 1: dc-5 groups even
-// an unresolvable ref under the verdict (a disclosed divergence from matrix's
-// own exit-2 posture for the identical resolution failure), but co-2's exit
-// discipline forbids dressing a genuine operational failure as that verdict.
+// returning exactly one of three outcomes: the resolved story-or-feature
+// spec on success (refusal == "", opErr == nil — R-RR2-4 widened admission
+// to both classes); a non-empty, human-readable refusal reason on any of
+// AC-2's "(story, AC) pair does not exist" VERDICT shapes (the spec-ref
+// does not resolve, the resolved spec is neither class: story nor class:
+// feature — including a component spec, re-worded in attest's own terms
+// rather than leaking storyresolve's matrix framing, ADJ-51 finding 3 — or
+// the resolved spec does not declare acID); or a non-nil OPERATIONAL error
+// (opErr) when resolution itself fails on machinery — a spec present but
+// unreadable or undecodable, or a store listing that fails (ADJ-51 finding
+// 1). The caller maps opErr to exit 2 and any non-empty refusal to exit 1:
+// dc-5 groups even an unresolvable ref under the verdict (a disclosed
+// divergence from matrix's own exit-2 posture for the identical resolution
+// failure), but co-2's exit discipline forbids dressing a genuine
+// operational failure as that verdict.
 //
 // Resolution reuses resolveBuildTarget (buildstart.go), NOT
 // storyresolve.Resolve directly: storyresolve.Resolve's own scheme-
@@ -221,7 +256,21 @@ func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artif
 		}
 		return nil, err.Error(), nil
 	}
-	if spec.Class != artifact.ClassStory {
+	// R-RR2-4 (spec/readiness-recovery ac-6): the verb's grammar widened —
+	// <spec-ref> now accepts a story ref, a story spec ref, OR a feature
+	// spec ref, so ClassFeature is admitted here exactly like ClassStory
+	// (the L-M14 remedy 2 feature-refusal branch this replaced — pointing
+	// at the true-closure hand-authoring precedent — no longer applies:
+	// this verb now scaffolds the feature AC's own outcome attestation
+	// directly, at attestations/<feature-name>/<ac-id>.md). By this point
+	// spec.Class can only be ClassComponent among the remaining
+	// possibilities (resolveBuildTarget's own storyresolve.Resolve call
+	// already turns a class: component spec-ref into a ComponentSpecError,
+	// handled separately above, before this branch is ever reached) — the
+	// check stays explicit rather than assumed, so a future spec class
+	// added here falls back to this generic refusal rather than silently
+	// being admitted.
+	if spec.Class != artifact.ClassStory && spec.Class != artifact.ClassFeature {
 		// Display resolution (L-M13(1)): both class words resolve, with
 		// model.Indefinite composing each article-word pair; the emphatic
 		// STORY is the same resolved word upper-cased. The class COMPARISON
@@ -231,36 +280,6 @@ func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artif
 		refusal := fmt.Sprintf("%s resolves to %s-class spec, not %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
 			model.Indefinite(classWord),
 			model.Indefinite(storyWord), strings.ToUpper(storyWord))
-
-		// L-M14 remedy 2: for a feature-class target specifically, point at
-		// the hand-authoring convention instead of dead-ending. By this
-		// point spec.Class can only be ClassFeature (resolveBuildTarget's
-		// own storyresolve.Resolve call already turns a class: component
-		// spec-ref into a ComponentSpecError, handled separately above,
-		// before this branch is ever reached) — but the check stays
-		// explicit rather than assumed, so a future spec class added here
-		// falls back to the generic refusal above rather than a wrong
-		// pointer. This verb (verdi attest) only ever scaffolds a
-		// STORY-scope attestation (attestations/<story-slug>/<ac-id>.md,
-		// I-6/I-31); a feature AC's own OUTCOME attestation (03 §The
-		// feature fold's outcome floor) is a different record at a
-		// different path — attestations/<feature-slug>/<ac-id>.md,
-		// CODEOWNERS-routed (03 §Attestations and waivers) — that no verb
-		// scaffolds today (no feature-scope AttestationScaffold exists;
-		// CODEOWNERS routing for it is aspirational, L-M14's own note).
-		// The true-closure precedent
-		// (.verdi/attestations/true-closure/ac-1.md..ac-4.md) shows the
-		// shape to hand-author: the same attestation frontmatter (id,
-		// kind, title, owners, a verifies link to the feature spec, a
-		// frozen stamp) this verb would have scaffolded, at that path.
-		if spec.Class == artifact.ClassFeature {
-			specRef, err := artifact.ParseRef(spec.ID)
-			if err != nil {
-				return nil, "", fmt.Errorf("attest: internal error: resolved spec has an invalid id: %w", err)
-			}
-			refusal += fmt.Sprintf("; a %s AC's own outcome attestation is hand-authored directly at %s (03 §The feature fold's outcome floor, §Attestations and waivers; the spec/true-closure precedent), not scaffolded by this verb",
-				classWord, evidence.AttestationPath("", specRef.Name, acID))
-		}
 		return nil, refusal, nil
 	}
 	for _, ac := range spec.AcceptanceCriteria {

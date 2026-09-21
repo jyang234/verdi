@@ -5,10 +5,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // attestFixtureStorySpecMD is a story spec declaring two ACs — the exact
@@ -305,34 +308,106 @@ func TestRunAttest_RefusesUnknownStoryRef(t *testing.T) {
 	assertTreeUnchanged(t, repo.Dir, before)
 }
 
-// TestRunAttest_RefusesWrongClass proves AC-2/dc-5's scope boundary: a
-// story-ref that resolves to a non-story (here class: feature) spec is
-// refused under the SAME "pair does not exist" verdict (exit 1) — "no
-// STORY exists to attest an AC against" — never exit 0, never exit 2. L-M14
-// remedy 2: the refusal additionally points at the hand-authoring
-// convention (attestations/<feature-slug>/<ac-id>.md) rather than dead-
-// ending, naming the EXACT path for this (feature, ac) pair.
-func TestRunAttest_RefusesWrongClass(t *testing.T) {
+// TestRunAttest_FeatureHappy proves ac-6/R-RR2-4: a <spec-ref> that
+// resolves to a class: feature spec is now ADMITTED (the wrong-class
+// refusal this test replaced, TestRunAttest_RefusesWrongClass, dead-ended
+// features before spec/readiness-recovery widened the grammar) — the
+// scaffold lands at attestations/<feature-name>/<ac-id>.md, carries a
+// single verifies edge to the feature spec, the feature's own owners
+// copied verbatim, and the criterion's own accepted text quoted in the
+// body (R-RR2-1). The second stdout line differs from the story form's
+// (spec/readiness-recovery ac-6: "this criterion's outcome floor"), and a
+// second call against the same pair refuses (exit 1) rather than
+// overwriting it, exactly like the story form.
+//
+// guide-claim: 7.3-attest
+func TestRunAttest_FeatureHappy(t *testing.T) {
+	repo := buildAttestFixtureRepo(t)
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-1", nil, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runAttest(feature-class target) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	path := filepath.Join(repo.Dir, ".verdi", "attestations", "attest-fixture-feature", "ac-1.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading scaffolded feature attestation at %s: %v", path, err)
+	}
+	content := string(data)
+
+	fm, body, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+	}
+	decoded, err := artifact.DecodeAttestation(fm)
+	if err != nil {
+		t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+	}
+
+	if decoded.ID != "attestation/attest-fixture-feature--ac-1" {
+		t.Errorf("id = %q, want attestation/attest-fixture-feature--ac-1", decoded.ID)
+	}
+	if len(decoded.Links) != 1 || decoded.Links[0].Type != artifact.LinkVerifies || decoded.Links[0].Ref != "spec/attest-fixture-feature" {
+		t.Errorf("links = %+v, want a single verifies edge to spec/attest-fixture-feature", decoded.Links)
+	}
+	if len(decoded.Owners) != 1 || decoded.Owners[0] != "platform-team" {
+		t.Errorf("owners = %v, want the feature spec's own owners verbatim [platform-team]", decoded.Owners)
+	}
+	if !bytes.Contains(body, []byte("the feature outcome holds")) {
+		t.Errorf("body does not quote the feature spec's own ac-1 criterion text:\n%s", body)
+	}
+	if !bytes.HasPrefix(body, []byte(evidence.UnauthoredAttestationMarker)) {
+		t.Errorf("body does not start with the unauthored marker:\n%s", body)
+	}
+
+	lines := strings.Split(stdout.String(), "\n")
+	if len(lines) < 2 || !contains(lines[0], path) {
+		t.Errorf("stdout first line = %q, want it to name the scaffolded path %q", stdout.String(), path)
+	}
+	const wantSecondLine = "attest: unauthored — replace the marker with your own first-person outcome claim before this criterion's outcome floor is satisfied"
+	if len(lines) < 2 || lines[1] != wantSecondLine {
+		t.Errorf("stdout second line = %q, want %q", stdout.String(), wantSecondLine)
+	}
+
+	stdout2, stderr2, code2 := runAttestBuffers(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-1", nil)
+	if code2 != 1 {
+		t.Fatalf("runAttest(feature pair, already exists) = %d, want 1; stdout=%s stderr=%s", code2, stdout2, stderr2)
+	}
+	if !contains(stderr2, "already exists") {
+		t.Errorf("stderr = %q, want it to say the attestation already exists", stderr2)
+	}
+}
+
+// TestRunAttest_FeatureUndeclaredAC proves the feature form's own AC-2
+// analog: a feature spec-ref resolves, but the given ac-id is not one of
+// its declared acceptance criteria — refused (exit 1, verdict), naming the
+// undeclared id, exactly like the story form's TestRunAttest_RefusesUndeclaredAC.
+func TestRunAttest_FeatureUndeclaredAC(t *testing.T) {
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-1", nil, &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-99", nil, &stdout, &stderr)
 	if got != 1 {
-		t.Fatalf("runAttest(feature-class target) = %d, want 1 (verdict)", got)
+		t.Fatalf("runAttest(feature, undeclared ac) = %d, want 1 (verdict)", got)
 	}
-	if !contains(stderr.String(), "feature") {
-		t.Errorf("stderr = %q, want it to name the offending class", stderr.String())
-	}
-	wantPath := ".verdi/attestations/attest-fixture-feature/ac-1.md"
-	if !contains(stderr.String(), wantPath) {
-		t.Errorf("stderr = %q, want it to point at the hand-authoring convention path %q (L-M14 remedy 2)", stderr.String(), wantPath)
-	}
-	if !contains(stderr.String(), "hand-authored") {
-		t.Errorf("stderr = %q, want it to name the hand-authoring convention instead of dead-ending (L-M14 remedy 2)", stderr.String())
+	if !contains(stderr.String(), "ac-99") {
+		t.Errorf("stderr = %q, want it to name the undeclared ac-id", stderr.String())
 	}
 	assertTreeUnchanged(t, repo.Dir, before)
+}
+
+// runAttestBuffers is a small runAttest wrapper returning stdout/stderr as
+// strings alongside the exit code — used where a test needs to inspect
+// both streams of a second call without re-declaring three locals inline.
+func runAttestBuffers(ctx context.Context, root, storyRefArg, acID string, mdl *model.Model) (stdout, stderr string, code int) {
+	var outBuf, errBuf bytes.Buffer
+	code = runAttest(ctx, root, storyRefArg, acID, mdl, &outBuf, &errBuf)
+	return outBuf.String(), errBuf.String(), code
 }
 
 // TestRunAttest_RefusesUndeclaredAC proves AC-2's third refusal shape: a
@@ -555,26 +630,22 @@ func TestClassifyPair(t *testing.T) {
 		}
 	})
 
-	t.Run("resolved spec is not class story (verdict)", func(t *testing.T) {
+	// R-RR2-4 (spec/readiness-recovery ac-6): the verb's grammar widened —
+	// a resolved class: feature spec is now ADMITTED, exactly like a
+	// story, rather than refused. This subtest replaces the pre-ac-6
+	// "resolved spec is not class story (verdict)" case, which asserted
+	// the now-superseded feature refusal (L-M14 remedy 2's own
+	// hand-authoring pointer, no longer reachable through this path).
+	t.Run("resolved feature spec is admitted (R-RR2-4)", func(t *testing.T) {
 		spec, refusal, opErr := classifyPair(repo.Dir, "spec/attest-fixture-feature", "ac-1", nil)
-		if refusal == "" {
-			t.Fatal("want a non-empty refusal reason")
+		if refusal != "" || opErr != nil {
+			t.Fatalf("refusal = %q, opErr = %v, want neither (a feature spec-ref is admitted)", refusal, opErr)
 		}
-		if opErr != nil {
-			t.Fatalf("opErr = %v, want nil", opErr)
+		if spec == nil || spec.ID != "spec/attest-fixture-feature" {
+			t.Fatalf("spec = %+v, want spec/attest-fixture-feature", spec)
 		}
-		if spec != nil {
-			t.Fatalf("spec = %+v, want nil on refusal", spec)
-		}
-		if !contains(refusal, "feature") {
-			t.Errorf("refusal = %q, want it to name the offending class", refusal)
-		}
-		// L-M14 remedy 2: the feature-ref refusal points at the exact
-		// hand-authoring path for THIS (feature, ac) pair instead of
-		// dead-ending.
-		wantPath := ".verdi/attestations/attest-fixture-feature/ac-1.md"
-		if !contains(refusal, wantPath) {
-			t.Errorf("refusal = %q, want it to name the hand-authoring path %q", refusal, wantPath)
+		if spec.Class != artifact.ClassFeature {
+			t.Fatalf("spec.Class = %q, want feature", spec.Class)
 		}
 	})
 
