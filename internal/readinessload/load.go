@@ -21,6 +21,20 @@ import (
 // derivation with no supplied --context-request.
 const noContextRequestWitness = "no context request supplied for this derivation"
 
+// staleConflictReportWitness is R-RR1-18's fixed witness sentence for a
+// cached policy-conflict report whose target content digest does not match
+// the spec bytes on disk. That report cannot speak for these bytes, which
+// is the SAME epistemic state as a cache miss — so the derivation
+// discloses it as unproven rather than failing operationally (CLAUDE.md's
+// three-valued honesty: disclosed-as-unproven over an operational
+// failure). It deliberately carries no path, digest or control character:
+// readinesspilot rejects control characters, and the digests, while
+// deterministic, tell an operator nothing they can act on. The
+// context-conflict verb named here is the destination that refreshes the
+// report, and it is exactly the verb the request-bound contextFallback
+// vector already points at.
+const staleConflictReportWitness = "the cached policy-conflict report was computed for different spec bytes than the ones on disk; re-run the context-conflict verb to refresh it"
+
 // noContextRequestCLI is R-RR1-5's fixed context/verdict destination when
 // no request was supplied: an instructive vector naming the verb and flag a
 // caller would use to supply one, not a runnable command against any real
@@ -250,7 +264,20 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	if conflictUnavailable == "" {
 		candidate := report.Input.Target.Candidate
 		if candidate.ContentDigest != readinessDigest(specBytes) {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: conflict report target content digest %q does not match decoded spec bytes %q", candidate.ContentDigest, readinessDigest(specBytes))
+			// R-RR1-18: a digest MISMATCH is the same epistemic state as a
+			// cache MISS — the cached report was computed over different
+			// spec bytes, so it cannot speak for the ones on disk. It used
+			// to be a loader error, which meant a single spec edit blanked
+			// the entire readiness page (and, through one server-wide
+			// loader, kept blanking it for every other spec too). The
+			// report is dropped rather than shown: nothing it says was
+			// evaluated against these bytes, and readinesspilot refuses a
+			// non-zero report alongside an unavailability witness anyway.
+			// contextFallback is deliberately left as the request-bound
+			// vector — re-running the context-conflict verb IS how the
+			// report is refreshed.
+			conflictUnavailable = staleConflictReportWitness
+			report = policyconflict.Report{}
 		}
 	}
 

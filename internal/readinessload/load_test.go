@@ -1180,3 +1180,77 @@ func TestLoad_ShapeDestinationRewrite(t *testing.T) {
 		assertCLI(t, provenance.Destination.CLI, []string{"verdi", "journey", ref})
 	})
 }
+
+// TestLoad_StaleConflictReportIsACacheMissNotAnError is R-RR1-18: a cached
+// policy-conflict report whose target content digest does not match the
+// spec bytes on disk is in exactly the same epistemic state as a cache
+// MISS — it cannot speak for these bytes. It used to be a loader error,
+// which meant a single spec edit blanked the whole readiness page (and,
+// through one server-wide loader, kept blanking it). CLAUDE.md's
+// three-valued honesty makes disclosed-as-unproven the required answer
+// over an operational failure: the context/verdict concern goes unproven
+// carrying the fixed witness sentence, and its destination stays the
+// request-bound context-conflict vector, because re-running that verb IS
+// the way to refresh the report.
+func TestLoad_StaleConflictReportIsACacheMissNotAnError(t *testing.T) {
+	repo, ref := readinessRepo(t, "feature")
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
+
+	staleBytes := []byte("the spec bytes the judge evaluated, since edited on disk\n")
+	l := loader{newConflictProvider: func(_ context.Context, root string, request policyconflict.Request, _ JudgeMode, _ ActorsResolver) (policyconflict.VerdictProvider, error) {
+		return providerFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			return fixtureReport(t, root, request, policyconflict.VerdictBlockedViolated, func(report *policyconflict.Report) {
+				report.Input.Target.Candidate.ContentDigest = testDigest(staleBytes)
+			}), nil
+		}), nil
+	}}
+
+	snap, err := l.load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath})
+	if err != nil {
+		t.Fatalf("a stale cached report must be a cache miss, not a loader error, got: %v", err)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("snapshot Validate: %v", err)
+	}
+	verdict := concernByID(t, snap, "context/verdict")
+	if verdict.State != readinesspilot.StateUnproven {
+		t.Fatalf("context/verdict state = %q, want unproven", verdict.State)
+	}
+	if !reflect.DeepEqual(verdict.Witnesses, []string{staleConflictReportWitness}) {
+		t.Fatalf("context/verdict witnesses = %q, want exactly the fixed stale-report sentence %q", verdict.Witnesses, staleConflictReportWitness)
+	}
+	// The destination stays the request-bound vector: the context-conflict
+	// verb is the destination that refreshes the report.
+	assertCLI(t, verdict.Destination.CLI, []string{"verdi", "context", "conflict", "--request", requestPath})
+
+	// The stale report must not speak at all: no mechanical, semantic or
+	// disclosure row may be derived from bytes it did not evaluate — the
+	// report it carried was a VerdictBlockedViolated one, so a row leaking
+	// through would be visible here.
+	for _, concern := range snap.AllConcerns {
+		if strings.HasPrefix(concern.ID, "context/") && concern.ID != "context/verdict" {
+			t.Fatalf("concern %q derived from a report that does not match the spec bytes on disk", concern.ID)
+		}
+	}
+
+	// The witness is display prose the readiness pilot must accept: no
+	// path, no digest, no control character.
+	for _, forbidden := range []string{repo.Dir, requestPath, "sha256:", "\n", "\t"} {
+		if strings.Contains(staleConflictReportWitness, forbidden) {
+			t.Fatalf("witness %q must not contain %q", staleConflictReportWitness, forbidden)
+		}
+	}
+
+	// Positive control: the same fixture WITHOUT the digest mutation still
+	// travels the whole conflict path, so the assertions above are the
+	// ruling at work and not a request that never reached a report.
+	fresh := loader{newConflictProvider: passProviderFactory(t, repo.Dir)}
+	freshSnap, err := fresh.load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath})
+	if err != nil {
+		t.Fatalf("control load: %v", err)
+	}
+	if got := concernByID(t, freshSnap, "context/verdict"); got.State != readinesspilot.StateProven {
+		t.Fatalf("control context/verdict = %+v, want proven", got)
+	}
+}
