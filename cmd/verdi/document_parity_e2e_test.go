@@ -494,7 +494,11 @@ func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
 //     the resolution (a CLI request flag, or an amendment defining parity
 //     over equivalent request inputs) to the owner with SI-211. Until
 //     that lands this arm pins the SHIPPED divergence so a change in it
-//     is visible, and asserts nothing about its conformance.
+//     is visible, and asserts nothing about its conformance. The owner
+//     chose the amendment on 2026-09-21: spec/readiness-recovery-v2 ac-4
+//     (design/readiness-recovery-v2) defines parity over equivalent
+//     context-request inputs and names this exact divergence, so once it
+//     merges this arm pins conforming behaviour.
 //
 // Both request-bound legs run through Options.ConflictProvider (R-RR1-14's
 // hermetic seam, readinessLoadPassProviderFunc) so no judge process is

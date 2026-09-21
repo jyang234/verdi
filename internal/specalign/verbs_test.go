@@ -153,7 +153,11 @@
 // docs/guide-claims.yaml's 7.3-attest entry, and this note — not
 // verdi-surfaces' table. No assertion is added here to pin the grammar
 // string: this file's inventory mechanism has nothing to key it on, and a
-// fake assertion would not be a witness.
+// fake assertion would not be a witness. The amendment is authored: the
+// owner ratified the widened row on 2026-09-21 (08-revision-notes,
+// "Readiness-recovery correction wave — attest verb grammar"), and
+// design/readiness-recovery-v2 syncs the mirror; once that branch merges
+// this note is historical and the table is the contract again.
 package specalign
 
 import (
