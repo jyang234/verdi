@@ -24,6 +24,26 @@ const (
 	LeftDeleteFailed                 // switched back, DeleteBranch failed
 )
 
+// String names o for logging/disclosure, self-naming an out-of-set value
+// rather than printing a bare int (the package's usual shape, e.g.
+// internal/execworkspace's Outcome.String).
+func (o Outcome) String() string {
+	switch o {
+	case Unwound:
+		return "unwound"
+	case LeftUninspectable:
+		return "left-uninspectable"
+	case LeftAheadOfCut:
+		return "left-ahead-of-cut"
+	case LeftSwitchFailed:
+		return "left-switch-failed"
+	case LeftDeleteFailed:
+		return "left-delete-failed"
+	default:
+		return fmt.Sprintf("branchcut.Outcome(%d)", int(o))
+	}
+}
+
 // Unwind is verdi close's branch-cut unwind, moved here verbatim so
 // close and recover run ONE sequence (spec/readiness-recovery-v2 ac-9:
 // "with the sequence close already uses"): re-prove branch still points
