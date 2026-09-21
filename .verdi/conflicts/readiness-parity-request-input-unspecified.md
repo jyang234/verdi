@@ -51,8 +51,10 @@ through the request and the request-free CLI in exactly the Readiness
 section, disclosed by the no-request and stale-request witnesses — and
 carrying every other object byte-identical. The owner chose this option on
 2026-09-21 over a `verdi spec doc` request flag, which remains available as
-a later feature. Cascade fold: zero affected stories — the four spike stories
-that depend on `spec/readiness-recovery` (`ritual-write-scope-spike`,
-`self-governance-spike`, `mutation-ratchet-spike`, `verification-rules-spike`)
-carry whole-spec `depends-on` edges and no object-level edge into ac-4 — so
-the single-owner acceptance price applies.
+a later feature. Cascade fold: zero affected stories — the only frontmatter
+edges into `spec/readiness-recovery` are whole-spec `depends-on` links on
+five feature specs (`ritual-write-scope`, `ritual-write-scope-v2`,
+`self-governance`, `mutation-ratchet`, `verification-rules`); their spike
+stories mention the spec only in body prose and declare no edge, and no
+story anywhere carries an object-level edge into ac-4 — so the single-owner
+acceptance price applies.
