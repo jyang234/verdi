@@ -355,7 +355,7 @@ func recognizeArtifactsStagedUncommitted(f Facts) []RecognizedState {
 }
 
 func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
-	if !(f.ArchiveSpecOnDisk && !f.ActiveSpecOnDisk && f.ActiveSpecAtHead && !f.ArchiveSpecAtHead) {
+	if !f.ArchiveSpecOnDisk || f.ActiveSpecOnDisk || !f.ActiveSpecAtHead || f.ArchiveSpecAtHead {
 		return nil
 	}
 	if closureStagedSpecName(f.StagedPaths) == f.Name {

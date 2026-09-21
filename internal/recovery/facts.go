@@ -154,7 +154,7 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	}
 
 	root := cfg.Root
-	class, err := specClassAt(ctx, root, ref.Name)
+	class, err := specClassAt(root, ref.Name)
 	if err != nil {
 		return Facts{}, fmt.Errorf("recovery: gather: %w", err)
 	}
@@ -301,13 +301,19 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 // imported, since cmd/verdi is package main.
 const gcUnprovenSpecsRefusal = "gc: --reclaim-unmanaged: one or more active-zone specs have an unproven effective lifecycle state; refusing to compute or apply a reclamation plan over an incomplete scan"
 
-// specClassAt resolves name's spec class by checking, in order: the
-// on-disk active zone, HEAD's active zone, the on-disk archive zone, and
-// HEAD's archive zone — the target spec may not be visible in the
-// current working tree/HEAD at all depending on which ritual branch
-// happens to be checked out, so every place its bytes could legitimately
-// live is tried before giving up.
-func specClassAt(ctx context.Context, root, name string) (artifact.SpecClass, error) {
+// specClassAt resolves name's spec class from the CURRENT on-disk
+// checkout only: the active zone, then the archive zone. Reading a
+// spec's class from a ritual branch's own tree without checking it out
+// would need gitx.Show (blob content at an arbitrary ref), which is
+// outside this package's own read-only command-surface allow-list
+// (commandsurface_test.go, Step 15's enumerated list — os.ReadFile is not
+// a gitx call, so it carries no such restriction). This is a real,
+// disclosed narrowing: `verdi recover <ref>` needs its target spec.md
+// visible in the checkout it is run from (its active zone, or its
+// archive zone once closed) to resolve which class-gated inventory
+// applies, and reports an operational error naming that otherwise —
+// never a guess.
+func specClassAt(root, name string) (artifact.SpecClass, error) {
 	var lastDecodeErr error
 	if data, err := os.ReadFile(store.ActiveSpecPath(root, name)); err == nil {
 		fm, ferr := artifact.DecodeSpec(data)
@@ -316,9 +322,6 @@ func specClassAt(ctx context.Context, root, name string) (artifact.SpecClass, er
 		}
 		lastDecodeErr = ferr
 	}
-	if class, ok := specClassAtHead(ctx, root, store.SpecDirRelPath(store.ZoneActive, name), store.SpecRelPath(store.ZoneActive, name), &lastDecodeErr); ok {
-		return class, nil
-	}
 	if data, err := os.ReadFile(store.ArchiveSpecPath(root, name)); err == nil {
 		fm, ferr := artifact.DecodeSpec(data)
 		if ferr == nil {
@@ -326,30 +329,10 @@ func specClassAt(ctx context.Context, root, name string) (artifact.SpecClass, er
 		}
 		lastDecodeErr = ferr
 	}
-	if class, ok := specClassAtHead(ctx, root, store.SpecDirRelPath(store.ZoneArchive, name), store.SpecRelPath(store.ZoneArchive, name), &lastDecodeErr); ok {
-		return class, nil
-	}
 	if lastDecodeErr != nil {
 		return "", fmt.Errorf("spec/%s's spec.md could not be decoded (last attempt: %w)", name, lastDecodeErr)
 	}
-	return "", fmt.Errorf("could not find spec/%s's spec.md at HEAD, on disk, or in the archive zone", name)
-}
-
-func specClassAtHead(ctx context.Context, root, dirRelPath, fileRelPath string, lastDecodeErr *error) (artifact.SpecClass, bool) {
-	entries, err := gitx.LsTree(ctx, root, "HEAD", dirRelPath)
-	if err != nil || len(entries) == 0 {
-		return "", false
-	}
-	data, err := gitx.Show(ctx, root, "HEAD", fileRelPath)
-	if err != nil {
-		return "", false
-	}
-	fm, err := artifact.DecodeSpec(data)
-	if err != nil {
-		*lastDecodeErr = err
-		return "", false
-	}
-	return fm.Class, true
+	return "", fmt.Errorf("could not find spec/%s's spec.md in the current checkout (active or archive zone)", name)
 }
 
 func pathExists(path string) bool {
