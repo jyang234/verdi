@@ -107,3 +107,54 @@ self-governance: review REVISE (F1..F7, no Critical). Rulings: F1 ACCEPT — 479
 2026-09-21T03:46:00Z WAVE GATE run 1 at 459b5a24 (VERIFY_STEPS without e2e, skill §11): build/fmt-check/vet/lint ok; test FAILED at 620 s — cmd/verdi 'panic: test timed out after 10m0s' (go test default wall, Makefile passes no -timeout) while running TestHelp_LintNeverExecutes; 100 packages ok before the timeout; load 20–80 (whole-wave reviewer + an external specalign run concurrently). Diff is docs-only → attributed to load, not the change; cmd/verdi re-run alone with -timeout 40m in progress; full gate to be re-run on a quiet machine after the whole-wave review finishes. Log kept as wave-gate-run1-459b5a24.log.
 2026-09-21T03:50:16Z WHOLE-WAVE REVIEW: ACCEPT (W-1..W-3 Important as feature-build obligations; W-4..W-7 minor). Controller actions: W-1/W-2/W-6 disclosures in self-governance README (b5cafc4d); W-3/W-4 disclosures in strict-lint (9f7b9c90), verification-rules (323b068c), mutation-ratchet (c496f6a9); four wave-1 SHAs tagged locally spike-evidence/readiness-recovery-wave-1/<sha> (push = owner action). Four lanes re-merged --no-ff; new wave head 2aa9c2843f2c9701ef5b74cd553c5424af21aa72; gate run 2 to follow on this head.
 2026-09-21T03:54:41Z cmd/verdi standalone: go test -race -count=1 -timeout 40m ./cmd/verdi/ → ok 509.526 s, exit 0, load 9.8→4.0 (log cmdverdi-race-standalone.log). Confirms run-1 timeout was load, not a red test; note only ~15% headroom under the 10-min default wall (gate fragility, PA-025 class, pre-existing). Gate run 2 launched at 2aa9c284 on a quiet machine.
+
+## Owner decisions taken (2026-09-21)
+
+Recorded after the owner read the five READMEs and this report. Each is
+reversible in the way named; the sub-choices inside 3 and 4 are the
+controller's reading of "as recommended" and are flagged in the handoff.
+
+1. **mutation-ratchet: closed as not-doing** under the parent's own oq-3
+   rule. The spec stays accepted-pending-build and no build starts; the
+   mechanism gap (no not-doing status or verb for an accepted feature) is
+   invention-ledger I-132. Carried forward as ordinary follow-ups, not as
+   this feature: the hand-seeded persistence fixture as a regression test
+   for readiness-recovery's co-2 test; `internal/align`'s 1-second judge
+   deadline and `internal/sealedexec`'s stale-witness failures to the
+   product tracker.
+2. **ritual-write-scope: `index_carry` enum adopted** (refused, scoped,
+   carried, no_commit) with a first-holds precedence rule in execution
+   order; invention-ledger I-131. **v2 started:** spec/ritual-write-scope-v2
+   on `design/ritual-write-scope-v2` (worktree `verdi-wt/ritual-write-scope-v2`,
+   content commit a8fdd479), superseding the parent with ac-1/ac-2/ac-4/dc-2
+   amended, dc-3/dc-4/dc-5 added, oq-1..oq-5 removed as answered, three
+   story stubs (gitx-recorder-seam, write-scope-registry,
+   ritual-effect-witness). CI-shaped `verdi lint` exit 0 on the head.
+3. **strict-lint-target:** `dupl` leaves the gate (same-package report-only
+   is optional, never ac-3's witness); `containedctx`, `noctx`,
+   `contextcheck`, `errorlint` stay; `exhaustive` is re-measured with
+   `default-signifies-exhaustive: true` before ac-1's list is final;
+   `gochecknoglobals` stays, with a Go-style sentence on package-level
+   mutable state added to CLAUDE.md so it enforces a written rule;
+   committed baseline over `--new-from-rev`. ac-3's retro-witness is
+   rewritten to the reachable half (the readiness loader globals) in the
+   v2; "114 linters" becomes 111.
+4. **self-governance:** ac-4 is restated against the policy-conflict path
+   that already honours review windows; wiring `lint`/`journey` to that
+   path is a separate later item. ac-1's "28 active specs" becomes 39.
+   Rules 4 and 5 ("every commit builds", "never bare git stash") gain
+   sentences in CLAUDE.md's build-workflow section so ac-3's drift witness
+   has its mirror; co-1's referent is resolved in the v2 before amendment
+   order is stated; co-3's exemptions list starts with the golangci-lint
+   parity exception as its only measured row.
+5. **verification-rules:** ac-2's threshold is T=18 on the deduplicated
+   basis (backlog 4), recorded as a decision with a revisit trigger when a
+   second rater labels the sample; Seam B for ac-1's citation; the co-1
+   ratification request carries the 46-line 02-clauses.diff and the
+   seven-consumer table; ac-4's enumerating test adjudicates three rows
+   together (status, problem/outcome, supersession). No supersession is
+   needed; the rulings land in the feature's plan.
+
+Still the owner's: push `agent/process-hardening-spikes` and the four
+`spike-evidence/readiness-recovery-wave-1/<sha>` tags; open the PR; the
+spec/verdi-surfaces drift on main.
