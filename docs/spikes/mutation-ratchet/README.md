@@ -207,9 +207,14 @@ mitigations, and why the alternatives were rejected, are in
    coverage of 9 of the 33 touched files, `cmd/verdi`'s 8 among them.
 2. **Require a canary** per package: seed one mutant that must survive and
    fail the gate unless the run reports it LIVED. Under this defect a
-   package reports 100.00% efficacy, so "efficacy == 100%" is the alarm,
-   not the goal — and ac-1's byte-identical report cannot be trusted
-   without it.
+   package reports 100.00% efficacy with every mutant a setup failure;
+   a correctly targeted package can also legitimately report 100.00%
+   (`internal/store`, 17/17 killed), so the seeded canary, not the
+   efficacy figure, is the discriminator. The canary itself is proposed
+   here and UNMEASURED: no canary was built or run in this spike; its
+   premise (a correctly targeted run reports LIVED mutants) is witnessed
+   by readinessload's 22 LIVED. ac-1's byte-identical report cannot be
+   trusted without it.
 3. Rejected: `-i/--integration` genuinely avoids the defect
    (`executor.go:199-201,234-237` replace both cwd and package argument
    with `rootDir` and `./...`), but runs the whole module suite per
@@ -384,9 +389,12 @@ others; and it does NOT scope gremlins' whole-package coverage pass):
 exclusion list per package from `git diff --name-only` and asserts
 afterwards that the report names no untouched file.
 
-**Ruling for dc-2: "only touched files are mutated" is achievable
-natively.** Not with `-D/--diff`, which returned `SKIPPED` for every
-mutant including touched ones (see oq-1), but with `-E`.
+**Ruling for dc-2's first clause: "only touched files are mutated" is
+achievable natively.** Not with `-D/--diff`, which returned `SKIPPED` for
+every mutant including touched ones (see oq-1), but with `-E`. dc-2's
+second clause, "only the tests covering them run", is NOT addressed by
+this spike: every per-mutant invocation is `go test -failfast <pkg>` with
+no `-run` filter, so the whole package suite runs per mutant.
 
 ### Configuration A — the first version's figures (gremlins defaults, whole package, post-filtered)
 
@@ -443,15 +451,22 @@ What changes, and why it matters to the spec:
   from 29 s to 7 s: 17 mutants generated instead of 101 generated-then-
   discarded. Where the touched set IS the package (readinessload), there
   is nothing to save.
-- **Two TIMED OUT appear in journey** where configuration A had none, at
-  the same `--timeout-coefficient 10`. Together with store's first,
+- **Two TIMED OUT appear in journey** where configuration A had none.
+  (Configuration A ran at gremlins' defaults, `--timeout-coefficient 3`
+  and `--workers 0` = NumCPU = 10; configuration B ran `--workers 2
+  --timeout-coefficient 10`; the two are not the same setting, corrected
+  at the closure check.) Together with store's first,
   untuned attempt (below), that is three independent observations that
   gremlins' timeout calibration is load-sensitive — on a contended
   runner a timeout is indistinguishable from a survivor, which a
   hard-failing gate cannot tolerate.
 - **The seconds are still load-bearing, not settled.** readinessload
   reads 454 s here against configuration A's 88 s for 1.32x the mutants.
-  That spread is the machine, not the tool.
+  Most of that spread is the configuration, not the machine: A ran ten
+  workers, B two (the closure check's quiet-machine re-run of B gives
+  458 s at load 3–8, within 1% of the 454 s measured at load 13). co-3's
+  58% lower bound is therefore a two-worker figure; a ten-worker run of
+  the same catalogue is unmeasured.
 
 ### Packages the pinned tool cannot measure at all
 

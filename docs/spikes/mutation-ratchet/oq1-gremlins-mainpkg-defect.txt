@@ -252,6 +252,9 @@ specific to the path derivation, not to the machine or to this module.
 
   $ cd /tmp/fix-mr && go list -f '{{.ImportPath}} {{.Name}} {{.Dir}}' ./... \
       | awk '{n=split($3,a,"/"); if (a[n] != $2) print}'
+  (the three lines below are the command's output re-annotated by hand as
+   pkgclause=/dirbase= for legibility; the literal output prints the
+   import path, package clause and directory)
   github.com/jyang234/verdi/cmd/e2eharness pkgclause=main dirbase=e2eharness
   github.com/jyang234/verdi/cmd/public-execution-contract-release pkgclause=main dirbase=public-execution-contract-release
   github.com/jyang234/verdi/cmd/verdi pkgclause=main dirbase=verdi
