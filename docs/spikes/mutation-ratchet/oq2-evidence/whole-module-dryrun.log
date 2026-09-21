@@ -1,0 +1,193 @@
+oq-2 evidence: whole-module gremlins dry-run attempt, and the baseline
+per-package coverage-gathering timings this spike's oq-2 table draws its
+"bounded by baseline timing" figures from.
+
+Command (scratch worktree, detached at e963f4d0):
+  $ gremlins unleash --dry-run --diff b810c302 --output /tmp/gremlins-dryrun-diff.json .
+  exit=1
+  wall clock: 807.00s user, 973.65s system, 292% cpu, 10:09.06 total
+
+This run was an attempt to scope gremlins to the touched-files diff over
+the WHOLE module in one invocation (path "."), superseded in this spike's
+own methodology by the per-touched-package approach oq-2's README section
+describes (this single invocation's coverage-gathering phase runs every
+package's own test suite once, exactly like `go test -cover ./...`, and
+that is expensive/fragile at whole-module scope — see below). Kept as
+evidence anyway because its output is the source of every "baseline pass"
+timing this spike quotes for the six packages it could not mutation-test
+directly this session, and because its failure is itself a real, useful
+finding.
+
+Reduction: gremlins' own progress output uses carriage returns, not
+newlines, between spinner frames; the raw capture (244 lines after
+normalizing \r to \n) is almost entirely that spinner noise. Kept below:
+every one of Go's own `ok`/`FAIL` per-package result lines (102 total —
+every package `go test`'s own coverage pass touched before the run gave
+up), verbatim and in original order; both failures' own diagnostic
+output; and the final fatal line. Nothing else was removed (there was
+nothing else — the spinner frames carry no information `wc -l` or `grep`
+can distinguish from each other).
+
+--- per-package coverage-pass result lines (Go's own, verbatim) ---------
+ok  	github.com/jyang234/verdi/cmd/e2eharness	30.926s	coverage: 50.5% of statements
+ok  	github.com/jyang234/verdi/cmd/public-execution-contract-release	1.768s	coverage: 0.0% of statements
+FAIL	github.com/jyang234/verdi/cmd/verdi	600.587s
+FAIL	github.com/jyang234/verdi/internal/align	49.823s
+ok  	github.com/jyang234/verdi/internal/artifact	30.031s	coverage: 90.7% of statements
+ok  	github.com/jyang234/verdi/internal/artifact/splice	1.618s	coverage: 82.9% of statements
+ok  	github.com/jyang234/verdi/internal/artifactview	1.175s	coverage: 44.1% of statements
+ok  	github.com/jyang234/verdi/internal/atomicfile	2.154s	coverage: 59.1% of statements
+ok  	github.com/jyang234/verdi/internal/boardio	1.456s	coverage: 85.0% of statements
+ok  	github.com/jyang234/verdi/internal/boardlayout	1.822s	coverage: 92.3% of statements
+ok  	github.com/jyang234/verdi/internal/buildinfo	2.160s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/bundle	3.041s	coverage: 89.0% of statements
+ok  	github.com/jyang234/verdi/internal/canonjson	3.017s	coverage: 86.3% of statements
+ok  	github.com/jyang234/verdi/internal/commitdesign	10.449s	coverage: 80.3% of statements
+ok  	github.com/jyang234/verdi/internal/constitutionapp	98.290s	coverage: 81.1% of statements
+ok  	github.com/jyang234/verdi/internal/constitutionimpact	3.381s	coverage: 77.1% of statements
+ok  	github.com/jyang234/verdi/internal/contextcompile	40.903s	coverage: 78.9% of statements
+ok  	github.com/jyang234/verdi/internal/contextevent	1.402s	coverage: 77.2% of statements
+ok  	github.com/jyang234/verdi/internal/contextowner	9.747s	coverage: 73.0% of statements
+ok  	github.com/jyang234/verdi/internal/contextreceipt	1.460s	coverage: 78.4% of statements
+ok  	github.com/jyang234/verdi/internal/contextresolve	3.548s	coverage: 88.1% of statements
+ok  	github.com/jyang234/verdi/internal/corpus	2.477s	coverage: [no statements]
+ok  	github.com/jyang234/verdi/internal/countersign	0.914s	coverage: 78.1% of statements
+ok  	github.com/jyang234/verdi/internal/decisionsweep	1.005s	coverage: 83.3% of statements
+ok  	github.com/jyang234/verdi/internal/designapp	55.755s	coverage: 85.7% of statements
+ok  	github.com/jyang234/verdi/internal/designinterview	1.235s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/designprovenance	1.396s	coverage: 78.5% of statements
+ok  	github.com/jyang234/verdi/internal/designscaffold	2.171s	coverage: 82.8% of statements
+ok  	github.com/jyang234/verdi/internal/dex	107.639s	coverage: 83.7% of statements
+ok  	github.com/jyang234/verdi/internal/diagrambase	2.457s	coverage: 74.4% of statements
+ok  	github.com/jyang234/verdi/internal/diagramedit	2.441s	coverage: 99.0% of statements
+ok  	github.com/jyang234/verdi/internal/diagramverify	2.133s	coverage: 96.4% of statements
+ok  	github.com/jyang234/verdi/internal/disclosure	1.771s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/disclosureview	2.004s	coverage: 89.5% of statements
+ok  	github.com/jyang234/verdi/internal/draftmutation	13.566s	coverage: 78.6% of statements
+ok  	github.com/jyang234/verdi/internal/evidence	19.624s	coverage: 92.1% of statements
+ok  	github.com/jyang234/verdi/internal/execworkspace	170.636s	coverage: 90.8% of statements
+ok  	github.com/jyang234/verdi/internal/experiment	3.427s	coverage: 82.6% of statements
+ok  	github.com/jyang234/verdi/internal/experimentapp	56.632s	coverage: 75.6% of statements
+ok  	github.com/jyang234/verdi/internal/experimentdecision	1.122s	coverage: 93.5% of statements
+ok  	github.com/jyang234/verdi/internal/experimentevaluator	3.070s	coverage: 87.7% of statements
+ok  	github.com/jyang234/verdi/internal/experimenthuman	0.755s	coverage: 89.3% of statements
+ok  	github.com/jyang234/verdi/internal/experimentpolicy	1.559s	coverage: 81.9% of statements
+ok  	github.com/jyang234/verdi/internal/experimentrun	2.029s	coverage: 68.3% of statements
+ok  	github.com/jyang234/verdi/internal/filelock	2.299s	coverage: 81.8% of statements
+ok  	github.com/jyang234/verdi/internal/fixturegit	6.638s	coverage: 59.0% of statements
+ok  	github.com/jyang234/verdi/internal/forge	0.333s	coverage: 87.2% of statements
+ok  	github.com/jyang234/verdi/internal/forge/fake	0.553s	coverage: 85.3% of statements
+ok  	github.com/jyang234/verdi/internal/forge/github	0.898s	coverage: 65.8% of statements
+ok  	github.com/jyang234/verdi/internal/forge/gitlab	0.931s	coverage: 66.3% of statements
+ok  	github.com/jyang234/verdi/internal/gitx	87.841s	coverage: 92.5% of statements
+ok  	github.com/jyang234/verdi/internal/governanceprincipal	0.702s	coverage: 95.2% of statements
+ok  	github.com/jyang234/verdi/internal/httpjson	0.880s	coverage: 91.2% of statements
+ok  	github.com/jyang234/verdi/internal/humanartifact	0.445s	coverage: 82.8% of statements
+ok  	github.com/jyang234/verdi/internal/index	10.140s	coverage: 89.7% of statements
+ok  	github.com/jyang234/verdi/internal/initwizard	0.882s	coverage: 93.5% of statements
+ok  	github.com/jyang234/verdi/internal/instructionprojection	4.374s	coverage: 92.2% of statements
+ok  	github.com/jyang234/verdi/internal/journey	(cached)	coverage: 94.8% of statements
+ok  	github.com/jyang234/verdi/internal/lifecyclecountersign	0.371s	coverage: 83.3% of statements
+ok  	github.com/jyang234/verdi/internal/lint	301.285s	coverage: 87.5% of statements
+ok  	github.com/jyang234/verdi/internal/matrixprojection	1.670s	coverage: 80.1% of statements
+ok  	github.com/jyang234/verdi/internal/mcpserve	72.506s	coverage: 78.9% of statements
+ok  	github.com/jyang234/verdi/internal/model	0.608s	coverage: 97.4% of statements
+ok  	github.com/jyang234/verdi/internal/policyadopt	0.409s	coverage: 80.2% of statements
+ok  	github.com/jyang234/verdi/internal/policyartifact	0.440s	coverage: 87.4% of statements
+ok  	github.com/jyang234/verdi/internal/policyauthority	2.057s	coverage: 89.9% of statements
+ok  	github.com/jyang234/verdi/internal/policyconflict	56.710s	coverage: 86.0% of statements
+ok  	github.com/jyang234/verdi/internal/policyintegration	1.613s	coverage: [no statements]
+ok  	github.com/jyang234/verdi/internal/provider	0.238s	coverage: 78.1% of statements
+ok  	github.com/jyang234/verdi/internal/provider/fake	0.249s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/provider/jira	0.695s	coverage: 88.8% of statements
+ok  	github.com/jyang234/verdi/internal/publicrelease	3.859s	coverage: 54.5% of statements
+ok  	github.com/jyang234/verdi/internal/readinessload	(cached)	coverage: 77.4% of statements
+ok  	github.com/jyang234/verdi/internal/readinesspilot	0.453s	coverage: 93.0% of statements
+ok  	github.com/jyang234/verdi/internal/readinesspilot/readinesstest	0.240s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/reclaim	13.032s	coverage: 97.7% of statements
+ok  	github.com/jyang234/verdi/internal/refindex	13.729s	coverage: 90.3% of statements
+ok  	github.com/jyang234/verdi/internal/render	0.325s	coverage: 77.8% of statements
+ok  	github.com/jyang234/verdi/internal/repositoryfacts	0.294s	coverage: 92.6% of statements
+ok  	github.com/jyang234/verdi/internal/residue	31.527s	coverage: 89.1% of statements
+ok  	github.com/jyang234/verdi/internal/runtimeprobe	0.232s	coverage: 93.8% of statements
+FAIL	github.com/jyang234/verdi/internal/sealedexec	46.193s
+ok  	github.com/jyang234/verdi/internal/sealedexec/claude	51.312s	coverage: 79.6% of statements
+ok  	github.com/jyang234/verdi/internal/sealedexec/codex	0.480s	coverage: 68.9% of statements
+ok  	github.com/jyang234/verdi/internal/sealedreview	6.960s	coverage: 75.5% of statements
+ok  	github.com/jyang234/verdi/internal/showcasealign	249.848s	coverage: [no statements]
+ok  	github.com/jyang234/verdi/internal/skillpack	7.168s	coverage: 90.0% of statements
+ok  	github.com/jyang234/verdi/internal/specalign	360.583s	coverage: [no statements]
+ok  	github.com/jyang234/verdi/internal/specdoc	0.688s	coverage: 98.3% of statements
+ok  	github.com/jyang234/verdi/internal/specdocload	12.038s	coverage: 86.1% of statements
+ok  	github.com/jyang234/verdi/internal/specimport	50.329s	coverage: 88.7% of statements
+ok  	github.com/jyang234/verdi/internal/specname	2.545s	coverage: 100.0% of statements
+ok  	github.com/jyang234/verdi/internal/specstate	14.563s	coverage: 85.2% of statements
+ok  	github.com/jyang234/verdi/internal/store	4.027s	coverage: 93.1% of statements
+ok  	github.com/jyang234/verdi/internal/storyresolve	0.271s	coverage: 71.2% of statements
+ok  	github.com/jyang234/verdi/internal/stubinstantiate	4.379s	coverage: 81.5% of statements
+ok  	github.com/jyang234/verdi/internal/supersede	3.113s	coverage: 94.0% of statements
+ok  	github.com/jyang234/verdi/internal/svcfixcanned	0.226s	coverage: [no statements]
+ok  	github.com/jyang234/verdi/internal/upstream	1.308s	coverage: 82.5% of statements
+ok  	github.com/jyang234/verdi/internal/wallbadge	2.807s	coverage: 92.2% of statements
+ok  	github.com/jyang234/verdi/internal/workbench	269.793s	coverage: 89.5% of statements
+ok  	github.com/jyang234/verdi/internal/wtmanager	7.677s	coverage: 76.7% of statements
+
+--- both failures' own diagnostic output (verbatim) ----------------------
+
+cmd/verdi (600.587s — hit Go's own default 10-minute per-package test
+timeout; the tail of its stack trace, showing the timeout firing mid-`Run`):
+  created by testing.(*T).Run in goroutine 35078
+  goroutine 35078 [chan receive]:
+  testing.(*T).Run(0x14001a208c0, {0x102dca8fa?, 0xf?}, 0x140001c3740)
+  	/usr/local/go/src/testing/testing.go:2005 +0x378
+  github.com/jyang234/verdi/cmd/verdi.TestBuildGateConflictPreEffect(0x14001a208c0)
+  	/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/cmd/verdi/gate_test.go:258 +0x110
+  testing.tRunner(0x14001a208c0, 0x103942298)
+  	/usr/local/go/src/testing/testing.go:1934 +0xc8
+  created by testing.(*T).Run in goroutine 1
+  	/usr/local/go/src/testing/testing.go:1997 +0x364
+  FAIL	github.com/jyang234/verdi/cmd/verdi	600.587s
+
+internal/align (49.823s — NOT a mutation-testing finding; a pre-existing
+product test with its own 1-second subprocess-response deadline, which
+this session's shared load blew, unrelated to anything this spike
+touched):
+  --- FAIL: TestGenerate_JudgedSlugMatch_BecomesCandidate_AllDispositionedFalse (2.33s)
+      finding_identity_test.go:89: no judged-j-1 among [... judged-coverage-absent Text:judged coverage absent: no result within 1s (stage=timeout, exit=0, cmd=".../fakejudge.sh") ...]
+  --- FAIL: TestGenerate_JudgedDriftingSlug_NotResurfaced_TallyStillDry (2.31s)
+      finding_identity_test.go:147: NotResurfaced = [... judged-coverage-absent ... no result within 1s (stage=timeout, ...)], want judged-j-1 preserved (drifting slug)
+  FAIL
+  coverage: 88.1% of statements
+  FAIL	github.com/jyang234/verdi/internal/align	49.823s
+
+internal/sealedexec (46.193s — appears much later in the log, after
+internal/runtimeprobe, per Go's own alphabetical package ordering; a
+separate, unrelated failure):
+  --- FAIL: TestPublicControllerConsolidationImportSuccessor (0.04s)
+      --- FAIL: TestPublicControllerConsolidationImportSuccessor/witness-coverage (0.03s)
+          public_consolidation_import_test.go:232: unmapped drift in bound source cmd/verdi/context.go
+  --- FAIL: TestPublicControllerConsolidationWitnessSensitivity (0.60s)
+      --- FAIL: TestPublicControllerConsolidationWitnessSensitivity/valid-control (0.11s)
+          public_consolidation_sensitivity_test.go:73: complete witness refused: exit status 1
+              --- FAIL: TestPublicControllerConsolidationWitnessSensitivity (0.03s)
+                  public_consolidation_sensitivity_test.go:58: stale witness source cmd/verdi/context.go
+              FAIL
+              coverage: 0.0% of statements
+  --- FAIL: TestPublicControllerConsolidationWitness (0.05s)
+      public_consolidation_witness_test.go:86: stale witness source internal/policyconflict/service.go
+
+Final line:
+  ERROR: failed to gather coverage: impossible to executeCoverage coverage: exit status 1
+
+Both failures are pre-existing in this wave-1 branch's own tree at
+e963f4d0, discovered as a side effect of attempting a whole-module
+`--diff` scope, not introduced by this spike and not touched by it.
+align's is a load-sensitivity gap in the product's own test suite (a
+hardcoded 1s subprocess deadline), independently interesting to the
+process-hardening effort but out of this spike's scope to fix. sealedexec's
+"stale witness source cmd/verdi/context.go" / "...internal/policyconflict/
+service.go" is consistent with the wave-1 diff itself having edited both
+files (they are on this diff's own touched-file list) without regenerating
+a witness fixture that tracks their content — also out of scope to fix
+here, but worth the implementing feature's attention if it inherits this
+branch.

@@ -1,0 +1,524 @@
+commitdesign.test  -test.paniconexit0	add	--
+commitdesign.test  -test.paniconexit0	commit	-m
+commitdesign.test  -test.paniconexit0	diff	--name-status -M
+commitdesign.test  -test.paniconexit0	log	-1 --format=%cI
+commitdesign.test  -test.paniconexit0	ls-files	
+commitdesign.test  -test.paniconexit0	merge-base	--is-ancestor
+commitdesign.test  -test.paniconexit0	rev-parse	--verify
+commitdesign.test  -test.paniconexit0	rev-parse	--verify -q
+commitdesign.test  -test.paniconexit0	status	--porcelain -z --untracked-files=no
+commitdesign.test  -test.paniconexit0	status	--porcelain=v1 -z --untracked-files=all
+designapp.test  -test.paniconexit0	diff	--name-status -M
+designapp.test  -test.paniconexit0	for-each-ref	--format=%(refname:short)
+designapp.test  -test.paniconexit0	ls-files	
+designapp.test  -test.paniconexit0	ls-tree	--
+designapp.test  -test.paniconexit0	ls-tree	--name-only --
+designapp.test  -test.paniconexit0	ls-tree	-r --name-only --
+designapp.test  -test.paniconexit0	merge-base	
+designapp.test  -test.paniconexit0	rev-list	--first-parent --reverse --
+designapp.test  -test.paniconexit0	rev-parse	--verify
+designapp.test  -test.paniconexit0	show	
+designapp.test  -test.paniconexit0	show-ref	--verify --quiet
+designapp.test  -test.paniconexit0	status	--porcelain
+designapp.test  -test.paniconexit0	symbolic-ref	--short -q
+verdi audit	rev-parse	--git-dir
+verdi audit	show-ref	--verify --quiet
+verdi audit	symbolic-ref	--short -q
+verdi build start	checkout	-b
+verdi build start	config	--local --get-all
+verdi build start	ls-tree	--
+verdi build start	ls-tree	-r --name-only --
+verdi build start	ls-tree	-rz --full-tree
+verdi build start	remote	
+verdi build start	rev-list	--first-parent --reverse --
+verdi build start	rev-parse	--verify
+verdi build start	show	
+verdi build start	show-ref	--verify --quiet
+verdi build start	status	--porcelain
+verdi build start	status	--porcelain -z --untracked-files=no
+verdi build start	status	--porcelain=v1 -z --untracked-files=all
+verdi build start	symbolic-ref	--short -q
+verdi close --context-request	ls-tree	--
+verdi close --context-request	ls-tree	-r --name-only --
+verdi close --context-request	ls-tree	-rz --full-tree
+verdi close --context-request	remote	
+verdi close --context-request	rev-list	--first-parent --reverse --
+verdi close --context-request	rev-parse	--verify
+verdi close --context-request	show	
+verdi close --context-request	show-ref	--verify --quiet
+verdi close --context-request	status	--porcelain
+verdi close --context-request	status	--porcelain -z --untracked-files=no
+verdi close --context-request	status	--porcelain=v1 -z --untracked-files=all
+verdi close --context-request	symbolic-ref	--short -q
+verdi close --force-local	add	--
+verdi close --force-local	checkout	-b
+verdi close --force-local	commit	-m
+verdi close --force-local	log	-1 --format=%cI
+verdi close --force-local	ls-tree	--
+verdi close --force-local	ls-tree	--name-only --
+verdi close --force-local	ls-tree	-r --name-only --
+verdi close --force-local	ls-tree	-rz --full-tree
+verdi close --force-local	remote	
+verdi close --force-local	rev-list	--first-parent --reverse --
+verdi close --force-local	rev-parse	--verify
+verdi close --force-local	show	
+verdi close --force-local	show-ref	--verify --quiet
+verdi close --force-local	status	--porcelain
+verdi close --force-local	status	--porcelain -z --untracked-files=no
+verdi close --force-local	status	--porcelain=v1 -z --untracked-files=all
+verdi close --force-local	symbolic-ref	--short -q
+verdi close --preflight	ls-tree	--
+verdi close --preflight	ls-tree	--name-only --
+verdi close --preflight	ls-tree	-r --name-only --
+verdi close --preflight	ls-tree	-rz --full-tree
+verdi close --preflight	remote	
+verdi close --preflight	rev-list	--first-parent --reverse --
+verdi close --preflight	rev-parse	--verify
+verdi close --preflight	show	
+verdi close --preflight	show-ref	--verify --quiet
+verdi close --preflight	status	--porcelain
+verdi close --preflight	status	--porcelain -z --untracked-files=no
+verdi close --preflight	status	--porcelain=v1 -z --untracked-files=all
+verdi close --preflight	symbolic-ref	--short -q
+verdi close --prepare	remote	
+verdi close --prepare	rev-parse	--verify
+verdi close --prepare	status	--porcelain -z --untracked-files=no
+verdi close spec/close-feature-fixture	hash-object	
+verdi close spec/close-feature-fixture	ls-files	--cached --others --exclude-standard
+verdi close spec/close-feature-fixture	ls-tree	--
+verdi close spec/close-feature-fixture	ls-tree	-r --name-only --
+verdi close spec/close-feature-fixture	ls-tree	-rz --full-tree
+verdi close spec/close-feature-fixture	remote	
+verdi close spec/close-feature-fixture	rev-list	--first-parent --reverse --
+verdi close spec/close-feature-fixture	rev-parse	--verify
+verdi close spec/close-feature-fixture	show	
+verdi close spec/close-feature-fixture	show-ref	--verify --quiet
+verdi close spec/close-feature-fixture	status	--porcelain
+verdi close spec/close-feature-fixture	status	--porcelain -z --untracked-files=no
+verdi close spec/close-feature-fixture	status	--porcelain=v1 -z --untracked-files=all
+verdi close spec/close-feature-fixture	symbolic-ref	--short -q
+verdi close spec/close-fixture	hash-object	
+verdi close spec/close-fixture	ls-files	--cached --others --exclude-standard
+verdi close spec/close-fixture	ls-tree	--
+verdi close spec/close-fixture	ls-tree	-r --name-only --
+verdi close spec/close-fixture	ls-tree	-rz --full-tree
+verdi close spec/close-fixture	merge-base	--is-ancestor
+verdi close spec/close-fixture	remote	
+verdi close spec/close-fixture	rev-list	--first-parent --reverse --
+verdi close spec/close-fixture	rev-parse	--verify
+verdi close spec/close-fixture	rev-parse	--verify -q
+verdi close spec/close-fixture	show	
+verdi close spec/close-fixture	show-ref	--verify --quiet
+verdi close spec/close-fixture	status	--porcelain
+verdi close spec/close-fixture	status	--porcelain -z --untracked-files=no
+verdi close spec/close-fixture	status	--porcelain=v1 -z --untracked-files=all
+verdi close spec/close-fixture	symbolic-ref	--short -q
+verdi close spec/quarantine-story	ls-tree	--
+verdi close spec/quarantine-story	ls-tree	-r --name-only --
+verdi close spec/quarantine-story	ls-tree	-rz --full-tree
+verdi close spec/quarantine-story	remote	
+verdi close spec/quarantine-story	rev-list	--first-parent --reverse --
+verdi close spec/quarantine-story	rev-parse	--git-dir
+verdi close spec/quarantine-story	rev-parse	--is-shallow-repository
+verdi close spec/quarantine-story	rev-parse	--verify
+verdi close spec/quarantine-story	rev-parse	--verify -q
+verdi close spec/quarantine-story	show	
+verdi close spec/quarantine-story	show-ref	--verify --quiet
+verdi close spec/quarantine-story	status	--porcelain -z --untracked-files=no
+verdi close spec/quarantine-story	symbolic-ref	--short -q
+verdi context compile	ls-tree	--
+verdi context compile	ls-tree	-r --name-only --
+verdi context compile	ls-tree	-rz --full-tree
+verdi context compile	remote	
+verdi context compile	rev-list	--first-parent --reverse --
+verdi context compile	rev-parse	--verify
+verdi context compile	show	
+verdi context compile	show-ref	--verify --quiet
+verdi context compile	status	--porcelain
+verdi context compile	status	--porcelain -z --untracked-files=no
+verdi context compile	status	--porcelain=v1 -z --untracked-files=all
+verdi context compile	symbolic-ref	--short -q
+verdi context conflict	config	--local --get-all
+verdi context conflict	hash-object	
+verdi context conflict	ls-files	--cached --others --exclude-standard
+verdi context conflict	ls-tree	--
+verdi context conflict	ls-tree	-r --name-only --
+verdi context conflict	ls-tree	-rz --full-tree
+verdi context conflict	remote	
+verdi context conflict	rev-list	--first-parent --reverse --
+verdi context conflict	rev-parse	--verify
+verdi context conflict	show	
+verdi context conflict	show-ref	--verify --quiet
+verdi context conflict	status	--porcelain
+verdi context conflict	status	--porcelain -z --untracked-files=no
+verdi context conflict	status	--porcelain=v1 -z --untracked-files=all
+verdi context conflict	symbolic-ref	--short -q
+verdi context constitution	add	--
+verdi context constitution	checkout	-b
+verdi context constitution	commit	-m
+verdi context constitution	ls-tree	-rtz --full-tree
+verdi context constitution	rev-parse	--verify
+verdi context constitution	show	
+verdi context constitution	show-ref	--verify --quiet
+verdi context constitution	status	--porcelain
+verdi context constitution	symbolic-ref	--short -q
+verdi context execution	diff	--name-status -M -C --find-copies-harder
+verdi context execution	ls-tree	--
+verdi context execution	ls-tree	-r --name-only --
+verdi context execution	ls-tree	-rz --full-tree
+verdi context execution	merge	--ff-only
+verdi context execution	merge-base	--is-ancestor
+verdi context execution	remote	
+verdi context execution	rev-list	--first-parent --reverse --
+verdi context execution	rev-parse	--git-common-dir
+verdi context execution	rev-parse	--verify
+verdi context execution	show	
+verdi context execution	show-ref	--verify --quiet
+verdi context execution	status	--porcelain
+verdi context execution	status	--porcelain -z --untracked-files=no
+verdi context execution	status	--porcelain=v1 -z --untracked-files=all
+verdi context execution	symbolic-ref	--short -q
+verdi context execution	worktree	--detach
+verdi context execution	worktree	--porcelain
+verdi context mcp	rev-parse	--verify
+verdi context mcp	status	--porcelain
+verdi context resolve	ls-tree	--
+verdi context resolve	ls-tree	-r --name-only --
+verdi context resolve	ls-tree	-rz --full-tree
+verdi context resolve	remote	
+verdi context resolve	rev-list	--first-parent --reverse --
+verdi context resolve	rev-parse	--verify
+verdi context resolve	show	
+verdi context resolve	show-ref	--verify --quiet
+verdi context resolve	status	--porcelain
+verdi context resolve	status	--porcelain -z --untracked-files=no
+verdi context resolve	status	--porcelain=v1 -z --untracked-files=all
+verdi context resolve	symbolic-ref	--short -q
+verdi design board	diff	--name-status -M
+verdi design board	for-each-ref	--format=%(refname:short)
+verdi design board	ls-files	
+verdi design board	ls-tree	--
+verdi design board	merge-base	
+verdi design board	rev-parse	--verify
+verdi design board	show-ref	--verify --quiet
+verdi design board	status	--porcelain
+verdi design board	symbolic-ref	--short -q
+verdi design capabilities	ls-tree	--
+verdi design capabilities	rev-parse	--verify
+verdi design capabilities	show-ref	--verify --quiet
+verdi design capabilities	symbolic-ref	--short -q
+verdi design context	rev-parse	--verify
+verdi design context	symbolic-ref	--short -q
+verdi design import	commit-tree	-p -m
+verdi design import	diff	--name-status -M
+verdi design import	hash-object	
+verdi design import	hash-object	-w --stdin
+verdi design import	ls-files	--cached --others --exclude-standard
+verdi design import	ls-tree	--
+verdi design import	ls-tree	-r --name-only --
+verdi design import	read-tree	
+verdi design import	rev-list	--first-parent --reverse --
+verdi design import	rev-parse	--verify
+verdi design import	show	
+verdi design import	show-ref	--verify --quiet
+verdi design import	status	--porcelain=v1 -z --untracked-files=all
+verdi design import	symbolic-ref	--short -q
+verdi design import	update-index	--add --cacheinfo
+verdi design import	update-ref	
+verdi design import	write-tree	
+verdi design mutate	ls-tree	--
+verdi design mutate	rev-parse	--verify
+verdi design mutate	show-ref	--verify --quiet
+verdi design mutate	symbolic-ref	--short -q
+verdi design provenance	rev-parse	--verify
+verdi design provenance	symbolic-ref	--short -q
+verdi design review	ls-tree	--name-only --
+verdi design review	rev-parse	--verify
+verdi design review	show-ref	--verify --quiet
+verdi design review	symbolic-ref	--short -q
+verdi design start	add	--
+verdi design start	checkout	-b
+verdi design start	commit	-m
+verdi design start	ls-tree	--
+verdi design start	ls-tree	-r --name-only --
+verdi design start	remote	
+verdi design start	rev-list	--first-parent --reverse --
+verdi design start	rev-parse	--git-dir
+verdi design start	rev-parse	--verify
+verdi design start	show	
+verdi design start	show-ref	--verify --quiet
+verdi design start	symbolic-ref	--short -q
+verdi experiment capture-candidate	rev-parse	--verify
+verdi experiment capture-candidate	show-ref	--verify --quiet
+verdi experiment discover-capabilities	rev-parse	--verify
+verdi experiment discover-capabilities	show-ref	--verify --quiet
+verdi experiment draft-definition	ls-tree	-rz --full-tree
+verdi experiment draft-definition	rev-parse	--verify
+verdi experiment draft-definition	show-ref	--verify --quiet
+verdi experiment explain-result	ls-tree	-rz --full-tree
+verdi experiment explain-result	rev-parse	--verify
+verdi experiment explain-result	show	
+verdi experiment explain-result	show-ref	--verify --quiet
+verdi experiment inspect	ls-tree	-rz --full-tree
+verdi experiment inspect	rev-parse	--verify
+verdi experiment inspect	show	
+verdi experiment inspect	show-ref	--verify --quiet
+verdi experiment propose-ratification	ls-tree	-rz --full-tree
+verdi experiment propose-ratification	rev-parse	--verify
+verdi experiment propose-ratification	show	
+verdi experiment propose-ratification	show-ref	--verify --quiet
+verdi experiment propose-registration	ls-tree	-rz --full-tree
+verdi experiment propose-registration	rev-parse	--verify
+verdi experiment propose-registration	show	
+verdi experiment propose-registration	show-ref	--verify --quiet
+verdi experiment publish-capsule	ls-tree	-rz --full-tree
+verdi experiment publish-capsule	rev-parse	--verify
+verdi experiment publish-capsule	show	
+verdi experiment publish-capsule	show-ref	--verify --quiet
+verdi experiment reconcile-draft	ls-tree	-rz --full-tree
+verdi experiment reconcile-draft	rev-parse	--verify
+verdi experiment reconcile-draft	show	
+verdi experiment reconcile-draft	show-ref	--verify --quiet
+verdi experiment release-workspaces	ls-tree	-rz --full-tree
+verdi experiment release-workspaces	rev-parse	--verify
+verdi experiment release-workspaces	show	
+verdi experiment release-workspaces	show-ref	--verify --quiet
+verdi experiment resume	ls-tree	-rz --full-tree
+verdi experiment resume	rev-parse	--verify
+verdi experiment resume	show	
+verdi experiment resume	show-ref	--verify --quiet
+verdi experiment review-registration	ls-tree	-rz --full-tree
+verdi experiment review-registration	rev-parse	--verify
+verdi experiment review-registration	show	
+verdi experiment review-registration	show-ref	--verify --quiet
+verdi experiment start	ls-tree	-rz --full-tree
+verdi experiment start	rev-parse	--git-dir
+verdi experiment start	rev-parse	--verify
+verdi experiment start	show	
+verdi experiment start	show-ref	--verify --quiet
+verdi experiment start	symbolic-ref	--short -q
+verdi experiment status	ls-tree	-rz --full-tree
+verdi experiment status	rev-parse	--verify
+verdi experiment status	show	
+verdi experiment status	show-ref	--verify --quiet
+verdi experiment validate-draft	rev-parse	--verify
+verdi experiment validate-draft	show-ref	--verify --quiet
+verdi gate	ls-tree	--
+verdi gate	ls-tree	-r --name-only --
+verdi gate	ls-tree	-rz --full-tree
+verdi gate	remote	
+verdi gate	rev-list	--first-parent --reverse --
+verdi gate	rev-parse	--verify
+verdi gate	show	
+verdi gate	show-ref	--verify --quiet
+verdi gate	symbolic-ref	--short -q
+verdi gate --context-request	hash-object	
+verdi gate --context-request	ls-files	--cached --others --exclude-standard
+verdi gate --context-request	ls-tree	--
+verdi gate --context-request	ls-tree	-r --name-only --
+verdi gate --context-request	ls-tree	-rz --full-tree
+verdi gate --context-request	remote	
+verdi gate --context-request	rev-list	--first-parent --reverse --
+verdi gate --context-request	rev-parse	--verify
+verdi gate --context-request	show	
+verdi gate --context-request	show-ref	--verify --quiet
+verdi gate --context-request	status	--porcelain
+verdi gate --context-request	status	--porcelain -z --untracked-files=no
+verdi gate --context-request	status	--porcelain=v1 -z --untracked-files=all
+verdi gate --context-request	symbolic-ref	--short -q
+verdi gc	merge-base	--is-ancestor
+verdi gc	rev-parse	--git-common-dir
+verdi gc	rev-parse	--verify
+verdi gc	show-ref	--verify --quiet
+verdi gc	status	--porcelain
+verdi gc	worktree	
+verdi gc	worktree	--porcelain
+verdi gc --reclaim-unmanaged	branch	-d
+verdi gc --reclaim-unmanaged	for-each-ref	--format=%(refname:short)
+verdi gc --reclaim-unmanaged	merge-base	--is-ancestor
+verdi gc --reclaim-unmanaged	rev-parse	--git-dir
+verdi gc --reclaim-unmanaged	rev-parse	--verify
+verdi gc --reclaim-unmanaged	show-ref	--verify --quiet
+verdi gc --reclaim-unmanaged	status	--porcelain
+verdi gc --reclaim-unmanaged	symbolic-ref	--short -q
+verdi gc --reclaim-unmanaged	worktree	
+verdi gc --reclaim-unmanaged	worktree	--porcelain
+verdi harness render	rev-parse	--verify
+verdi journey --json	ls-tree	--
+verdi journey --json	ls-tree	-r --name-only --
+verdi journey --json	remote	
+verdi journey --json	rev-list	--first-parent --reverse --
+verdi journey --json	rev-parse	--verify
+verdi journey --json	show	
+verdi journey --json	show-ref	--verify --quiet
+verdi journey --json	status	--porcelain
+verdi journey --json	status	--porcelain -z --untracked-files=no
+verdi journey --json	symbolic-ref	--short -q
+verdi journey spec/journey-story	ls-tree	--
+verdi journey spec/journey-story	ls-tree	-r --name-only --
+verdi journey spec/journey-story	remote	
+verdi journey spec/journey-story	rev-list	--first-parent --reverse --
+verdi journey spec/journey-story	rev-parse	--verify
+verdi journey spec/journey-story	show	
+verdi journey spec/journey-story	show-ref	--verify --quiet
+verdi journey spec/journey-story	status	--porcelain
+verdi journey spec/journey-story	status	--porcelain -z --untracked-files=no
+verdi journey spec/journey-story	symbolic-ref	--short -q
+verdi journey spec/payments	ls-tree	--
+verdi journey spec/payments	ls-tree	-r --name-only --
+verdi journey spec/payments	remote	
+verdi journey spec/payments	rev-list	--first-parent --reverse --
+verdi journey spec/payments	rev-parse	--verify
+verdi journey spec/payments	show	
+verdi journey spec/payments	show-ref	--verify --quiet
+verdi journey spec/payments	status	--porcelain
+verdi journey spec/payments	status	--porcelain -z --untracked-files=no
+verdi journey spec/payments	symbolic-ref	--short -q
+verdi journey spec/story-alpha	ls-tree	--
+verdi journey spec/story-alpha	ls-tree	-r --name-only --
+verdi journey spec/story-alpha	remote	
+verdi journey spec/story-alpha	rev-list	--first-parent --reverse --
+verdi journey spec/story-alpha	rev-parse	--verify
+verdi journey spec/story-alpha	show	
+verdi journey spec/story-alpha	show-ref	--verify --quiet
+verdi journey spec/story-alpha	status	--porcelain
+verdi journey spec/story-alpha	status	--porcelain -z --untracked-files=no
+verdi journey spec/story-alpha	symbolic-ref	--short -q
+verdi lint	diff	--name-status -M
+verdi lint	ls-files	
+verdi lint	ls-tree	--
+verdi lint	ls-tree	-r --name-only --
+verdi lint	merge-base	
+verdi lint	rev-list	--first-parent --reverse --
+verdi lint	show	
+verdi lint	show-ref	--verify --quiet
+verdi lint	symbolic-ref	--short -q
+verdi matrix --json	ls-tree	--
+verdi matrix --json	ls-tree	-r --name-only --
+verdi matrix --json	merge-base	--is-ancestor
+verdi matrix --json	rev-list	--first-parent --reverse --
+verdi matrix --json	rev-parse	--verify
+verdi matrix --json	rev-parse	--verify -q
+verdi matrix --json	show	
+verdi matrix --json	show-ref	--verify --quiet
+verdi matrix --preview	ls-tree	--
+verdi matrix --preview	ls-tree	-r --name-only --
+verdi matrix --preview	merge-base	--is-ancestor
+verdi matrix --preview	rev-list	--first-parent --reverse --
+verdi matrix --preview	rev-parse	--verify
+verdi matrix --preview	rev-parse	--verify -q
+verdi matrix --preview	show	
+verdi matrix --preview	show-ref	--verify --quiet
+verdi matrix spec/stale-decline	ls-tree	--
+verdi matrix spec/stale-decline	ls-tree	-r --name-only --
+verdi matrix spec/stale-decline	merge-base	--is-ancestor
+verdi matrix spec/stale-decline	rev-list	--first-parent --reverse --
+verdi matrix spec/stale-decline	rev-parse	--verify
+verdi matrix spec/stale-decline	rev-parse	--verify -q
+verdi matrix spec/stale-decline	show	
+verdi matrix spec/stale-decline	show-ref	--verify --quiet
+verdi matrix spec/waive-fixture-story	rev-parse	--git-dir
+verdi matrix spec/waive-fixture-story	rev-parse	--verify
+verdi matrix spec/waive-fixture-story	show-ref	--verify --quiet
+verdi matrix spec/waive-fixture-story	symbolic-ref	--short -q
+verdi obligation author	log	-1 --format=%cI
+verdi obligation author	ls-tree	--name-only --
+verdi obligation author	merge-base	
+verdi obligation author	rev-parse	--git-dir
+verdi obligation author	rev-parse	--verify
+verdi obligation author	show-ref	--verify --quiet
+verdi obligation author	symbolic-ref	--short -q
+verdi obligation scaffold	log	-1 --format=%cI
+verdi obligation scaffold	ls-tree	--
+verdi obligation scaffold	rev-parse	--verify
+verdi obligation scaffold	show-ref	--verify --quiet
+verdi policy adopt	add	--
+verdi policy adopt	checkout	-b
+verdi policy adopt	commit	-m --
+verdi policy adopt	config	--local --get-all
+verdi policy adopt	rev-parse	--git-dir
+verdi policy adopt	rev-parse	--verify
+verdi policy adopt	show-ref	--verify --quiet
+verdi policy adopt	symbolic-ref	--short -q
+verdi policy adopt	var	
+verdi serve --http	hash-object	
+verdi serve --http	ls-files	--cached --others --exclude-standard
+verdi serve --http	ls-tree	--
+verdi serve --http	ls-tree	-r --name-only --
+verdi serve --http	ls-tree	-rz --full-tree
+verdi serve --http	remote	
+verdi serve --http	rev-list	--first-parent --reverse --
+verdi serve --http	rev-parse	--verify
+verdi serve --http	show	
+verdi serve --http	show-ref	--verify --quiet
+verdi serve --http	status	--porcelain
+verdi serve --http	status	--porcelain -z --untracked-files=no
+verdi serve --http	symbolic-ref	--short -q
+verdi spec doc	ls-tree	--
+verdi spec doc	ls-tree	-r --name-only --
+verdi spec doc	rev-list	--first-parent --reverse --
+verdi spec doc	rev-parse	--verify
+verdi spec doc	show	
+verdi spec doc	show-ref	--verify --quiet
+verdi sync --produce-runtime	remote	
+verdi sync --produce-runtime	rev-parse	--verify
+verdi sync --produce-runtime	symbolic-ref	--short -q
+verdi waive jira:WAIVE-1	rev-parse	--verify
+verdi.test  -test.paniconexit0	add	--
+verdi.test  -test.paniconexit0	add	-A
+verdi.test  -test.paniconexit0	branch	-d
+verdi.test  -test.paniconexit0	checkout	
+verdi.test  -test.paniconexit0	checkout	-b
+verdi.test  -test.paniconexit0	commit	-m
+verdi.test  -test.paniconexit0	commit	-m ->
+verdi.test  -test.paniconexit0	commit-tree	-p -m
+verdi.test  -test.paniconexit0	config	--local --get-all
+verdi.test  -test.paniconexit0	diff	--name-status -M
+verdi.test  -test.paniconexit0	for-each-ref	--format=%(refname:short)
+verdi.test  -test.paniconexit0	hash-object	
+verdi.test  -test.paniconexit0	hash-object	-w --stdin
+verdi.test  -test.paniconexit0	log	--format=%H%cI%an%s
+verdi.test  -test.paniconexit0	log	--format=%H%cI%an%s --
+verdi.test  -test.paniconexit0	log	-1 --format=%cI
+verdi.test  -test.paniconexit0	ls-files	
+verdi.test  -test.paniconexit0	ls-files	--cached --others --exclude-standard
+verdi.test  -test.paniconexit0	ls-tree	--
+verdi.test  -test.paniconexit0	ls-tree	--name-only --
+verdi.test  -test.paniconexit0	ls-tree	-r --name-only --
+verdi.test  -test.paniconexit0	ls-tree	-rtz --full-tree
+verdi.test  -test.paniconexit0	ls-tree	-rz --full-tree
+verdi.test  -test.paniconexit0	merge-base	
+verdi.test  -test.paniconexit0	merge-base	--is-ancestor
+verdi.test  -test.paniconexit0	read-tree	
+verdi.test  -test.paniconexit0	remote	
+verdi.test  -test.paniconexit0	rev-list	--first-parent --reverse --
+verdi.test  -test.paniconexit0	rev-list	--left-right --count
+verdi.test  -test.paniconexit0	rev-parse	--git-common-dir
+verdi.test  -test.paniconexit0	rev-parse	--git-dir
+verdi.test  -test.paniconexit0	rev-parse	--git-path
+verdi.test  -test.paniconexit0	rev-parse	--is-shallow-repository
+verdi.test  -test.paniconexit0	rev-parse	--show-prefix
+verdi.test  -test.paniconexit0	rev-parse	--verify
+verdi.test  -test.paniconexit0	rev-parse	--verify -q
+verdi.test  -test.paniconexit0	show	
+verdi.test  -test.paniconexit0	show-ref	--verify --quiet
+verdi.test  -test.paniconexit0	status	--porcelain
+verdi.test  -test.paniconexit0	status	--porcelain -z --untracked-files=no
+verdi.test  -test.paniconexit0	status	--porcelain=v1 -z --untracked-files=all
+verdi.test  -test.paniconexit0	symbolic-ref	--short -q
+verdi.test  -test.paniconexit0	update-index	--add --cacheinfo
+verdi.test  -test.paniconexit0	update-ref	
+verdi.test  -test.paniconexit0	var	
+verdi.test  -test.paniconexit0	worktree	
+verdi.test  -test.paniconexit0	worktree	--detach
+verdi.test  -test.paniconexit0	worktree	--porcelain
+verdi.test  -test.paniconexit0	write-tree	
+wtmanager.test  -test.paniconexit0	checkout	
+wtmanager.test  -test.paniconexit0	checkout	-b
+wtmanager.test  -test.paniconexit0	merge-base	--is-ancestor
+wtmanager.test  -test.paniconexit0	rev-parse	--verify
+wtmanager.test  -test.paniconexit0	show-ref	--verify --quiet
+wtmanager.test  -test.paniconexit0	status	--porcelain
+wtmanager.test  -test.paniconexit0	symbolic-ref	--short -q
+wtmanager.test  -test.paniconexit0	update-ref	
+wtmanager.test  -test.paniconexit0	worktree	

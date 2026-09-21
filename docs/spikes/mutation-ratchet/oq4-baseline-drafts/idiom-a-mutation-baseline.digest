@@ -1,0 +1,6 @@
+{
+  "schema": "verdi.fixture-digests/v1",
+  "files": {
+    "idiom-a-mutation-baseline.json": "sha256:83c2903f9f9d6d84d4bc7602098b8f35d7cff6be00a82dfe8ab58f9551d23e79"
+  }
+}

@@ -1,0 +1,3 @@
+404 issues:
+* gochecknoglobals: 404
+exit=1

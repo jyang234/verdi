@@ -1,0 +1,17 @@
+Command: (cd /tmp/spike-sg-oq5-obligation && /tmp/verdi-sg obligation author spec/disclosure-seam ac-1 behavioral)
+Exit status: 0
+stdout:
+obligation author: scaffolded .verdi/obligations/disclosure-seam/ac-1--behavioral.md
+obligation author: unauthored — replace the marker with a first-person statement of what this evidence must specifically show before this obligation is considered authored
+
+Finding: the verb WRITES a file but does not commit it (git status shows
+it untracked) -- authoring/committing is left to the operator. The
+scaffold's shape (successful-scaffold-shape-demo.md, sibling file) has
+title/owners/for_kind/quality.state/links/frozen and a body whose fixed
+job is "state what this evidence must specifically show" -- there is no
+"reason" or "clearing_condition" field anywhere in this shape (contrast
+dc-3's required "reason, owner, witness, clearing condition"). This is
+the structural evidence behind this spike's "cannot be expressed"
+verdict for candidate (a): even where the CLI accepts the attachment
+point, the artifact it produces has the wrong fields for a process
+disclosure.

@@ -1,0 +1,9 @@
+=== RUN   TestLedger_DeferredResidualParkedLineCount
+--- PASS: TestLedger_DeferredResidualParkedLineCount (0.00s)
+=== RUN   TestLedger_NaiveClauseSplitOvercounts
+    ledger_test.go:87: matched lines: 9; naive semicolon-split clauses: 32; hand-curated distinct items: 20 (disclosures.md)
+--- PASS: TestLedger_NaiveClauseSplitOvercounts (0.00s)
+=== RUN   TestLedger_ItemsAreFreeProseNotStructuredFields
+--- PASS: TestLedger_ItemsAreFreeProseNotStructuredFields (0.00s)
+PASS
+ok  	github.com/jyang234/verdi/docs/spikes/self-governance/_scratch/oq5ledger	(cached)

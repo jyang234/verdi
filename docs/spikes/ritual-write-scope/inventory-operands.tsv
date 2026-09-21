@@ -1,0 +1,57 @@
+# inventory-operands.tsv — oq-1/ac-1 operands, the reduction gitlog-dedup-all-verbs.tsv discards.
+#
+# gitlog-dedup-all-verbs.tsv keeps only (who, subcommand, flags), which drops exactly the
+# tokens ac-1 fields are made of: branch names, their bases, pathspecs, and the `--` separator
+# that decides whether a commit is scoped. This file keeps the FULL argument vector of every
+# mutating invocation of the five governed rituals, deduplicated. 37 data rows.
+#
+# Produced by: sh reduce-operands.sh <raw-recorder-log.tsv>   (the script states the reduction
+# rule in full; in short: filter to the five rituals by `who`, keep only mutating subcommands
+# by an allowlist derived from the raw log's own subcommand census, normalize ONLY the volatile
+# fixture root to <repo>/<tmp>, sort -u.)
+#
+# Provenance: regenerated independently in fix round 1 — recorder.patch re-applied in a fresh
+# /tmp clone, `VERDI_SPIKE_GITLOG=... go test ./cmd/verdi/ ./internal/designapp/
+# ./internal/wtmanager/ ./internal/commitdesign/ ./internal/policyadopt/` exit 0, all five
+# packages ok, 21173 raw lines (the original run recorded 21174). Running this reduction over
+# BOTH raw logs produces byte-identical output, so every operand below reproduced across two
+# independent recorder runs.
+#
+ritual	args (full vector, operands intact)
+build_start	checkout -b feature/localop-story
+build_start	checkout -b feature/succ-story
+close	add -- .verdi/specs/active/exp-spike .verdi/specs/archive/exp-spike
+close	checkout -b close/exp-spike
+close	commit -m close: archive spec/exp-spike (jira:EXP-1)
+commit_to_design	add -- <repo>/.verdi/specs/active/dup
+commit_to_design	add -- <repo>/.verdi/specs/active/my-new-feature
+commit_to_design	add -- <repo>/.verdi/specs/active/no-story-flag
+commit_to_design	add -- <repo>/.verdi/specs/active/override-born
+commit_to_design	add -- <repo>/.verdi/specs/active/stages-only-specdir
+commit_to_design	add -- <repo>/.verdi/specs/active/tracks-fixture-model
+commit_to_design	add -- <repo>/.verdi/specs/active/vl014-dangling
+commit_to_design	add -- <repo>/.verdi/specs/active/vl014-happy
+commit_to_design	add -- <repo>/.verdi/specs/active/vl014-missing
+commit_to_design	commit -m commit-to-design: spec/dup from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/my-new-feature from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/no-story-flag from board jira:LOAN-2000
+commit_to_design	commit -m commit-to-design: spec/override-born from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/stages-only-specdir from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/tracks-fixture-model from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/vl014-dangling from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/vl014-happy from board STORY-1482
+commit_to_design	commit -m commit-to-design: spec/vl014-missing from board STORY-1482
+design_start	add -- <repo>/.verdi/specs/active/built-binary-interview
+design_start	add -- <repo>/.verdi/specs/active/lockbox-v2
+design_start	add -- <repo>/.verdi/specs/active/same-name-retry
+design_start	checkout -b design/built-binary-interview HEAD
+design_start	checkout -b design/lockbox-v2 main
+design_start	checkout -b design/same-name-retry HEAD
+design_start	commit -m design start: scaffold spec/built-binary-interview (feature spec, no tracker ref)
+design_start	commit -m design start: scaffold spec/same-name-retry (feature spec, no tracker ref)
+design_start	commit -m design start: supersede spec/lockbox as spec/lockbox-v2
+policy_adopt	add -- .verdi/policy/constitution.md .verdi/policy/profiles/starter-solo.md .verdi/policy/policies/starter.md .verdi/constitution/consumers.json
+policy_adopt	add -- .verdi/policy/constitution.md .verdi/policy/profiles/starter-team.md .verdi/policy/policies/starter.md .verdi/constitution/consumers.json
+policy_adopt	checkout -b policy/adopt main
+policy_adopt	commit -m policy adopt: starter constitution (solo profile) -- .verdi/policy/constitution.md .verdi/policy/profiles/starter-solo.md .verdi/policy/policies/starter.md .verdi/constitution/consumers.json
+policy_adopt	commit -m policy adopt: starter constitution (team profile) -- .verdi/policy/constitution.md .verdi/policy/profiles/starter-team.md .verdi/policy/policies/starter.md .verdi/constitution/consumers.json

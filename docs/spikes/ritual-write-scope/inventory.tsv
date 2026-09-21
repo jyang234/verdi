@@ -1,0 +1,69 @@
+ritual	source	git_subcommand	flags	mutates	notes
+design_start	verb-subprocess (verdi design start)	add	--	index	scoped to the new spec dir (git add -- <path>), never -A
+design_start	verb-subprocess (verdi design start)	checkout	-b	refs+HEAD+worktree	creates design/<name>; base is resolved default branch (main/origin/<default>) or, no-origin fallback, HEAD (disclosed)
+design_start	verb-subprocess (verdi design start)	commit	-m	refs	NOT scoped with -- pathspec: commits whatever is staged, not only what this call added (UAT-036 shape)
+design_start	verb-subprocess (verdi design start)	ls-tree	--	none	read
+design_start	verb-subprocess (verdi design start)	ls-tree	-r --name-only --	none	read
+design_start	verb-subprocess (verdi design start)	remote		none	read (bare listing)
+design_start	verb-subprocess (verdi design start)	rev-list	--first-parent --reverse --	none	read
+design_start	verb-subprocess (verdi design start)	rev-parse	--git-dir	none	read
+design_start	verb-subprocess (verdi design start)	rev-parse	--verify	none	read
+design_start	verb-subprocess (verdi design start)	show		none	read
+design_start	verb-subprocess (verdi design start)	show-ref	--verify --quiet	none	read
+design_start	verb-subprocess (verdi design start)	symbolic-ref	--short -q	none	read (query form, one ref arg, no set-target)
+build_start	verb-subprocess (verdi build start)	checkout	-b	refs+HEAD+worktree	creates feature/<name>; only mutating call this ritual makes; never add/commit
+build_start	verb-subprocess (verdi build start)	config	--local --get-all	none	read (gitx.ConfigValue, identity resolution)
+build_start	verb-subprocess (verdi build start)	ls-tree	--	none	read
+build_start	verb-subprocess (verdi build start)	ls-tree	-r --name-only --	none	read
+build_start	verb-subprocess (verdi build start)	ls-tree	-rz --full-tree	none	read
+build_start	verb-subprocess (verdi build start)	remote		none	read
+build_start	verb-subprocess (verdi build start)	rev-list	--first-parent --reverse --	none	read
+build_start	verb-subprocess (verdi build start)	rev-parse	--verify	none	read
+build_start	verb-subprocess (verdi build start)	show		none	read
+build_start	verb-subprocess (verdi build start)	show-ref	--verify --quiet	none	read
+build_start	verb-subprocess (verdi build start)	status	--porcelain	none	read
+build_start	verb-subprocess (verdi build start)	status	--porcelain -z --untracked-files=no	none	read
+build_start	verb-subprocess (verdi build start)	status	--porcelain=v1 -z --untracked-files=all	none	read
+build_start	verb-subprocess (verdi build start)	symbolic-ref	--short -q	none	read
+close	verb-subprocess (verdi close, all modes: plain/--preflight/--prepare/--force-local/--context-request)	add	--	index	scoped (2 paths: active+archive spec dirs), observed only in --force-local
+close	verb-subprocess (verdi close --force-local)	checkout	-b	refs+HEAD+worktree	creates close/<spec-name> (force-local's local archive branch, not main)
+close	verb-subprocess (verdi close --force-local)	commit	-m	refs	NOT scoped with -- pathspec (same command SHAPE as design start) -- but NOT the same defect: requireCleanIndex (close.go:655, runClose's first statement) exits 2 before this commit is ever reached with a foreign index entry staged, so close is index_carry: refused, not carried. Shape alone does not decide the value; see declarations.yaml and README's 'Correction: how close was got wrong'
+close	verb-subprocess (verdi close)	hash-object		none	read (no -w: content digest only, never writes an object; countersign's integrity check)
+close	verb-subprocess (verdi close)	log	-1 --format=%cI	none	read
+close	verb-subprocess (verdi close)	ls-files	--cached --others --exclude-standard	none	read
+close	verb-subprocess (verdi close)	ls-tree	--	none	read
+close	verb-subprocess (verdi close)	ls-tree	--name-only --	none	read
+close	verb-subprocess (verdi close)	ls-tree	-r --name-only --	none	read
+close	verb-subprocess (verdi close)	ls-tree	-rz --full-tree	none	read
+close	verb-subprocess (verdi close)	merge-base	--is-ancestor	none	read
+close	verb-subprocess (verdi close)	remote		none	read
+close	verb-subprocess (verdi close)	rev-list	--first-parent --reverse --	none	read
+close	verb-subprocess (verdi close)	rev-parse	--git-dir	none	read
+close	verb-subprocess (verdi close)	rev-parse	--is-shallow-repository	none	read
+close	verb-subprocess (verdi close)	rev-parse	--verify	none	read
+close	verb-subprocess (verdi close)	rev-parse	--verify -q	none	read
+close	verb-subprocess (verdi close)	show		none	read
+close	verb-subprocess (verdi close)	show-ref	--verify --quiet	none	read
+close	verb-subprocess (verdi close)	status	--porcelain	none	read
+close	verb-subprocess (verdi close)	status	--porcelain -z --untracked-files=no	none	read
+close	verb-subprocess (verdi close)	status	--porcelain=v1 -z --untracked-files=all	none	read
+close	verb-subprocess (verdi close)	symbolic-ref	--short -q	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	add	--	index	scoped (4 policy-payload paths)
+policy_adopt	verb-subprocess (verdi policy adopt)	checkout	-b	refs+HEAD+worktree	creates the adopt branch
+policy_adopt	verb-subprocess (verdi policy adopt)	commit	-m --	refs	SCOPED with a trailing -- pathspec matching what was added (does not carry pre-staged unrelated entries) — the one ritual of the five that scopes both add and commit
+policy_adopt	verb-subprocess (verdi policy adopt)	config	--local --get-all	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	rev-parse	--git-dir	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	rev-parse	--verify	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	show-ref	--verify --quiet	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	symbolic-ref	--short -q	none	read
+policy_adopt	verb-subprocess (verdi policy adopt)	var		none	read (git var, e.g. author ident)
+commit_to_design	pkg-inprocess (internal/commitdesign, no direct CLI verb: invoked from board.go/forgeboot.go/workbench board.go)	add	--	index	scoped to the new spec dir
+commit_to_design	pkg-inprocess (internal/commitdesign)	commit	-m	refs	NOT scoped with -- pathspec (same UAT-036 shape)
+commit_to_design	pkg-inprocess (internal/commitdesign)	diff	--name-status -M	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	log	-1 --format=%cI	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	ls-files		none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	merge-base	--is-ancestor	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	rev-parse	--verify	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	rev-parse	--verify -q	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	status	--porcelain -z --untracked-files=no	none	read
+commit_to_design	pkg-inprocess (internal/commitdesign)	status	--porcelain=v1 -z --untracked-files=all	none	read

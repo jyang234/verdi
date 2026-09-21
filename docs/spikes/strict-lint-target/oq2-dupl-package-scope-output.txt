@@ -1,0 +1,3 @@
+total dupl findings: 37
+same-directory (same-package) pairs: 37
+cross-directory (cross-package) pairs: 0

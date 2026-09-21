@@ -1,0 +1,175 @@
+{
+    "actions": {
+        "needed_facts": [
+            "obligation attestation/countersign for transition close is unproven",
+            "obligation behavioral/fold-green for transition close is unproven"
+        ],
+        "safe": []
+    },
+    "blockers": {
+        "current": [
+            {
+                "class": "governance",
+                "clearing_condition": "obligation attestation/countersign is proven for transition close",
+                "id": "obligation-countersign-unproven/close/attestation/countersign",
+                "owner": {
+                    "attribution": {
+                        "unauthenticated": true
+                    },
+                    "declared": "platform-team"
+                },
+                "reason": "obligation-countersign-unproven",
+                "transition": "close",
+                "witnesses": [
+                    "obligation attestation/countersign for transition close (accepted-pending-build -> closed) is not proven by this projection; obligation gates are not yet journey contributors"
+                ]
+            },
+            {
+                "class": "mechanical",
+                "clearing_condition": "obligation behavioral/fold-green is proven for transition close",
+                "id": "obligation-fold-green-unproven/close/behavioral/fold-green",
+                "owner": {
+                    "attribution": {
+                        "unauthenticated": true
+                    },
+                    "declared": "platform-team"
+                },
+                "reason": "obligation-fold-green-unproven",
+                "transition": "close",
+                "witnesses": [
+                    "obligation behavioral/fold-green for transition close (accepted-pending-build -> closed) is not proven by this projection; obligation gates are not yet journey contributors"
+                ]
+            },
+            {
+                "class": "governance",
+                "clearing_condition": "the required principals resolve as authenticated",
+                "id": "principal-resolution-unproven/close",
+                "owner": {
+                    "attribution": {
+                        "unauthenticated": true
+                    },
+                    "declared": "platform-team"
+                },
+                "reason": "principal-resolution-unproven",
+                "transition": "close",
+                "witnesses": [
+                    "a governance profile is adopted, but authenticated principal resolution remains unproven because principal resolution is not yet a journey contributor"
+                ]
+            }
+        ],
+        "eventual": {
+            "derived": false,
+            "disclosures": [
+                "eventual closure blockers are not derived by this delivery unit; a later delivery unit (GLG AC-6, continuous-readiness) supplies them"
+            ],
+            "items": []
+        }
+    },
+    "digest": "sha256:c044213f38fa0444e53be0ffb07a9119fcb283652b450d39b855b58e6e9f2fce",
+    "disclosures": [
+        "forge facts are not consulted by this projection; forge-dependent proofs remain unproven",
+        "preparation and preflight closure contributors are not yet journey contributors; their blocker coverage is unknown",
+        "source posture receipt-bound is never produced by this projection version",
+        "the origin remote URL could not be canonicalized to a repository identity"
+    ],
+    "evidence": {
+        "authority": "unknown",
+        "contributors": [
+            {
+                "id": "attestation",
+                "kind": "attestation",
+                "resolution": "unproven",
+                "witness": "evidence kind attestation is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+            },
+            {
+                "id": "behavioral",
+                "kind": "behavioral",
+                "resolution": "unproven",
+                "witness": "evidence kind behavioral is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+            },
+            {
+                "id": "static",
+                "kind": "static",
+                "resolution": "unproven",
+                "witness": "evidence kind static is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+            }
+        ],
+        "disclosures": [
+            "Context Integrity's canonical evidence-authority and freshness operands are not consumed by this delivery unit; evidence posture and freshness are unknown"
+        ],
+        "freshness": "unknown"
+    },
+    "lifecycle": {
+        "accepted_baseline": {
+            "blob": "448e0b162226ccbbf6bd4d148e8b6e23b547bf43",
+            "commit": "01211bd8e51ad9319bb6139dc004f4e6c22e3dc5",
+            "path": ".verdi/specs/active/readiness-recovery/spec.md"
+        },
+        "active_branch": {
+            "known": true,
+            "value": "design/readiness-recovery"
+        },
+        "class": "feature",
+        "disclosures": [],
+        "frozen": null,
+        "posture": "authoritative",
+        "relation": "exact",
+        "state": "accepted-pending-build"
+    },
+    "principals": {
+        "disclosures": [
+            "authenticated principal resolution and profile-contributed requirements remain unproven"
+        ],
+        "profile_adopted": true,
+        "required": [
+            {
+                "count": 1,
+                "obligation": "attestation/countersign",
+                "resolution": "unproven",
+                "transition": "close"
+            }
+        ],
+        "selected_profile_digest": "sha256:5a50e771143bf95c4e1f0d889f84f43952c9a9447b066f99ffef8c7363fae178",
+        "selected_profile_id": "starter-team"
+    },
+    "repository": {
+        "branch": {
+            "known": true,
+            "value": "policy/adopt"
+        },
+        "default_branch": {
+            "head": "5f60c76c56b16858f7321d287514b195b2f59d71",
+            "known": true,
+            "name": "main",
+            "ref": "origin/main"
+        },
+        "dirty": {
+            "known": true,
+            "value": false
+        },
+        "head": {
+            "known": true,
+            "value": "9d6ca1d1af5ff77b18bae69ade4b0dd07a8fd456"
+        },
+        "relationship": "ahead",
+        "remote_origin": {
+            "known": false,
+            "value": ""
+        },
+        "source": "head",
+        "staged": {
+            "known": true,
+            "value": false
+        },
+        "worktree": {
+            "managed": false,
+            "name": ""
+        }
+    },
+    "schema": "verdi.journey/v1",
+    "target": {
+        "class": "feature",
+        "path": ".verdi/specs/active/readiness-recovery/spec.md",
+        "ref": "spec/readiness-recovery"
+    }
+}

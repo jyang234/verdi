@@ -1,0 +1,46 @@
+--- _fence-copies/02-artifact-contract.original.md	2026-09-20 20:18:46
++++ _fence-copies/02-artifact-contract.draft.md	2026-09-20 20:19:14
+@@ -138,9 +138,11 @@
+ 
+ ```yaml
+ acceptance_criteria:
+-  - { id: ac-2, text: "...", evidence: [static, behavioral], anchor: "#ac-2" }
++  - { id: ac-2, text: "...", evidence: [static, behavioral], anchor: "#ac-2",
++      clauses: [ { id: c1, text: "..." }, { id: c2, text: "..." } ] }
+ constraints:
+-  - { id: co-1, text: "...", anchor: "#co-1" }
++  - { id: co-1, text: "...", anchor: "#co-1",
++      clauses: [ { id: c1, text: "..." }, { id: c2, text: "..." } ] }
+ decisions:
+   - { id: dc-1, text: "...", anchor: "#dc-1",
+       links: [ { type: exempts, ref: adr/0012-outbox-loansvc-events, note: "..." } ] }
+@@ -163,7 +165,28 @@
+ kinds like any AC (VL-006). `constraints` objects state a rule that applies
+ wherever relevant; they are deliberately not mappable to stories and carry
+ no `links:` of their own — a feature constraint inherits downward to its
+-stories, checked wherever relevant, never assigned to one. `decisions`
++stories, checked wherever relevant, never assigned to one.
++
++An `acceptance_criteria` or `constraints` entry MAY declare `clauses:` —
++an ordered list of `{ id, text }` sub-objects breaking a criterion or
++constraint's own `text` into independently citable claims, for AC/CO
++prose that bundles several separately-falsifiable requirements into one
++frontmatter object (spec/verification-rules). Each clause `id` is a bare
++short token (`c1`, `c2`, ...) scoped to its parent object, never globally
++unique on its own; a clause carries no `anchor:`, `evidence:`, or `links:`
++of its own — it is a decomposition of its parent's single `text`, not a
++new object kind, and inherits the parent's evidence expectations and body
++anchor. `clauses:` is optional and `omitempty`: an object with three or
++fewer claims (§Lint rules' under-enumeration threshold) is never required
++to add it, and existing objects with no `clauses:` key keep their current
++single-`text` meaning unchanged (A8). Citing one clause from a
++`verdi.bindings.yaml` evidence-for entry or from a `links[].ref` fragment
++requires a fragment ref one level deeper than §Identity and references'
++current `spec/<name>#<object-id>` grammar — `spec/<name>#<object-id>/<clause-id>`
++— which is a prerequisite change to this contract's fragment-ref shape
++(today's `objectIDRe` rejects a `/` in the fragment), not merely an
++additive frontmatter field; see spec/verification-rules' ratification
++request for the citation-seam decision this depends on. `decisions`
+ objects may carry their own `links:` — the same shape as document-level
+ `links:` (§Common frontmatter) — for `supersedes`/`exempts` edges against
+ ADRs or other decisions (§Link taxonomy). `open_questions` objects (added

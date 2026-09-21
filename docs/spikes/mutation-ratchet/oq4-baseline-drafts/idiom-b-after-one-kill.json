@@ -1,0 +1,6 @@
+{
+  "internal/readinessload/conflict.go:50:41:CONDITIONALS_NEGATION": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged",
+  "internal/readinessload/facts.go:79:20:CONDITIONALS_NEGATION": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged",
+  "internal/readinessload/facts.go:83:28:CONDITIONALS_NEGATION": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged",
+  "internal/readinessload/load.go:295:25:CONDITIONALS_NEGATION": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged"
+}

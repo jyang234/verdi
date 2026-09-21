@@ -1,0 +1,25 @@
+# oq-1 summary — golangci-lint v2.5.0, --config docs/spikes/strict-lint-target/golangci.strict.yml, --enable-only <linter>, ./...
+# generated 2026-09-20T22:22:36Z at HEAD=5f60c76c56b16858f7321d287514b195b2f59d71
+linter                 findings    seconds
+load before (containedctx): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+load after (containedctx): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+containedctx                  8       0.93
+load before (noctx): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+load after (noctx): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+noctx                       256       1.04
+load before (contextcheck): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+load after (contextcheck): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+contextcheck                 43       0.95
+load before (errorlint): 18:22  up 16 days, 11:10, 6 users, load averages: 46.94 30.73 17.80
+load after (errorlint): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+errorlint                   173       1.04
+load before (exhaustive): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+load after (exhaustive): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+exhaustive                  129       0.98
+load before (dupl): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+load after (dupl): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+dupl                         37       0.77
+load before (gochecknoglobals): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+load after (gochecknoglobals): 18:22  up 16 days, 11:10, 6 users, load averages: 47.82 31.19 18.03
+gochecknoglobals            404       1.09
+core count (sysctl hw.ncpu / nproc): 10

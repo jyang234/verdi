@@ -1,0 +1,133 @@
+oq-1 evidence: exact install commands, exit statuses, and version output.
+Reduction: `go install`'s "go: downloading ..." dependency-resolution lines
+are kept in full below (they are short); nothing is elided.
+
+Environment for every install:
+  $ go version
+  go version go1.25.5 darwin/arm64
+
+--------------------------------------------------------------------------
+Candidate 1: gremlins — github.com/go-gremlins/gremlins
+
+  $ go list -m -versions github.com/go-gremlins/gremlins
+  github.com/go-gremlins/gremlins v0.1.0 v0.1.1 v0.1.2 v0.2.0 v0.2.1 v0.2.2 v0.3.0 v0.4.0 v0.5.0 v0.5.1 v0.6.0
+
+  $ GOBIN=/tmp/mutation-ratchet-bin go install github.com/go-gremlins/gremlins@v0.6.0
+  go: downloading github.com/go-gremlins/gremlins v0.6.0
+  go: github.com/go-gremlins/gremlins@v0.6.0: module github.com/go-gremlins/gremlins@v0.6.0 found, but does not contain package github.com/go-gremlins/gremlins@v0.6.0
+  exit=1
+  (module root has no importable main package; the CLI's main package is
+  the cmd/gremlins subdirectory, corrected below)
+
+  $ GOBIN=/tmp/mutation-ratchet-bin go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+  go: downloading github.com/MakeNowJust/heredoc v1.0.0
+  go: downloading github.com/spf13/cobra v1.10.2
+  go: downloading github.com/spf13/viper v1.21.0
+  go: downloading golang.org/x/tools v0.39.0
+  go: downloading github.com/bluekeyes/go-gitdiff v0.8.1
+  go: downloading github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
+  go: downloading github.com/spf13/afero v1.15.0
+  go: downloading github.com/spf13/cast v1.10.0
+  go: downloading github.com/sagikazarmark/locafero v0.12.0
+  go: downloading go.yaml.in/yaml/v3 v3.0.4
+  exit=0
+
+  $ /tmp/mutation-ratchet-bin/gremlins --version
+  gremlins version dev darwin/arm64
+  exit=0
+  (caveat: `go install module@version` does not run gremlins' own
+  Makefile ldflags version-stamping, so --version prints "dev" rather than
+  "v0.6.0" — the pin is nonetheless exact and verifiable via the install
+  command above: the module proxy resolves v0.6.0 to one immutable content
+  hash, recorded in this worktree's go.sum-equivalent module cache lookup,
+  independent of what the binary prints about itself.)
+
+  PIN: github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+
+--------------------------------------------------------------------------
+Candidate 2a: go-mutesting (zimmski) — github.com/zimmski/go-mutesting
+
+  $ go list -m -versions github.com/zimmski/go-mutesting
+  github.com/zimmski/go-mutesting
+  (no tagged releases at all; only a pseudo-version resolves)
+
+  $ go list -m github.com/zimmski/go-mutesting@latest
+  github.com/zimmski/go-mutesting v0.0.0-20210610104036-6d9217011a00
+  (last real commit: 2021-06-10 — unmaintained for ~5 years as of this
+  spike's 2026-09-20 run)
+
+  $ GOBIN=/tmp/mutation-ratchet-bin-zimmski go install github.com/zimmski/go-mutesting/cmd/go-mutesting@v0.0.0-20210610104036-6d9217011a00
+  go: downloading github.com/zimmski/go-tool v0.0.0-20150119110811-2dfdc9ac8439
+  go: downloading github.com/jessevdk/go-flags v1.4.0
+  go: downloading github.com/zimmski/osutil v0.0.0-20190128123334-0d0b3ca231ac
+  go: downloading github.com/stretchr/testify v1.4.0
+  go: downloading gopkg.in/yaml.v2 v2.2.2
+  go: downloading github.com/davecgh/go-spew v1.1.0
+  exit=0    (installs cleanly; DISQUALIFIED at runtime — see
+             oq1-gomutesting-zimmski-panic.txt)
+
+  PIN (disqualified): github.com/zimmski/go-mutesting/cmd/go-mutesting@v0.0.0-20210610104036-6d9217011a00
+
+--------------------------------------------------------------------------
+Candidate 2b: go-mutesting (avito-tech fork) — github.com/avito-tech/go-mutesting
+
+  $ go list -m github.com/avito-tech/go-mutesting@latest
+  github.com/avito-tech/go-mutesting v0.0.0-20251226130216-48d0401f00fb
+  (no tagged releases either; pseudo-version off a commit from
+  2025-12-26 — actively maintained relative to the zimmski original)
+
+  $ GOBIN=/tmp/mutation-ratchet-bin-avito go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@v0.0.0-20251226130216-48d0401f00fb
+  go: downloading golang.org/x/tools v0.31.0
+  go: downloading github.com/jessevdk/go-flags v1.5.0
+  go: downloading github.com/zimmski/osutil v1.6.1
+  go: downloading golang.org/x/sys v0.31.0
+  go: downloading github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae
+  go: downloading github.com/avast/retry-go v3.0.0+incompatible
+  go: downloading github.com/schollz/progressbar/v3 v3.14.2
+  go: downloading github.com/ulikunitz/xz v0.5.11
+  go: downloading github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
+  go: downloading golang.org/x/term v0.17.0
+  exit=0    (installs cleanly and RUNS on Go 1.25; DISQUALIFIED on result
+             trustworthiness — see oq1-gomutesting-avito-defect.txt)
+
+  Neither fork's binary accepts --version or -version:
+  $ /tmp/mutation-ratchet-bin-zimmski/go-mutesting --version
+  unknown flag `version'
+  $ /tmp/mutation-ratchet-bin-avito/go-mutesting --version
+  unknown flag `version'
+  (both exit 0 despite the "unknown flag" text — this CLI parser's own
+  behavior, unrelated to the disqualification below)
+
+  PIN (disqualified): github.com/avito-tech/go-mutesting/cmd/go-mutesting@v0.0.0-20251226130216-48d0401f00fb
+
+--------------------------------------------------------------------------
+Candidate 3: ooze — github.com/gtramontina/ooze
+
+  $ go list -m -versions github.com/gtramontina/ooze
+  github.com/gtramontina/ooze v0.1.0 v0.1.1 v0.2.0
+
+  $ go list -m github.com/gtramontina/ooze@latest
+  github.com/gtramontina/ooze v0.2.0
+
+  ooze is NOT installed with `go install` — pkg.go.dev/its own repo layout
+  has no main package anywhere (confirmed: `go install .../cmd/ooze@v0.2.0`
+  fails with "does not contain package"). It is a library dependency
+  (`go get`) plus a hand-written `_test.go` file with a `mutation` build
+  tag that a caller writes themselves and runs via `go test -tags=mutation`
+  (see its README's own Quick Start). This is a structurally different
+  integration model from gremlins/go-mutesting's external, pinned CLI
+  binary — see the README's oq-1 section for why that alone weighs against
+  it under co-2's "pinned like golangci-lint" analogy, independent of the
+  correctness defect found below.
+
+  $ go get github.com/gtramontina/ooze@v0.2.0
+  go: added github.com/fatih/color v1.14.1
+  go: added github.com/gtramontina/ooze v0.2.0
+  go: added github.com/mattn/go-colorable v0.1.13
+  go: added github.com/mattn/go-isatty v0.0.17
+  exit=0    (adds cleanly to go.mod/go.sum; DISQUALIFIED on result
+             trustworthiness — see oq1-ooze-defect.txt. go.mod/go.sum
+             changes were reverted with `git checkout -- .` immediately
+             after use, per the scratch-worktree discipline.)
+
+  PIN (disqualified): github.com/gtramontina/ooze@v0.2.0

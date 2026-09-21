@@ -1,0 +1,48 @@
+# oq-4 coexistence evidence — both .golangci.yml and .golangci.strict.yml present at worktree root
+# (temporary copy for this test only, per the brief's lane specifics; removed before every commit)
+
+== command: golangci-lint run -v --max-issues-per-linter=0 --max-same-issues=0 ./internal/lint/... (plain, no --config, BOTH files present) ==
+level=info msg="golangci-lint has version 2.5.0 built with go1.25.5 from (unknown, modified: ?, mod sum: \"h1:BDRg4ASm4J1y/DSRY6zwJ5tr5Yy8ZqbZ79XrCeFxaQo=\") on (unknown)"
+level=info msg="[config_reader] Config search paths: [./ /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/internal/lint /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/internal /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target /Users/johnyang/code/verdi-system/verdi-wt /Users/johnyang/code/verdi-system /Users/johnyang/code /Users/johnyang /Users /]"
+level=info msg="[config_reader] Used config file .golangci.yml"
+level=info msg="[config_reader] Module name \"github.com/jyang234/verdi\""
+level=info msg="maxprocs: Leaving GOMAXPROCS=10: CPU quota undefined"
+level=info msg="[goenv] Read go env for 9.654125ms: map[string]string{\"GOCACHE\":\"/Users/johnyang/Library/Caches/go-build\", \"GOROOT\":\"/usr/local/go\"}"
+level=info msg="[lintersdb] Active 5 linters: [errcheck govet ineffassign staticcheck unused]"
+level=info msg="[loader] Go packages loading at mode 8767 (files|imports|compiled_files|deps|name|types_sizes|exports_file) took 125.112166ms"
+level=info msg="[runner/filename_unadjuster] Pre-built 0 adjustments in 9.195959ms"
+level=info msg="[linters_context/goanalysis] analyzers took 0s with no stages"
+level=info msg="[runner] processing took 2.293µs with stages: max_same_issues: 875ns, exclusion_paths: 208ns, exclusion_rules: 208ns, max_per_file_from_linter: 125ns, nolint_filter: 125ns, path_absoluter: 125ns, max_from_linter: 84ns, diff: 83ns, path_relativity: 42ns, generated_file_filter: 42ns, cgo: 42ns, severity-rules: 42ns, invalid_issue: 42ns, source_code: 42ns, fixer: 42ns, path_shortener: 42ns, sort_results: 42ns, path_prettifier: 41ns, uniq_by_line: 41ns, filename_unadjuster: 0s"
+level=info msg="[runner] linters took 30.967ms with stages: goanalysis_metalinter: 30.937917ms"
+0 issues.
+level=info msg="File cache stats: 0 entries of total size 0B"
+level=info msg="Memory: 3 samples, avg is 42.1MB, max is 55.6MB"
+level=info msg="Execution took 175.408083ms"
+
+== command: golangci-lint run -v --config .golangci.strict.yml --max-issues-per-linter=0 --max-same-issues=0 ./internal/lint/... (explicit --config, BOTH files present) ==
+level=info msg="[config_reader] Used config file .golangci.strict.yml"
+level=info msg="[lintersdb] Active 7 linters: [containedctx contextcheck dupl errorlint exhaustive gochecknoglobals noctx]"
+31 issues:
+* containedctx: 1
+* contextcheck: 8
+* dupl: 4
+* exhaustive: 2
+* gochecknoglobals: 12
+* noctx: 4
+
+== command: golangci-lint run -v --max-issues-per-linter=0 --max-same-issues=0 ./internal/lint/... (plain, no --config, ONLY .golangci.strict.yml present, .golangci.yml moved aside) ==
+level=info msg="golangci-lint has version 2.5.0 built with go1.25.5 from (unknown, modified: ?, mod sum: \"h1:BDRg4ASm4J1y/DSRY6zwJ5tr5Yy8ZqbZ79XrCeFxaQo=\") on (unknown)"
+level=info msg="[config_reader] Config search paths: [./ /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/internal/lint /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/internal /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target /Users/johnyang/code/verdi-system/verdi-wt /Users/johnyang/code/verdi-system /Users/johnyang/code /Users/johnyang /Users /]"
+level=info msg="[config_reader] Module name \"github.com/jyang234/verdi\""
+level=info msg="maxprocs: Leaving GOMAXPROCS=10: CPU quota undefined"
+level=info msg="[goenv] Read go env for 9.787541ms: map[string]string{\"GOCACHE\":\"/Users/johnyang/Library/Caches/go-build\", \"GOROOT\":\"/usr/local/go\"}"
+level=info msg="[lintersdb] Active 5 linters: [errcheck govet ineffassign staticcheck unused]"
+level=info msg="[loader] Go packages loading at mode 8767 (name|types_sizes|deps|files|imports|compiled_files|exports_file) took 126.369417ms"
+level=info msg="[runner/filename_unadjuster] Pre-built 0 adjustments in 9.269375ms"
+level=info msg="[linters_context/goanalysis] analyzers took 2.794326209s with top 10 stages: buildir: 1.564233169s, fact_purity: 114.09854ms, SA5012: 108.246333ms, printf: 107.940086ms, nilness: 103.178784ms, typedness: 101.347671ms, ctrlflow: 94.78158ms, fact_deprecated: 82.213118ms, inspect: 54.860459ms, S1038: 34.541958ms"
+level=info msg="[runner] processing took 1.791µs with stages: max_same_issues: 416ns, exclusion_rules: 208ns, path_absoluter: 167ns, exclusion_paths: 167ns, nolint_filter: 167ns, max_from_linter: 166ns, cgo: 42ns, fixer: 42ns, path_shortener: 42ns, invalid_issue: 42ns, diff: 42ns, max_per_file_from_linter: 42ns, path_relativity: 42ns, path_prettifier: 42ns, severity-rules: 41ns, sort_results: 41ns, source_code: 41ns, uniq_by_line: 41ns, filename_unadjuster: 0s, generated_file_filter: 0s"
+level=info msg="[runner] linters took 923.439333ms with stages: goanalysis_metalinter: 923.410792ms"
+0 issues.
+level=info msg="File cache stats: 0 entries of total size 0B"
+level=info msg="Memory: 12 samples, avg is 198.0MB, max is 290.1MB"
+level=info msg="Execution took 1.069392875s"

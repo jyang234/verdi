@@ -1,0 +1,69 @@
+diff --git a/internal/readinesspilot/clausewitness_test.go b/internal/readinesspilot/clausewitness_test.go
+new file mode 100644
+index 00000000..e22e2c42
+--- /dev/null
++++ b/internal/readinesspilot/clausewitness_test.go
+@@ -0,0 +1,45 @@
++package readinesspilot
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++	"regexp"
++	"strings"
++	"testing"
++)
++
++// TestClauseWitnessCoverage is spike/verification-rules oq-2 Seam B
++// evidence (docs/spikes/verification-rules/, THROWAWAY — reverted before
++// the spike commits; see seam-b.patch): it collects every
++// `// verdi:clause <ref>` marker under internal/ and reports, for
++// readiness-recovery co-2's nine prohibitions (c1..c9), which have a
++// marked witness today.
++func TestClauseWitnessCoverage(t *testing.T) {
++	markerRe := regexp.MustCompile(`verdi:clause (\S+)`)
++	found := map[string]bool{}
++	err := filepath.Walk("..", func(path string, info os.FileInfo, walkErr error) error {
++		if walkErr != nil || info.IsDir() || !strings.HasSuffix(path, "_test.go") {
++			return nil
++		}
++		data, rerr := os.ReadFile(path)
++		if rerr != nil {
++			return rerr
++		}
++		for _, m := range markerRe.FindAllStringSubmatch(string(data), -1) {
++			found[m[1]] = true
++		}
++		return nil
++	})
++	if err != nil {
++		t.Fatalf("walking internal/ for clause markers: %v", err)
++	}
++	for i := 1; i <= 9; i++ {
++		ref := fmt.Sprintf("spec/readiness-recovery#co-2/c%d", i)
++		if found[ref] {
++			t.Logf("WITNESSED: %s", ref)
++		} else {
++			t.Errorf("MISSING WITNESS: %s", ref)
++		}
++	}
++}
+diff --git a/internal/readinesspilot/derive_test.go b/internal/readinesspilot/derive_test.go
+index a3eac7ea..ab3efd7a 100644
+--- a/internal/readinesspilot/derive_test.go
++++ b/internal/readinesspilot/derive_test.go
+@@ -13,6 +13,13 @@ import (
+ 	"github.com/jyang234/verdi/internal/policyconflict"
+ )
+ 
++// verdi:clause spec/readiness-recovery#co-2/c9 — SYNTHETIC spike marker
++// (spike/verification-rules oq-2 Seam B trial, THROWAWAY, reverted before
++// commit — see docs/spikes/verification-rules/seam-b.patch). This test does
++// NOT actually witness readiness-recovery co-2/c9 ("a projection is never
++// authority"); the marker is placed here only to prove the collection
++// mechanism detects a marker when one exists. No real witness exists at
++// this base commit (readiness-recovery is unimplemented).
+ func TestDeriveHappyPath(t *testing.T) {
+ 	t.Parallel()
+ 
