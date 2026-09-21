@@ -93,8 +93,10 @@ exercised via `cmd/verdi`. Ran over `./cmd/verdi/ ./internal/designapp/
 **Attribution.** `cmd/verdi`'s own test suite both calls ritual entry
 points in-process (labelled `verdi.test ...`) *and* builds+execs the real
 patched binary as each verb (labelled `verdi design start`, `verdi build
-start`, `verdi close --force-local`, `verdi policy adopt`, etc. — 55
-distinct verb/flag combinations observed, `gitlog-dedup-all-verbs.tsv`).
+start`, `verdi close --force-local`, `verdi policy adopt`, etc. — **59**
+distinct verb/flag combinations observed: `cut -f1
+gitlog-dedup-all-verbs.tsv | grep -v '\.test' | sort -u | wc -l` prints 59,
+not the 55 this README's first issue stated).
 The direct verb-subprocess entries are unambiguous (the `who` field *is*
 the verb argv) and are this table's primary source for `design_start`,
 `build_start`, `close`, and `policy_adopt`. `commit_to_design` has no
@@ -129,22 +131,32 @@ different verbs entirely. All five rituals here go through `exec.go`'s
 `run` only, plus `configvalue.go`'s `ConfigValue` for `build_start` and
 `policy_adopt`'s identity reads.
 
-**Bonus finding — three of the six UAT findings the parent spec lists are
-already fixed at this base, one is confirmed still open, and one (design
-start's own case) is confirmed fixed while its sibling ritual is not:**
+**Bonus finding — the parent spec's six UAT findings, re-read at this
+base:** three are already fixed (UAT-021, UAT-033, UAT-034); two are still
+open (UAT-023, and UAT-036 for two of the five rituals rather than three);
+and one (UAT-031) is fixed for design start's own case while its sibling
+rituals were not traced. The first issue of this README counted "one
+confirmed still open", which left UAT-036 out of the tally.
 
 | Finding | Parent spec's table | This spike's empirical + source finding |
 |---|---|---|
 | UAT-021 (design start branches from stale HEAD) | fixed, pending merge | **Confirmed fixed.** `design.go`'s `resolveBranchBase`/`gitx.CheckoutNewBranchFrom` resolve the default branch; empirically the observed base was `main`/`origin/<default>` or a disclosed HEAD fallback only when no `origin` remote exists. |
 | UAT-023 (build start cuts from HEAD) | open | **Confirmed still open.** `buildstart.go` calls `gitx.CheckoutNewBranch` (no base param — `git checkout -b <name>`, git's implicit-HEAD default), never `resolveBranchBase`/`CheckoutNewBranchFrom` (zero hits, grepped). `gitx/branch.go`'s own doc comment on `CheckoutNewBranchFrom` narrates design start's UAT-021 fix story — build start never received the analogous change. |
-| UAT-031 (branch-cutting checks collide against the wrong tree) | open | **Design start's own case is fixed** (`design_test.go`: `TestRunDesignStart_BehindCheckout_NameOnMainRefused`; `designsupersede.go` comments cite the same fix). Build start / close were not traced for an equivalent collision check (grepped: no hits) — **not answered** for those two specifically. |
-| UAT-033 (design start commits every untracked file) | open | **Confirmed fixed**, contradicting a literal reading of the parent table (the table reflects spec-authoring time, before this base). `design.go`/`designsupersede.go` call `gitx.AddPaths`, never `gitx.AddAll`; `design_test.go`'s `TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir` asserts `AddAll` is never called. Empirically confirmed: every `add` line for `design_start` is `add -- <one specific spec dir>`, never `-A`. |
+| UAT-031 (branch-cutting checks collide against the wrong tree) | open | **Design start's own case is fixed** (`design_test.go`: `TestRunDesignStart_BehindCheckout_NameOnMainRefused`; `designsupersede.go` comments cite the same fix). Build start / close were not traced for an equivalent collision check — **not answered** for those two specifically. The first issue of this README said "grepped: no hits", which is wrong: `close.go:219` and `close.go:1156` both discuss `gitx.CheckoutNewBranch`'s no-clobber cut (it refuses a `close/<name>` that already exists). That is a *ref-namespace* collision check, not UAT-031's "collides against the wrong tree" — which is about resolving the name against the tree the branch is cut from, as `TestRunDesignStart_BehindCheckout_NameOnMainRefused` pins for design start. So the conclusion stands and only the phrasing was wrong. |
+| UAT-033 (design start commits every untracked file) | open | **Confirmed fixed** at this base. This does not contradict the parent spec: its column is headed "Status at authoring" (`.verdi/specs/active/ritual-write-scope/spec.md:40`), which already disclaims currency. `design.go`/`designsupersede.go` call `gitx.AddPaths`, never `gitx.AddAll`; `design_test.go`'s `TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir` asserts `AddAll` is never called. Empirically confirmed: every `add` line for `design_start` is `add -- <one specific spec dir>`, never `-A`. |
 | UAT-034 (commit-to-design sweeps the same way) | open | **Confirmed fixed**, same shape: `internal/commitdesign/commitdesign.go` uses `gitx.AddPaths`; `commitdesign_test.go`'s `TestRun_ScaffoldCommitStagesOnlySpecDir` asserts `AddAll` is never called. |
 | UAT-036 (ritual commits carry pre-staged index entries) | open | **Confirmed still open for TWO of the five rituals — `design_start` and `commit_to_design`** (this row said three in this README's first issue; see "Correction: how `close` was got wrong" below). Both call `git commit -m "<msg>"` with **no** `--` pathspec and have **no** pre-ritual index guard, so each commits whatever the *whole index* holds; reproduced empirically for `design_start` on an ac-2-seeded fixture (`state-diff/seeded-designstart-commit-files.txt`: the ritual staged one path and its commit carries two, the second being the operator's `spike-foreign-staged.txt`). `close` shares the pathspec-less commit shape and is still **not** exposed: `requireCleanIndex` is `runClose`'s first statement (`cmd/verdi/close.go:655`; guard at `:920-944`) and exits 2 before any mutation — witnessed in `state-diff/seeded-close-stderr.txt`. `policy_adopt` is immune a third way: its commit **is** `--`-scoped (`commit -m ... -- <the 4 paths it added>`). `build_start` never commits. |
 
-This resolves the apparent UAT-033/034 vs. table conflict rather than
-silently reconciling it: the parent spec's problem-statement table was
-authored against an earlier commit; this base is newer for those two.
+No reconciliation is owed for UAT-033/034. The parent spec's column is
+headed **"Status at authoring"** (`spec.md:40`), so a finding that two of
+those rows have since been fixed is the table working as written, not a
+conflict with it — and this README's first issue overstated it as one,
+along with an integration prerequisite to correct the parent table. That
+prerequisite is withdrawn. The empirical finding itself is valuable and
+unchanged: `design start` and `commit-to-design` stage with `AddPaths` at
+this base, and ac-4's UAT-033/034 half is already covered by named
+regression tests, so the build should plan against UAT-036 and build
+start's UAT-023/031 half.
 
 **Correction: how `close` was got wrong (fix round 1).** This README's
 first issue put `close` in the UAT-036 column and called the finding "the
@@ -222,8 +234,13 @@ log (`gitlog-dedup-all-verbs.tsv`, `gitlog-raw-sample.tsv`).
 ## oq-2: Non-gitx mutations and the sensor ruling
 
 **Census** (`grep -rn "exec.Command" --include=*.go internal cmd | grep -v
-_test | grep -v internal/gitx`, 21 real call sites across 17 files; 2
-matches were comment text, excluded):
+_test | grep -v internal/gitx`). The grep returns **24** lines; **3** are
+comment text (`internal/execworkspace/isolation.go:176`,
+`cmd/e2eharness/main.go:81`, `cmd/e2eharness/main.go:226`), leaving **21
+real call sites across 17 files**, every one of them classified below. (The
+first issue of this README said 2 comment hits; the derived 21/17 totals
+were right and no site was omitted or misclassified, but the stated
+exclusion count would mislead anyone reproducing the grep.)
 
 | Site | Can mutate the operator's repository? | Why |
 |---|---|---|
