@@ -776,3 +776,64 @@ func TestConflictBlockers_ProvenRowsAreNotNumbered(t *testing.T) {
 		t.Fatalf("disclosures = %v, want none: proven rows are skipped before numbering", disclosures)
 	}
 }
+
+// TestDeriveEventual_ClosedFeatureCarriesNoClosureDebt is R-RR1-13: once
+// the closure transition is BEHIND the target's state, the three
+// closure-gated feature sources — stub reconciliation, the outcome floor
+// and a spike-claimed question — derive nothing. A closed (or superseded)
+// feature carries no closure debt: the gate that would have consumed each
+// of those requirements has already run, so naming them now would forecast
+// a transition that can never be taken again. The input below carries all
+// three debts unsatisfied on purpose, so a zero count is the ruling's own
+// witness and not an empty fixture. This is a PROVEN ABSENCE, not an
+// unproven state: no disclosure beyond the fixed no-report one is
+// required, and the section stays Derived: true.
+func TestDeriveEventual_ClosedFeatureCarriesNoClosureDebt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state specstate.State
+	}{
+		{name: "closed", state: specstate.Closed},
+		{name: "superseded", state: specstate.Superseded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mdl := model.Canonical()
+			state := statusOf(tc.state)
+			candidates := canonicalCandidates(t, "feature", tc.state)
+			in := eventualInput{
+				Class: "feature", Model: mdl, State: state, Owner: testOwner(),
+				Candidates:       candidates,
+				LaterTransitions: laterTransitions(mdl, "feature", state, candidates),
+				Stubs: &evidence.StubReconciliation{Stubs: []evidence.StubResult{
+					{Slug: "board-tab", Bucket: evidence.StubUnreconciled},
+				}},
+				Fold: &evidence.FeatureResult{ACs: []evidence.FeatureACResult{
+					{ID: "ac-1", Floor: evidence.FloorResult{Satisfied: false, DeclaresAttestation: true, Attestation: evidence.AttestationAbsent}},
+				}},
+				Spec: &artifact.SpecFrontmatter{
+					Base:          artifact.Base{ID: "spec/feature-alpha"},
+					OpenQuestions: []artifact.OpenQuestion{{ID: "oq-1", Text: "x", Anchor: "#oq-1"}},
+					Stubs:         []artifact.Stub{{Slug: "probe", Spike: true, Resolves: []string{"oq-1"}}},
+				},
+			}
+			eb := deriveEventual(in)
+			if !eb.Derived {
+				t.Fatal("Derived must stay true: a closed feature's empty eventual section is a derived absence, not an underived one")
+			}
+			if got := blockerIDs(eb.Items); len(got) != 0 {
+				t.Fatalf("items = %v, want none: the closure gate is already behind a %s feature", got, tc.name)
+			}
+			// The control: the SAME input one state earlier (closure still
+			// ahead) derives all three debts, so the zero above is the
+			// ruling at work and not a fixture that carries no debt.
+			ahead := in
+			ahead.State = statusOf(specstate.AcceptedPendingBuild)
+			ahead.Candidates = canonicalCandidates(t, "feature", specstate.AcceptedPendingBuild)
+			ahead.LaterTransitions = laterTransitions(mdl, "feature", ahead.State, ahead.Candidates)
+			want := []string{"outcome-floor/ac-1", "question-claimed/oq-1", "stub-unreconciled/board-tab"}
+			if got := blockerIDs(deriveEventual(ahead).Items); !reflect.DeepEqual(got, want) {
+				t.Fatalf("control (accepted, closure still ahead) items = %v, want %v", got, want)
+			}
+		})
+	}
+}

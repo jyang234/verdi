@@ -176,15 +176,18 @@ func laterTransitions(mdl *model.Model, class, state string, candidates []model.
 	return out
 }
 
-// verbToState returns the verb of the first declared transition whose
-// target is state, in the model's own declared order.
-func verbToState(lifecycle model.Lifecycle, state string) (string, bool) {
+// transitionToState returns the first declared transition whose target is
+// state, in the model's own declared order. The whole transition (not just
+// its verb) is returned because R-RR1-13 also needs its FROM-state: a
+// closure gate is only ahead of the target when its from-state is still
+// forward-reachable.
+func transitionToState(lifecycle model.Lifecycle, state string) (model.Transition, bool) {
 	for _, tr := range lifecycle.Transitions {
 		if tr.To == state {
-			return tr.Verb, true
+			return tr, true
 		}
 	}
-	return "", false
+	return model.Transition{}, false
 }
 
 // eventualScopeResult carries R-RR1-12's per-source verb table for one
@@ -196,7 +199,17 @@ type eventualScopeResult struct {
 	closureVerb string
 	policyVerb  string
 	resolved    bool
-	disclosure  string
+	// closureAhead is R-RR1-13: true when the closure transition's own
+	// FROM-state is still forward-reachable from the target's current
+	// state, i.e. the closure gate has yet to run. False for a target that
+	// is already closed or superseded — the three closure-gated feature
+	// sources then derive nothing, because the gate that would have
+	// consumed those requirements has already run and cannot run again. A
+	// state the lifecycle does not declare leaves this TRUE: nothing there
+	// proves the gate is behind, and an unproven absence is never reported
+	// as a proven one.
+	closureAhead bool
+	disclosure   string
 }
 
 // resolveEventualScope resolves R-RR1-12's verb table (ledger SI-207):
@@ -223,17 +236,21 @@ func resolveEventualScope(mdl *model.Model, class, state string) eventualScopeRe
 	if !ok {
 		return eventualScopeResult{disclosure: noClosureTransitionDisclosure(mdl, class)}
 	}
-	closure, ok := verbToState(lifecycle, closedStatus)
+	closure, ok := transitionToState(lifecycle, closedStatus)
 	if !ok {
 		return eventualScopeResult{disclosure: noClosureTransitionDisclosure(mdl, class)}
 	}
 
-	out := eventualScopeResult{closureVerb: closure, policyVerb: closure, resolved: true}
+	out := eventualScopeResult{closureVerb: closure.Verb, policyVerb: closure.Verb, resolved: true, closureAhead: true}
 	reached := reachableStates(lifecycle, state)
 	if len(reached) == 0 {
 		out.disclosure = stateNotDeclaredDisclosure(mdl, class, state)
 		return out
 	}
+	// R-RR1-13: the closure gate lies AHEAD only while its own from-state
+	// is still reachable. From a terminal state (closed, superseded) it is
+	// not, so the closure-gated sources below derive nothing.
+	out.closureAhead = reached[closure.From]
 	for _, tr := range lifecycle.Transitions {
 		if tr.To == acceptedStatus && reached[tr.From] {
 			out.policyVerb = tr.Verb
@@ -303,7 +320,11 @@ func deriveEventual(in eventualInput) EventualBlockers {
 		disclosures = append(disclosures, scope.disclosure)
 	}
 
-	if scope.resolved && in.Class == string(artifact.ClassFeature) {
+	// R-RR1-13: a closed feature carries no closure debt. All three
+	// sources below are consumed by the CLOSURE gate, so once that gate is
+	// behind the state they derive nothing — a proven absence, which needs
+	// no disclosure (the section stays Derived: true either way).
+	if scope.resolved && scope.closureAhead && in.Class == string(artifact.ClassFeature) {
 		add(stubUnreconciledBlockers(in, scope.closureVerb)...)
 		add(outcomeFloorBlockers(in, scope.closureVerb)...)
 		add(questionClaimedBlockers(in, scope.closureVerb)...)
