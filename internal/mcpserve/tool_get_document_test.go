@@ -3,6 +3,7 @@ package mcpserve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,9 +11,41 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/readinesspilot/readinesstest"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// fixedSnapshotLoader is a test-only ReadinessLoader returning the same
+// snapshot for any ref (never an error) — the guard that keeps a foreign
+// snapshot from leaking (specdoc.WithReadiness's TargetRef tripwire,
+// R-RR1-8) is exercised by the guard itself, not by this fake refusing a
+// mismatched ref.
+type fixedSnapshotLoader struct{ snap readinesspilot.Snapshot }
+
+func (f fixedSnapshotLoader) Load(context.Context, string) (readinesspilot.Snapshot, error) {
+	return f.snap, nil
+}
+
+// countingReadinessLoader is a test-only ReadinessLoader recording every
+// ref it was asked to Load, in order — proving a mode that must never
+// touch the loader (ModeAt) genuinely never calls it, rather than merely
+// discarding what it returned.
+type countingReadinessLoader struct {
+	snap  readinesspilot.Snapshot
+	err   error
+	calls int
+	refs  []string
+}
+
+func (c *countingReadinessLoader) Load(_ context.Context, ref string) (readinesspilot.Snapshot, error) {
+	c.calls++
+	c.refs = append(c.refs, ref)
+	if c.err != nil {
+		return readinesspilot.Snapshot{}, c.err
+	}
+	return c.snap, nil
+}
 
 // These tests use spec/widget-retry, the accepted feature spec
 // buildFixture (fixture_test.go) actually carries on main — the brief's
@@ -285,11 +318,13 @@ func getDocumentDraftStore(t *testing.T) string {
 	return repo.Dir
 }
 
-// TestGetDocument_ReadinessWhenSnapshotTargetsSpec is R-W3-3: Backend.Readiness
-// reaches the loader (tool_get_document.go's Readiness: b.Readiness), which
-// supplies the Readiness section only when the snapshot's TargetRef names
-// the spec being rendered (internal/specdoc/readiness.go's WithReadiness,
-// Wave 2) — never another spec's facts.
+// TestGetDocument_ReadinessWhenSnapshotTargetsSpec is spec/readiness-
+// recovery ac-4/R-RR1-8: Backend.ReadinessLoader is asked for get_document's
+// OWN ref on every live call, and the section renders only when the
+// returned snapshot's TargetRef names the spec being rendered
+// (internal/specdoc/readiness.go's WithReadiness, Wave 2) — never another
+// spec's facts (the foreign-snapshot arm, kept per R-RR1-8, now fed
+// through a fake loader rather than a hand-injected field).
 func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	root := getDocumentFixtureStore(t)
@@ -297,7 +332,7 @@ func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
 	if err := snap.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	b := &Backend{Root: root, Readiness: &snap}
+	b := &Backend{Root: root, ReadinessLoader: fixedSnapshotLoader{snap: snap}}
 	raw, _ := json.Marshal(map[string]any{"ref": snap.TargetRef, "kind": "spec"})
 	text, isErr := decodeText(t, b.GetDocument(context.Background(), raw))
 	if isErr {
@@ -306,13 +341,84 @@ func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
 	if !strings.Contains(text, "## Readiness") || strings.Contains(text, "Readiness was not supplied for this render.") {
 		t.Fatalf("readiness section not rendered from the snapshot:\n%s", text)
 	}
-	// A snapshot targeting another spec leaves the document untouched.
+	// A loader returning a snapshot for another spec leaves the document
+	// untouched.
 	other := snap
 	other.TargetRef = "spec/other"
-	b2 := &Backend{Root: root, Readiness: &other}
+	b2 := &Backend{Root: root, ReadinessLoader: fixedSnapshotLoader{snap: other}}
 	text2, _ := decodeText(t, b2.GetDocument(context.Background(), raw))
 	if !strings.Contains(text2, "Readiness was not supplied for this render.") {
 		t.Fatalf("foreign snapshot must not leak:\n%s", text2)
+	}
+}
+
+// TestGetDocument_ReadinessCommitModeNeverCallsTheLoader is spec/
+// readiness-recovery ac-4: a `commit` argument (or an equivalent pinned
+// ref) selects specdocload.ModeAt, a historical reading the loader must
+// never be asked about at all — not merely one whose result is discarded.
+func TestGetDocument_ReadinessCommitModeNeverCallsTheLoader(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	backend, repo, _ := newTestBackend(t)
+	loader := &countingReadinessLoader{snap: readinesstest.ValidSnapshot("spec/widget-retry", repo.Head)}
+	backend.ReadinessLoader = loader
+
+	res := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry", "commit": repo.Head}))
+	if isToolError(res) {
+		t.Fatalf("tool error: %s", toolResultText(t, res))
+	}
+	if loader.calls != 0 {
+		t.Fatalf("loader.calls = %d, want 0 for a commit-argument (ModeAt) render; refs asked: %v", loader.calls, loader.refs)
+	}
+
+	pinned := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry@" + repo.Head}))
+	if isToolError(pinned) {
+		t.Fatalf("tool error: %s", toolResultText(t, pinned))
+	}
+	if loader.calls != 0 {
+		t.Fatalf("loader.calls = %d, want 0 for a pinned-ref (ModeAt) render; refs asked: %v", loader.calls, loader.refs)
+	}
+
+	// Confirmed the loader genuinely works for a live reading, so the two
+	// zero counts above are a refusal, not a broken fake.
+	live := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry"}))
+	if isToolError(live) {
+		t.Fatalf("tool error: %s", toolResultText(t, live))
+	}
+	if loader.calls != 1 || len(loader.refs) != 1 || loader.refs[0] != "spec/widget-retry" {
+		t.Fatalf("live render: loader.calls=%d refs=%v, want exactly one call for spec/widget-retry", loader.calls, loader.refs)
+	}
+}
+
+// TestGetDocument_ReadinessLoaderErrorBecomesDisclosure is R-RR1-9: a
+// loader failure never fails get_document — it becomes a
+// "readiness: <err>" entry in Disclosures and the section states its own
+// absence, exactly like any other degraded fact a document is not a
+// verdict over.
+func TestGetDocument_ReadinessLoaderErrorBecomesDisclosure(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	backend, _, _ := newTestBackend(t)
+	wantErr := errors.New("boom: readiness derivation failed")
+	backend.ReadinessLoader = &countingReadinessLoader{err: wantErr}
+
+	res := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry"}))
+	if isToolError(res) {
+		t.Fatalf("a readiness failure must not fail get_document: %s", toolResultText(t, res))
+	}
+	var got getDocumentResult
+	if err := json.Unmarshal([]byte(toolResultText(t, res)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Markdown, "Readiness was not supplied for this render.") {
+		t.Fatalf("readiness section must state its own absence on a loader error:\n%s", got.Markdown)
+	}
+	found := false
+	for _, d := range got.Disclosures {
+		if d == "readiness: "+wantErr.Error() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("disclosures = %v, want one naming %q", got.Disclosures, "readiness: "+wantErr.Error())
 	}
 }
 
@@ -376,7 +482,7 @@ func TestGetDocument_PinnedCommitOmitsTheLiveReadinessSnapshot(t *testing.T) {
 	if err := snap.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	backend.Readiness = &snap
+	backend.ReadinessLoader = fixedSnapshotLoader{snap: snap}
 
 	const absent = "Readiness was not supplied for this render."
 	cases := []struct {

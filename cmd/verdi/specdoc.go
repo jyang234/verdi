@@ -19,13 +19,16 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // vocab:identity — CLI usage grammar (identity arg placeholders)
-const specDocForm = "verdi spec doc <spec-ref> [--kind spec|plan|tasks] [--format md|html] [--at <commit>] [--proposed] [-o <path>]"
+const specDocForm = "verdi spec doc <spec-ref> [--kind spec|plan|tasks] [--format md|html] [--at <commit>] [--proposed] [--no-readiness] [-o <path>]"
 
 // vocab:identity — CLI usage grammar (identity arg placeholders)
 const specDocUsage = "usage: " + specDocForm
@@ -42,6 +45,7 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 	// vocab:identity — non-vocabulary homograph: "draft" names an unmerged branch's edit in English prose, never the model's "draft" lifecycle-state id
 	proposedFlag := fs.Bool("proposed", false, "render the working tree's bytes (a design-branch draft)")
 	outFlag := fs.String("o", "", "write the document to this path instead of stdout")
+	noReadinessFlag := fs.Bool("no-readiness", false, "omit the Readiness section (spec/readiness-recovery ac-4/R-RR1-9)")
 
 	// The single positional <spec-ref> may appear anywhere among the
 	// flags: flag.FlagSet.Parse stops at the first non-flag token, so a
@@ -121,7 +125,27 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 	case *atFlag != "":
 		mode = specdocload.ModeAt
 	}
-	res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: parsed.Name, Mode: mode, At: *atFlag, Kind: kind, Model: cfg.Model})
+
+	// Readiness accompanies the accepted and working-tree readings by
+	// default (spec/readiness-recovery ac-4/R-RR1-9): --no-readiness
+	// omits it outright, and --at (a historical reading) never calls the
+	// loader — a live derivation is not a fact about historical bytes,
+	// the same rule the board Document tab and MCP get_document follow.
+	// A loader failure never fails the render: it is a disclosure on
+	// stderr ("spec doc: readiness: <err>") and the section states its
+	// own absence — a document is not a verdict (R-RR1-9).
+	var readiness *readinesspilot.Snapshot
+	if !*noReadinessFlag && mode != specdocload.ModeAt {
+		loader := readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: workbench.BranchBoardHref}}
+		snap, rerr := loader.Load(ctx, "spec/"+parsed.Name)
+		if rerr != nil {
+			fmt.Fprintln(stderr, "spec doc: readiness:", rerr)
+		} else {
+			readiness = &snap
+		}
+	}
+
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: parsed.Name, Mode: mode, At: *atFlag, Kind: kind, Model: cfg.Model, Readiness: readiness})
 	if err != nil {
 		fmt.Fprintln(stderr, "spec doc:", err)
 		return 2

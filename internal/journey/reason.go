@@ -42,6 +42,19 @@ type ReasonCode string
 
 // The closed v1 ReasonCode vocabulary. Each code's fixed class is recorded
 // in reasonClasses and returned by Class.
+//
+// The six eventual-blocker codes (spec/readiness-recovery ac-1, ruling
+// R-RR1-1) each name one of the six eventual-closure-blocker sources
+// deriveEventual (eventual.go) evaluates: a feature's acceptance-time stub
+// is unreconciled; a feature AC's mandatory outcome floor is unsatisfied;
+// a declared open question is claimed by an unresolved spike stub; a
+// policy-conflict report's mechanical row is not proven; its semantic row
+// is not proven; or one of its exemption resolutions is not proven
+// effective. R-RR1-1's note: conflict-row-unresolved would carry a
+// PER-ROW class (mechanical rows mechanical, semantic rows judgmental),
+// which violates reasonClasses' one-fixed-class-per-code invariant, so two
+// codes replace it here — conflict-mechanical-unresolved and
+// conflict-semantic-unresolved — keeping every code's class fixed.
 const (
 	ReasonDefaultBranchUnresolved       ReasonCode = "default-branch-unresolved"
 	ReasonLifecycleStateUnproven        ReasonCode = "lifecycle-state-unproven"
@@ -52,6 +65,27 @@ const (
 	ReasonObligationDesignUnresolved    ReasonCode = "obligation-design-unresolved"
 	ReasonObligationFoldGreenUnproven   ReasonCode = "obligation-fold-green-unproven"
 	ReasonObligationUnknownKind         ReasonCode = "obligation-unknown-kind"
+
+	// ReasonStubUnreconciled: a feature's acceptance-time stub is neither
+	// realized-by a closed implementing story nor withdrawn with a note
+	// (03 §Stub reconciliation).
+	ReasonStubUnreconciled ReasonCode = "stub-unreconciled"
+	// ReasonOutcomeFloorUnsatisfied: a feature acceptance criterion's
+	// mandatory outcome floor (an authored attestation, or a current
+	// passing outcome record) is not yet satisfied (03 §The feature fold).
+	ReasonOutcomeFloorUnsatisfied ReasonCode = "outcome-floor-unsatisfied"
+	// ReasonQuestionClaimedBySpike: a declared open question is named by a
+	// spike stub's resolves edge, and that spike has not yet resolved it.
+	ReasonQuestionClaimedBySpike ReasonCode = "question-claimed-by-spike"
+	// ReasonConflictMechanicalUnresolved: a policy-conflict report's
+	// mechanical row is not proven (violated-with-witness or unproven).
+	ReasonConflictMechanicalUnresolved ReasonCode = "conflict-mechanical-unresolved"
+	// ReasonConflictSemanticUnresolved: a policy-conflict report's
+	// semantic row is not proven (violated-with-witness or unproven).
+	ReasonConflictSemanticUnresolved ReasonCode = "conflict-semantic-unresolved"
+	// ReasonExemptionIneffective: a policy-conflict report's exemption
+	// resolution is not proven both bound and fresh.
+	ReasonExemptionIneffective ReasonCode = "exemption-ineffective"
 )
 
 // reasonClasses is the single source of truth binding each ReasonCode to
@@ -67,6 +101,12 @@ var reasonClasses = map[ReasonCode]BlockerClass{
 	ReasonObligationDesignUnresolved:    ClassMechanical,
 	ReasonObligationFoldGreenUnproven:   ClassMechanical,
 	ReasonObligationUnknownKind:         ClassUnknown,
+	ReasonStubUnreconciled:              ClassMechanical,
+	ReasonOutcomeFloorUnsatisfied:       ClassJudgmental,
+	ReasonQuestionClaimedBySpike:        ClassMechanical,
+	ReasonConflictMechanicalUnresolved:  ClassMechanical,
+	ReasonConflictSemanticUnresolved:    ClassJudgmental,
+	ReasonExemptionIneffective:          ClassGovernance,
 }
 
 // Class returns r's fixed blocker class. An unrecognized code is an error

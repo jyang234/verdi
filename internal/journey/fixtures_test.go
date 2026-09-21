@@ -72,9 +72,15 @@ func validRecord(t *testing.T) Record {
 				},
 			},
 			Eventual: EventualBlockers{
-				Derived:     false,
-				Items:       []Blocker{},
-				Disclosures: []string{"eventual blockers not yet derived"},
+				Derived: false,
+				Items:   []Blocker{},
+				// A neutral placeholder, not a description of real
+				// behavior: validRecord is the SCHEMA fixture many
+				// negative-path mutations build on, so its eventual
+				// section deliberately stays the minimal Derived: false
+				// shape (a derived section lives in goldenRecord). The
+				// sentence the retired stub used to emit is gone with it.
+				Disclosures: []string{"this fixture's eventual section is intentionally underived"},
 			},
 		},
 		Principals: PrincipalFacts{

@@ -10,6 +10,9 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/matrixprojection"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -324,6 +327,113 @@ func selectObligationQualityAssessment(ctx context.Context, base evidence.Obliga
 	return selected, nil
 }
 
+// StubReconciler is journey's consumer-owned port (04 §port pattern) onto
+// 03 §Stub reconciliation's bidirectional completeness check for one
+// feature spec: every acceptance-time stub is either realized-by named
+// closed implementing stories or explicitly withdrawn-with-note. journey
+// itself withdraws nothing (no withdrawal-declaration source exists yet —
+// evidence.StubWithdrawal's own doc comment), so every call effectively
+// reconciles against zero withdrawals; the port still returns the whole
+// evidence.StubReconciliation so a withdrawal source added later needs no
+// interface change here.
+type StubReconciler interface {
+	Reconcile(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.StubReconciliation, error)
+}
+
+// stubReconciler is the production StubReconciler: discovers a feature's
+// implementing stories the same way `verdi matrix <feature>` does
+// (matrixprojection.DiscoverImplementingStories, project.go:181), then
+// folds the result through evidence.ReconcileStubs.
+//
+// DUPLICATION, DELIBERATE AND DISCLOSED: cmd/verdi/closefeature.go's own
+// reconcileFeatureStubs keeps its own copy of this fold, under
+// task-1-brief.md's explicit escape hatch. It takes an ALREADY-discovered
+// []implementingStoryEdges — the same single discovery pass runCloseFeature
+// feeds to the fold and the closure gate — while this port's interface is
+// self-contained and discovers internally, so routing closefeature.go
+// through it would discard that shared pass and add a second
+// DiscoverImplementingStories walk to every close. Anyone editing one copy
+// must edit the other; a future shared seam would have to give the port an
+// optional pre-discovered-stories path.
+type stubReconciler struct{}
+
+// NewStubReconciler returns the production StubReconciler.
+func NewStubReconciler() StubReconciler { return stubReconciler{} }
+
+func (stubReconciler) Reconcile(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.StubReconciliation, error) {
+	ref, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return evidence.StubReconciliation{}, fmt.Errorf("journey: parsing spec id %q for stub reconciliation: %w", spec.ID, err)
+	}
+	ix, err := index.Build(root)
+	if err != nil {
+		return evidence.StubReconciliation{}, fmt.Errorf("journey: building index for stub reconciliation: %w", err)
+	}
+	stories, _, _, err := matrixprojection.DiscoverImplementingStories(ctx, root, commit, ref.Name, spec, ix, specstate.NewProjector())
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose), mirroring cmd/verdi/closefeature.go's own reconcileFeatureStubs
+		return evidence.StubReconciliation{}, fmt.Errorf("journey: discovering implementing stories for stub reconciliation: %w", err)
+	}
+	stubStories := make([]evidence.StubStory, 0, len(stories))
+	for _, story := range stories {
+		stubStories = append(stubStories, evidence.StubStory{SpecRef: story.SpecRef, ACIDs: story.ACIDs, Closed: story.Closed})
+	}
+	return evidence.ReconcileStubs(evidence.StubReconcileInput{Spec: spec, Stories: stubStories, Model: mdl})
+}
+
+// FeatureFolder is journey's consumer-owned port onto 03 §The feature
+// fold's outcome-floor computation for one feature spec.
+type FeatureFolder interface {
+	Fold(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.FeatureResult, error)
+}
+
+// featureFolder is the production FeatureFolder: discovers implementing
+// stories exactly as stubReconciler does, loads the feature's own outcome-
+// level evidence records, and folds via evidence.FoldFeature — mirroring
+// matrixprojection/project.go:136's projectFeature. Preview is true
+// (unlike cmd/verdi/closefeature.go's own closure-time fold, which is
+// authoritative-only): journey is a read-only, forward-looking projection
+// (DC-15), not the closure ritual, so it folds source:local (advisory)
+// records in alongside source:ci, the same posture `verdi matrix --preview`
+// gives an operator inspecting a feature's current shape.
+type featureFolder struct{}
+
+// NewFeatureFolder returns the production FeatureFolder.
+func NewFeatureFolder() FeatureFolder { return featureFolder{} }
+
+func (featureFolder) Fold(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.FeatureResult, error) {
+	ref, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose), mirroring cmd/verdi/closefeature.go's own foldFeature
+		return evidence.FeatureResult{}, fmt.Errorf("journey: parsing spec id %q for feature fold: %w", spec.ID, err)
+	}
+	ix, err := index.Build(root)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return evidence.FeatureResult{}, fmt.Errorf("journey: building index for feature fold: %w", err)
+	}
+	_, storiesByAC, _, err := matrixprojection.DiscoverImplementingStories(ctx, root, commit, ref.Name, spec, ix, specstate.NewProjector())
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return evidence.FeatureResult{}, fmt.Errorf("journey: discovering implementing stories for feature fold: %w", err)
+	}
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
+	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return evidence.FeatureResult{}, fmt.Errorf("journey: loading feature evidence records for the outcome floor: %w", err)
+	}
+	return evidence.FoldFeature(evidence.FeatureInput{
+		Spec:        spec,
+		Stories:     storiesByAC,
+		Records:     records,
+		Preview:     true,
+		StoreRoot:   root,
+		FeatureSlug: ref.Name,
+		Model:       mdl,
+	})
+}
+
 // Projector gathers repository and lifecycle facts and (a later stage,
 // Project) derives the complete journey Record from them. Its zero value
 // is not useful — construct it via NewProjector (production) or the
@@ -336,12 +446,15 @@ type Projector struct {
 	obligations          ObligationQualityReader
 	resolveDefaultBranch DefaultBranchResolver
 	repoFacts            RepositoryFactsGatherer
+	stubs                StubReconciler
+	folder               FeatureFolder
 }
 
 // NewProjector returns a Projector backed by real git plumbing, the real
 // internal/specstate resolver, the policyauthority-backed profile loader,
-// specstate.ResolveDefaultBranch, and the real internal/repositoryfacts
-// leaf — the only constructor production callers may use.
+// specstate.ResolveDefaultBranch, the real internal/repositoryfacts leaf,
+// and the real stub-reconciliation/feature-fold adapters — the only
+// constructor production callers may use.
 func NewProjector() Projector {
 	return Projector{
 		git:                  NewGitReader(),
@@ -350,11 +463,13 @@ func NewProjector() Projector {
 		obligations:          NewObligationQualityReader(),
 		resolveDefaultBranch: specstate.ResolveDefaultBranch,
 		repoFacts:            repositoryfacts.NewGatherer(),
+		stubs:                NewStubReconciler(),
+		folder:               NewFeatureFolder(),
 	}
 }
 
 // newProjector is the test-only seam: package tests construct a Projector
 // over in-process fakes.
-func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver, repoFacts RepositoryFactsGatherer) Projector {
-	return Projector{git: git, state: state, profiles: NewProfileLoader(), obligations: evidenceObligationQualityReader{git: git}, resolveDefaultBranch: resolveDefaultBranch, repoFacts: repoFacts}
+func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver, repoFacts RepositoryFactsGatherer, stubs StubReconciler, folder FeatureFolder) Projector {
+	return Projector{git: git, state: state, profiles: NewProfileLoader(), obligations: evidenceObligationQualityReader{git: git}, resolveDefaultBranch: resolveDefaultBranch, repoFacts: repoFacts, stubs: stubs, folder: folder}
 }

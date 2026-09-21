@@ -408,7 +408,7 @@ func validSnapshot() Snapshot {
 		CurrentFocus: "",
 		Attention:    []Concern{},
 		AllConcerns:  concerns,
-		StaleNotice:  "Startup snapshot at 0123456789abcdef0123456789abcdef01234567; restart verdi serve after an edit.",
+		StaleNotice:  "Derived at HEAD 0123456789abcdef0123456789abcdef01234567 for this request.",
 	}
 }
 

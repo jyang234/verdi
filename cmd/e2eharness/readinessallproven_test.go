@@ -105,7 +105,7 @@ func TestReadinessAllProvenFixture_Handler_Negative(t *testing.T) {
 // TestReadinessAllProvenFixture_ControlWiring proves the control server
 // actually routes the endpoint.
 func TestReadinessAllProvenFixture_ControlWiring(t *testing.T) {
-	ctrl := newControlServer(t.TempDir(), t.TempDir())
+	ctrl := newControlServer(t.TempDir(), t.TempDir(), "")
 	srv := httptest.NewServer(ctrl.handler())
 	defer srv.Close()
 

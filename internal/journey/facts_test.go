@@ -83,7 +83,7 @@ func TestResolveTargetBytes_DirectRef_Active(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "payments", testFeatureSpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -100,7 +100,7 @@ func TestResolveTargetBytes_DirectRef_Archive(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneArchive, "payments", testFeatureSpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 	_, relPath, _, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -123,7 +123,7 @@ func TestResolveTargetBytes_DirectRef_RemoteRefFallback(t *testing.T) {
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
+	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
@@ -139,7 +139,7 @@ func TestResolveTargetBytes_DirectRef_RemoteRefFallback(t *testing.T) {
 
 func TestResolveTargetBytes_DirectRef_NotFound_NoDefaultBranch(t *testing.T) {
 	root := t.TempDir()
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 	var nf *NotFoundError
@@ -157,7 +157,7 @@ func TestResolveTargetBytes_DirectRef_NotFound_DefaultBranchAlsoMissing(t *testi
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
+	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 	var nf *NotFoundError
@@ -170,7 +170,7 @@ func TestResolveTargetBytes_StoryRef_Resolves(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "loans", testFeatureSpecWithStoryMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -188,7 +188,7 @@ func TestResolveTargetBytes_StoryRef_Unmatched(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".verdi", "specs", "active"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:NOPE-1")
 	var nf *NotFoundError
@@ -199,7 +199,7 @@ func TestResolveTargetBytes_StoryRef_Unmatched(t *testing.T) {
 
 func TestResolveTargetBytes_NeitherForm(t *testing.T) {
 	root := t.TempDir()
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "not-a-valid-arg")
 	if err == nil {
@@ -322,7 +322,7 @@ func TestGatherRepositoryFacts_DelegatesToSharedGatherer(t *testing.T) {
 			return wantSnap, nil
 		},
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake, noOpStubReconciler(), noOpFeatureFolder())
 
 	rf, discl, err := p.gatherRepositoryFacts(context.Background(), "the-root", "rel/spec.md", []byte("x"), true)
 	if err != nil {
@@ -348,7 +348,7 @@ func TestGatherRepositoryFacts_PropagatesGatherError(t *testing.T) {
 			return repositoryfacts.Snapshot{}, errors.New("boom")
 		},
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake, noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, err := p.gatherRepositoryFacts(context.Background(), "root", "rel/spec.md", []byte("x"), true)
 	if err == nil {
@@ -429,7 +429,7 @@ func TestResolveActiveBranch(t *testing.T) {
 			git := noOpGitReader()
 			git.hasLocalBranchFn = tt.hasLocal
 			git.hasRemoteTrackingBranchFn = tt.hasRemote
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 			fact, discl, err := p.resolveActiveBranch(context.Background(), t.TempDir(), "foo")
 			if err != nil {
@@ -451,7 +451,7 @@ func TestResolveActiveBranch(t *testing.T) {
 func TestResolveActiveBranch_Error(t *testing.T) {
 	git := noOpGitReader()
 	git.hasLocalBranchFn = func(context.Context, string, string) (bool, error) { return false, errors.New("boom") }
-	p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, err := p.resolveActiveBranch(context.Background(), t.TempDir(), "foo")
 	if err == nil {
@@ -529,7 +529,7 @@ func TestGatherLifecycleFacts_SanitizesRootFromDisclosures(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	lf, result, err := p.gatherLifecycleFacts(context.Background(), root, "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -595,7 +595,7 @@ func TestGatherLifecycleFacts_HappyPath(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	lf, result, err := p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -638,7 +638,7 @@ func TestGatherLifecycleFacts_PartialBaselineNeverMapped(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	lf, _, err := p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -659,7 +659,7 @@ func TestGatherLifecycleFacts_ResolveError(t *testing.T) {
 			return specstate.Result{}, errors.New("boom")
 		},
 	}
-	p := newProjector(noOpGitReader(), state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, _, err = p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err == nil {
@@ -692,7 +692,7 @@ func TestGatherFacts_HappyPath(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, repoFacts)
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, repoFacts, noOpStubReconciler(), noOpFeatureFolder())
 
 	facts, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/payments")
 	if err != nil {
@@ -707,6 +707,26 @@ func TestGatherFacts_HappyPath(t *testing.T) {
 	if len(facts.Owners) != 1 || facts.Owners[0] != "platform-team" {
 		t.Fatalf("Owners = %v", facts.Owners)
 	}
+	// This fixture is a FEATURE, so GatherFacts reaches both eventual-
+	// source ports; both noOp fakes return their benign error, so this
+	// happy path deliberately carries exactly two disclosures and no
+	// stub/fold facts at all (co-6: an unavailable source is disclosed,
+	// never a gathering failure). Asserted rather than ignored — a
+	// disclosure nothing examines is the silence CO-1 forbids.
+	if facts.Stubs != nil || facts.FeatureFold != nil {
+		t.Fatalf("Stubs = %v, FeatureFold = %v, want both nil", facts.Stubs, facts.FeatureFold)
+	}
+	if len(facts.EventualDisclosures) != 2 {
+		t.Fatalf("EventualDisclosures = %v, want exactly two", facts.EventualDisclosures)
+	}
+	for _, want := range []string{
+		"stub reconciliation for payments could not be computed: journey: fake stub reconciler has no reconcileFn wired for this test",
+		"the outcome-floor fold for payments could not be computed: journey: fake feature folder has no foldFn wired for this test",
+	} {
+		if !containsString(facts.EventualDisclosures, want) {
+			t.Fatalf("EventualDisclosures = %v, want %q", facts.EventualDisclosures, want)
+		}
+	}
 }
 
 func TestGatherFacts_NotFound(t *testing.T) {
@@ -714,7 +734,7 @@ func TestGatherFacts_NotFound(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/nope")
 	var nf *NotFoundError
@@ -726,7 +746,7 @@ func TestGatherFacts_NotFound(t *testing.T) {
 func TestGatherFacts_ComponentClassRefused(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "shared-lib", testComponentSpecMD)
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 	_, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/shared-lib")
 	if err == nil {
@@ -913,7 +933,7 @@ func TestResolveTargetBytes_StoryRef_StoryClassReachable(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "loan-api", testStorySpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -956,7 +976,7 @@ func TestResolveTargetBytes_StoryRef_AmbiguousFailsClosed(t *testing.T) {
 				writeSpec(t, root, store.ZoneActive, name, content)
 			}
 
-			p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
+			p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 			_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 			if err == nil {
 				t.Fatal("resolveTargetBytes: want an ambiguity refusal, got nil")
@@ -1000,7 +1020,7 @@ func TestNotFoundError_SearchedIsHonestPerForm(t *testing.T) {
 		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 		}
-		p := newProjector(noOpGitReader(), &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
+		p := newProjector(noOpGitReader(), &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:NOPE-1")
 		var nf *NotFoundError
@@ -1028,7 +1048,7 @@ func TestNotFoundError_SearchedIsHonestPerForm(t *testing.T) {
 		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 		}
-		p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
+		p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
 
 		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 		var nf *NotFoundError

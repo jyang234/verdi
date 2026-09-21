@@ -5,6 +5,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // This file is the single assembler for the .verdi store layout
@@ -442,4 +443,23 @@ func AttestationDirRelPath(storySlug string) string {
 // disclosure names.
 func DerivedSpecRelDir(refSlug string) string {
 	return path.Join(verdiDir, dataDir, derivedDir, refSlug)
+}
+
+// HasDotDotElement reports whether p contains a ".." PATH ELEMENT under
+// either separator convention. It is element-wise, never a substring test:
+// a file honestly named "..notes.json" or "a..b" carries no traversal and
+// stays allowed. The single home for this path-safety predicate — every
+// caller that needs to refuse a ".." path element before resolving or
+// reading it (cmd/verdi's --out/--context-request flag validation,
+// internal/readinessload's --context-request path safety check) shares
+// this one definition rather than keeping a second copy.
+func HasDotDotElement(p string) bool {
+	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	}) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }

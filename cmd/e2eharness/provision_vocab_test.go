@@ -98,7 +98,7 @@ func TestVocabFixture_Handler_Negative_WrongMethod(t *testing.T) {
 // TestControlServer_WiresVocabFixture proves the endpoint is mounted on
 // the control server's own mux.
 func TestControlServer_WiresVocabFixture(t *testing.T) {
-	c := newControlServer(t.TempDir(), "../..")
+	c := newControlServer(t.TempDir(), "../..", "")
 	req := httptest.NewRequest(http.MethodGet, "/vocab-fixture", nil)
 	rec := httptest.NewRecorder()
 	c.handler().ServeHTTP(rec, req)

@@ -119,7 +119,7 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	// root is resolved. The caller can always respell the same destination
 	// without `..`, so this over-refusal costs nothing and removes a whole
 	// class of guard-versus-write divergence.
-	if hasOut && hasDotDotElement(outArg) {
+	if hasOut && store.HasDotDotElement(outArg) {
 		fmt.Fprintln(stderr, "context compile:", errContextOutDotDot)
 		return 2
 	}
@@ -478,21 +478,6 @@ var errContextOutDotDot = errors.New(`--out must not contain a ".." path element
 // acceptable substitute for proving that the caller's path is symlink-free.
 var errContextOutSymlink = errors.New("--out must not contain a symlink path component")
 
-// hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
-// either separator convention. It is element-wise, never a substring test:
-// a file honestly named "..notes.json" or "a..b" carries no traversal and
-// stays allowed.
-func hasDotDotElement(p string) bool {
-	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
-		return r == '/' || r == filepath.Separator
-	}) {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
-}
-
 // canonicalOutPath returns the single absolute, alias-resolved destination
 // string the command uses for BOTH the reserved-path guards and the write
 // itself.
@@ -505,7 +490,7 @@ func hasDotDotElement(p string) bool {
 // out.json` to the kernel (which authority design §11 forbids writing).
 // Handing the write the guard's own canonical string closes that gap by
 // construction: there is no second path to disagree with the approved one.
-// hasDotDotElement rejects such spellings earlier still, so this function's
+// store.HasDotDotElement rejects such spellings earlier still, so this function's
 // input is already ".."-free; the discipline is kept structurally anyway so
 // no future spelling can reintroduce the divergence.
 func canonicalOutPath(root, p string) (string, error) {

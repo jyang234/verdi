@@ -274,6 +274,8 @@ func (s *Service) prepareJudgeCache(ctx context.Context) (judgeCacheContext, err
 				return judgeCacheContext{}, fmt.Errorf("concrete judge adapter is nil")
 			}
 			adapters = append(adapters, *adapter)
+		case cacheOnlyJudge:
+			adapters = append(adapters, adapter.adapter)
 		}
 	}
 	if len(adapters) == 0 {
@@ -376,8 +378,30 @@ func runValidatedJudge(ctx context.Context, judge Judge, role JudgeRole, input S
 		copy.Root = cache.root
 		validated, cacheErr := CachedJudge(ctx, copy, input, cache.treeHash, view.Profile.ID, view.Snapshot.ProfileDigest, view.Snapshot.EffectivePolicyDigest)
 		exchange, err = validated.Exchange, cacheErr
+	case cacheOnlyJudge:
+		// AC-3/R-RR1-4: the cache-only judge is recognized here, alongside
+		// JudgeAdapter/*JudgeAdapter, so it gets the SAME tree-hash/profile/
+		// authority axes a real run's CachedJudge call above uses — the
+		// cache key a request computes is byte-identical to the one a real
+		// run (`verdi context conflict`, or serve's startup pre-run)
+		// published under. It never runs adapter.Argv: cacheOnlyLookup only
+		// performs CachedJudge's hit-check.
+		if !cache.enabled {
+			return nil, fmt.Errorf("concrete judge adapter has no prepared cache context")
+		}
+		lookupAdapter := adapter.adapter
+		lookupAdapter.Root = cache.root
+		validated, cacheErr := cacheOnlyLookup(lookupAdapter, input, cache.treeHash, view.Profile.ID, view.Snapshot.ProfileDigest, view.Snapshot.EffectivePolicyDigest)
+		exchange, err = validated.Exchange, cacheErr
 	default:
 		exchange, err = judge.Judge(ctx, input.Prompt, inputBytes)
+	}
+	// A cache miss (from the cache-only judge, in production always the
+	// case above — the default arm's own direct callers can, in principle,
+	// return the same sentinel) is "no judgment", exactly like a nil judge,
+	// never an operational failure (service.go:354, R-RR1-4).
+	if errors.Is(err, ErrJudgeCacheMiss) {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err

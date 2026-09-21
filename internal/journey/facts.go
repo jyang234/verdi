@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -74,6 +76,24 @@ type Facts struct {
 	LifecycleResult       specstate.Result
 	Evidence              EvidenceFacts
 	Owners                []string
+	// Spec is the target's own decoded frontmatter, carried forward for
+	// the eventual-blocker derivation's question-claimed-by-spike source
+	// (OpenQuestions x spike Stubs) — the one fact deriveEventual needs
+	// that no other Facts field already projects.
+	Spec *artifact.SpecFrontmatter
+	// Stubs and FeatureFold are the two feature-only fact families the
+	// eventual-blocker derivation needs (stub reconciliation, 03 §Stub
+	// reconciliation; the outcome-floor fold, 03 §The feature fold): both
+	// nil for a story target, and both nil (with EventualDisclosures
+	// naming why) when the corresponding port call errored — a
+	// reconciliation or fold failure is disclosed, never a projection
+	// failure (co-6).
+	Stubs       *evidence.StubReconciliation
+	FeatureFold *evidence.FeatureResult
+	// EventualDisclosures carries any Stubs/FeatureFold gathering error,
+	// merged into the record's eventual section (never the projection's
+	// own error return).
+	EventualDisclosures []string
 }
 
 // GatherFacts resolves arg to a target spec (I-30's two-form contract),
@@ -103,6 +123,13 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 		return Facts{}, err
 	}
 
+	var stubs *evidence.StubReconciliation
+	var featureFold *evidence.FeatureResult
+	var eventualDisclosures []string
+	if spec.Class == artifact.ClassFeature {
+		stubs, featureFold, eventualDisclosures = p.gatherEventualFeatureFacts(ctx, root, name, spec, cfg.Model, repoFacts)
+	}
+
 	return Facts{
 		Target:                Target{Ref: arg, Class: string(spec.Class), Path: relPath},
 		Repository:            repoFacts,
@@ -111,7 +138,62 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 		LifecycleResult:       result,
 		Evidence:              gatherEvidenceFacts(spec),
 		Owners:                spec.Owners,
+		Spec:                  spec,
+		Stubs:                 stubs,
+		FeatureFold:           featureFold,
+		EventualDisclosures:   eventualDisclosures,
 	}, nil
+}
+
+// gatherEventualFeatureFacts gathers the two feature-only fact families
+// the eventual-blocker derivation needs (stub reconciliation and the
+// outcome-floor fold) via the consumer-owned StubReconciler/FeatureFolder
+// ports (port.go). commit is the evaluation commit — the SAME
+// facts.Repository.Head value the obligation-quality assessment above
+// uses as its own evaluationCommit (Project's targetCommit/evaluationCommit
+// split), never the remote-ref fallback target commit: both ports bound
+// EVIDENCE reachability, the evaluationCommit question, not "which bytes
+// represent the target."
+//
+// A Reconcile or Fold error is disclosed, never a projection failure
+// (co-6, resolution (g) of task-1-brief.md): the corresponding return
+// value stays nil and the source yields no eventual items for this record
+// (eventual.go's stubUnreconciledBlockers/outcomeFloorBlockers both treat
+// a nil input as "nothing to derive from," not an error of their own).
+//
+// Both errors routinely carry this process's own ABSOLUTE store path
+// (internal/index/walk.go's "index: walking <root>/.verdi",
+// internal/evidence/records.go's "evidence: reading <derivedRoot>"), and
+// the disclosure they become flows into the canonical bytes and the
+// record digest — so it is sanitized here exactly as
+// gatherLifecycleFacts sanitizes specstate's own disclosures (F1(b),
+// CO-2/CO-4: two checkouts of the same store at different paths must
+// derive identical bytes).
+func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name string, spec *artifact.SpecFrontmatter, mdl *model.Model, repo RepositoryFacts) (*evidence.StubReconciliation, *evidence.FeatureResult, []string) {
+	commit := ""
+	if repo.Head.Known {
+		commit = repo.Head.Value
+	}
+
+	var disclosures []string
+
+	var stubsOut *evidence.StubReconciliation
+	stubs, err := p.stubs.Reconcile(ctx, root, commit, spec, mdl)
+	if err != nil {
+		disclosures = append(disclosures, fmt.Sprintf("stub reconciliation for %s could not be computed: %v", name, err))
+	} else {
+		stubsOut = &stubs
+	}
+
+	var foldOut *evidence.FeatureResult
+	fold, err := p.folder.Fold(ctx, root, commit, spec, mdl)
+	if err != nil {
+		disclosures = append(disclosures, fmt.Sprintf("the outcome-floor fold for %s could not be computed: %v", name, err))
+	} else {
+		foldOut = &fold
+	}
+
+	return stubsOut, foldOut, sanitizeDisclosures(root, disclosures)
 }
 
 // --- target resolution --------------------------------------------------

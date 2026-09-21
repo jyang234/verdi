@@ -61,7 +61,7 @@ func ValidSnapshot(targetRef, head string) readinesspilot.Snapshot {
 			concern("context/verdict", readinesspilot.AreaContext, true),
 			concern("review/action", readinesspilot.AreaReview, true),
 		},
-		StaleNotice: "Startup snapshot at " + head + "; restart verdi serve after an edit.",
+		StaleNotice: "Derived at HEAD " + head + " for this request.",
 	}
 }
 
