@@ -136,6 +136,15 @@ func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string)
 		Actors:             resolveConflictActors,
 		Judge:              readinessload.JudgeRun,
 		PredecodedRequest:  predecoded,
+		// R-RRF-3 (SI-214): the WARM-UP is the only caller that still
+		// refuses a request whose `expected` branch/HEAD does not describe
+		// this checkout — a request already stale at startup is a
+		// misconfiguration, and serve exits 2 on it. The per-request
+		// loaderOpts cmdServeWithDeps builds below deliberately leaves the
+		// option false: those loads run against this same retained bundle
+		// for the life of the server, so an ordinary commit must disclose
+		// the stale context, not blank the whole readiness page.
+		RequireExpectedMatch: true,
 	}
 	if _, err := readinessload.Load(ctx, root, targetSpec, warmOpts); err != nil {
 		return "", nil, err

@@ -34,6 +34,7 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
@@ -543,6 +544,101 @@ func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing
 	if err != nil || strings.TrimSpace(string(callsAfterCacheOnly)) != "1" {
 		t.Fatalf("judge calls after the cache-only hand-off load = %q (err %v), want STILL exactly 1 (no second launch)", callsAfterCacheOnly, err)
 	}
+}
+
+// TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest is R-RRF-3's
+// (SI-214) warm-up half. A per-request load now DISCLOSES a stale
+// `expected` branch/HEAD claim instead of failing
+// (internal/readinessload's own
+// TestLoad_ExpectedMismatchPostureIsTheExplicitOption), so the startup
+// warm-up became the ONE caller that must still refuse one: a request that
+// cannot describe the checkout the server is about to serve is a
+// misconfiguration the operator has to see at once, not something a page
+// discloses quietly for the life of the process.
+// readinessLoadBuilder.Build sets Options.RequireExpectedMatch on its
+// warmOpts alone — cmdServeWithDeps' per-request loaderOpts never does —
+// and deleting that one line leaves the refusing rows below red while the
+// disclosure behaviour stays green.
+func TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		branch  string // "" keeps the checkout's own branch
+		head    string // "" keeps the repository's own HEAD
+		wantErr bool
+	}{
+		{name: "an expected claim describing the checkout warms up"},
+		{name: "an already-stale expected HEAD is refused", head: strings.Repeat("a", 40), wantErr: true},
+		{name: "an already-stale expected branch is refused", branch: "design/other", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildContextCompileRepo(t, map[string]string{
+				".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+			})
+			judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+			configureContextConflictJudge(t, repo, judge, 0)
+			checkoutBranch(t, repo.Dir, "design/feature-alpha")
+			expected := contextcompile.Expected{Branch: "design/feature-alpha", Head: repo.Head}
+			if tc.branch != "" {
+				expected.Branch = tc.branch
+			}
+			if tc.head != "" {
+				expected.Head = tc.head
+			}
+			requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json",
+				contextRequestBytesWithExpected(t, "spec/feature-alpha", expected))
+
+			defaultSpec, predecoded, err := (readinessLoadBuilder{}).Build(context.Background(), repo.Dir, requestPath)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("Build: %v", err)
+				}
+				if defaultSpec != "spec/feature-alpha" || predecoded == nil || predecoded.Request.Expected == nil {
+					t.Fatalf("Build = (%q, %+v), want the warmed startup bundle for spec/feature-alpha", defaultSpec, predecoded)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "expected repository") {
+				t.Fatalf("Build error = %v, want the warm-up's expected-identity refusal", err)
+			}
+			// …and `verdi serve` itself exits 2 on it, never entering the
+			// run: an operational failure, the exit code every verb owes a
+			// misconfiguration (CLAUDE.md 0/1/2).
+			var stdout, stderr bytes.Buffer
+			deps := serveCommandDeps{
+				findRoot:  func(string) (string, error) { return repo.Dir, nil },
+				readiness: readinessLoadBuilder{},
+				run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+					t.Error("serve entered its run with an already-stale --context-request")
+					return 0
+				},
+			}
+			if code := cmdServeWithDeps([]string{"--http", "127.0.0.1:0", "--context-request", requestPath}, &stdout, &stderr, deps); code != 2 {
+				t.Fatalf("serve exit = %d, want 2; stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "expected repository") {
+				t.Fatalf("serve stderr = %q, want the expected-identity refusal", stderr.String())
+			}
+		})
+	}
+}
+
+// contextRequestBytesWithExpected is contextRequestBytes plus the optional
+// `expected` repository claim R-RRF-3 turns on — built through
+// contextcompile's own EncodeRequest seam, never hand-authored JSON.
+func contextRequestBytesWithExpected(t *testing.T, spec string, expected contextcompile.Expected) []byte {
+	t.Helper()
+	data, err := contextcompile.EncodeRequest(contextcompile.Request{
+		Schema:   contextcompile.RequestSchema,
+		Adapter:  contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		Phase:    contextcompile.PhaseDesign,
+		Scope:    policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:     spec,
+		Expected: &expected,
+	})
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	return data
 }
 
 // TestServeContextRequestReadinessReachesGetDocumentOverSocket is fix

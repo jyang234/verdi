@@ -42,6 +42,33 @@ const noContextRequestWitness = "no context request supplied for this derivation
 // vector already points at.
 const staleConflictReportWitness = "the policy-conflict report was computed for different spec bytes than the ones on disk; re-run the context-conflict verb to refresh it"
 
+// staleExpectedRepositoryWitness is R-RRF-3's (SI-214) fixed witness
+// sentence for a per-request derivation whose --context-request carries an
+// optional `expected` claim that no longer matches the checkout. It is the
+// SI-208 shape one level earlier: nothing was evaluated for these bytes, so
+// the honest answer is disclosed-as-unproven, not an operational failure
+// that blanks every unrelated area of the page (CLAUDE.md's three-valued
+// honesty). It names both repositories because that pair is exactly what an
+// operator needs to decide whether to re-run the context-conflict verb or
+// to move the checkout back.
+//
+// Both repositories are rendered with %q: `expected.branch` is
+// caller-authored request data that contextcompile only requires to be
+// non-empty, so an unquoted branch could carry a control character and
+// readinesspilot rejects a control-bearing witness — which would turn this
+// disclosure straight back into the operational failure the ruling
+// removes. %q escapes every such rune, so the sentence is display-safe by
+// construction for any request the decoder accepts. It carries no path and
+// no digest (the SI-208 reasoning): the request-bound contextFallback
+// vector already names the file, and a digest tells an operator nothing
+// they can act on.
+func staleExpectedRepositoryWitness(expected, computed contextcompile.Expected) string {
+	return fmt.Sprintf(
+		"the context request expected repository %q; the repository now reads %q: the policy-conflict evaluation was not derived for these bytes",
+		expected.Branch+"@"+expected.Head, computed.Branch+"@"+computed.Head,
+	)
+}
+
 // noContextRequestCLI is R-RR1-5's fixed context/verdict destination when
 // no request was supplied: an instructive vector naming the verb and flag a
 // caller would use to supply one, not a runnable command against any real
@@ -195,13 +222,39 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	conflictUnavailable := ""
 	contextFallback := noContextRequestCLI
 
-	if !haveRequest {
+	computed := contextcompile.Expected{Branch: branch, Head: head}
+	// staleExpected: the request carries an optional `expected` claim and it
+	// no longer describes this checkout.
+	staleExpected := haveRequest && request.Expected != nil && *request.Expected != computed
+	switch {
+	case !haveRequest:
 		conflictUnavailable = noContextRequestWitness
-	} else {
-		computed := contextcompile.Expected{Branch: branch, Head: head}
-		if request.Expected != nil && *request.Expected != computed {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: --context-request expected repository %+v does not match computed repository %+v", *request.Expected, computed)
-		}
+	case staleExpected && opts.RequireExpectedMatch:
+		// Only `verdi serve`'s startup warm-up sets the option: a request
+		// that is ALREADY stale when the server starts is a
+		// misconfiguration the operator must see at once, not a page that
+		// quietly discloses it forever.
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: --context-request expected repository %+v does not match computed repository %+v", *request.Expected, computed)
+	case staleExpected:
+		// R-RRF-3 (SI-214, independent review R3): on an ordinary
+		// per-request load the mismatch is the ac-3 ConflictUnavailable
+		// posture, not an error. `verdi serve` keeps deriving against the
+		// request bundle it validated at startup (R-RR1-17), so one
+		// ordinary commit or branch change made this claim stale and
+		// refusing here blanked the startup spec's entire readiness page —
+		// every area, including the ones the request has nothing to do with
+		// — until the server was restarted. Nothing was evaluated for these
+		// bytes, so no provider is constructed and no report is read; the
+		// context area carries the one witness and every other area
+		// derives. `expected` is deliberately NOT rebound to the computed
+		// value: silently re-pointing the operator's own claim at whatever
+		// the checkout now says would manufacture authority the request
+		// never granted. contextFallback becomes the request-bound vector
+		// because re-running that verb against this file IS how the
+		// operator refreshes it.
+		conflictUnavailable = staleExpectedRepositoryWitness(*request.Expected, computed)
+		contextFallback = []string{"verdi", "context", "conflict", "--request", opts.ContextRequestPath}
+	default:
 		request.Expected = &computed
 
 		conflictRequest := policyconflict.Request{
