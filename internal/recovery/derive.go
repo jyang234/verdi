@@ -333,11 +333,12 @@ func recognizeArtifactsStagedUncommitted(f Facts) []RecognizedState {
 	id := "resolve-staged-closure:" + target
 
 	return []RecognizedState{{
-		Code:           StateArtifactsStagedUncommitted,
-		Scope:          ScopeRef,
-		Target:         target,
-		Facts:          []string{fmt.Sprintf("the index carries spec/%s's own closure paths (%s, %s) and nothing else", f.Name, active, archive)},
-		Uncertainties:  []Uncertainty{},
+		Code:          StateArtifactsStagedUncommitted,
+		Scope:         ScopeRef,
+		Target:        target,
+		Facts:         []string{fmt.Sprintf("the index carries spec/%s's own closure paths (%s, %s) and nothing else", f.Name, active, archive)},
+		Uncertainties: []Uncertainty{},
+		// vocab:identity — "close" names the git verb/branch-prefix identity, never the renameable lifecycle status
 		StepsCompleted: []string{"close staged the active-to-archive move"},
 		InvariantsHeld: []string{},
 		Choices: []Choice{{
@@ -374,7 +375,8 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 			fmt.Sprintf("%s is absent on disk but present in HEAD's tree", active),
 			fmt.Sprintf("%s is present on disk but absent from HEAD's tree", archive),
 		},
-		Uncertainties:  []Uncertainty{},
+		Uncertainties: []Uncertainty{},
+		// vocab:identity — "close" names the git verb/branch-prefix identity, never the renameable lifecycle status
 		StepsCompleted: []string{"close moved the spec directory on disk"},
 		InvariantsHeld: []string{},
 		Choices: []Choice{{
@@ -561,15 +563,17 @@ func recognizeGovernedActionInterrupted(f Facts) []RecognizedState {
 		}
 		id := "resolve-journal:" + f.Journal.Path
 		states = append(states, RecognizedState{
-			Code:           StateGovernedActionInterrupted,
-			Scope:          ScopeRef,
-			Target:         f.Journal.Path,
+			Code:   StateGovernedActionInterrupted,
+			Scope:  ScopeRef,
+			Target: f.Journal.Path,
+			// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 			Facts:          []string{fmt.Sprintf("the draft-mutation journal for %s is in phase %q", f.Journal.Spec, f.Journal.Phase)},
 			Uncertainties:  []Uncertainty{},
 			StepsCompleted: steps,
 			InvariantsHeld: []string{},
 			Choices: []Choice{{
-				ID:             id,
+				ID: id,
+				// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 				Summary:        "resolve the interrupted draft-mutation journal for " + f.Journal.Spec,
 				Preconditions:  []string{fmt.Sprintf("%s is still in phase %q", f.Journal.Path, f.Journal.Phase)},
 				Effects:        []string{"complete or roll back the journal"},
@@ -577,6 +581,7 @@ func recognizeGovernedActionInterrupted(f Facts) []RecognizedState {
 				Confirmation:   "none: no executor",
 				Postconditions: []string{f.Journal.Path + " no longer exists"},
 				Executor:       "none",
+				// vocab:identity — "draft" names internal/draftmutation.LockedWriter.Recover's own board-draft-write identity, not a lifecycle status
 				ManualCommands: []string{"next board draft write completes or rolls back this journal (internal/draftmutation.LockedWriter.Recover)"},
 			}},
 		})

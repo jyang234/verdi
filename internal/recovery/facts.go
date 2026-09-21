@@ -432,18 +432,22 @@ func gatherJournal(root, name string) (JournalFact, []string) {
 		if os.IsNotExist(err) {
 			return jf, nil
 		}
+		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("could not stat draft-mutation journal %s: %v", path, err)}
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
+		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("draft-mutation journal %s is a symlink; not followed", path)}
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("could not read draft-mutation journal %s: %v", path, err)}
 	}
 	var peek journalPeek
 	if err := json.Unmarshal(data, &peek); err != nil {
+		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("could not decode draft-mutation journal %s: %v", path, err)}
 	}
 	jf.Present = true
