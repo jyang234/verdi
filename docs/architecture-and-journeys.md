@@ -293,11 +293,14 @@ attributes the load-bearing ones to the component that embodies them.
    governance-v3 dc-12). The fold counts only a marker-removed scaffold as
    authored — an unauthored one folds exactly as absent, and an unreadable
    attestation file fails operationally (exit 2), never a silent absent.
-   VL-022 is attestation's own coherence check, story-scoped as of this
-   feature's first wave (ADJ-51): it refuses a story-targeting attestation
-   whose own path/slug disagrees with the (story, AC) its `verifies` edge
-   names, skipping a feature-outcome attestation's edge entirely — the same
-   feature scope R-RR2-2's own follow-on wave widens VL-022 to cover.
+   VL-022 is attestation's own coherence check for both classes
+   (spec/readiness-recovery ac-7, R-RR2-2 / SI-212): it refuses a
+   story-targeting attestation whose own path/slug disagrees with the
+   (story, AC) its `verifies` edge names, and a feature-targeting one whose
+   directory/id segment is not the feature's own name when the named
+   criterion declares the `attestation` evidence kind — the path the feature
+   fold reads; a criterion that declares no such kind is outside every
+   consumer and is skipped, never refused.
 2. **Sync.** Post-merge, evidence keeps accruing: every CI run produces
    `source: ci` records; `runtime-probe.yml` on its cron emits `kind: runtime`
    records through `verdi sync --produce-runtime` (bare, it is a disclosed
