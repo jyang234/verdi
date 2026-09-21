@@ -15,14 +15,65 @@ counts below). Kept below: every "undefined:" compiler-error line (11
 total, verbatim, in original order), six representative PASS lines
 bracketing them for context, and the final summary line. Elided: 233 of
 the 239 PASS/separator line pairs, replaced with "... [N line-pairs
-elided] ..." noting exactly which mutant-file ranges. Full JSON --output
-(report.json,
-6.2MB — embeds the complete mutated source of every one of the 239
-mutants) was inspected inline in this session and then removed by the
+elided] ..." noting exactly which mutant-file ranges. The 6.2MB
+report.json (it embeds the complete mutated source of every one of the
+239 mutants) was inspected inline in this session and then removed by the
 mandated scratch-worktree restore (`git checkout -- . && git clean -fd`)
 before a reduced copy could be written to this fence; the four aggregate
 fields below were read directly from it before removal and are quoted
 verbatim, not reconstructed.
+
+CORRECTION (fix round 1): the sentence above originally attributed
+report.json to a "Full JSON `--output`" flag. **That flag does not
+exist.** Checked against the pinned binary:
+
+  $ GOBIN=/tmp/fix-mr-bin-avito go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@v0.0.0-20251226130216-48d0401f00fb
+  exit status: 0
+  $ /tmp/fix-mr-bin-avito/go-mutesting --help
+  General options:
+    --debug                       Debug log output
+    --do-not-remove-tmp-folder    Do not remove the tmp folder ...
+    --help                        Show this help message
+    --verbose                     Verbose log output
+    --config=                     Path to config file
+    --html-output                 Generates a go-mutesting-report.html file after
+                                  testing is complete
+  (no --output of any kind; --html-output is the only report flag)
+
+The FILE is real, though, and is written unconditionally rather than on
+request — the name is hardcoded in the fork's own source:
+
+  $GOMODCACHE/github.com/avito-tech/go-mutesting@v0.0.0-20251226130216-48d0401f00fb/internal/models/report.go:4
+    var ReportFileName string = "report.json"
+  :20  TotalMutantsCount    int64   `json:"totalMutantsCount"`
+  :28  MutationCodeCoverage int64   `json:"mutationCodeCoverage"`
+
+So the stats block below is reproducible in principle (re-run the tool and
+read ./report.json), and its field names match the fork's own struct tags
+exactly. It was NOT re-derived in fix round 1: the re-run was started and
+then stopped after ~10 minutes at mutant ~190 of 239, because it was
+blocking the critical path and had already produced the more important
+finding (the in-place mutation below). Status of the stats block:
+DISCLOSED-AS-UNVERIFIED in this round, with the flag misattribution
+corrected and the artifact's provenance established. The compile-error
+witness that carries the disqualification does reproduce independently and
+was re-confirmed by the lane's reviewer down to the mutant checksums.
+
+ALSO CORRECTED (fix round 1): the clean-tree note further down said this
+fork "DID restore the working tree correctly on a normal exit in this
+run", attributing the dirty tree to an interrupted run. It dirties the
+tree for the duration of EVERY mutant. Observed directly, mid-run, during
+a normal (uninterrupted) run in a throwaway clone:
+
+  $ git -C /tmp/fix-mr status --porcelain
+   M internal/readinessload/facts.go
+  ?? internal/readinessload/facts.go.tmp
+
+The story's step 1 makes the clean-tree check a disqualifier in its own
+right, so this fork fails step 1 independently of the
+compile-failure-as-kill defect. (The tree IS restored by the time the
+tool exits normally, which is why the post-run check below is empty; the
+check is simply too late to catch it.)
 
 report.json top-level stats (quoted from the tool's own JSON, verbatim):
   "stats":{"totalMutantsCount":239,"killedCount":239,"notCoveredCount":0,
