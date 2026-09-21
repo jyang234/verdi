@@ -117,14 +117,14 @@ controller's reading of "as recommended" and are flagged in the handoff.
 1. **mutation-ratchet: closed as not-doing** under the parent's own oq-3
    rule. The spec stays accepted-pending-build and no build starts; the
    mechanism gap (no not-doing status or verb for an accepted feature) is
-   invention-ledger SI-208 (PLAN.md §7 I-132). Carried forward as ordinary follow-ups, not as
+   invention-ledger SI-217 (PLAN.md §7 I-132; merged as SI-208, renumbered 2026-09-21 after a collision with the readiness-recovery lanes' allocation). Carried forward as ordinary follow-ups, not as
    this feature: the hand-seeded persistence fixture as a regression test
    for readiness-recovery's co-2 test; `internal/align`'s 1-second judge
    deadline and `internal/sealedexec`'s stale-witness failures to the
    product tracker.
 2. **ritual-write-scope: `index_carry` enum adopted** (refused, scoped,
    carried, no_commit) with a first-holds precedence rule in execution
-   order; invention-ledger SI-207 (PLAN.md §7 I-131). **v2 started:** spec/ritual-write-scope-v2
+   order; invention-ledger SI-216 (PLAN.md §7 I-131; merged as SI-207, renumbered 2026-09-21 for the same collision; the frozen v2 body cites SI-207). **v2 started:** spec/ritual-write-scope-v2
    on `design/ritual-write-scope-v2` (worktree `verdi-wt/ritual-write-scope-v2`,
    content commit a8fdd479), superseding the parent with ac-1/ac-2/ac-4/dc-2
    amended, dc-3/dc-4/dc-5 added, oq-1..oq-5 removed as answered, three
