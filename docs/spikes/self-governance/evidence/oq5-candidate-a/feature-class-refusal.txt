@@ -1,0 +1,13 @@
+Command: (cd /tmp/spike-sg-oq5-obligation && /tmp/verdi-sg obligation author spec/readiness-recovery ac-1 static)
+Exit status: 1
+stdout/stderr:
+obligation author: spec/readiness-recovery resolves to a feature-class spec, not a story — no STORY exists to attest an AC against (spec/attest-helper dc-5); a feature AC's own outcome attestation is hand-authored directly at .verdi/attestations/readiness-recovery/ac-1.md (03 §The feature fold's outcome floor, §Attestations and waivers; the spec/true-closure precedent), not scaffolded by this verb
+
+Finding: `verdi obligation author` refuses to attach to a feature-class
+spec directly. It only scaffolds obligations against a STORY spec's own
+acceptance criteria (a story that `verifies` a parent feature). Wave-1's
+readiness-recovery work has no story-class spec of its own in
+.verdi/specs (it was executed straight from a plan document against the
+feature spec) — recording these 20 items as obligations would first
+require authoring a brand-new story spec purely to have an attachment
+point, which is out of proportion for a process-disclosure note.

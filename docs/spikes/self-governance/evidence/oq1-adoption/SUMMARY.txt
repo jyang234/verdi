@@ -1,0 +1,109 @@
+oq-1 evidence summary — exact commands, exit codes, blocker-by-reason-code counts.
+Battery script (re-runnable): docs/spikes/self-governance/_scratch/sg-battery.sh
+Both profiles run in separate /tmp clones per the lane brief (constraint 4);
+solo clone discarded after this spike, team clone discarded after this spike.
+
+## Commands (identical battery run before and after each adoption)
+
+  verdi lint
+  verdi model check
+  verdi journey --json spec/readiness-recovery
+  verdi journey --json spec/spec-documents
+  verdi journey --json spec/verdi-store-layout        (component-class probe)
+  verdi spec doc spec/readiness-recovery
+  verdi spec doc spec/spec-documents
+  verdi spec doc spec/verdi-store-layout
+
+## Exit codes (identical in all four batteries: solo-before, solo-after, team-before, team-after)
+
+  lint                          0
+  model check                   0
+  journey readiness-recovery    0
+  journey spec-documents        0
+  journey verdi-store-layout    2  (operational refusal, unchanged wording both before and after:
+                                    "journey: spec/verdi-store-layout is a component spec (no story:
+                                    field, no acceptance_criteria:); journey requires class: feature or
+                                    class: story")
+  spec doc readiness-recovery   0
+  spec doc spec-documents       0
+  spec doc verdi-store-layout   0
+
+## Adoption commits
+
+  solo: git show --stat -> adoption-commit-solo.show-stat.txt
+    4 files changed, 76 insertions(+): .verdi/constitution/consumers.json,
+    .verdi/policy/constitution.md, .verdi/policy/policies/starter.md,
+    .verdi/policy/profiles/starter-solo.md
+  team: git show --stat -> adoption-commit-team.show-stat.txt
+    same 4 paths, same insertion count (starter-team.md instead of starter-solo.md)
+
+Both starter policies decode with claims: [] — the adoption verb writes ONE
+real rule (the design_assistance payload) and no constraint claims, and the
+starter constitution registers subjects: {action: [], configuration: [],
+capability: [], resource: [], identity: [], evidence: []} — zero subjects in
+any family (see docs/spikes/self-governance/evidence/oq4-exemption/
+subject-not-registered-refusal.txt for why that also matters: no claim using
+ANY subject can load until an operator registers one by hand).
+
+## verdi lint: byte-identical before/after, both profiles
+
+Single finding both before and after: disclosed-unproven [lint:VL-017]
+(the mutable-zone disclosure, unconditional on this checkout, unrelated to
+policy content), naming 107 affected specs, exit 0. Zero verdict findings.
+diff before/after: empty (lint-representative.stdout is the one file
+needed; all four runs are byte-identical).
+
+## verdi model check: byte-identical before/after, both profiles
+
+  model: OK — verdi.model/v1, 2 classes, 4 transitions, digest
+  sha256:c08c9b153bf27cc18eece5b81d2a3413a05810bbba3b96e3e6fcc470aafebf08
+  (model-check-representative.stdout; identical digest in all four runs —
+  the model/lifecycle schema does not read policy content at all.)
+
+## verdi journey --json: blocker-by-reason-code table
+
+spec/readiness-recovery and spec/spec-documents (identical shape for both):
+
+  | reason code                        | before (both profiles) | after solo | after team |
+  |-------------------------------------|:---:|:---:|:---:|
+  | obligation-countersign-unproven     |  1  |  1  |  1  |
+  | obligation-fold-green-unproven      |  1  |  1  |  1  |
+  | principal-resolution-unproven       |  1  |  1  |  1  |
+  | TOTAL                                |  3  |  3  |  3  |
+
+New blockers introduced by adoption: 0 (either profile).
+Blockers cleared by adoption: 0 (either profile).
+Blockers whose TEXT changes without changing reason code or count: 1
+  (principal-resolution-unproven's clearing_condition/witness narrows from
+  "a governance profile is adopted and the required principals resolve as
+  authenticated" to "the required principals resolve as authenticated" —
+  principals.profile_adopted flips false->true and
+  principals.selected_profile_id/selected_profile_digest populate — because
+  the FIRST half of that condition is now satisfied; principal
+  AUTHENTICATION remains unproven, so the blocker itself does not clear).
+
+Full pretty-printed before/after/team-after journey records for
+spec/readiness-recovery are journey-readiness-recovery-{before,after-solo,
+after-team}.json in this directory; spec/spec-documents is byte-for-byte
+the same shape (not duplicated here to stay under the per-file line cap).
+
+## verdi spec doc: byte-identical before/after except the source-commit line
+
+The only diff in any of the six `spec doc` before/after pairs (2 profiles x
+3 specs) is the trailing "Source: matrix over the working tree at
+<sha>." line, which naturally names the new adoption commit. No new
+section, table, row, or word appears anywhere else in any rendered
+document — spec doc does not read .verdi/policy/ at all yet.
+
+## Answer
+
+Adopting the starter constitution and policy (either profile) on this
+28-active-spec store is inert to store lint, model check, and spec doc,
+and downgrades exactly one existing journey blocker's remaining condition
+text without changing its reason code, its count, or the total blocker
+count for either probed feature spec. Zero new blockers, of any reason
+code, either profile. The one behavioral difference between profiles is
+the design_assistance mode line printed by the adopt verb itself (solo:
+draft-write; team: proposal-only) and the profile id/digest populated in
+journey's principals section — nothing readiness derives from that
+difference changes today.

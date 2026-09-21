@@ -1,0 +1,89 @@
+=== go build ./... ===
+exit:0
+
+=== go test ./internal/policyartifact/... (tail) ===
+    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/one_role (0.00s)
+        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "two"
+    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/three_roles (0.00s)
+        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "two"
+    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/duplicate_roles (0.00s)
+        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "distinct"
+    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/bound_rejected (0.00s)
+        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "bound"
+    --- FAIL: TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles/non-kebab_role (0.00s)
+        claim_test.go:308: Validate() = policyartifact: unknown enforcement rung "" (known: unrepresentable, analyzer, gate-assertion, review, prose), want error containing "kebab"
+--- FAIL: TestFixtureDigests_Ratchet (0.00s)
+    fixtures_test.go:55: digesting policies/go-toolchain.md: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+--- FAIL: TestFixtureExemptionWitnessDigest (0.00s)
+    fixtures_test.go:144: decoding policy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+--- FAIL: TestDecodePolicy_Happy (0.00s)
+    policy_test.go:48: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+--- FAIL: TestDecodePolicy_DigestOrderInsensitive (0.00s)
+    policy_test.go:109: DecodePolicy(a): policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+--- FAIL: TestDecodePolicy_Negative (0.00s)
+    --- FAIL: TestDecodePolicy_Negative/duplicate_claim_ids (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "duplicate"
+    --- FAIL: TestDecodePolicy_Negative/unknown_payload_kind (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "unknown payload kind"
+    --- FAIL: TestDecodePolicy_Negative/unknown_claim_operator (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "operator"
+    --- FAIL: TestDecodePolicy_Negative/empty_body (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "rationale"
+    --- FAIL: TestDecodePolicy_Negative/empty_instruction (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "instruction"
+    --- FAIL: TestDecodePolicy_Negative/multiline_instruction (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "single line"
+    --- FAIL: TestDecodePolicy_Negative/instructions_null_entry (0.00s)
+        policy_test.go:168: DecodePolicy error = policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is []), want containing "instruction"
+--- FAIL: TestPolicySeal_RejectsForgeryAndMutation (0.00s)
+    policy_test.go:184: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+--- FAIL: TestDecodePolicy_DesignAssistancePayload (0.00s)
+    policy_test.go:197: DecodePolicy: policyartifact: policy.claims[0].rung is missing: every claim field except bound is mandatory (values' explicitly empty set is [])
+FAIL
+FAIL	github.com/jyang234/verdi/internal/policyartifact	0.535s
+FAIL
+
+=== fail counts by package (go test ./... summary) ===
+total FAIL test cases: 480
+packages with FAIL:       41
+FAIL
+FAIL	github.com/jyang234/verdi/cmd/e2eharness	30.015s
+FAIL
+FAIL	github.com/jyang234/verdi/cmd/verdi	583.566s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/align	47.962s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/constitutionapp	43.977s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/constitutionimpact	2.633s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/contextcompile	11.117s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/contextresolve	2.798s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/designapp	52.085s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/draftmutation	10.531s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/instructionprojection	3.119s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/journey	24.782s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/mcpserve	71.226s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/policyartifact	0.263s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/policyauthority	2.614s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/policyconflict	12.988s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/policyintegration	0.684s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/readinesspilot	0.353s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/sealedexec/claude	15.277s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/skillpack	4.798s
+FAIL
+FAIL	github.com/jyang234/verdi/internal/specimport	18.066s
+FAIL

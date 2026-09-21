@@ -1,0 +1,26 @@
+Command: (cd /tmp/spike-sg-exempt && /tmp/verdi-sg journey --json spec/readiness-recovery)
+Context: run immediately after adding the golangci-lint-standard-set claim
+to .verdi/policy/policies/starter.md, BEFORE registering that subject in
+the adopted constitution's subjects.configuration list.
+Exit status: 2 (operational)
+stderr:
+journey: loading policy authority: policyauthority: policy policy/starter claim golangci-lint-standard-set: subject "golangci-lint-linter-set" is not registered for family "configuration" in the constitution subject catalog
+
+Finding: internal/policyartifact.DecodePolicy (the seam oq-2's scratch
+harness exercises) accepts any kebab-case subject — it has no subject
+registry. internal/policyauthority.Load, the seam `verdi journey` and
+`verdi lint` actually call, cross-validates every claim's subject against
+the ADOPTED CONSTITUTION's own subjects catalog (store.go's crossValidate,
+"policyauthority: ... subject %q is not registered ... in the
+constitution subject catalog") and fails closed (exit 2) when it is not
+registered. The starter constitution (`verdi policy adopt --starter`)
+registers ZERO subjects in all six families ("no constraint subjects" per
+its own rationale prose) — so no claim using ANY subject can be loaded by
+the real CLI until an operator hand-edits the constitution's subjects:
+block first. This is a second, independent reason (beyond zero claims)
+that oq-1's adopted starter store is inert: even a hand-added claim is
+refused by the real loader until its subject is separately registered.
+Remedy applied for this experiment: added `golangci-lint-linter-set` to
+`subjects.configuration` in constitution.md (see
+constitution-with-subject.md in this directory); journey then succeeded
+(exit 0; see lapsed-journey.exit / future-journey.exit).
