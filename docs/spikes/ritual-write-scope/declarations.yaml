@@ -3,9 +3,34 @@
 # raw/reduced recorder logs beside it. NEVER committed as product data —
 # this file is spike evidence under the VL-016 fence (docs/spikes/).
 #
-# Grammar shape is the seven fields the story's investigation plan names:
-# refs_create, refs_move, head_may_switch, stage_paths,
-# index_carry_foreign, untracked_may_enter, may_push.
+# Grammar shape is the seven fields the story's investigation plan names,
+# with ONE retyped slot (fix round 1, finding F-1): refs_create,
+# refs_move, head_may_switch, stage_paths, index_carry,
+# untracked_may_enter, may_push.
+#
+# index_carry REPLACES the story's boolean index_carry_foreign, in the same
+# slot, because the five rituals occupy four states and a boolean collapses
+# three of them into one `false`:
+#
+#   carried    an unguarded, pathspec-less `git commit` absorbs a foreign
+#              pre-staged entry into the ritual's own commit  (UAT-036)
+#   refused    the ritual exits 2 before it begins when the index carries
+#              anything relative to HEAD (a pre-ritual refusal guard)
+#   scoped     the commit names its own paths (`commit -m <msg> -- <paths>`),
+#              so a foreign entry is left untouched in the index
+#   no_commit  the ritual creates no commit at all, so the question is moot
+#
+# The old boolean is recoverable as (index_carry == carried). The reasons
+# for the change, and the method error that made it necessary, are in
+# README.md's oq-3 section and its "Correction: how close was got wrong".
+#
+# EVERY index_carry value below is derived from SOURCE GUARDS -- the
+# non-test callers of gitx.StagedPaths / gitx.StatusDirty /
+# gitx.WorktreeChangedPaths, plus every require*/refuse* helper in cmd and
+# internal -- and from which commit primitive the ritual calls. It is NOT
+# inferred from the shape of the command log, which over-reports (it
+# records the pathspec-less commit close never reaches) as readily as it
+# under-reports.
 #
 # Framing: each declaration below describes OBSERVED CURRENT BEHAVIOR at
 # base 5f60c76c (an empirical snapshot, matching co-1: "declarations
@@ -14,14 +39,17 @@
 # are ALREADY FIXED at this base commit (confirmed by source comments and
 # existing regression tests — see README's oq-1 section); this file
 # records that as observed fact. UAT-036 (pre-staged foreign index entries
-# riding along in an unscoped `git commit`) and UAT-023/UAT-031's
-# build-start half are OPEN at this base commit — also observed fact, each
-# annotated inline below with "OPEN DEFECT" so the eventual feature build
-# does not mistake a faithful transcription of current behavior for an
-# endorsement of it (ac-4 must close these before ac-1's registry ships
-# the tightened value, per co-1's "never a widening... without an
-# owner-visible decision" read in reverse: narrowing a declaration to
-# close a defect IS the owner-visible decision ac-4 already recorded).
+# riding along in an unscoped `git commit`) is OPEN for TWO of the five
+# rituals -- design_start and commit_to_design -- and NOT for close, which
+# refuses to begin at all; UAT-023/UAT-031's build-start half is OPEN too.
+# Each open case is annotated inline below with "OPEN DEFECT" so the
+# eventual feature build does not mistake a faithful transcription of
+# current behavior for an endorsement of it (ac-4 must close these before
+# ac-1's registry ships the tightened value, per co-1's "never a
+# widening... without an owner-visible decision" read in reverse:
+# narrowing a declaration to close a defect IS the owner-visible decision
+# ac-4 already recorded). ac-4's UAT-036 pin therefore covers TWO rituals,
+# and owes close a different pin: that its refusal keeps working.
 
 design_start:
   verb: "design start"
@@ -36,9 +64,20 @@ design_start:
     - ".verdi/specs/active/<name>/"   # gitx.AddPaths, scoped — UAT-033 fix confirmed present
                                        # (design_test.go: TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir
                                        # asserts gitx.AddAll is never called)
-  index_carry_foreign: true    # OPEN DEFECT (UAT-036): `git commit -m <msg>` carries no `--`
-                                # pathspec, so it commits the whole index, not only what
-                                # stage_paths staged. policy_adopt below shows the fixed shape.
+  index_carry: carried         # OPEN DEFECT (UAT-036). Two source facts, both required:
+                                # (1) NO pre-ritual index guard — design.go and
+                                #     designsupersede.go call neither gitx.StagedPaths nor
+                                #     gitx.StatusDirty (zero non-test hits); and
+                                # (2) gitx.CreateCommit (design.go:660), which is
+                                #     `git commit -m <msg>` with no `--` pathspec, so it
+                                #     commits the WHOLE index, not only what stage_paths
+                                #     staged.
+                                # Reproduced empirically on an ac-2-seeded fixture: the
+                                # ritual's own commit carries the operator's
+                                # spike-foreign-staged.txt
+                                # (state-diff/seeded-designstart-commit-files.txt).
+                                # policy_adopt below shows one fixed shape; close shows the
+                                # other.
   untracked_may_enter: false   # add is scoped (see stage_paths); nothing untracked outside
                                 # stage_paths is ever `git add`-ed by this ritual itself
   may_push: false              # no push/fetch/remote-mutating subcommand observed
@@ -60,7 +99,12 @@ build_start:
                                 # own doc comment on CheckoutNewBranchFrom narrates that fix).
   stage_paths: []               # never calls add — confirmed: zero `add`/`commit` lines for
                                  # "verdi build start" across the whole recorder run
-  index_carry_foreign: false    # moot: this ritual never commits, so nothing can ride along
+  index_carry: no_commit        # moot, and moot for a reason worth naming rather than
+                                 # spelling `false`: this ritual creates no commit at all
+                                 # (zero gitx.AddPaths/gitx.CreateCommit/CreateCommitPaths
+                                 # callers in buildstart.go), so no foreign index entry can
+                                 # ride along and ac-2's witness must assert the ABSENCE of
+                                 # a commit object, not a commit's contents.
   untracked_may_enter: false    # moot, same reason
   may_push: false                # no push observed
 
@@ -81,10 +125,34 @@ close:
   stage_paths:
     - ".verdi/specs/active/<name>/"     # the two observed --force-local `add --` paths
     - ".verdi/specs/archive/<name>/"
-  index_carry_foreign: true      # OPEN DEFECT, same shape as design_start: `git commit -m <msg>`
-                                  # under --force-local carries no `--` pathspec (UAT-036's own
-                                  # text names close's sibling rituals, not just design start;
-                                  # this spike's inventory confirms close shares the defect)
+  index_carry: refused           # NOT a defect, and NOT UAT-036. This value was `true` in
+                                  # this file's first issue and was wrong (fix round 1, F-1).
+                                  # close DOES share design_start's pathspec-less commit shape
+                                  # (closeCreateCommit = gitx.CreateCommit, close.go:162; the
+                                  # two commit sites are close.go:890 and closefeature.go:256)
+                                  # — but it can never reach that commit with a foreign index
+                                  # entry staged, because requireCleanIndex (close.go:932) is
+                                  # runClose's FIRST statement (close.go:655) and exits 2 on
+                                  # any staged path. Its own doc comment (close.go:920-931,
+                                  # D6-33 / ledger L-N15(2)) names precisely this hazard:
+                                  # "The check runs before every mutation — branch cut, align
+                                  # freeze, rollup, status flip, archive move — because a
+                                  # later ordinary commit would carry inherited index entries
+                                  # regardless of how narrowly the ritual itself stages."
+                                  # --force-local overrides only the PUBLISH guard
+                                  # (close.go:336-346), never this one; runClose's only
+                                  # production caller is close.go:397, and --preflight takes a
+                                  # separate read-only path that rehearses the same guard
+                                  # (closepreflight.go:107) and never commits.
+                                  # Pinned by close_test.go:1017-1098 (foreign staged path,
+                                  # closure residue, mixed index) and
+                                  # closefeature_test.go:493. Witnessed empirically at
+                                  # state-diff/seeded-close-stderr.txt: exit 2, refusal text,
+                                  # and all three state diffs empty.
+                                  # ac-1 consequence: `carried`/true here would have been a
+                                  # PERMISSION — ac-2's witness would then pass a future
+                                  # change that deleted requireCleanIndex, exactly co-1's
+                                  # "widening... without an owner-visible decision".
   untracked_may_enter: false     # add is scoped to the two spec-dir paths above
   may_push: false                 # CONFIRMED BY SOURCE, not just by this run's fixtures:
                                    # close.go:915-916 — the verb deliberately "stops at the
@@ -112,8 +180,15 @@ commit_to_design:
     - ".verdi/specs/active/<name>/"   # gitx.AddPaths, scoped — UAT-034 fix confirmed present
                                        # (commitdesign_test.go: TestRun_ScaffoldCommitStagesOnlySpecDir
                                        # asserts gitx.AddAll is never called)
-  index_carry_foreign: true       # OPEN DEFECT, same UAT-036 shape as design_start: `git commit
-                                   # -m <msg>` carries no `--` pathspec
+  index_carry: carried            # OPEN DEFECT, same UAT-036 shape as design_start, and for
+                                   # the same two source reasons: no pre-ritual index guard
+                                   # anywhere in internal/commitdesign (zero non-test
+                                   # gitx.StagedPaths/StatusDirty callers), and
+                                   # gitx.CreateCommit (commitdesign.go:222) — `git commit -m
+                                   # <msg>` with no `--` pathspec. Not separately reproduced
+                                   # dynamically (it has no CLI verb to drive from a seeded
+                                   # clone); the source pair is identical to design_start's,
+                                   # which WAS reproduced.
   untracked_may_enter: false      # add is scoped to stage_paths
   may_push: false                  # no push observed; this ritual never pushes (board.go/
                                     # forgeboot.go own the push decision, if any, separately)
@@ -132,24 +207,54 @@ policy_adopt:
     - ".verdi/policy/profiles/<profile>.md"
     - ".verdi/policy/policies/starter.md"
     - ".verdi/constitution/consumers.json"
-  index_carry_foreign: false      # FIXED SHAPE (the target other rituals should match): `git
-                                   # commit -m <msg> -- <the exact 4 stage_paths>` — the ONLY
-                                   # ritual of the five whose commit itself is pathspec-scoped,
-                                   # so a pre-staged foreign index entry is NEVER swept in even
-                                   # though internal/policyadopt never explicitly checks the index
-                                   # is otherwise clean first
+  index_carry: scoped             # FIXED SHAPE, and the one design_start/commit_to_design
+                                   # should match: policyAdoptCommit = gitx.CreateCommitPaths
+                                   # (policy.go:57), i.e. `git commit -m <msg> -- <the exact 4
+                                   # stage_paths>`. The ONLY ritual of the five whose commit is
+                                   # itself pathspec-scoped, so a pre-staged foreign entry is
+                                   # never swept in and is simply LEFT in the index — which is
+                                   # why this is `scoped`, not `refused`: unlike close, the
+                                   # ritual runs to completion and the operator keeps their
+                                   # staged work. policy.go:47-54 states the reasoning in
+                                   # source: "a pathspec-less `git commit` records the whole
+                                   # index — so an unrelated change the operator had already
+                                   # staged rode into the adoption commit and defeated the
+                                   # isolation policy/adopt exists to provide."
+                                   # No pre-ritual index guard here (zero gitx.StagedPaths /
+                                   # StatusDirty callers in cmd/verdi/policy.go or
+                                   # internal/policyadopt) — the pathspec alone does the work.
   untracked_may_enter: false      # add is scoped to stage_paths
   may_push: false                  # no push observed
 
 # --- Fields the five rituals needed that the base shape lacked ---
 #
-# None. The seven-field shape (refs_create, refs_move, head_may_switch,
-# stage_paths, index_carry_foreign, untracked_may_enter, may_push) covers
-# every mutating effect this spike's inventory observed across all five
-# rituals: ref creation, HEAD movement, index staging (scoped or not),
-# foreign-index carry, untracked-file entry, and push. No ritual produced
-# an effect (e.g. a tag, a note, a config write, a submodule change) this
-# shape has no field for.
+# ONE. (This file's first issue said "None"; that verdict is WITHDRAWN --
+# it was a consequence of close's wrong index_carry_foreign value, not an
+# independent finding.)
+#
+# index_carry_foreign's BOOLEAN is the gap. The five rituals occupy four
+# states (carried / refused / scoped / no_commit, defined at the top of
+# this file) and a boolean collapses three of them into one `false`. The
+# smallest field that carries the distinction is the enum in the same
+# slot, which is what this file now declares -- seven fields still, one of
+# them retyped, no eighth field and no derivable duplicate to drift.
+#
+# Why the distinction is load-bearing rather than cosmetic:
+#   - ac-2's behavioral witness needs a different assertion per state:
+#     exit 2 + zero mutation (refused); exit 0 + the foreign path absent
+#     from the commit (scoped); exit 0 + the foreign path PRESENT, until
+#     ac-4 narrows it (carried); no commit object at all (no_commit).
+#     `false` names none of these.
+#   - co-1's widening check goes blind under a boolean: deleting
+#     requireCleanIndex and adding a `--` pathspec to close's commit reads
+#     false -> false, yet flips the operator-visible behavior from "the
+#     ritual refuses until you deal with your index" to "the ritual
+#     proceeds silently". As refused -> scoped it lands in review.
+#
+# Everything else the five rituals do still has a field: ref creation,
+# HEAD movement, index staging (scoped or not), untracked-file entry, and
+# push. No ritual produced an effect (a tag, a note, a config write, a
+# submodule change) this shape has no field for.
 #
 # One near-miss, not a missing field: `close`'s --force-local branch name
 # ("close/<name>") differs from every other ritual's branch-naming

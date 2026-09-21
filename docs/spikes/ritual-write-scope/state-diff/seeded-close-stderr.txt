@@ -1,0 +1,2 @@
+close: --force-local: running outside CI; this escape hatch exists for local testing only and its publish is NON-AUTHORITATIVE (04 §Semantics: PublishRollup runs in CI only)
+close: refusing to run with pre-existing staged paths ["spike-foreign-staged.txt"]; commit or unstage them before running the ritual

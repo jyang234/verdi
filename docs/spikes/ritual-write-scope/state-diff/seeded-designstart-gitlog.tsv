@@ -1,0 +1,10 @@
+verdi-fix-rws design start	/tmp/fix-rws-trial	symbolic-ref --short -q refs/remotes/origin/HEAD
+verdi-fix-rws design start	/tmp/fix-rws-trial	show-ref --verify --quiet refs/remotes/origin/spike/ritual-write-scope
+verdi-fix-rws design start	/tmp/fix-rws-trial	rev-parse --verify origin/spike/ritual-write-scope
+verdi-fix-rws design start	/tmp/fix-rws-trial	ls-tree origin/spike/ritual-write-scope -- .verdi/specs/active/seeded-trial/spec.md
+verdi-fix-rws design start	/tmp/fix-rws-trial	ls-tree origin/spike/ritual-write-scope -- .verdi/specs/archive/seeded-trial/spec.md
+verdi-fix-rws design start	/tmp/fix-rws-trial	symbolic-ref --short -q HEAD
+verdi-fix-rws design start	/tmp/fix-rws-trial	checkout -b design/seeded-trial origin/spike/ritual-write-scope
+verdi-fix-rws design start	/tmp/fix-rws-trial	add -- /tmp/fix-rws-trial/.verdi/specs/active/seeded-trial
+verdi-fix-rws design start	/tmp/fix-rws-trial	commit -m design start: scaffold spec/seeded-trial (feature spec, no tracker ref)
+verdi-fix-rws design start	/tmp/fix-rws-trial	rev-parse --verify HEAD

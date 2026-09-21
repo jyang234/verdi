@@ -27,7 +27,7 @@ build_start	verb-subprocess (verdi build start)	status	--porcelain=v1 -z --untra
 build_start	verb-subprocess (verdi build start)	symbolic-ref	--short -q	none	read
 close	verb-subprocess (verdi close, all modes: plain/--preflight/--prepare/--force-local/--context-request)	add	--	index	scoped (2 paths: active+archive spec dirs), observed only in --force-local
 close	verb-subprocess (verdi close --force-local)	checkout	-b	refs+HEAD+worktree	creates close/<spec-name> (force-local's local archive branch, not main)
-close	verb-subprocess (verdi close --force-local)	commit	-m	refs	NOT scoped with -- pathspec (same UAT-036 shape as design start)
+close	verb-subprocess (verdi close --force-local)	commit	-m	refs	NOT scoped with -- pathspec (same command SHAPE as design start) -- but NOT the same defect: requireCleanIndex (close.go:655, runClose's first statement) exits 2 before this commit is ever reached with a foreign index entry staged, so close is index_carry: refused, not carried. Shape alone does not decide the value; see declarations.yaml and README's 'Correction: how close was got wrong'
 close	verb-subprocess (verdi close)	hash-object		none	read (no -w: content digest only, never writes an object; countersign's integrity check)
 close	verb-subprocess (verdi close)	log	-1 --format=%cI	none	read
 close	verb-subprocess (verdi close)	ls-files	--cached --others --exclude-standard	none	read

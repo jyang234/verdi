@@ -1,0 +1,4 @@
+e148ad2f7e8539841413714aae610b718940c2b1 commit	refs/heads/design/seeded-trial
+a140ebeecdaea031a53f837283e47499b0e7324c commit	refs/heads/spike/ritual-write-scope
+a140ebeecdaea031a53f837283e47499b0e7324c commit	refs/remotes/origin/HEAD
+a140ebeecdaea031a53f837283e47499b0e7324c commit	refs/remotes/origin/spike/ritual-write-scope

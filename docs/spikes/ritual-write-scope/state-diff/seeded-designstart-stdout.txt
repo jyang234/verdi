@@ -1,0 +1,6 @@
+design start: base origin/spike/ritual-write-scope @ a140ebe
+design start: --defer-statements: problem and outcome deliberately deferred as TODO placeholders — replace both before merge
+design start: switched checkout from spike/ritual-write-scope to design/seeded-trial
+design start: created branch design/seeded-trial
+design start: scaffolded spec/seeded-trial (kind: feature, state: proposed (derived until merge))
+design start: board: http://127.0.0.1:4173/board/spec/seeded-trial (run `verdi serve` from this checkout)

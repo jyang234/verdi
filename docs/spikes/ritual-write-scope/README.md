@@ -9,13 +9,20 @@ patch to `internal/gitx` is never committed — see `recorder.patch` and
 ## Recommendation, up front
 
 Build the empirical inventory first (done here) before writing ac-1's
-registry. The five rituals split cleanly into three shapes: two
-(`build_start`, `commit_to_design`) never stage or commit at all or never
-move HEAD; three (`design_start`, `close`, `commit_to_design`) share one
-open defect (unscoped commits carry pre-staged foreign index entries,
-UAT-036); one (`policy_adopt`) already shows the fixed shape. The
-seven-field grammar the story proposes fits all five with no addition and
-one field (`refs_move`) that is always empty for these five specifically.
+registry. Asked what each ritual does with an index entry the operator
+staged and the ritual never named, the five split into **four** distinct
+shapes, not two: `build_start` never commits at all, so the question is
+moot; `design_start` and `commit_to_design` **carry it** into their own
+commit (UAT-036, open — reproduced empirically below); `close`
+**refuses to begin**, exiting 2 at `requireCleanIndex`, `runClose`'s first
+statement (`cmd/verdi/close.go:655`); `policy_adopt` **scopes its commit**
+with a `--` pathspec so the entry is simply left in the index. The
+seven-field grammar the story proposes needed exactly one change to
+express that: its `index_carry_foreign` boolean cannot distinguish the
+four, so this spike replaces it with a four-valued `index_carry` enum
+(same slot, still seven fields — `refs_move` remains empty for these five
+specifically).
+
 The registry's home is a Go literal checked by a gate test — the policy
 kernel's payload system technically admits the shape but is a category
 mismatch (governance an operator *adopts*, not fixed product behavior an
@@ -121,11 +128,60 @@ start's own case) is confirmed fixed while its sibling ritual is not:**
 | UAT-031 (branch-cutting checks collide against the wrong tree) | open | **Design start's own case is fixed** (`design_test.go`: `TestRunDesignStart_BehindCheckout_NameOnMainRefused`; `designsupersede.go` comments cite the same fix). Build start / close were not traced for an equivalent collision check (grepped: no hits) — **not answered** for those two specifically. |
 | UAT-033 (design start commits every untracked file) | open | **Confirmed fixed**, contradicting a literal reading of the parent table (the table reflects spec-authoring time, before this base). `design.go`/`designsupersede.go` call `gitx.AddPaths`, never `gitx.AddAll`; `design_test.go`'s `TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir` asserts `AddAll` is never called. Empirically confirmed: every `add` line for `design_start` is `add -- <one specific spec dir>`, never `-A`. |
 | UAT-034 (commit-to-design sweeps the same way) | open | **Confirmed fixed**, same shape: `internal/commitdesign/commitdesign.go` uses `gitx.AddPaths`; `commitdesign_test.go`'s `TestRun_ScaffoldCommitStagesOnlySpecDir` asserts `AddAll` is never called. |
-| UAT-036 (ritual commits carry pre-staged index entries) | open | **Confirmed still open**, and the widest of the six: `design_start`, `close` (`--force-local`), and `commit_to_design` all call `git commit -m "<msg>"` with **no** `--` pathspec, so each commits whatever the *whole index* holds, not only what its own scoped `add` staged. `policy_adopt` is the one exception — its commit **is** `-- `-scoped (`commit -m ... -- <the 4 paths it added>`), immune to this class. No source hit for "UAT-036" anywhere (grepped), confirming no fix has landed. |
+| UAT-036 (ritual commits carry pre-staged index entries) | open | **Confirmed still open for TWO of the five rituals — `design_start` and `commit_to_design`** (this row said three in this README's first issue; see "Correction: how `close` was got wrong" below). Both call `git commit -m "<msg>"` with **no** `--` pathspec and have **no** pre-ritual index guard, so each commits whatever the *whole index* holds; reproduced empirically for `design_start` on an ac-2-seeded fixture (`state-diff/seeded-designstart-commit-files.txt`: the ritual staged one path and its commit carries two, the second being the operator's `spike-foreign-staged.txt`). `close` shares the pathspec-less commit shape and is still **not** exposed: `requireCleanIndex` is `runClose`'s first statement (`cmd/verdi/close.go:655`; guard at `:920-944`) and exits 2 before any mutation — witnessed in `state-diff/seeded-close-stderr.txt`. `policy_adopt` is immune a third way: its commit **is** `--`-scoped (`commit -m ... -- <the 4 paths it added>`). `build_start` never commits. |
 
 This resolves the apparent UAT-033/034 vs. table conflict rather than
 silently reconciling it: the parent spec's problem-statement table was
 authored against an earlier commit; this base is newer for those two.
+
+**Correction: how `close` was got wrong (fix round 1).** This README's
+first issue put `close` in the UAT-036 column and called the finding "the
+widest of the six". Two compounding method errors produced that:
+
+1. `index_carry_foreign` was inferred from the *shape of the command log*
+   — a `commit -m` with no `--` was read as "carries the whole index" —
+   with no check for a guard upstream of the commit. That is this spike's
+   own oq-2 ruling turned against itself: a command log over-reports as
+   readily as it under-reports, because it records what ran, never what
+   refused to run.
+2. The absence of a fix was inferred from a token grep (`UAT-036`, no
+   source hits). `close`'s guard landed under a different label
+   (`D6-33`, ledger `L-N15(2)`, named in `close.go:927-931`), so the grep
+   false-negatived.
+
+**The value is now derived from source guards for all five.** The census
+is every non-test caller of a pre-ritual index/worktree refusal primitive
+(`grep -rn --include='*.go' -E "gitx\.(StagedPaths|StatusDirty|WorktreeChangedPaths)" cmd internal | grep -v _test | grep -v '^internal/gitx/'`,
+plus `grep -rn --include='*.go' -E "^func [a-zA-Z]*(require|refuse)[A-Za-z]*\(" cmd internal | grep -v _test`):
+
+| Ritual | Pre-ritual refusal? | Commit pathspec-scoped? | `index_carry` |
+|---|---|---|---|
+| `design_start` | no — zero guard calls in `design.go`/`designsupersede.go` | no (`gitx.CreateCommit`, design.go:660) | `carried` |
+| `build_start` | n/a | never commits (no `AddPaths`/`CreateCommit` in `buildstart.go`) | `no_commit` |
+| `close` | **yes** — `requireCleanIndex` (close.go:932) is `runClose`'s first statement (:655) | no (`closeCreateCommit = gitx.CreateCommit`, close.go:162) | `refused` |
+| `commit_to_design` | no — zero guard calls in `internal/commitdesign/` | no (`gitx.CreateCommit`, commitdesign.go:222) | `carried` |
+| `policy_adopt` | no | **yes** (`policyAdoptCommit = gitx.CreateCommitPaths`, policy.go:57) | `scoped` |
+
+`requireCleanIndex` is the **only** pre-ritual index refusal in the whole
+non-test tree; the three other non-test `gitx.StagedPaths` callers
+(`internal/journey/port.go`, `internal/repositoryfacts/port.go`,
+`internal/constitutionapp/identity.go`) are observation ports, and every
+non-test `gitx.StatusDirty` caller belongs to `context`, `gc`, `residue`,
+`workbench` or `execworkspace` — none of the five. Both close commit sites
+(`close.go:890` spec closure, `closefeature.go:256` feature closure) are
+downstream of `runClose`, whose only production caller is `close.go:397`;
+`--preflight` takes a separate read-only path that rehearses the same
+guard (`closepreflight.go:107`) and never commits.
+
+Two consequences beyond the row itself. **ac-4's pin scope is two rituals,
+not three**: a regression witness that "a ritual commit never carries a
+pre-staged entry outside its declared paths" has `design_start` and
+`commit_to_design` to fix, while `close` needs its existing refusal pinned
+instead — a different assertion (exit 2 and no mutation), not the same
+one. And under ac-1 a declared `index_carry_foreign: true` for `close`
+would have been a *permission*: ac-2's behavioral witness would then pass
+a future change that deleted `requireCleanIndex`, which is exactly co-1's
+"widening of its declaration without an owner-visible decision".
 
 **29-file cross-reference** (`grep -l github.com/jyang234/verdi/internal/
 gitx cmd/verdi/*.go | grep -v _test`, confirmed 29 files): 19 files show
@@ -172,7 +228,7 @@ matches were comment text, excluded):
 | `cmd/verdi/sync_regen.go:42` | Can write build/test artifacts under a discovered service dir (not git-specific); not reachable from the five rituals | `verdi sync --or-regen` only. |
 | `internal/experimentevaluator/testdata/evaluator/main.go:55` | NO | Lives under `testdata/` (Go-ignored for builds); a self-contained test fixture program, never linked into the production binary. |
 
-**Sensor trial (state-diff, `state-diff/`).** Built
+**Sensor trial 1 — pristine fixture (state-diff, `state-diff/sd-*`).** Built
 `go build -o /tmp/verdi-rws ./cmd/verdi` from the patched worktree (per
 constraint 4, the binary is built in the worktree; the ritual itself runs
 in a `/tmp` clone: `git clone -q --no-hardlinks <worktree>
@@ -186,51 +242,165 @@ just test code).
 
 Result: `diff.for-each-ref.txt` shows exactly one new line (the new
 `design/spike-trial` branch); `diff.ls-files-s.txt` shows exactly one new
-line (the new spec file, staged); `diff.status.txt` is **empty** (clean
-tree after). Both diffs are fully explained by the command log
-(`design-start-trial-gitlog.tsv`: `symbolic-ref`, `show-ref`, `rev-parse`,
-`ls-tree`×2, `symbolic-ref`, `checkout -b`, `add`, `commit`, `rev-parse` —
-exactly one ref created, one file staged+committed, nothing else). **No
-effect outside what the log explains, for this specific trial.**
+line (the new spec file, staged); `diff.status.txt` is **empty**. **This
+trial proves less than it appears to.** Its `sd-before.status.txt` and
+`sd-after.status.txt` are both **0 bytes**: the clone was pristine, so
+"the log explains every effect" was true only because there was nothing
+for the log to fail to explain. ac-2 demands a fixture "seeded with an
+untracked file, a pre-staged unrelated index entry, and a dirty tracked
+file"; trial 1 seeded none of the three, and that omission is exactly what
+let the `close` row of the UAT-036 table above go wrong. Trial 2 repairs
+it.
 
-**Ruling: log plus state diff, not log alone** — dc-2's design stands,
-not merely by default but because this trial's clean result does not
-generalize past its own narrow conditions. The census above found two
-real, unsandboxed, non-gitx exec sites reachable from three of the five
-governed rituals (`upstream.RealRunner` from `design_start`/`build_start`/
-`close`; `align.ExecJudgeRunner` from `close --prepare`). Neither fired in
-this trial (no declared `impacts:`, no configured live judge auth), so
-the trial cannot show what a log-only sensor would miss if they did. A
-log-only sensor is definitionally blind to a non-git mutation (e.g. an
-upstream tool writing a stray file into `root`) — but `git status
---porcelain` (part of the state-diff sensor) would catch exactly that,
-since a newly-written file shows as untracked. The state-diff sensor is
-therefore required, not merely defensible.
+**Sensor trial 2 — ac-2's seeded fixture (`state-diff/seeded-*`,
+`state-diff/seeded-trial.sh`).** A fresh `/tmp` clone seeded with exactly
+ac-2's three conditions, one file each — untracked `spike-untracked.txt`,
+pre-staged unrelated `spike-foreign-staged.txt` (`git add`-ed and nothing
+else), and a dirty tracked `README.md` (appended, never staged) — then two
+rituals run against that **same** seeded state, snapshotted the same three
+ways before and after each. The script is re-runnable
+(`sh seeded-trial.sh <src-worktree> <patched-binary> <out-dir>`).
+
+| | command | exit | what the state diff shows |
+|---|---|---|---|
+| `close` | `verdi close --force-local spec/ritual-write-scope` | **2** | `diff.seeded-close.{for-each-ref,ls-files-s,status}.txt` all **empty** — the refusal precedes every mutation |
+| `design start` | `verdi design start --kind feature --name seeded-trial --defer-statements` | 0 | one new ref, one new index entry, **and the seeded foreign entry gone from `status`** |
+
+`close`'s refusal, verbatim (`seeded-close-stderr.txt`, second line; the
+first is the unrelated non-CI escape-hatch notice):
+
+```
+close: refusing to run with pre-existing staged paths ["spike-foreign-staged.txt"]; commit or unstage them before running the ritual
+```
+
+Its whole command log for that run is four read-only invocations
+(`seeded-close-gitlog.tsv`: `remote`, `remote get-url origin`,
+`status --porcelain -z --untracked-files=no` — `StagedPaths`' one
+invocation — and `rev-parse --show-prefix`). No `checkout -b`, no `add`,
+no `commit`. This is F-1's empirical witness: `close` cannot carry a
+foreign index entry because it never begins.
+
+`design start` on the identical seeded state **does** reproduce UAT-036.
+Its commit's own file list (`seeded-designstart-commit-files.txt`) is:
+
+```
+e148ad2f7e8539841413714aae610b718940c2b1
+design start: scaffold spec/seeded-trial (feature spec, no tracker ref)
+
+.verdi/specs/active/seeded-trial/spec.md
+spike-foreign-staged.txt
+```
+
+The ritual staged one path and committed two. The untracked file and the
+dirty tracked file both survive untouched (`git status --porcelain` after:
+` M README.md`, `?? spike-untracked.txt`), which independently re-confirms
+UAT-033 fixed and UAT-019-adjacent scope intact — only the *index* entry
+was absorbed.
+
+**A sensor finding the feature build needs (ac-2).** Of the three
+snapshots, only `git status --porcelain=v2` showed the sweep, and it showed
+it as a line **disappearing** (`diff.seeded.status.txt`: `2d1`, the
+`A. ... spike-foreign-staged.txt` row). `git ls-files -s` is blind to it —
+the path is in the index before and after, merely with a different
+staged-vs-HEAD relation — and `git for-each-ref` names only the new branch.
+The command log is blind in the other direction: it records
+`commit -m <msg>` with no `--`, which is the *shape* that permits the sweep
+but never the *fact* of it. The one artifact that names the effect
+directly is the commit's own file list. ac-2's witness therefore needs
+three things, not two: the before/after state diff, the command log, and
+`git show --name-only` over every commit the ritual created.
+
+**Ruling: log plus state diff, not log alone** — dc-2's design stands.
+The strongest ground is not in the `exec.Command` census at all; it is in
+the rituals themselves. **Every ritual that produces an artifact writes it
+with ordinary Go file I/O, never through git.**
+`internal/commitdesign/commitdesign.go:193-206` is the plainest case —
+`os.MkdirAll`, `os.WriteFile` for `spec.md`, `boardio.SaveBoardState` for a
+frozen `board.json`, `boardio.GraduateStickies` for the annotations — all
+before it ever calls `gitx.AddPaths`. `design.go:629-637` and
+`internal/policyadopt/write.go` reach the same end through
+`internal/atomicfile.Write` (create-temp, fsync, rename-into-place) rather
+than `os.WriteFile`, which changes the durability story and nothing about
+this one. These are working-tree mutations entirely outside gitx that **no
+command log can ever explain**, because no git command caused them. That
+alone settles the sensor question: a log-only sensor cannot see the
+artifacts a ritual creates, only the `add` that later stages them.
+
+The census adds two further, weaker grounds: two real, unsandboxed,
+non-gitx exec sites reachable from three of the five governed rituals
+(`upstream.RealRunner` from `design_start`/`build_start`/`close`;
+`align.ExecJudgeRunner` from `close --prepare`). Neither fired in either
+trial (no declared `impacts:`, no configured live judge auth), so neither
+trial can show what a log-only sensor would miss if they did — disclosed,
+not counted as proof. A log-only sensor is definitionally blind to a
+non-git mutation (e.g. an upstream tool writing a stray file into `root`)
+— but `git status --porcelain` (part of the state-diff sensor) would catch
+exactly that, since a newly-written file shows as untracked.
+
+Trial 2 adds the sharper reason: the state diff and the log fail in
+*opposite* directions. The log **over**-reported `close` (a pathspec-less
+`commit -m` that a guard means is never reached with a foreign entry
+staged) and **under**-reported `design start` (the same shape, where the
+sweep actually happens); only running the ritual against a seeded index
+told the two apart. The state-diff sensor is therefore required, and —
+per the sensor finding above — must include the created commit's own file
+list, not only the three repository snapshots.
 
 **ANSWERED**: census table above (`inventory.tsv`'s ritual coverage cross-
 referenced against this table), sensor ruling with reasoning, state-diff
-evidence in `state-diff/`.
+evidence in `state-diff/` for both the pristine (trial 1) and ac-2-seeded
+(trial 2) fixtures.
 
 ## oq-3: The scope grammar
 
-Five declarations, one YAML shape, `declarations.yaml` (182 lines,
-YAML-valid, verified with `python3 -c "import yaml; yaml.safe_load(...)"`
-— exit 0). Summary:
+Five declarations, one YAML shape, `declarations.yaml` (YAML-valid,
+verified with `python3 -c "import yaml; yaml.safe_load(...)"` — exit 0).
+Summary:
 
-| Ritual | refs_create | refs_move | head_may_switch | stage_paths (scoped?) | index_carry_foreign | untracked_may_enter | may_push |
+| Ritual | refs_create | refs_move | head_may_switch | stage_paths (scoped?) | index_carry | untracked_may_enter | may_push |
 |---|---|---|---|---|---|---|---|
-| `design_start` | `design/<name>` | — | true | yes | **true (open defect, UAT-036)** | false | false |
-| `build_start` | `feature/<name>` | — | **true (open defect, UAT-023: implicit HEAD base)** | n/a (never stages) | false (moot) | false (moot) | false |
-| `close` | `close/<name>` (`--force-local` only) | unmeasured (plain/CI publish path not traced) | true | yes | **true (open defect, UAT-036)** | false | **false (confirmed by source: close.go:915-916 prints a "push it yourself" instruction, never calls `gitx.Push`)** |
-| `commit_to_design` | — | — | false (never checks out) | yes | **true (open defect, UAT-036)** | false | false |
-| `policy_adopt` | `<adopt-branch>` | — | true | yes | **false — the one ritual that already scopes its commit (`commit -m ... -- <paths>`)** | false | false |
+| `design_start` | `design/<name>` | — | true | yes | **`carried` (open defect, UAT-036)** | false | false |
+| `build_start` | `feature/<name>` | — | **true (open defect, UAT-023: implicit HEAD base)** | n/a (never stages) | `no_commit` | false (moot) | false |
+| `close` | `close/<name>` (`--force-local` only) | unmeasured (plain/CI publish path not traced) | true | yes | **`refused` (requireCleanIndex, close.go:655 — exit 2 before any mutation)** | false | **false (confirmed by source: close.go:915-916 prints a "push it yourself" instruction, never calls `gitx.Push`)** |
+| `commit_to_design` | — | — | false (never checks out) | yes | **`carried` (open defect, UAT-036)** | false | false |
+| `policy_adopt` | `<adopt-branch>` (name not yet isolated — see Deviations) | — | true | yes | **`scoped` (`commit -m ... -- <paths>`, policy.go:57)** | false | false |
 
-**Fields the five needed that the shape lacked:** none. Every observed
-mutating effect (ref creation, HEAD movement, scoped/unscoped staging,
-foreign-index carry, untracked entry, push) has a field. The one
-near-miss — `close`'s branch-naming convention (`close/<name>` vs.
-`design/<name>`/`feature/<name>`) — is a *value* inside the existing
-`refs_create` field, not a missing field.
+**Fields the five needed that the shape lacked: one — and this README's
+first issue said "none", which is withdrawn.** The story's
+`index_carry_foreign` is a boolean, and the five rituals occupy **four**
+states, not two: `carried` (an unguarded, pathspec-less commit absorbs the
+foreign entry), `refused` (the ritual exits 2 before it begins), `scoped`
+(the commit names its own paths, so the entry is left in the index), and
+`no_commit` (the ritual creates no commit at all). A boolean collapses the
+last three into one `false`, which is wrong in three separate ways that
+each matter to this feature:
+
+- **ac-2 cannot write its assertion from a boolean.** The witness must
+  assert exit 2 and zero mutation for `refused`, exit 0 with the foreign
+  path absent from the commit for `scoped`, and no commit object at all
+  for `no_commit`. These are three different tests; `false` names none of
+  them.
+- **co-1's widening check goes blind.** Under a boolean, deleting
+  `requireCleanIndex` and adding a `--` pathspec to `close`'s commit reads
+  as `false → false` — no widening — even though the operator-visible
+  behaviour flips from "your ritual refuses until you deal with your
+  index" to "your ritual proceeds silently". Under the enum it reads
+  `refused → scoped` and lands in review.
+- **It is how this spike got `close` wrong** (see the correction under
+  oq-1): with only `true`/`false` available and a pathspec-less `commit`
+  in the log, `true` was the only value that looked like it fit.
+
+**The smallest change that carries it** is to retype the existing slot
+rather than add an eighth field: `index_carry_foreign: <bool>` becomes
+`index_carry: refused | scoped | carried | no_commit`. The field count
+stays at seven, the old boolean is recoverable as `index_carry ==
+carried`, and there is no second, derivable copy of the same fact to drift.
+`declarations.yaml` is re-issued with it filled for all five, each value
+cited to its source guard.
+
+One further near-miss, which is **not** a missing field: `close`'s
+branch-naming convention (`close/<name>` vs. `design/<name>`/
+`feature/<name>`) is a *value* inside the existing `refs_create` field.
 
 **Fields no ritual used:** `refs_move` is `[]` for all five — none of
 them moves an *existing* ref; every `refs_create` is a brand-new branch.
@@ -245,8 +415,16 @@ these five specifically; a sixth ritual (the workbench's own push button,
 `gitx.Push` besides an internal gitx helper) is where it would first
 read `true`.
 
-**ANSWERED**: `declarations.yaml` (five filled declarations), field-list
-verdict above.
+**ANSWERED-WITH-CAVEAT**: `declarations.yaml` (five filled declarations)
+and the field-list verdict above. The caveat is the grammar change itself:
+oq-3's first answer was ANSWERED on a shape that carried one wrong
+load-bearing value (`close`), and the field-list verdict of "none missing"
+was a consequence of that error rather than an independent finding. Both
+are corrected here, but the correction is a *decision* about ac-1's field
+list — replacing a story-named field with an enum — not merely a
+measurement, so it is flagged rather than presented as a clean measurement
+result. `close`'s `refs_move` remains genuinely unmeasured for the
+plain/CI `PublishRollup` path.
 
 ## oq-4: Where the declaration lives
 
@@ -460,25 +638,34 @@ existing text corroborated, not just asserted).
 | `gitlog-dedup-all-verbs.tsv` | Deduplicated (who, subcommand, flags) across the whole test sweep, all verbs (524 lines) |
 | `gitlog-raw-sample.tsv` | Head(300)+tail(100) of the 21174-line raw recorder log, with the full-file line count and reduction pointer stated inline |
 | `test-run-stdout.log` | `go test`'s own summary line per package (all `ok`) |
-| `state-diff/` | Before/after `for-each-ref`/`ls-files -s`/`status` snapshots and diffs for the `design start` trial, plus that trial's own command log and stdout/stderr |
+| `state-diff/sd-*`, `state-diff/diff.*` (no `seeded` in the name) | Trial 1, the PRISTINE fixture: before/after `for-each-ref`/`ls-files -s`/`status` snapshots and diffs for the `design start` trial, plus that trial's command log and stdout/stderr. Both `status` snapshots are 0 bytes — which is the trial's limitation, not a clean result |
+| `state-diff/seeded-trial.sh` | Trial 2's re-runnable script: seeds ac-2's three conditions in a fresh `/tmp` clone, runs `close` then `design start` against the same seeded state, snapshots three ways around each |
+| `state-diff/seeded-*`, `state-diff/diff.seeded*` | Trial 2's output. `seeded-close-stderr.txt` + `seeded-close-exit.txt` + the three empty `diff.seeded-close.*` files are F-1's witness (exit 2, no mutation); `seeded-designstart-commit-files.txt` is UAT-036's (the commit carries `spike-foreign-staged.txt`) |
 | `_scratch/` | Reserved for Go evidence under the VL-016 fence; empty — this spike's throwaway logic lived entirely in the patched product files (reverted) and shell/awk reduction, so nothing needed the `_scratch/` carve-out |
 
 ## Status summary (three-valued, constraint 8)
 
 - oq-1: **ANSWERED** — `inventory.tsv` + recorder log evidence.
-- oq-2: **ANSWERED** — census table + state-diff trial + sensor ruling
-  (log plus state diff required; log-only not proven sufficient).
-- oq-3: **ANSWERED** — `declarations.yaml`, field-list verdict (no
-  addition needed; `refs_move` empty for these five).
+- oq-2: **ANSWERED** — census table + two state-diff trials (pristine and
+  ac-2-seeded) + sensor ruling (log plus state diff required, and the
+  commit's own file list alongside them; log-only refuted by the rituals'
+  own non-git artifact writes).
+- oq-3: **ANSWERED-WITH-CAVEAT** — `declarations.yaml` re-issued with
+  `index_carry` (a four-valued enum) replacing the story's
+  `index_carry_foreign` boolean in the same slot. The caveat: the first
+  issue of this answer carried one wrong load-bearing value (`close`), and
+  its "no fields missing" verdict was a consequence of that error; both are
+  corrected here, and the replacement is a *decision* about ac-1's field
+  list rather than a measurement. `refs_move` empty for these five.
 - oq-4: **ANSWERED** — Go registry + gate test recommended, ratification
   consequence stated (none), all three candidates compared.
 - oq-5: **ANSWERED** — seam sketch (ctx-scoped `Recorder`) + sequencing
   ruling (ritual-write-scope lands it first), `gochecknoglobals` status
   disclosed as inactive-but-applied-as-principle.
 
-No open question landed as NOT ANSWERED. Several sub-parts landed
-ANSWERED-WITH-CAVEAT / explicitly UNMEASURED rather than guessed (`close`'s
-plain/CI publish refs_move; `policy_adopt`'s exact branch name;
-`align`/`upstream`'s non-gitx capability confirmed reachable by source but
-not dynamically triggered in this run's fixtures) — each is named inline
-above and in `declarations.yaml`, never silently filled.
+No open question landed as NOT ANSWERED; oq-3 is the one
+ANSWERED-WITH-CAVEAT. Several sub-parts are explicitly UNMEASURED rather
+than guessed (`close`'s plain/CI publish `refs_move`; `policy_adopt`'s exact
+branch name; `align`/`upstream`'s non-gitx capability confirmed reachable by
+source but not dynamically triggered in either trial) — each is named
+inline above and in `declarations.yaml`, never silently filled.

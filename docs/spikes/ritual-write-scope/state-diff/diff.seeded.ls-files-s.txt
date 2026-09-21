@@ -1,0 +1,2 @@
+416a417
+> 100644 1721b5528cf04ab45f7d8f808e246f0a3be8749c 0	.verdi/specs/active/seeded-trial/spec.md
