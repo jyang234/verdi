@@ -49,7 +49,7 @@ links:
 supersession:
   carried: [ac-1, ac-2, ac-3, ac-5, ac-6, ac-7, ac-8, ac-9, ac-10, co-1, co-2, co-3, co-4, co-5, co-6, dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7]
   amended:
-    - { id: ac-4, note: "readiness parity is defined over equivalent context-request inputs: the startup request's own spec may differ between a served surface deriving through the request (ac-3) and the request-free CLI in exactly the Readiness section, disclosed by the no-request and stale-request witnesses; the predecessor promised the four surfaces identical bytes without qualifying the input, which no conforming implementation could meet because spec/spec-documents ac-2 gives verdi spec doc no request flag (independent review 2026-09-21 R4; ledger SI-215; owner chose the amendment 2026-09-21)" }
+    - { id: ac-4, note: "readiness parity is defined over equivalent context-request inputs: the startup request's own spec may differ between a served surface deriving through the request (ac-3) and the request-free CLI in exactly the Readiness section, disclosed by the no-request and stale-request witnesses; the predecessor promised the four surfaces identical bytes without qualifying the input, which no conforming implementation could meet because spec/spec-documents ac-2 gives verdi spec doc no request flag (independent review 2026-09-21 R4; ledger SI-217; owner chose the amendment 2026-09-21)" }
   amended_advisory: []
   removed: []
   added: []
@@ -104,7 +104,7 @@ section and each side says why — the fixed no-request witness on the CLI, or
 the stale-request witness once the request's expected-repository claim no
 longer matches the checkout. The predecessor's ac-4 promised the four surfaces
 identical bytes without qualifying the input; the shipped parity test pinned
-the divergence as a recorded conflict (ledger SI-215) until this amendment.
+the divergence as a recorded conflict (ledger SI-217) until this amendment.
 
 ## ac-5
 
