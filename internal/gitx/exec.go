@@ -11,7 +11,11 @@ import (
 // run execs `git <args...>` with its working directory set to dir, returning
 // stdout on success. A non-zero exit becomes an error naming the command and
 // stderr, never a silent empty result.
+//
+// Every exec site calls observe first; a new exec site that bypasses run
+// must call it too (observer_test pins both).
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	observe(ctx, dir, args)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 

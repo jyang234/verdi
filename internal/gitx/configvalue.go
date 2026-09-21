@@ -72,6 +72,7 @@ var ErrConfigUnset = errors.New("gitx: git config key is unset")
 // the same way — the fail-closed direction, and never an identity
 // ConfigValue invented.
 func ConfigValue(ctx context.Context, dir, key string) (string, error) {
+	observe(ctx, dir, []string{"config", "--local", "--get-all", key})
 	cmd := exec.CommandContext(ctx, "git", "config", "--local", "--get-all", key)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
