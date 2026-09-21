@@ -25,23 +25,26 @@ type BoardBadges struct {
 	// speaks the one disclosed-unproven vocabulary and is recognized by
 	// disclosure.IsRendered.
 	Disclosures []string
-	// EvidenceSlots is, per STORY acceptance-criterion id, the
-	// fold-derived record state of each DECLARED evidence kind in the
-	// AC's own declared order (spec/evidence-slot ac-1) — the data the
-	// card's per-kind obligation rows wear as record-state chips (ac-3).
-	// Nil on non-story specs and on specs declaring no evidence kinds.
-	// The matching fold:empty-slot badges ride ByObject like every other
-	// card badge (dc-3: one attachment path, one record shape).
+	// EvidenceSlots is, per acceptance-criterion id (story OR feature
+	// class alike, ac-7/R-RR2-3), the fold-derived record state of each
+	// DECLARED evidence kind in the AC's own declared order
+	// (spec/evidence-slot ac-1) — the data the card's per-kind obligation
+	// rows wear as record-state chips (ac-3). Nil only on specs declaring
+	// no evidence kinds at all (component specs, or a feature/story with
+	// none declared). The matching fold:empty-slot badges ride ByObject
+	// like every other card badge (dc-3: one attachment path, one record
+	// shape).
 	EvidenceSlots map[string][]SlotState
 }
 
 // ComputeBadges runs the full v1 badge set (dc-1) for one spec: the
 // VL-finding partition (ac-2), scoped to specRelPath; the size-smell
 // observation (spec/case-file-flags ac-2) on ANY spec wall that declares
-// acceptance criteria, feature and story alike (its dc-3); plus — on a
-// STORY-class spec only, mirroring internal/dex/lens.go's own
-// isStoryPage/computeLensData gate — the spec-stale and pending-
-// supersession ladder badges (ac-3).
+// acceptance criteria, feature and story alike (its dc-3); the evidence-
+// slot compute (spec/evidence-slot, widened to feature walls by ac-7/
+// R-RR2-3) on ANY spec wall too; plus — on a STORY-class spec only,
+// mirroring internal/dex/lens.go's own isStoryPage/computeLensData gate —
+// the spec-stale and pending-supersession ladder badges (ac-3).
 //
 // ctx/root are the caller's own inputs; specRelPath/specRevision/fm are
 // internal/workbench's loadBoard's ALREADY-loaded spec document (its
@@ -71,6 +74,23 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 	// AC count plus declared constants (dc-1), so it needs no store I/O.
 	if smell := SizeSmellBadge(specRelPath, specRevision, len(fm.AcceptanceCriteria)); smell != nil {
 		out.CaseFile = append(out.CaseFile, *smell)
+	}
+
+	// The evidence-slot compute (spec/evidence-slot ac-1/ac-2, widened to
+	// feature walls by ac-7/R-RR2-3): a story OR feature AC card's
+	// per-declared-kind record state, plus a fold:empty-slot badge on each
+	// AC holding an empty slot — attached through this one entry point and
+	// ByObject like every other card badge (dc-3), never a second
+	// attachment path. Computed BEFORE the story-only ladder return below:
+	// a feature wall's own review ergonomics (ac-7) do not depend on the
+	// ladder flags that are a story-wall concern only.
+	slots, slotBadges, err := EmptySlotBadges(ctx, root, specRelPath, specRevision, fm)
+	if err != nil {
+		return nil, err
+	}
+	out.EvidenceSlots = slots
+	for _, b := range slotBadges {
+		out.ByObject[b.Target] = append(out.ByObject[b.Target], b)
 	}
 
 	if fm.Class != artifact.ClassStory {
@@ -107,20 +127,6 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 	}
 	if disclosure != "" {
 		out.Disclosures = append(out.Disclosures, disclosure)
-	}
-
-	// The evidence-slot compute (spec/evidence-slot ac-1/ac-2): a story
-	// AC card's per-declared-kind record state, plus a fold:empty-slot
-	// badge on each AC holding an empty slot — attached through this one
-	// entry point and ByObject like every other card badge (dc-3), never
-	// a second attachment path.
-	slots, slotBadges, err := EmptySlotBadges(ctx, root, specRelPath, specRevision, fm)
-	if err != nil {
-		return nil, err
-	}
-	out.EvidenceSlots = slots
-	for _, b := range slotBadges {
-		out.ByObject[b.Target] = append(out.ByObject[b.Target], b)
 	}
 
 	return out, nil

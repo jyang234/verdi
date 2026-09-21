@@ -208,6 +208,104 @@ func TestEmptySlotBadges_FilledVersusEmpty(t *testing.T) {
 	}
 }
 
+// slotFeatureSpec is a minimal feature-class fixture for
+// TestEmptySlotBadges_FeatureUsesItsOwnName (R-RR2-3): one AC declaring
+// attestation, and deliberately no `story:` field at all — the feature
+// carries no obligation to set one, so attestationSlugFor's feature branch
+// must key on the spec's own name (artifact.ParseRef(fm.ID).Name), never
+// store.RefSlug(fm.Story) (which would collapse to the empty slug here).
+const slotFeatureSpec = `---
+id: spec/slot-feature
+kind: spec
+class: feature
+title: "Slot feature"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "does a thing", evidence: [attestation] }
+---
+# Slot feature
+`
+
+func slotFeatureFM(t *testing.T) *artifact.SpecFrontmatter {
+	t.Helper()
+	fmBytes, _, err := artifact.SplitFrontmatter([]byte(slotFeatureSpec))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	fm, err := artifact.DecodeSpec(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	return fm
+}
+
+// newSlotFeatureRepo builds a one-layer fixturegit repo carrying
+// slotFeatureSpec.
+func newSlotFeatureRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/slot-feature/spec.md": slotFeatureSpec,
+			".verdi/.gitignore":                        "data/\n",
+		},
+		Message: "seed slot feature",
+	}})
+}
+
+func writeFeatureAttestation(t *testing.T, root, slug, acID string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "attestations", slug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir attestations: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, acID+".md"), []byte("attested\n"), 0o644); err != nil {
+		t.Fatalf("writing attestation: %v", err)
+	}
+}
+
+// TestEmptySlotBadges_FeatureUsesItsOwnName is R-RR2-3's own witness: a
+// feature AC's attestation slot reads attestations/<feature-name>/<ac>.md
+// (the spec's own name), never the story-scope helper
+// store.RefSlug(fm.Story) — this fixture's feature carries no story: at
+// all, so that helper would silently collapse to the empty slug. The same
+// file placed under the (wrong, story-scoped) path is never consulted:
+// the slot stays empty regardless.
+func TestEmptySlotBadges_FeatureUsesItsOwnName(t *testing.T) {
+	fm := slotFeatureFM(t)
+
+	t.Run("file at the feature's own name: held", func(t *testing.T) {
+		repo := newSlotFeatureRepo(t)
+		writeFeatureAttestation(t, repo.Dir, "slot-feature", "ac-1")
+
+		slots, _, err := EmptySlotBadges(context.Background(), repo.Dir, ".verdi/specs/active/slot-feature/spec.md", "sha256:fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe", fm)
+		if err != nil {
+			t.Fatalf("EmptySlotBadges: %v", err)
+		}
+		st := slotByKind(t, slots["ac-1"], "attestation")
+		if st.Empty || st.Records != 1 {
+			t.Errorf("attestation slot = %+v, want held (file at the feature's own name)", st)
+		}
+	})
+
+	t.Run("file at the story-scope (empty) slug: still empty", func(t *testing.T) {
+		repo := newSlotFeatureRepo(t)
+		// store.RefSlug(fm.Story) is store.RefSlug("") == "" for this
+		// fixture (no story: field) — AttestationDir(root, "") collapses
+		// to attestations/ itself (filepath.Join drops the empty
+		// element), so the file lands at attestations/ac-1.md directly.
+		writeFeatureAttestation(t, repo.Dir, "", "ac-1")
+
+		slots, _, err := EmptySlotBadges(context.Background(), repo.Dir, ".verdi/specs/active/slot-feature/spec.md", "sha256:fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe", fm)
+		if err != nil {
+			t.Fatalf("EmptySlotBadges: %v", err)
+		}
+		st := slotByKind(t, slots["ac-1"], "attestation")
+		if !st.Empty || st.Records != 0 {
+			t.Errorf("attestation slot = %+v, want EMPTY (the wrong, story-scoped path is never consulted for a feature)", st)
+		}
+	})
+}
+
 // writeSlotUnauthoredAttestation writes a `verdi attest`-shaped scaffold —
 // the marker still present — at the same fold path writeSlotAttestation
 // uses, so a test can directly compare the two.
