@@ -8,7 +8,7 @@ problem: { text: "The largest and most severe class of shipped product defects i
 outcome: { text: "Every verb that mutates a repository declares its write scope as data in one registry; a gate witness runs each ritual on fixtures and fails when the observed effects exceed the declaration; the forbidden-token witness covers every verb; and the six findings become regression witnesses, so the whole class turns into a red gate instead of a product finding.", anchor: outcome }
 acceptance_criteria:
   - { id: ac-1, text: "Every verb that mutates a git repository declares a write scope in one registry with a closed grammar: the refs it may create or move, whether HEAD may switch, the paths it may stage, how it treats index entries it did not stage (refused before any mutation, scoped out of its commit, carried into its commit, or moot because it never commits), whether untracked files may enter a commit, and whether it may push; a static witness fails when a verb that calls gitx has no declaration, and an unknown scope field or value fails closed.", evidence: [static, attestation], anchor: ac-1 }
-  - { id: ac-2, text: "A behavioral witness runs each declared ritual against fixturegit repositories seeded with an untracked file, a pre-staged unrelated index entry, and a dirty tracked file; observes refs, index and working tree before and after, and the file list of every commit the ritual creates; and fails when any effect lies outside the declared scope, asserting the declared index-carry state exactly (a refusal exits 2 with no mutation, a scoped commit omits the foreign entry, no commit object exists when none is declared); an effect the sensor cannot attribute is reported as unproven, never as within scope.", evidence: [behavioral, attestation], anchor: ac-2 }
+  - { id: ac-2, text: "A behavioral witness runs each declared ritual, along each publication path it supports, against fixturegit repositories in two seeded states: one with an untracked file, a pre-staged unrelated index entry, and a dirty tracked file, and one with a clean index and the same unrelated untracked and dirty tracked work, so a ritual that refuses a foreign index entry is also observed running to completion; it observes refs, index and working tree before and after, and the file list of every commit the ritual creates; it fails when any effect lies outside the declared scope, when a ritual expected to complete does not, and it asserts the declared index-carry state exactly (a refusal exits 2 with no mutation, a scoped commit omits the foreign entry, no commit object exists when none is declared); an effect the sensor cannot attribute is reported as unproven, never as within scope.", evidence: [behavioral, attestation], anchor: ac-2 }
   - { id: ac-3, text: "The forbidden-token witness (reset, restore, clean, stash, --force, update-ref) covers every verb's git command log through one seam in internal/gitx, and spec/readiness-recovery ac-9's recovery witness is one consumer of that seam rather than a second mechanism.", evidence: [static, behavioral, attestation], anchor: ac-3 }
   - { id: ac-4, text: "UAT-036 is pinned for design start and the commit-to-design ritual: their commits never carry a pre-staged entry outside their declared paths, so no ritual in the registry declares that it carries foreign entries; close's existing refusal of a non-empty index is pinned as its own witness (exit 2, no mutation); build start cuts its branch from the resolved default branch and the branch-cutting rituals check name collisions against the tree they cut from (UAT-023, UAT-031); UAT-021, UAT-033 and UAT-034, already fixed at this revision's base, remain covered by their existing tests.", evidence: [behavioral, attestation], anchor: ac-4 }
 constraints:
@@ -19,7 +19,7 @@ constraints:
 decisions:
   - { id: dc-1, text: "One declaration plus one witness for the class, not six point fixes: the findings share a cause (no check over what a verb does to the repository), and a per-bug fix leaves the next ritual free to repeat it.", anchor: dc-1 }
   - { id: dc-2, text: "Declared scope is compared against observed effects, not only against the command log: a command log proves what gitx ran, a repository state diff proves what changed, and the file list of each commit the ritual created proves what it recorded; the three together catch a mutation made outside gitx and tell a refused commit from a carried one, because a log records what ran and never what refused to run.", anchor: dc-2 }
-  - { id: dc-3, text: "The index-carry field is a closed four-valued enum (refused, scoped, carried, no_commit), not a boolean: the five governed rituals occupy four states, and a boolean reads a refusal, a scoped commit and no commit as the same false, so deleting a refusal guard would pass co-1's widening check unseen; where more than one state could describe a ritual, the declared value is the first that holds in the ritual's execution order (refused if a guard refuses a foreign entry before any mutation, no_commit if it never creates a commit, scoped if every commit it creates names its own paths, carried otherwise); carried stays in the grammar so the witness can name the defect state, and ac-4 requires that no shipped ritual declares it.", anchor: dc-3 }
+  - { id: dc-3, text: "The index-carry field is a closed four-valued enum (refused, scoped, carried, no_commit), not a boolean: the five governed rituals occupy four states, and a boolean reads a refusal, a scoped commit and no commit as the same false, so deleting a refusal guard would pass co-1's widening check unseen; where more than one state could describe a ritual, the declared value is the first that holds in the ritual's execution order (refused if a guard refuses a foreign entry before any mutation, no_commit if it never creates a commit, scoped if every commit it creates records only its declared paths, whether by a pathspec or by a scratch index, carried otherwise); carried stays in the grammar so the witness can name the defect state, and ac-4 requires that no shipped ritual declares it.", anchor: dc-3 }
   - { id: dc-4, text: "The registry lives in source as a Go literal in one internal package checked by a gate test, the same shape as the CLI-verb and MCP-tool inventories; it is not a policy payload, because a write scope is fixed product behaviour shipped with the binary and a governance profile an operator adopts must not be able to widen it (co-1), and it is not an amendment to design specs 03 or 04, which say nothing about verb effects, so no ratification precedes the build.", anchor: dc-4 }
   - { id: dc-5, text: "This feature lands the gitx recorder seam: a consumer-defined one-method observer attached through the context every gitx call already receives, so gitx's signatures do not change and no package-level mutable state is added; spec/readiness-recovery ac-9's forbidden-token check is one recorder implementation consuming that seam, and readiness-recovery's wave 3 plan consumes it rather than building a second mechanism, because ac-9 needs strictly less than ac-1 through ac-3 need (a token scan needs no per-verb attribution and no state diff, while the registry witness needs both).", anchor: dc-5 }
 stubs:
@@ -33,7 +33,7 @@ supersession:
   carried: [ac-3, co-1, co-2, co-3, co-4, dc-1]
   amended:
     - { id: ac-1, note: "the boolean index-carry field becomes a four-state value (refused, scoped, carried, no_commit) and fail-closed covers unknown values as well as unknown fields; spike oq-3" }
-    - { id: ac-2, note: "the sensor gains the file list of every commit the ritual creates and asserts the declared index-carry state exactly; spike oq-2 and the close correction" }
+    - { id: ac-2, note: "two seeded states instead of one, so a refusing ritual is also observed completing (Codex review R1 of bf50e741); each supported publication path; the sensor gains the file list of every commit the ritual creates and asserts the declared index-carry state exactly; spike oq-2 and the close correction" }
     - { id: ac-4, note: "UAT-036's pin covers design start and commit-to-design, close's refusal gets its own pin, build start's base and collision check are named as open fixes (UAT-023, UAT-031), and UAT-021/033/034 are recorded as already fixed at the base; spike oq-1" }
     - { id: dc-2, note: "the sensor is three-way: command log, state diff and the created commits' file lists, because the log over-reports a refused commit and under-reports a carried one; spike oq-2" }
   amended_advisory: []
@@ -90,6 +90,10 @@ the predecessor's premises:
   rituals occupy. ac-1 and dc-3 adopt the enum (owner decision, 2026-09-21;
   invention ledger SI-207, mirrored as PLAN.md §7 I-131).
 
+One correction came from the Codex review of the first head (R1): the
+single fully seeded fixture proves `close`'s refusal and nothing after it,
+so ac-2 now requires a second seeded state in which every ritual completes.
+
 The remaining answers landed as decisions: dc-4 (registry home, no
 ratification), dc-5 (seam shape and sequencing against readiness-recovery
 wave 3). ac-2 and ac-4 were amended so the witness and the pins match what
@@ -125,9 +129,15 @@ is four-valued (dc-3).
 
 The seeded fixture is the whole point: an untracked file, an unrelated
 staged entry, and a dirty tracked file are exactly what the findings swept
-up. The witness asserts a different thing per declared index-carry state,
-which is why a boolean could not have written it. Unattributable effects
-are unproven, never within scope (three-valued honesty).
+up. That fixture alone is vacuous for a refusing ritual: `close` exits at
+`requireCleanIndex` before its branch cut, staging and commit, so a later
+out-of-scope `git add` on its success path would never be observed. The
+second state (clean index, unrelated unstaged and untracked work, which
+`close` explicitly permits) makes every ritual run to completion under
+the same three sensors, and the witness fails if it does not. The witness
+asserts a different thing per declared index-carry state, which is why a
+boolean could not have written it. Unattributable effects are unproven,
+never within scope (three-valued honesty).
 
 ## ac-3
 
@@ -178,8 +188,11 @@ file I/O before it ever calls git, which no command log can explain.
 Grammar by construction, from five real rituals: `design start` carried,
 `build start` no_commit, `close` refused, commit-to-design carried,
 `policy adopt` scoped. The precedence rule answers the case the spike left
-undefined, a ritual that both guards and scopes. The old boolean is
-recoverable as `carried`, so nothing derivable is duplicated.
+undefined, a ritual that both guards and scopes. `scoped` is defined by
+the commit's recorded delta, not by the presence of a `--` pathspec:
+`design start --from-stub` builds its commit from a scratch tree and
+never touches the caller's index, and that is scoped too. The old boolean
+is recoverable as `carried`, so nothing derivable is duplicated.
 
 ## dc-4
 
@@ -212,6 +225,13 @@ measures them before the registry ships, and neither is a design question:
   pathspec-less commit) and not reproduced dynamically, because the ritual
   has no CLI verb to drive from a seeded clone; `design start`'s identical
   source pair was reproduced.
+
+One tension the build must adjudicate before the universal witness ships,
+with a ledger entry, never a silent exemption: ac-3 (carried verbatim)
+forbids `update-ref` in every verb's command log, while the
+stub-instantiation and spec-import paths create refs through a
+create-only `gitx.UpdateRef`. The five-ritual spike did not inventory
+those paths, so this spec does not claim it settled them.
 
 Two adjacent facts the build inherits: `internal/policyadopt`'s own
 package tests exercise no git call, so `policy adopt`'s footprint is
