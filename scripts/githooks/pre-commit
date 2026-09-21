@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# pre-commit — every commit must build.
+#
+# Process-audit PA-004 (prose-only rules are detected, not prevented): the
+# wave-1 ruling "every commit must build" was violated three times after it
+# was written, each time caught by review after the fact. This hook makes the
+# violation impossible instead of reportable.
+#
+# It builds the INDEX, not the working tree. The witness commit (62ac6e5f)
+# was a staging mistake — the working tree built while the staged snapshot
+# did not — so a hook that ran `go build` in the working tree would have
+# passed it. The staged tree is exported with `git checkout-index` and built
+# there; the shared Go build cache keeps a clean run at a few seconds.
+#
+# Install: `make hooks` (copies this file into the repository's SHARED hooks
+# folder, `git rev-parse --git-common-dir`/hooks, so every worktree runs it).
+# Bypass: git's own `--no-verify`, and nothing else — a bypassed commit is a
+# disclosed decision, not a silent slip.
+set -euo pipefail
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "pre-commit: go is not on PATH; cannot prove the staged tree builds" >&2
+  exit 1
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/verdi-precommit.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+# -a: every path in the index; -f: overwrite; --prefix must end with '/'.
+git checkout-index -a -f --prefix="$tmp/"
+
+if ! out=$(cd "$tmp" && go build ./... 2>&1); then
+  {
+    echo "pre-commit: the STAGED tree does not build (go build ./...):"
+    echo "$out"
+    echo
+    echo "Stage the missing files (or unstage the half-staged change) and commit again."
+    echo "Every commit must build. Bypass only with --no-verify, and say so in the report."
+  } >&2
+  exit 1
+fi

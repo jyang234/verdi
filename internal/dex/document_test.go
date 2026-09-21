@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -322,23 +323,48 @@ func stubRender(t *testing.T, fn func(ctx context.Context, outDir, root string, 
 // round 1, F5): the caller cancels after the first page is rendered; the
 // pass returns the caller's own cancellation, and fewer than all pages
 // were rendered.
+//
+// The stub cancels on its first call and every call then waits at the
+// barrier below until that cancel() has returned. The barrier is what
+// makes the count a property of the pool rather than of the scheduler: a
+// worker renders only if it passed the pool's ctx.Err() check, it holds
+// one of the at most documentWorkers() semaphore slots from before that
+// check until after its render returns, and the barrier holds that render
+// open past the cancel — so every worker that renders holds a distinct
+// slot at the instant of the cancel, and rendered <= documentWorkers()
+// (<= 8, far fewer than these 64 pages). A worker the scheduler spawns on
+// a slot released afterwards is spawned after cancel() returned, so it
+// sees the cancelled context and renders nothing. Without the barrier the
+// count was a race: the first worker drew its number and cancelled in two
+// steps, and one descheduled between them let the whole pool drain and
+// render all 64 pages.
 func TestWriteAllSpecDocuments_CallerCancel(t *testing.T) {
 	pages, docs := fakeSpecPages(64)
+	if w := documentWorkers(); w >= len(pages) {
+		t.Fatalf("pool width %d is not narrower than the %d pages: the witness can no longer show that the cancellation stopped the pass", w, len(pages))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var rendered atomic.Int32
-	stubRender(t, func(ctx context.Context, _, _ string, _ buildStamp, _ *model.Model, _ *artifactPage) error {
-		if rendered.Add(1) == 1 {
+	var (
+		rendered   atomic.Int32
+		cancelOnce sync.Once
+		cancelled  = make(chan struct{})
+	)
+	stubRender(t, func(_ context.Context, _, _ string, _ buildStamp, _ *model.Model, _ *artifactPage) error {
+		rendered.Add(1)
+		cancelOnce.Do(func() {
 			cancel()
-		}
+			close(cancelled)
+		})
+		<-cancelled // hold this worker's slot until the cancel has taken effect
 		return nil
 	})
 	err := writeAllSpecDocuments(ctx, t.TempDir(), t.TempDir(), buildStamp{SHA: "0000000000000000000000000000000000000000"}, nil, pages, docs)
 	if err != context.Canceled {
 		t.Fatalf("err = %v, want the caller's context.Canceled", err)
 	}
-	if n := int(rendered.Load()); n < 1 || n >= len(pages) {
-		t.Fatalf("rendered %d of %d pages, want at least one and fewer than all", n, len(pages))
+	if n, w := int(rendered.Load()), documentWorkers(); n < 1 || n > w {
+		t.Fatalf("rendered %d of %d pages, want at least one and no more than the pool width %d", n, len(pages), w)
 	}
 }
 
