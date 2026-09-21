@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/branchcut"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -167,7 +168,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// The branch to return to if the freeze fails after the cut below — the
 	// feature-path half of the shared unwind (finding
 	// judged-close-resume-hint-names-a-path-close-itself-refuses; "" for a
-	// detached-HEAD close is handled by unwindClosureBranchCut).
+	// detached-HEAD close is handled by branchcut.Unwind).
 	originalBranch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -191,19 +192,19 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// exactly like close.go's own runClose (spec/model-digest ledger L-M5).
 	//
 	// Both post-cut, pre-commit failures UNWIND the branch cut before exiting
-	// (the same shared unwindClosureBranchCut runClose uses), so the resume
+	// (the same shared branchcut.Unwind runClose uses), so the resume
 	// hint's promised `verdi close` retry can complete rather than dying at
 	// the next cut's no-clobber refusal.
 	modelDigest, err := resolveModelDigest(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
-		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
+		branchcut.Unwind(ctx, root, originalBranch, closureBranch, head, "close", stderr)
 		return 2
 	}
 	alignD := freezeAlignDeps(deps, modelDigest)
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
-		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
+		branchcut.Unwind(ctx, root, originalBranch, closureBranch, head, "close", stderr)
 		return rc
 	}
 
@@ -249,7 +250,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		reportUncommittedArchiveMove(specRef.Name, stderr)
-		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
+		branchcut.Unwind(ctx, root, originalBranch, closureBranch, head, "close", stderr)
 		return 2
 	}
 	commitMsg := fmt.Sprintf("close: archive %s", specRef.String())
