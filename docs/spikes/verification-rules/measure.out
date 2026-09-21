@@ -1,0 +1,114 @@
+active spec directories found: 39
+decode errors: 0
+criteria+constraints scored: 277
+texts containing an internal '. ' (candidate multi-sentence): 12
+
+histogram (claims -> count):
+   2 claims:  19  ###################
+   3 claims:  27  ###########################
+   4 claims:  40  ########################################
+   5 claims:  41  #########################################
+   6 claims:  21  #####################
+   7 claims:  24  ########################
+   8 claims:  23  #######################
+   9 claims:  22  ######################
+  10 claims:  18  ##################
+  11 claims:  17  #################
+  13 claims:   2  ##
+  14 claims:   6  ######
+  15 claims:   4  ####
+  16 claims:   1  #
+  17 claims:   5  #####
+  18 claims:   3  ###
+  19 claims:   1  #
+  21 claims:   1  #
+  22 claims:   1  #
+  24 claims:   1  #
+
+threshold sweep (T -> count with claims > T):
+  T=1: 277
+  T=2: 258
+  T=3: 231
+  T=4: 191
+  T=5: 150
+  T=6: 129
+  T=7: 105
+  T=8: 82
+  T=9: 60
+  T=10: 42
+  T=11: 25
+  T=12: 25
+  T=13: 23
+  T=14: 17
+  T=15: 13
+  T=16: 12
+  T=17: 7
+  T=18: 4
+  T=19: 3
+  T=20: 3
+  T=21: 2
+  T=22: 1
+  T=23: 1
+  T=24: 0
+
+top 20 by mechanical claim count:
+
+#1 claims=24 (list=24 never/no=2 and=4) ai-assisted-spec-design#co-3
+    nonconfigurable core safety semantics: only draft specs accept semantic mutations; every mutation requires a base digest; stale mutations never auto-merge; the complete result is validated before write; spec and provenance form one transaction with crash recovery to a complete old or new state; operations address stable object IDs, never positions; agent actors remain distinct from humans; provenance is non-authoritative and build-context-excluded; agents cannot accept, approve, attest, waive, or disposition; a stale agent cannot overwrite intervening human edits; every response names the exact checkout, branch, HEAD, and spec (C-18..C-25, C-11, C-40..C-41, C-50, INV-1, INV-4)
+
+#2 claims=22 (list=22 never/no=1 and=4) readiness-recovery#ac-8
+    verdi recover <ref> emits a canonical read-only projection (schema verdi.recovery-projection/v1: ref, branch, HEAD, recognized states) where every recognized state names its code, identifying facts, uncertainties with the witness that would settle each, steps the interrupted ritual completed, invariants that still hold, and choices; the recognized states are an empty branch cut, a scaffold written but not staged, artifacts staged but not committed, an archive move without its commit, a closure committed but unpublished or unpushed, a failed push after a board commit, a stale writer or worktree lock, and an interrupted governed action; ambiguous state yields diagnosis and a witness request, never a guess; exit 0 when nothing is recognized, 1 when something is, 2 operational.
+
+#3 claims=21 (list=21 never/no=1 and=5) ai-assisted-spec-design#co-9
+    every operation carries table-driven happy and negative coverage (wrong state, forbidden actor, stale digest, invalid IDs, illegal links, batch rollback, coordinated-commit crash recovery, direct-Markdown disclosure, archive and exclusion behavior, unknown-anything rejection); the three adapters share a byte-identity conformance suite; browser paths have Playwright coverage including the protected unsaved edit and the AI-free journey; MCP/CLI end-to-end tests cover both harness shapes, all three policy modes, and refused governance operations; no test calls a live model, network service, or harness (C-52, C-53, T-1..T-4, ASD 620–678)
+
+#4 claims=19 (list=19 never/no=5 and=4) ai-assisted-spec-design#co-5
+    provenance discipline: no complete transcript import; every excerpt targets a declared object, carries exactly one of human-stated / ai-synthesized / ai-inferred / unresolved, distinguishes verbatim from paraphrase, is bounded, removable, and redactable; excerpts record the target's digest at attach time; direct Markdown edits get `unclassified` origin, never fabricated attribution, and never a retroactive entry; generated provenance never counts as evidence and added volume improves no score (C-12..C-14, C-24, C-42, C-47, C-48, INV-2, P-1..P-3, NG-7)
+
+#5 claims=18 (list=18 never/no=4 and=7) readiness-recovery#ac-9
+    Every recovery choice states preconditions, effects, reversibility, confirmation requirement, postconditions, and either its executor or the exact manual command when none exists; exactly two choices execute, only through verdi recover <ref> --apply <choice-id> naming the exact target: unwinding an empty branch cut (re-proving at execution time that the branch still points at its cut point, has no commits of its own, and the tree is clean, then returning to the original branch and deleting it with the sequence close already uses) and delegating stranded worktree or branch residue to the existing reclaim plan under its own dry-run and --apply; every other state is diagnosis with manual commands disclosed as having no executor; no new git primitive is added and no recovery run's git command log contains reset, restore, clean, stash, --force, or update-ref.
+
+#6 claims=18 (list=18 never/no=1 and=12) sealed-claude-vatc-events#ac-3
+    the closed event-kind vocabulary covers flight-plan and projection delivery, provider-observable messages and summaries, tool calls and results, reads, writes and denials, context and claim activity, commands, tests, resources and timeouts, Git and forge changes, gates and witnesses, deviations and adjudication, execution results and receipts, retry, resume, suspension, telemetry gaps, and adapter lifecycle without treating hidden reasoning as observable
+
+#7 claims=18 (list=18 never/no=1 and=5) sealed-codex-execution#ac-3
+    Codex observable messages, summaries, tool calls and results, reads, writes, denials, commands, tests, Git changes, context requests, adapter lifecycle, execution-result, and post-finalization receipt events are normalized and streamed with complete identity and monotonic sequence; recorder loss, rejection, redaction failure, a gap, or missing receipt-event acknowledgment prevents automated authority
+
+#8 claims=17 (list=17 never/no=1 and=5) ai-assisted-spec-design#co-2
+    strict decode everywhere: the request schema is versioned and strict-decoded; unknown configuration, schemas, fields, operations, and enum values fail closed; extensibility attaches only at the declared internal ports — policy evaluation, mutation application, provenance recording, semantic diffing, change notification, and transport adapters — and project-defined fields are mutated only through declared model descriptors, never a generic YAML escape hatch (S-3, C-26, C-36, C-46, C-28)
+
+#9 claims=17 (list=17 never/no=2 and=8) comparative-spike-experiments#ac-6
+    project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance across every experiment mutation surface — CLI, workbench, agent, and the direct Git-edit draft path — records operation, prior digest, resulting digest, policy decision, and an attribution actor that embeds either a kernel canonical principal identifier or an explicit unauthenticated marker, never a bare string and never an authority decision
+
+#10 claims=17 (list=17 never/no=2 and=8) comparative-spike-experiments-v2#ac-6
+    project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance across every experiment mutation surface — CLI, workbench, agent, and the direct Git-edit draft path — records operation, prior digest, resulting digest, policy decision, and an attribution actor that embeds either a kernel canonical principal identifier or an explicit unauthenticated marker, never a bare string and never an authority decision
+
+#11 claims=17 (list=17 never/no=2 and=8) comparative-spike-experiments-v3#ac-6
+    project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance across every experiment mutation surface — CLI, workbench, agent, and the direct Git-edit draft path — records operation, prior digest, resulting digest, policy decision, and an attribution actor that embeds either a kernel canonical principal identifier or an explicit unauthenticated marker, never a bare string and never an authority decision
+
+#12 claims=17 (list=17 never/no=1 and=8) spec-documents#ac-1
+    A shared document core builds one canonical document model from a spec's decoded objects and body at an exact commit, the projection facts the workbench already computes (stub coverage per criterion, obligation and story state from the matrix fold, supersession classification), and the readiness snapshot when present; renders it as Markdown and HTML in three kinds (spec, plan, tasks); is byte-deterministic for identical inputs; stamps every render with ref, commit, engine digest, and the sentence that it is derived from accepted objects and not authority; states "proposed, not accepted" in the header for unmerged bytes; and never omits a section whose facts are unavailable, saying instead that they are unavailable.
+
+#13 claims=16 (list=16 never/no=1 and=7) sealed-claude-vatc-events#ac-2
+    the U4-owned verdi.context-event/v1 envelope binds source sequence, flight, lane, epoch, manifest revision and digest, session, ATC runway, execution-workspace identity, candidate commit and tree, adapter and version, declared occurrence stamp, closed payload discriminator and body, prior-event digest, optional prior-revision bridge, event digest, and VATC acknowledgment into an idempotent revision-local chain and one complete cross-revision execution chain
+
+#14 claims=15 (list=15 never/no=1 and=6) context-integrity#ac-2
+    for design, authoritative build, and independent review, the same phase, adapter version, accepted authority, repository state, declared scope, and capability grant compile to the same canonical context manifest and instruction projection, with every included, excluded, expanded, and opaque input classified, ordered, and digest-bound
+
+#15 claims=15 (list=15 never/no=1 and=6) context-integrity-v2#ac-2
+    for design, authoritative build, and independent review, the same phase, adapter version, accepted authority, repository state, declared scope, and capability grant compile to the same canonical context manifest and instruction projection, with every included, excluded, expanded, and opaque input classified, ordered, and digest-bound
+
+#16 claims=15 (list=15 never/no=1 and=9) context-receipts-review#ac-1
+    verdi.context-receipt/v1 strict-decodes and canonically binds receipt role and authority, manifest and dispatch digests, ATC runway and execution-workspace identities, input and output commits and trees, worktree cleanliness, the ordered revision-segment execution-event-chain root through the acknowledged execution-result plus execution-terminal manifest/source/VATC-global sequences, expansion ledger, obligations, evidence commands and results, runner principal resolution, adapter identity, review inputs, review-of link, and its own digest; its subsequently acknowledged receipt event is outside that self-digest boundary
+
+#17 claims=15 (list=15 never/no=3 and=5) readiness-recovery#ac-1
+    From feature acceptance onward the journey record derives its eventual closure blockers (Derived true, the undelivered-unit disclosure gone) from already-declared requirements only: unreconciled stubs, feature criteria whose outcome floor has neither an authored outcome attestation nor a passing outcome record, unelaborated obligations, open questions and unresolved conflict rows, exceptions past or within their review window, roles with no authenticated owner under the selected profile, and absent authoritative receipts; each is a Blocker with reason, class, witnesses, owner, clearing condition, and the transition it will block, never a prediction that evidence will fail and never a present violation.
+
+#18 claims=14 (list=14 never/no=1 and=5) comparative-spike-experiments#ac-1
+    a spike owner can explore candidate prototypes freely in disposable workspaces, then register an immutable child experiment — common base commit, canonical candidate patches with digests, behavioral contract, evaluator identity and capabilities, workload and fixture identities, guards, one primary metric with thresholds, execution schedule, environment policy, recommendation-algorithm version, and retention policy — that only a human can lock; after lock no registered input can change, and any change becomes a new child experiment revision
+
+#19 claims=14 (list=14 never/no=1 and=5) comparative-spike-experiments-v2#ac-1
+    a spike owner can explore candidate prototypes freely in disposable workspaces, then register an immutable child experiment — common base commit, canonical candidate patches with digests, behavioral contract, evaluator identity and capabilities, workload and fixture identities, guards, one primary metric with thresholds, execution schedule, environment policy, recommendation-algorithm version, and retention policy — that only a human can lock; after lock no registered input can change, and any change becomes a new child experiment revision
+
+#20 claims=14 (list=14 never/no=1 and=5) comparative-spike-experiments-v3#ac-1
+    a spike owner can explore candidate prototypes freely in disposable workspaces, then register an immutable child experiment — common base commit, canonical candidate patches with digests, behavioral contract, evaluator identity and capabilities, workload and fixture identities, guards, one primary metric with thresholds, execution schedule, environment policy, recommendation-algorithm version, and retention policy — that only a human can lock; after lock no registered input can change, and any change becomes a new child experiment revision

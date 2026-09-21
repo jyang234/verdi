@@ -1,0 +1,66 @@
+=== step 1: ParseRef on a two-level clause fragment ===
+ParseRef("spec/readiness-recovery#co-2/c1") = /, err=artifact: ref spec/readiness-recovery has an invalid fragment object id "co-2/c1"
+
+=== step 2: ParseRef on a single-level constraint fragment ===
+ParseRef("spec/readiness-recovery#co-2") = spec/readiness-recovery#co-2, err=<nil>
+
+=== step 3: ResolveBindingAC on the single-level constraint fragment ===
+ResolveBindingAC("spec/readiness-recovery", "spec/readiness-recovery#co-2") = specRef="spec/readiness-recovery" acID="co-2" err=<nil>
+
+=== step 4: ResolveBindingAC on the two-level clause fragment ===
+ResolveBindingAC("spec/readiness-recovery", "spec/readiness-recovery#co-2/c1") = specRef="" acID="" err=artifact: ac entry "spec/readiness-recovery#co-2/c1" is neither a bare ac-<slug> id nor a spec/<name>#<ac-id> fragment ref
+
+=== step 5: decode the real readiness-recovery spec.md (read-only) ===
+declared acceptance-criteria ids (AC-only set targetACSet builds, internal/lint/vl003.go:317-327): [ac-1 ac-10 ac-2 ac-3 ac-4 ac-5 ac-6 ac-7 ac-8 ac-9]
+declared object ids overall (artifact.DeclaredObjectIDs — ac+co+dc+oq): [ac-1 ac-10 ac-2 ac-3 ac-4 ac-5 ac-6 ac-7 ac-8 ac-9 co-1 co-2 co-3 co-4 co-5 co-6 dc-1 dc-2 dc-3 dc-4 dc-5 dc-6 dc-7]
+is "co-2" in the AC-only set VL-003's targetACSet checks against? false
+is "co-2" in DeclaredObjectIDs (what VL-003's checkLink fragment path for links[].ref DOES use)? true
+
+=== step 6: the real VL-003 message (internal/lint/vl003.go:305, format string and arguments quoted verbatim) ===
+evidence-for binding "scratch-seam-a-witness-single" names ac "spec/readiness-recovery#co-2", which "spec/readiness-recovery" does not declare
+
+=== step 7: DecodeBindings a scratch verdi.bindings.yaml carrying all nine co-2/c1..c9 two-level fragments ===
+--- scratch verdi.bindings.yaml ---
+schema: verdi.bindings/v1
+spec: spec/readiness-recovery
+bindings:
+  - producer: scratch-seam-a-witness
+    kind: behavioral
+    acs:
+      - "spec/readiness-recovery#co-2/c1"
+      - "spec/readiness-recovery#co-2/c2"
+      - "spec/readiness-recovery#co-2/c3"
+      - "spec/readiness-recovery#co-2/c4"
+      - "spec/readiness-recovery#co-2/c5"
+      - "spec/readiness-recovery#co-2/c6"
+      - "spec/readiness-recovery#co-2/c7"
+      - "spec/readiness-recovery#co-2/c8"
+      - "spec/readiness-recovery#co-2/c9"
+
+--- end scratch file ---
+DecodeBindings REJECTED: artifact: bindings[0]: artifact: binding "scratch-seam-a-witness": ac entry "spec/readiness-recovery#co-2/c1" must be a bare ac-<slug> id or a spec/<name>#<ac-id> fragment ref
+
+=== step 8: DecodeBindings a scratch file using ONE single-level co-2 fragment (no clause suffix) ===
+schema: verdi.bindings/v1
+spec: spec/readiness-recovery
+bindings:
+  - producer: scratch-seam-a-witness-single
+    kind: behavioral
+    acs:
+      - "spec/readiness-recovery#co-2"
+
+DecodeBindings ACCEPTED (shape-valid): &{Schema:verdi.bindings/v1 Spec:spec/readiness-recovery Bindings:[{Producer:scratch-seam-a-witness-single Kind:behavioral ACs:[spec/readiness-recovery#co-2]}]}
+(shape-valid at decode; VL-003's checkOneBindingsFile would still separately reject it
+ as 'does not declare' via the AC-only targetACSet, per step 6 above — the semantic
+ reject happens one layer later than decode, and its message reads as if co-2 were
+ entirely undeclared rather than declared-as-a-constraint.)
+
+=== step 9: ParseRef on a HYPHEN-joined clause id (alternate encoding, no '/' at all) ===
+ParseRef("spec/readiness-recovery#co-2-c1") = spec/readiness-recovery#co-2-c1, err=<nil>
+(objectIDRe allows repeated -[a-z0-9]+ groups; a hyphen-joined clause id parses today with
+ NO ref.go change — it would still need to become a DECLARED object id somewhere, e.g. by
+ also registering it in DeclaredObjectIDs, which is a separate design decision this spike
+ does not make; see README.md oq-2.)
+
+=== step 10: is DeclaredObjectIDs aware of any clause id today (co-2-c1 or co-2/c1)? ===
+is "co-2-c1" in DeclaredObjectIDs? false (clauses are not top-level objects at all in the current 02 schema)
