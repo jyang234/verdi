@@ -10,7 +10,7 @@ acceptance_criteria:
   - { id: ac-1, text: "From feature acceptance onward the journey record derives its eventual closure blockers (Derived true, the undelivered-unit disclosure gone) from already-declared requirements only: unreconciled stubs, feature criteria whose outcome floor has neither an authored outcome attestation nor a passing outcome record, unelaborated obligations, open questions and unresolved conflict rows, exceptions past or within their review window, roles with no authenticated owner under the selected profile, and absent authoritative receipts; each is a Blocker with reason, class, witnesses, owner, clearing condition, and the transition it will block, never a prediction that evidence will fail and never a present violation.", evidence: [static, behavioral, attestation], anchor: ac-1 }
   - { id: ac-2, text: "Readiness is derived per request by one loader for any active spec on any branch: the startup adapter moves out of cmd/verdi into a shared package, the design-branch gate is removed, branch and HEAD come from the journey record, the snapshot keeps its type and concern grammar, and its stale notice becomes a derivation stamp naming the HEAD the request looked at; the same ref at the same HEAD derives identical bytes twice.", evidence: [behavioral, attestation], anchor: ac-2 }
   - { id: ac-3, text: "A readiness derivation never launches the policy-conflict judge: the check-context area evaluates mechanically and takes semantic judgments only from the existing judge cache; an uncached semantic candidate is an unproven context/semantic concern whose destination is the context conflict verb; verdi serve --context-request remains an optional startup pre-run of the full evaluation.", evidence: [static, behavioral, attestation], anchor: ac-3 }
-  - { id: ac-4, text: "Readiness reads byte-identically for the same ref at the same HEAD on the CLI (verdi spec doc supplies the Readiness section for the spec and tasks kinds by default, --no-readiness omits it), the board readiness page (the startup spec when --context-request is given, ?spec=<name> otherwise, the existing disclosure page when neither), the board Document tab, and MCP get_document; a pinned-commit render still carries none; the four-way parity test gains a readiness arm; verdi journey --json carries the derived eventual section.", evidence: [behavioral, attestation], anchor: ac-4 }
+  - { id: ac-4, text: "Readiness reads byte-identically for the same ref at the same HEAD and the same context-request input on the CLI (verdi spec doc supplies the Readiness section for the spec and tasks kinds by default, --no-readiness omits it), the board readiness page (the startup spec when --context-request is given, ?spec=<name> otherwise, the existing disclosure page when neither), the board Document tab, and MCP get_document; the CLI takes no request, so for the startup request's own spec a served reading derived through that request (ac-3) and the CLI's reading derived without one answer different questions and may differ in exactly the Readiness section, the request-free side carrying the fixed no-request witness and the served side disclosing a request whose expected-repository claim has gone stale; every other spec derives without a request on every surface; a pinned-commit render still carries none; the four-way parity test gains a readiness arm that also pins that one divergence; verdi journey --json carries the derived eventual section.", evidence: [behavioral, attestation], anchor: ac-4 }
   - { id: ac-5, text: "The wall shell keeps its own derivation in this feature, and a committed parity witness lists, for the e2e harness fixture, every concern the continuous derivation produces that the wall does not and the reverse, pinned as an explicit gap list the post-design workbench lane inherits, never reported as parity.", evidence: [static, attestation], anchor: ac-5 }
   - { id: ac-6, text: "verdi attest <feature-ref> <ac-id> scaffolds attestations/<feature-name>/<ac-id>.md through the existing scaffold renderer with the same unauthored marker, fixed instructional body, self-validation before write, and create-only file posture as the story form; the body may quote the criterion's accepted text, its declared evidence kinds, and the feature's declared owners and never contains a claim-shaped sentence; the marker stays until a human replaces it.", evidence: [behavioral, attestation], anchor: ac-6 }
   - { id: ac-7, text: "Feature outcome attestations get the story form's review ergonomics: the board attestation chip derives its path from the feature's own name instead of the story slug, VL-022's mis-slug protection covers feature-targeting attestations with the same rule shape, the feature-close preflight's unauthored-scaffold disclosure has a producer, and a feature criterion whose outcome floor is unsatisfied is an eventual blocker whose witness is the criterion, whose owner is the feature's owners, and whose clearing condition names the attestation path or a passing outcome record.", evidence: [behavioral, attestation], anchor: ac-7 }
@@ -47,8 +47,9 @@ links:
   - { type: depends-on, ref: "spec/close-preflight" }
   - { type: supersedes, ref: "spec/readiness-recovery" }
 supersession:
-  carried: [ac-1, ac-2, ac-3, ac-4, ac-5, ac-6, ac-7, ac-8, ac-9, ac-10, co-1, co-2, co-3, co-4, co-5, co-6, dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7]
-  amended: []
+  carried: [ac-1, ac-2, ac-3, ac-5, ac-6, ac-7, ac-8, ac-9, ac-10, co-1, co-2, co-3, co-4, co-5, co-6, dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7]
+  amended:
+    - { id: ac-4, note: "readiness parity is defined over equivalent context-request inputs: the startup request's own spec may differ between a served surface deriving through the request (ac-3) and the request-free CLI in exactly the Readiness section, disclosed by the no-request and stale-request witnesses; the predecessor promised the four surfaces identical bytes without qualifying the input, which no conforming implementation could meet because spec/spec-documents ac-2 gives verdi spec doc no request flag (independent review 2026-09-21 R4; ledger SI-215; owner chose the amendment 2026-09-21)" }
   amended_advisory: []
   removed: []
   added: []
@@ -93,8 +94,17 @@ A page render never launches a process. The judge runs where it is asked for.
 
 ## ac-4
 
-Parity extends the spec-documents contract to readiness. `--no-readiness`
-exists so a render can be pinned without it.
+Parity extends the spec-documents contract to readiness, over equivalent
+inputs. `--no-readiness` exists so a render can be pinned without it. The CLI
+has no context-request flag (spec/spec-documents ac-2 declares its flag set)
+while `verdi serve --context-request` is a served-only startup pre-run (ac-3),
+so the startup request's own spec is the one ref whose served and CLI readings
+answer different questions; the difference is confined to the Readiness
+section and each side says why — the fixed no-request witness on the CLI, or
+the stale-request witness once the request's expected-repository claim no
+longer matches the checkout. The predecessor's ac-4 promised the four surfaces
+identical bytes without qualifying the input; the shipped parity test pinned
+the divergence as a recorded conflict (ledger SI-215) until this amendment.
 
 ## ac-5
 
