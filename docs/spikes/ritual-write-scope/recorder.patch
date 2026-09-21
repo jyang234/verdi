@@ -1,0 +1,73 @@
+diff --git a/internal/gitx/configvalue.go b/internal/gitx/configvalue.go
+index c4d4c9ca..ea26db8b 100644
+--- a/internal/gitx/configvalue.go
++++ b/internal/gitx/configvalue.go
+@@ -72,6 +72,7 @@ var ErrConfigUnset = errors.New("gitx: git config key is unset")
+ // the same way — the fail-closed direction, and never an identity
+ // ConfigValue invented.
+ func ConfigValue(ctx context.Context, dir, key string) (string, error) {
++	spikeGitLog(dir, []string{"config", "--local", "--get-all", key}) // THROWAWAY: docs/spikes/ritual-write-scope oq-1, reverted before commit
+ 	cmd := exec.CommandContext(ctx, "git", "config", "--local", "--get-all", key)
+ 	cmd.Dir = dir
+ 	var stdout, stderr bytes.Buffer
+diff --git a/internal/gitx/exec.go b/internal/gitx/exec.go
+index a17c2db5..516eda7e 100644
+--- a/internal/gitx/exec.go
++++ b/internal/gitx/exec.go
+@@ -4,14 +4,44 @@ import (
+ 	"bytes"
+ 	"context"
+ 	"fmt"
++	"os"
+ 	"os/exec"
++	"path/filepath"
+ 	"strings"
+ )
+ 
++// spikeGitLog is a THROWAWAY recorder for docs/spikes/ritual-write-scope
++// (oq-1). Never committed: reverted from the tree before every spike
++// commit (VL-016 fence). Appends one tab-separated line per git
++// invocation to the file named by VERDI_SPIKE_GITLOG, when set; a no-op
++// otherwise so production behavior is unchanged when the env var is
++// absent.
++func spikeGitLog(dir string, args []string) {
++	path := os.Getenv("VERDI_SPIKE_GITLOG")
++	if path == "" {
++		return
++	}
++	who := filepath.Base(os.Args[0])
++	if len(os.Args) > 1 {
++		who += " " + os.Args[1]
++	}
++	if len(os.Args) > 2 {
++		who += " " + os.Args[2]
++	}
++	line := who + "\t" + dir + "\t" + strings.Join(args, " ") + "\n"
++	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
++	if err != nil {
++		return
++	}
++	defer f.Close()
++	_, _ = f.WriteString(line)
++}
++
+ // run execs `git <args...>` with its working directory set to dir, returning
+ // stdout on success. A non-zero exit becomes an error naming the command and
+ // stderr, never a silent empty result.
+ func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
++	spikeGitLog(dir, args)
+ 	cmd := exec.CommandContext(ctx, "git", args...)
+ 	cmd.Dir = dir
+ 
+diff --git a/internal/gitx/plumbing.go b/internal/gitx/plumbing.go
+index b96bb3aa..ca2ec280 100644
+--- a/internal/gitx/plumbing.go
++++ b/internal/gitx/plumbing.go
+@@ -25,6 +25,7 @@ import (
+ // operations in this file need stdin/env beyond what run (exec.go)
+ // already covers.
+ func runStdin(ctx context.Context, dir string, env []string, stdin []byte, args ...string) ([]byte, error) {
++	spikeGitLog(dir, args) // THROWAWAY: docs/spikes/ritual-write-scope oq-1, reverted before commit
+ 	cmd := exec.CommandContext(ctx, "git", args...)
+ 	cmd.Dir = dir
+ 	if len(env) > 0 {

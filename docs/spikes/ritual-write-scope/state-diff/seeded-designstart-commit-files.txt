@@ -1,0 +1,5 @@
+e148ad2f7e8539841413714aae610b718940c2b1
+design start: scaffold spec/seeded-trial (feature spec, no tracker ref)
+
+.verdi/specs/active/seeded-trial/spec.md
+spike-foreign-staged.txt

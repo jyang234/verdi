@@ -1,0 +1,2 @@
+419a420
+> 100644 4961db4210ae19d8ef4ec3975faba0a31ae23292 0	.verdi/specs/active/spike-trial/spec.md
