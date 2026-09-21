@@ -264,9 +264,13 @@ double the real figure). This spike's own two independent fresh-clone
 re-derivations of this fix round agree with each other (480/20 both
 times) but land one case and one package above the independent review's
 own single re-derivation (479/19); the residual is disclosed, not
-resolved, in the evidence file — most likely run-to-run variance in
-`internal/sealedexec/claude`, the one failing package whose test spawns
-a real `go test ./cmd/verdi` subprocess rather than running in-process.
+resolved, in the evidence file. The closure check located the package
+that comes and goes: `internal/align`, failing on a load-sensitive
+judge-subprocess timeout (`judged coverage absent: no result within 1s`)
+that the unpatched baseline does not show, i.e. a flake the patch did not
+cause; `internal/sealedexec/claude` fails in every run. The honest
+restatement is roughly 480 cases across roughly 19 patch-attributable
+packages plus one load-induced `internal/align` flake.
 Either figure is "the high hundreds across roughly a fifth of the
 module's packages," which is what drives the recommendation; the exact
 last digit does not.
@@ -346,8 +350,9 @@ contract` (`schema: verdi.artifact/v1`, "Identity and references,"
 contract.md, self-hosted rather than imported). Its full 713 lines carry
 **zero** occurrences of "policy claim," "Claim," "policyartifact," or
 "enforcement rung" (`grep -n 'policy claim\|Claim\b\|policyartifact\|
-enforcement rung' .verdi/specs/active/verdi-artifact-contract/spec.md` —
-one incidental hit, "constitution 2," a citation of the workspace
+enforcement rung' .verdi/specs/active/verdi-artifact-contract/spec.md`
+returns nothing, exit 1; a separate `grep -n constitution` over the same
+file returns one incidental hit, "constitution 2," a citation of the workspace
 constitution's clause 2, unrelated to policy-authority constitution
 artifacts). So this third referent does not cover policy claims either,
 and the lane's context-integrity-v2 reading stands against it too — but
@@ -463,7 +468,8 @@ window is the one substantive variable, and it alone flips whether the
 claim is excused — exactly matching `authority_test.go:922`'s own unit
 proof, now reproduced end to end through the real CLI over a real store.
 (Both runs' overall verdict stays "blocked-unproven" for an unrelated
-reason — `spec/self-governance-spike`'s own prose registers as semantic
+reason — the parent `spec/self-governance`'s own prose (ids
+`spec/self-governance#co-1..co-4` in the reports) registers as semantic
 candidates needing a disposition, which a "no-conflict" judge finding
 alone does not supply; a target spec with no semantic candidates would
 very likely reach "pass" for the future window, not attempted here.)

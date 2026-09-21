@@ -71,7 +71,10 @@ Future window (expiry 2027-06-30, exemption-future-window.md):
   → the claim IS excused.
   Full report: conflict-future-window-report.json (483 lines pretty-printed)
 
-Lapsed window (expiry 2026-01-01, exemption-lapsed-window.md), same
+Lapsed window (expiry 2026-01-01, exemption-lapsed-window.md): after
+swapping the exemption file, `verdi context project` MUST be re-run before
+`context conflict`, or the second run refuses with "instruction projection
+drift" (found by the closure check when following these steps verbatim). Same
 request, same commit history pattern, only the exemption's expiry edited:
   exit: 1
   mechanical claim state: proven
