@@ -837,3 +837,95 @@ func TestDeriveEventual_ClosedFeatureCarriesNoClosureDebt(t *testing.T) {
 		})
 	}
 }
+
+// TestDeriveEventual_ClosedFeatureCarriesNoPolicyDebt is R-RR1-19,
+// R-RR1-13 extended to the POLICY sources: the conflict-mechanical,
+// conflict-semantic and exemption-ineffective sources each name the
+// earliest forward-reachable transition whose gate evaluates policy, so
+// once no such transition lies ahead they derive nothing either. Unlike
+// R-RR1-13's feature sources, this absence IS disclosed (co-6): a report
+// was supplied and its findings are real, so a reader could reasonably
+// expect them as eventual debt and must be told why they are not there.
+// The state word in the sentence routes through the display chain.
+func TestDeriveEventual_ClosedFeatureCarriesNoPolicyDebt(t *testing.T) {
+	report := &policyconflict.Report{
+		Mechanical: []policyconflict.MechanicalEvaluation{
+			{
+				ID:      "mech-1",
+				State:   policyconflict.ProofViolatedWithWitness,
+				Reasons: []policyconflict.ReasonCode{policyconflict.ReasonMechanicalConflict},
+				Exemptions: []policyconflict.ExemptionResolution{
+					{
+						ID: "ex-1",
+						Resolution: policyconflict.AuthorityResolution{
+							Match: policyconflict.ProofProven, Freshness: policyconflict.ProofUnproven,
+							Scope: policyconflict.ProofProven, Bound: policyconflict.ProofUnproven, Authorization: policyconflict.ProofProven,
+						},
+					},
+				},
+			},
+		},
+		Semantic: []policyconflict.SemanticEvaluation{
+			{ID: "sem-1", State: policyconflict.ProofUnproven, Reasons: []policyconflict.ReasonCode{policyconflict.ReasonJudgeUnavailable}},
+		},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state specstate.State
+	}{
+		{name: "closed", state: specstate.Closed},
+		{name: "superseded", state: specstate.Superseded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := statusOf(tc.state)
+			in := eventualInput{
+				Class: "feature", Model: model.Canonical(), State: state, Owner: testOwner(), Conflict: report,
+			}
+			eb := deriveEventual(in)
+			if !eb.Derived {
+				t.Fatal("Derived must stay true: the section discloses what it could not derive, it does not go underived")
+			}
+			if got := blockerIDs(eb.Items); len(got) != 0 {
+				t.Fatalf("items = %v, want none: no policy-evaluating transition lies ahead of a %s feature", got, tc.name)
+			}
+			want := "no policy-evaluating transition lies ahead of state " + state + ": policy-conflict findings were not derived as eventual debt"
+			seen := 0
+			for _, d := range eb.Disclosures {
+				if d == want {
+					seen++
+				}
+				if strings.Contains(d, "no policy-conflict report") {
+					t.Fatalf("disclosures = %v, must not claim a missing report when one was supplied", eb.Disclosures)
+				}
+			}
+			if seen != 1 || len(eb.Disclosures) != 1 {
+				t.Fatalf("disclosures = %v, want exactly one occurrence of %q", eb.Disclosures, want)
+			}
+		})
+	}
+
+	// Control: one state earlier the same report still derives all three
+	// policy items, naming the verb they name today — so the zeros above
+	// are the ruling at work, not an empty report.
+	t.Run("accepted control still derives all three, naming close", func(t *testing.T) {
+		in := eventualInput{
+			Class: "feature", Model: model.Canonical(), State: statusOf(specstate.AcceptedPendingBuild), Owner: testOwner(), Conflict: report,
+		}
+		eb := deriveEventual(in)
+		want := []string{"conflict-mechanical/mech-1", "conflict-semantic/sem-1", "exemption-ineffective/ex-1"}
+		if got := blockerIDs(eb.Items); !reflect.DeepEqual(got, want) {
+			t.Fatalf("control items = %v, want %v", got, want)
+		}
+		for _, b := range eb.Items {
+			if b.Transition != "close" {
+				t.Fatalf("control blocker %s names %q, want close", b.ID, b.Transition)
+			}
+		}
+		for _, d := range eb.Disclosures {
+			if strings.Contains(d, "no policy-evaluating transition lies ahead") {
+				t.Fatalf("control disclosures = %v, must not claim the policy gate is behind while close is still ahead", eb.Disclosures)
+			}
+		}
+	})
+}

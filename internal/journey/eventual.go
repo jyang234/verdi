@@ -283,6 +283,23 @@ func stateNotDeclaredDisclosure(mdl *model.Model, class, state string) string {
 	)
 }
 
+// noPolicyGateAheadDisclosure is R-RR1-19's one sentence: a supplied
+// policy-conflict report carries real findings, so a reader could
+// reasonably expect them as eventual debt. When no policy-evaluating
+// transition lies ahead of the target, those findings are NOT derived —
+// and unlike R-RR1-13's closure-gated feature sources, that absence is
+// disclosed rather than silent (CO-1/co-6), because the input exists and
+// only the gate that would consume it has gone. The state word routes
+// through the display chain (co-5); the format string itself carries no
+// class, state or verb word of its own.
+func noPolicyGateAheadDisclosure(mdl *model.Model, class, state string) string {
+	stateWord := mdl.DisplayState(class, state)
+	return fmt.Sprintf(
+		"no policy-evaluating transition lies ahead of state %s: policy-conflict findings were not derived as eventual debt",
+		stateWord,
+	)
+}
+
 // duplicateBlockerIDDisclosure is the last line of defence for CO-1: two
 // derived debts that resolve to one blocker id cannot both be listed (the
 // record's ids are unique by schema), so the one that is dropped is named
@@ -349,8 +366,25 @@ func deriveEventual(in eventualInput) EventualBlockers {
 
 	switch {
 	case in.Conflict == nil:
+		// The report itself is absent. This branch is about the missing
+		// INPUT, never about the target's state, so it is untouched by
+		// R-RR1-19 below.
 		disclosures = append(disclosures, noConflictReportDisclosure)
-	case scope.resolved:
+	case !scope.resolved:
+		// No verb could be named at all; scope.disclosure above already
+		// says why, and adding a second sentence would double-report it.
+	case !scope.closureAhead:
+		// R-RR1-19: R-RR1-13 extended to the policy sources. Each of the
+		// three below names the earliest forward-reachable transition
+		// whose gate EVALUATES policy, and resolveEventualScope narrows
+		// that to the acceptance transition only while acceptance is
+		// itself reachable — which it cannot be once the closure gate is
+		// behind, since acceptance precedes closure in the lifecycle.
+		// With no policy gate ahead there is no gate to owe these
+		// findings to, so none is derived; the report still exists, so
+		// the absence is disclosed rather than silent.
+		disclosures = append(disclosures, noPolicyGateAheadDisclosure(in.Model, in.Class, in.State))
+	default:
 		mech, mechDisc := conflictMechanicalBlockers(in.Conflict, scope.policyVerb, in.Owner)
 		add(mech...)
 		disclosures = append(disclosures, mechDisc...)
