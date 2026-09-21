@@ -1,6 +1,19 @@
 oq-5 evidence: attempting file -> package -> test files -> verdi.bindings.yaml
-producer -> criteria -> dc-6 tier, for the 30 touched non-test .go files of
+producer -> criteria -> dc-6 tier, for the 33 touched non-test .go files of
 b810c302..e963f4d0.
+
+CORRECTION NOTICE (fix round 1). Two things in the first version of this
+file were wrong and are corrected below, in place, with fresh output:
+  * the denominator was 30 touched files across 9 package directories; it
+    is 33 across 10 (section "Step 3" has the recomputed list and the
+    command);
+  * the two greps in "Step 2" were transcribed as producing no output and
+    62 lines. Neither reproduces. Re-run in a throwaway clone of the
+    scratch worktree at the same commit, the first prints 9 lines and the
+    second 56. Both fresh transcripts are quoted below. The RULING is
+    unchanged (0 / 0 / 33) and now rests on `grep -in "readiness"`, which
+    does reproduce as zero matches; the reasoning that used to lean on
+    those two greps is restated to match what they actually print.
 
 Step 0 (discrepancy, recorded per the brief's constraint 10): the owning
 spec of this diff, spec/readiness-recovery, does not exist anywhere in the
@@ -50,25 +63,64 @@ per spec that has had evidence authored for it so far.
 Step 2: does it mention spec/readiness-recovery, or the touched packages'
 directory names, as an OWNING spec block?
 
-  $ grep -in "readiness" verdi.bindings.yaml
-  (no output — zero matches, not even in a comment)
+All three transcripts below are fresh output from fix round 1, produced in
+a throwaway clone of the scratch worktree detached at e963f4d0
+(`git clone -q --no-hardlinks <scratch> /tmp/fix-mr && git -C /tmp/fix-mr
+checkout --detach e963f4d0`), against ./verdi.bindings.yaml (2235 lines).
+
+  $ grep -in "readiness" verdi.bindings.yaml | wc -l
+  0
+
+  That zero is the decisive one: the owning spec of all 33 touched files
+  is spec/readiness-recovery, and neither it nor the word "readiness"
+  appears anywhere in this file, in a block or in a comment.
 
   $ grep -in "journey\|policyconflict\|mcpserve\|e2eharness" verdi.bindings.yaml
-  (no output for any of these four package names, as an owning spec block
-  OR as a comment aside — zero matches)
+  49:      # test, the runtimeprobe fail-verdict pin, mcpserve's unknown-field
+  90:      # runtimeprobe fail-verdict pin, mcpserve fail-closed decodes) with
+  211:      # SupersessionDisclosedUnproven + the cmd/verdi + mcpserve
+  404:      # connects-nothing drag, and the disclosed-unavailable journey with
+  442:      # peek/reset journeys; ac-4 illustrative-tier e2e; ac-5 diagram-
+  645:      # cmd/e2eharness/emptyglance_test.go + provision_directory_test.go's
+  799:      # internal/mcpserve/vocabulary_test.go's
+  1876:      # internal/mcpserve.NewServer exactly as
+  1938:      # journeys.md's closure-ritual narrative (§D.5) names `verdi
+  exit status: 0
+
+  9 lines, not zero as this file first claimed. Every one of the 9 is a
+  `#` comment inside some OTHER spec's block, so none is a producer entry
+  that could carry a tier — the ruling is unaffected, but the transcript
+  above is what the command prints.
 
   $ grep -in "workbench" verdi.bindings.yaml | wc -l
-  62
+  56
+  $ grep -oin "workbench" verdi.bindings.yaml | wc -l
+  57
 
-workbench's 62 hits are all comments justifying evidence for OTHER,
-pre-existing specs (spec/workbench-directory, spec/workbench-legibility,
-spec/draft-boards, spec/stub-cards, spec/scoping-canvas, and others) that
-happen to also touch internal/workbench — none of them is
-spec/readiness-recovery. Matching on the package name alone, without
-checking which spec the match's OWN `spec:` block belongs to, would
-misattribute a tier to these 6 touched workbench files from an unrelated
-feature's evidence entry — recorded here as a hazard, not exercised as a
-mapping.
+  56 matching lines (57 raw occurrences, one line carrying two), not 62.
+  Of those 56 lines, 48 are comments and 8 are real criteria references:
+
+  $ grep -in "workbench" verdi.bindings.yaml | grep -v ":[[:space:]]*#"
+  465:      - "spec/workbench-directory#ac-2"
+  466:      - "spec/workbench-directory#ac-3"
+  467:      - "spec/workbench-directory#ac-4"
+  468:      - "spec/workbench-directory#ac-5"
+  469:      - "spec/workbench-directory#ac-6"
+  663:      - "spec/workbench-legibility#ac-1"
+  664:      - "spec/workbench-legibility#ac-2"
+  665:      - "spec/workbench-legibility#ac-3"
+
+  So the first version's "all 62 hits are comments" is doubly wrong: the
+  count is 56, and 8 of them are genuine bound criteria. They belong to
+  spec/workbench-directory and spec/workbench-legibility — pre-existing
+  specs that also touch internal/workbench — and not one belongs to
+  spec/readiness-recovery. Matching on the package name alone, without
+  checking which spec the match's OWN `spec:` block belongs to, would
+  misattribute a tier to the 6 touched workbench files from an unrelated
+  feature's evidence entry; and because 8 of these hits ARE real criteria
+  references rather than prose, a naive script would find them and
+  believe it had succeeded. Recorded here as a hazard, not exercised as a
+  mapping.
 
 Also notable, from the same read: every `producer:` id in this file (e.g.
 "verdi-verify-behavioral") names something a human comment then explains
@@ -81,7 +133,18 @@ a mechanical one.
 
 Step 3: count, per the story's own bins.
 
-  Touched files: 30 (cmd/e2eharness/readinessallproven.go,
+  $ git diff --name-only b810c302 e963f4d0 -- '*.go' | grep -v _test.go | wc -l
+  33
+  $ git diff --name-only b810c302 e963f4d0 -- '*.go' | grep -v _test.go \
+      | xargs -n1 dirname | sort -u | wc -l
+  10
+  $ git diff --name-status b810c302 e963f4d0 -- '*.go' | grep -v _test.go \
+      | awk '{print $1}' | sort | uniq -c
+     7 A
+     1 D
+    25 M
+
+  Touched files: 33 (cmd/e2eharness/readinessallproven.go,
     cmd/verdi/{conflictgate,context,context_conflict,context_constitution,
     mcp,readiness_snapshot,serve,specdoc}.go, internal/journey/{derive,
     eventual,facts,port,project,reason}.go,
@@ -94,15 +157,21 @@ Step 3: count, per the story's own bins.
     internal/workbench/{boarddocument,boardspec,branchboard,handler,
     readiness,readinessrender}.go)
 
+  across 10 package directories. One of the 33 is a DELETION
+  (cmd/verdi/readiness_snapshot.go, the `D` row above): it has no content
+  at e963f4d0 to mutate, so it is counted in the denominator the story
+  asks for and is unmutatable in any run — a distinction the count must
+  carry rather than hide.
+
   Resolve to exactly one tier (via the intended chain: this file's package
   -> a verdi.bindings.yaml block whose `spec:` is spec/readiness-recovery
-  -> one of that spec's ac-ids -> dc-6's tier for that ac-id): 0 of 30.
+  -> one of that spec's ac-ids -> dc-6's tier for that ac-id): 0 of 33.
 
   Resolve to several tiers (via the SAME correct chain — i.e. genuinely
-  ambiguous, not a naming coincidence): 0 of 30 (there is nothing to be
-  ambiguous between, since step 2 above is already empty).
+  ambiguous, not a naming coincidence): 0 of 33 (there is nothing to be
+  ambiguous between, since step 2 above finds no block for this spec).
 
-  Resolve to none: 30 of 30 (100%), because spec/readiness-recovery has no
+  Resolve to none: 33 of 33 (100%), because spec/readiness-recovery has no
   verdi.bindings.yaml block at all as of this diff's own head — the chain
   breaks at "package -> producer" for every single file, before dc-6 is
   even consulted.
