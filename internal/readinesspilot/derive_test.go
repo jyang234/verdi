@@ -1072,3 +1072,131 @@ func attentionContains(attention []Concern, id string) bool {
 	}
 	return false
 }
+
+// --- R-RRF-1 / SI-213: the eventual-derivation concern --------------------
+
+const eventualFoldUnavailable = "the outcome-floor fold for example could not be computed: permission denied"
+
+const eventualUnderivedDisclosure = "the eventual section was not derived for this projection"
+
+// TestDeriveEventualDerivationConcern is SI-213's consumer-side proof
+// (independent review 2026-09-21 R1). The readiness projection carries one
+// dedicated concern for the completeness of the journey's eventual
+// derivation, and its state depends on that derivation ALONE — not on the
+// lifecycle, the adopted profile, or whether a safe action exists. The
+// baseInput fixture is exactly the shape that hid the defect: a known
+// lifecycle, an adopted profile, and a safe action, so review/action is
+// proven and cannot carry the witness on the concern's behalf.
+func TestDeriveEventualDerivationConcern(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		mutate        func(*journey.Record)
+		wantState     State
+		wantWitnesses []string
+	}{
+		{
+			name:          "every declared source derived",
+			mutate:        func(*journey.Record) {},
+			wantState:     StateProven,
+			wantWitnesses: []string{},
+		},
+		{
+			name: "one source could not be computed",
+			mutate: func(r *journey.Record) {
+				r.Blockers.Eventual.Unavailable = []string{eventualFoldUnavailable}
+			},
+			wantState:     StateUnproven,
+			wantWitnesses: []string{eventualFoldUnavailable},
+		},
+		{
+			name: "the whole section is underived",
+			mutate: func(r *journey.Record) {
+				r.Blockers.Eventual.Derived = false
+				r.Blockers.Eventual.Items = []journey.Blocker{}
+				r.Blockers.Eventual.Disclosures = []string{eventualUnderivedDisclosure}
+			},
+			wantState:     StateUnproven,
+			wantWitnesses: []string{eventualUnderivedDisclosure},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			in := baseInput(t)
+			tt.mutate(&in.Journey)
+			if err := in.Journey.Validate(); err != nil {
+				t.Fatalf("mutated journey operand Validate() error = %v", err)
+			}
+
+			snapshot := mustDerive(t, in)
+			concern := mustConcern(t, snapshot, "review/eventual-derivation")
+
+			if concern.Area != AreaReview || concern.Timing != TimingCurrent || !concern.Blocking {
+				t.Fatalf("concern = %+v, want a blocking, current review-area concern", concern)
+			}
+			if concern.Summary != "Eventual closure blockers derived from every declared source" {
+				t.Fatalf("concern summary = %q", concern.Summary)
+			}
+			if concern.State != tt.wantState {
+				t.Fatalf("concern state = %q, want %q", concern.State, tt.wantState)
+			}
+			if !reflect.DeepEqual(concern.Witnesses, tt.wantWitnesses) {
+				t.Fatalf("concern witnesses = %v, want %v", concern.Witnesses, tt.wantWitnesses)
+			}
+			if tt.wantState == StateProven {
+				if attentionContains(snapshot.Attention, "review/eventual-derivation") {
+					t.Fatal("a proven concern must not reach attention")
+				}
+				return
+			}
+			if !attentionContains(snapshot.Attention, "review/eventual-derivation") {
+				t.Fatalf("attention = %+v, want review/eventual-derivation", snapshot.Attention)
+			}
+			assertReviewDestination(t, concern, in)
+		})
+	}
+}
+
+// TestDeriveEventualDerivationSurvivesAProvenSafeAction is the regression
+// witness itself: with a known lifecycle, an adopted profile and a safe
+// action, review/action stays proven — the branch that used to be the only
+// carrier of the eventual disclosures — and the unavailable source is still
+// stated, in attention, on its own concern.
+func TestDeriveEventualDerivationSurvivesAProvenSafeAction(t *testing.T) {
+	t.Parallel()
+
+	in := baseInput(t)
+	in.Journey.Blockers.Eventual.Unavailable = []string{eventualFoldUnavailable}
+	if err := in.Journey.Validate(); err != nil {
+		t.Fatalf("journey operand Validate() error = %v", err)
+	}
+	snapshot := mustDerive(t, in)
+
+	if action := mustConcern(t, snapshot, "review/action"); action.State != StateProven {
+		t.Fatalf("review/action = %+v, want proven: the fixture must reproduce the bypass, not a fallback", action)
+	}
+	var found bool
+	for _, concern := range snapshot.Attention {
+		for _, witness := range concern.Witnesses {
+			if strings.Contains(witness, "outcome-floor fold") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no attention row states the unavailable source: attention=%+v areas=%+v", snapshot.Attention, snapshot.Areas)
+	}
+}
+
+func assertReviewDestination(t *testing.T, concern Concern, in Input) {
+	t.Helper()
+	if !reflect.DeepEqual(concern.Destination.CLI, in.Fallbacks.Review) {
+		t.Fatalf("concern destination CLI = %v, want the review fallback %v", concern.Destination.CLI, in.Fallbacks.Review)
+	}
+	if concern.Destination.BoardPath != "" {
+		t.Fatalf("concern destination board path = %q, want none", concern.Destination.BoardPath)
+	}
+}

@@ -929,3 +929,96 @@ func TestDeriveEventual_ClosedFeatureCarriesNoPolicyDebt(t *testing.T) {
 		}
 	})
 }
+
+// --- R-RRF-5: a clearing condition offers only effective routes -----------
+
+// floorFixtureSpec is a one-AC feature whose single criterion declares
+// exactly kinds — the only input outcomeFloorBlockers' remedy shape
+// depends on (evidence.FloorResult.DeclaresAttestation).
+func floorFixtureSpec(kinds ...artifact.EvidenceKind) *artifact.SpecFrontmatter {
+	return &artifact.SpecFrontmatter{
+		Base:               artifact.Base{ID: "spec/checkout"},
+		Class:              artifact.ClassFeature,
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{{ID: "ac-1", Text: "the fixture outcome holds", Evidence: kinds}},
+	}
+}
+
+// foldFloorFixture folds spec over an empty store (no attestation file
+// anywhere), so the one AC's outcome floor is unsatisfied and its
+// DeclaresAttestation is whatever the criterion itself declares — the real
+// production fold, never a hand-built FloorResult.
+func foldFloorFixture(t *testing.T, spec *artifact.SpecFrontmatter, root string) evidence.FeatureResult {
+	t.Helper()
+	fold, err := evidence.FoldFeature(evidence.FeatureInput{Spec: spec, StoreRoot: root, FeatureSlug: "checkout"})
+	if err != nil {
+		t.Fatalf("FoldFeature: %v", err)
+	}
+	return fold
+}
+
+// TestOutcomeFloorBlockers_ClearingConditionOffersOnlyEffectiveRoutes is
+// R-RRF-5's proof (independent review 2026-09-21 R5): the fold reads
+// attestations/<feature>/<ac>.md ONLY for a criterion that declares the
+// attestation evidence kind, so offering that path for a criterion that
+// does not declare it advertises a remedy the fold ignores. ac-1/ac-7
+// require an actionable clearing condition, so the undeclared shape names
+// the passing-outcome-record route alone.
+func TestOutcomeFloorBlockers_ClearingConditionOffersOnlyEffectiveRoutes(t *testing.T) {
+	tests := []struct {
+		name  string
+		kinds []artifact.EvidenceKind
+		want  string
+	}{
+		{
+			name:  "the criterion declares attestation: both routes are offered",
+			kinds: []artifact.EvidenceKind{artifact.EvidenceAttestation},
+			want:  "author attestations/checkout/ac-1.md or land a passing outcome record for ac-1",
+		},
+		{
+			name:  "the criterion does not declare attestation: only the record route is offered",
+			kinds: []artifact.EvidenceKind{artifact.EvidenceStatic},
+			want:  "land a passing outcome record for ac-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := floorFixtureSpec(tt.kinds...)
+			fold := foldFloorFixture(t, spec, t.TempDir())
+			blockers := outcomeFloorBlockers(eventualInput{Spec: spec, Fold: &fold}, "close")
+			if len(blockers) != 1 {
+				t.Fatalf("outcomeFloorBlockers = %v, want exactly the one unsatisfied floor", blockers)
+			}
+			if got := blockers[0].ClearingCondition; got != tt.want {
+				t.Fatalf("ClearingCondition = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOutcomeFloorBlockers_UndeclaredAttestationIsNotOffered is the reason
+// the shape above is required, adapted from the reviewer's probe: writing
+// an authored attestation at the advertised path does NOT satisfy the floor
+// for a criterion that declares only static, so a remedy naming that path
+// would be an instruction that cannot clear the debt it names.
+func TestOutcomeFloorBlockers_UndeclaredAttestationIsNotOffered(t *testing.T) {
+	root := t.TempDir()
+	spec := floorFixtureSpec(artifact.EvidenceStatic)
+
+	blockers := outcomeFloorBlockers(eventualInput{Spec: spec, Fold: ptrFeatureResult(foldFloorFixture(t, spec, root))}, "close")
+	if len(blockers) != 1 {
+		t.Fatalf("outcomeFloorBlockers = %v, want exactly the one unsatisfied floor", blockers)
+	}
+	if strings.Contains(blockers[0].ClearingCondition, "attestations/") {
+		t.Fatalf("ClearingCondition = %q, but the fold never reads that path for a criterion declaring only static", blockers[0].ClearingCondition)
+	}
+
+	// The witness for the claim above: authoring the attestation leaves the
+	// floor exactly where it was.
+	writeUncommitted(t, root, ".verdi/attestations/checkout/ac-1.md", eventualFixtureAttestationMD("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	after := foldFloorFixture(t, spec, root)
+	if after.ACs[0].Floor.Satisfied {
+		t.Fatal("authoring the attestation cleared the floor for a criterion declaring only static; the remedy shape this test pins is unnecessary")
+	}
+}
+
+func ptrFeatureResult(r evidence.FeatureResult) *evidence.FeatureResult { return &r }

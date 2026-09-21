@@ -84,16 +84,20 @@ type Facts struct {
 	// Stubs and FeatureFold are the two feature-only fact families the
 	// eventual-blocker derivation needs (stub reconciliation, 03 §Stub
 	// reconciliation; the outcome-floor fold, 03 §The feature fold): both
-	// nil for a story target, and both nil (with EventualDisclosures
+	// nil for a story target, and both nil (with EventualUnavailable
 	// naming why) when the corresponding port call errored — a
 	// reconciliation or fold failure is disclosed, never a projection
 	// failure (co-6).
 	Stubs       *evidence.StubReconciliation
 	FeatureFold *evidence.FeatureResult
-	// EventualDisclosures carries any Stubs/FeatureFold gathering error,
-	// merged into the record's eventual section (never the projection's
-	// own error return).
-	EventualDisclosures []string
+	// EventualUnavailable names each eventual SOURCE that could not be
+	// computed at all — today the two Stubs/FeatureFold gathering errors,
+	// and nothing else feeds it. It becomes the record's
+	// blockers.eventual.unavailable list, deliberately apart from that
+	// section's Disclosures (SI-213 / R-RRF-1: a partial derivation must
+	// be distinguishable from a complete one), and never the projection's
+	// own error return.
+	EventualUnavailable []string
 }
 
 // GatherFacts resolves arg to a target spec (I-30's two-form contract),
@@ -125,9 +129,9 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 
 	var stubs *evidence.StubReconciliation
 	var featureFold *evidence.FeatureResult
-	var eventualDisclosures []string
+	var eventualUnavailable []string
 	if spec.Class == artifact.ClassFeature {
-		stubs, featureFold, eventualDisclosures = p.gatherEventualFeatureFacts(ctx, root, name, spec, cfg.Model, repoFacts)
+		stubs, featureFold, eventualUnavailable = p.gatherEventualFeatureFacts(ctx, root, name, spec, cfg.Model, repoFacts)
 	}
 
 	return Facts{
@@ -141,7 +145,7 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 		Spec:                  spec,
 		Stubs:                 stubs,
 		FeatureFold:           featureFold,
-		EventualDisclosures:   eventualDisclosures,
+		EventualUnavailable:   eventualUnavailable,
 	}, nil
 }
 
@@ -160,6 +164,11 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 // value stays nil and the source yields no eventual items for this record
 // (eventual.go's stubUnreconciledBlockers/outcomeFloorBlockers both treat
 // a nil input as "nothing to derive from," not an error of their own).
+// The third return value is that unavailable-source list (SI-213), which
+// the record carries as blockers.eventual.unavailable rather than as an
+// ordinary disclosure: "this source was not computed" and "this evaluated
+// fact is worth stating" are different claims, and a consumer that cannot
+// tell them apart reads a partial derivation as a complete one.
 //
 // Both errors routinely carry this process's own ABSOLUTE store path
 // (internal/index/walk.go's "index: walking <root>/.verdi",
@@ -175,12 +184,12 @@ func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name st
 		commit = repo.Head.Value
 	}
 
-	var disclosures []string
+	var unavailable []string
 
 	var stubsOut *evidence.StubReconciliation
 	stubs, err := p.stubs.Reconcile(ctx, root, commit, spec, mdl)
 	if err != nil {
-		disclosures = append(disclosures, fmt.Sprintf("stub reconciliation for %s could not be computed: %v", name, err))
+		unavailable = append(unavailable, fmt.Sprintf("stub reconciliation for %s could not be computed: %v", name, err))
 	} else {
 		stubsOut = &stubs
 	}
@@ -188,12 +197,12 @@ func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name st
 	var foldOut *evidence.FeatureResult
 	fold, err := p.folder.Fold(ctx, root, commit, spec, mdl)
 	if err != nil {
-		disclosures = append(disclosures, fmt.Sprintf("the outcome-floor fold for %s could not be computed: %v", name, err))
+		unavailable = append(unavailable, fmt.Sprintf("the outcome-floor fold for %s could not be computed: %v", name, err))
 	} else {
 		foldOut = &fold
 	}
 
-	return stubsOut, foldOut, sanitizeDisclosures(root, disclosures)
+	return stubsOut, foldOut, sanitizeDisclosures(root, unavailable)
 }
 
 // --- target resolution --------------------------------------------------

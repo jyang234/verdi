@@ -123,7 +123,7 @@ func (p Projector) ProjectWith(ctx context.Context, cfg *store.Config, arg strin
 				Stubs:            facts.Stubs,
 				Fold:             facts.FeatureFold,
 				Conflict:         extras.Conflict,
-				Disclosures:      facts.EventualDisclosures,
+				Unavailable:      facts.EventualUnavailable,
 			}),
 		},
 		Principals:  principals,

@@ -81,6 +81,9 @@ func validRecord(t *testing.T) Record {
 				// shape (a derived section lives in goldenRecord). The
 				// sentence the retired stub used to emit is gone with it.
 				Disclosures: []string{"this fixture's eventual section is intentionally underived"},
+				// SI-213: an underived section names no individual
+				// unavailable source (it is unavailable as a whole).
+				Unavailable: []string{},
 			},
 		},
 		Principals: PrincipalFacts{
