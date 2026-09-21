@@ -441,7 +441,48 @@ func deriveReview(input Input) []Concern {
 		"Lifecycle and safe-action posture can advance review", witnesses,
 		cliDestination(actionState, input.Fallbacks.Review),
 	))
+	concerns = append(concerns, eventualDerivationConcern(input))
 	return concerns
+}
+
+// eventualDerivationConcern states, on its own, whether the journey's
+// eventual-blocker section was derived from EVERY declared source
+// (spec/readiness-recovery ac-1, co-6; SI-213 / R-RRF-1).
+//
+// It is deliberately independent of lifecycle, profile and safe-action
+// state. Before R-RRF-1 the only carrier of the journey's eventual
+// disclosures was review/action's fallback branch, which a known
+// lifecycle with an adopted profile and an available safe action does not
+// enter — so a derivation that could not compute its outcome floor read
+// as all-proven readiness with empty attention (independent review
+// 2026-09-21 R1). Partial knowledge is not proof, whatever else is going
+// well.
+//
+// review/action keeps its own condition and witnesses unchanged: on an
+// underived section both concerns speak, and saying the same true thing
+// twice is honest duplication, not a defect.
+func eventualDerivationConcern(input Input) Concern {
+	eventual := input.Journey.Blockers.Eventual
+	state := StateProven
+	witnesses := []string{}
+	if !eventual.Derived || len(eventual.Unavailable) > 0 {
+		state = StateUnproven
+		// An underived section names no individual source (the journey
+		// schema forbids it); its disclosures carry the reason instead.
+		witnesses = mergeStrings(eventual.Unavailable, underivedDisclosures(eventual))
+	}
+	return newConcern(
+		"review/eventual-derivation", AreaReview, state, true, TimingCurrent, "",
+		"Eventual closure blockers derived from every declared source", witnesses,
+		cliDestination(state, input.Fallbacks.Review),
+	)
+}
+
+func underivedDisclosures(eventual journey.EventualBlockers) []string {
+	if eventual.Derived {
+		return nil
+	}
+	return eventual.Disclosures
 }
 
 func presenceConcern(id, provenSummary, missingSummary string, present bool, input Input, boardCorrectable bool) Concern {

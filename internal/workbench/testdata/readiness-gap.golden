@@ -12,6 +12,7 @@ loader-only:
   context/verdict
   review/action
   review/blocker/<id>
+  review/eventual-derivation
   review/role/<id>
   shape/board
   shape/mutation
