@@ -653,33 +653,50 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
     "readiness pilot probe: an open board question",
   );
 
-  // The already-rendered tab never refreshes itself (no live refresh, no
-  // polling, no recording): its DOM and its event log are exactly what
-  // they were before the edit.
-  const domAfter = await page.evaluate(
-    () => document.querySelector("main.content")!.outerHTML,
-  );
-  expect(domAfter).toBe(domBefore);
-  await expect(page.locator(".readiness-stale")).toContainText(
-    `Derived at HEAD ${head} for this request.`,
-  );
-  const events = await pilotEvents(page);
-  expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
+  // From here the shared store carries the probe. Every assertion runs
+  // inside the try so that a failure anywhere below still reaches the
+  // finally, which deletes the probe through the same board exactly once
+  // — a red here must never leak a shape/board/question/<id> concern into
+  // the later tests' exact-array oracles.
+  try {
+    // The already-rendered tab never refreshes itself (no live refresh, no
+    // polling, no recording): its DOM and its event log are exactly what
+    // they were before the edit.
+    const domAfter = await page.evaluate(
+      () => document.querySelector("main.content")!.outerHTML,
+    );
+    expect(domAfter).toBe(domBefore);
+    await expect(page.locator(".readiness-stale")).toContainText(
+      `Derived at HEAD ${head} for this request.`,
+    );
+    const events = await pilotEvents(page);
+    expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
 
-  // But the NEXT request derives afresh (ac-2): the same HEAD — the
-  // sticky is working-tree scratch, nothing was committed — and the new
-  // open board question is now a shape concern of its own.
-  const bodyAfter = await (await page.request.get("/readiness")).text();
-  expect(bodyAfter).not.toBe(bodyBefore);
-  expect(bodyAfter).toContain(`Derived at HEAD ${head} for this request.`);
-  expect(bodyAfter).toMatch(/data-concern-id="shape\/board\/question\/[^"]+"/);
+    // But the NEXT request derives afresh (ac-2): the same HEAD — the
+    // sticky is working-tree scratch, nothing was committed — and the new
+    // open board question is now a shape concern of its own.
+    const bodyAfter = await (await page.request.get("/readiness")).text();
+    expect(bodyAfter).not.toBe(bodyBefore);
+    expect(bodyAfter).toContain(`Derived at HEAD ${head} for this request.`);
+    expect(bodyAfter).toMatch(
+      /data-concern-id="shape\/board\/question\/[^"]+"/,
+    );
+  } finally {
+    // Delete the probe through the same board, as the happy path always
+    // did. Each step swallows its own error so a cleanup failure cannot
+    // mask the assertion that brought us here; on the happy path the
+    // bodyRestored check below still catches a cleanup that did not land.
+    await probe
+      .getByRole("button", { name: "Delete sticky" })
+      .click()
+      .catch(() => {});
+    await expectAutosaved(popup).catch(() => {});
+    await popup.close().catch(() => {});
+  }
 
-  // Deleting the probe through the same board restores the store, and the
-  // same ref at the same HEAD derives identical bytes again (ac-2) — so
-  // every later test inherits the pinned posture, not this probe.
-  await probe.getByRole("button", { name: "Delete sticky" }).click();
-  await expectAutosaved(popup);
-  await popup.close();
+  // Deleting the probe restored the store, and the same ref at the same
+  // HEAD derives identical bytes again (ac-2) — so every later test
+  // inherits the pinned posture, not this probe.
   const bodyRestored = await (await page.request.get("/readiness")).text();
   expect(bodyRestored).toBe(bodyBefore);
 });

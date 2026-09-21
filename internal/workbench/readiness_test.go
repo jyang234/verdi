@@ -602,6 +602,10 @@ func TestReadinessRender_DestinationActionsUsable(t *testing.T) {
 // restart. The chrome (class names, role, data attribute, tabindex) is
 // unchanged so the stale-notice-inspected instrumentation and the CSS
 // keep working; only the visible label and the accessible name move.
+// The stamp-text assertion below repeats the fixture's own StaleNotice, so
+// it proves pass-through and escaping only; the wording oracle is
+// TestLoad_AnyBranchNoRequest (internal/readinessload/load_test.go:140),
+// which pins the sentence where it is produced.
 func TestReadinessRender_DerivationStampNamesHead(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	notice := sectionOf(t, html, `class="readiness-stale"`, `</aside>`)
@@ -623,8 +627,8 @@ func TestReadinessRender_DerivationStampNamesHead(t *testing.T) {
 			t.Fatalf("derivation stamp still carries the startup notice text %q:\n%s", forbidden, notice)
 		}
 	}
-	if strings.Contains(html, "startup snapshot") {
-		t.Fatalf("page still describes itself as a startup snapshot:\n%s", html)
+	if strings.Contains(strings.ToLower(html), "startup snapshot") {
+		t.Fatalf("page still describes itself as a startup snapshot (any case):\n%s", html)
 	}
 }
 
@@ -839,6 +843,25 @@ func TestReadinessRoute_QuerySpecDerivesPerRequest(t *testing.T) {
 		}
 		if strings.Contains(body, "no spec was named") {
 			t.Fatalf("no-loader 503 page wrongly blames a missing spec name: %s", body)
+		}
+	})
+
+	// The check order is a contract: loader-nil is tested before ref-empty,
+	// so a process with neither a loader nor a named spec reports the
+	// not-wired disclosure, never the no-spec one. There is no loader, so
+	// there is no call counter to read; the body alone pins the order.
+	t.Run("a nil loader with no spec named is the not-wired 503", func(t *testing.T) {
+		h := NewHandlerWith(t.TempDir(), Deps{})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNotWired.Error())) {
+			t.Fatalf("503 page does not carry the no-loader disclosure verbatim: %s", body)
+		}
+		if strings.Contains(body, "no spec was named") {
+			t.Fatalf("nil loader with no spec named must report not-wired first, not the missing spec: %s", body)
 		}
 	})
 
