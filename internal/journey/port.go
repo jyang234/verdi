@@ -390,12 +390,16 @@ type FeatureFolder interface {
 // featureFolder is the production FeatureFolder: discovers implementing
 // stories exactly as stubReconciler does, loads the feature's own outcome-
 // level evidence records, and folds via evidence.FoldFeature — mirroring
-// matrixprojection/project.go:136's projectFeature. Preview is true
-// (unlike cmd/verdi/closefeature.go's own closure-time fold, which is
-// authoritative-only): journey is a read-only, forward-looking projection
-// (DC-15), not the closure ritual, so it folds source:local (advisory)
-// records in alongside source:ci, the same posture `verdi matrix --preview`
-// gives an operator inspecting a feature's current shape.
+// matrixprojection/project.go:136's projectFeature, with cmd/verdi/
+// closefeature.go's own authoritative-only posture.
+//
+// R-RRF-2 (independent review 2026-09-21 R2): Preview stays FALSE — the
+// outcome-floor debt this fold feeds is the debt the CLOSURE gate will
+// read, and closure folds ONLY source: ci evidence (closefeature.go's
+// foldFeature; 03 §Evidence records makes source: local advisory). Folding
+// advisory records here would discharge a closure debt the closure ritual
+// still owes, which is exactly the silence CO-1 forbids. Advisory progress
+// keeps its existing home: `verdi matrix --preview`.
 type featureFolder struct{}
 
 // NewFeatureFolder returns the production FeatureFolder.
@@ -424,10 +428,12 @@ func (featureFolder) Fold(ctx context.Context, root, commit string, spec *artifa
 		return evidence.FeatureResult{}, fmt.Errorf("journey: loading feature evidence records for the outcome floor: %w", err)
 	}
 	return evidence.FoldFeature(evidence.FeatureInput{
-		Spec:        spec,
-		Stories:     storiesByAC,
-		Records:     records,
-		Preview:     true,
+		Spec:    spec,
+		Stories: storiesByAC,
+		Records: records,
+		// R-RRF-2: closure folds source: ci only — the same authoritative-
+		// only posture cmd/verdi/closefeature.go's foldFeature enforces.
+		Preview:     false,
 		StoreRoot:   root,
 		FeatureSlug: ref.Name,
 		Model:       mdl,

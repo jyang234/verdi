@@ -2,6 +2,7 @@ package journey
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -357,4 +358,76 @@ func containsSubstring(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// --- R-RRF-2: the journey fold reads authoritative evidence only ----------
+
+// evidenceRecordJSON renders one strictly decodable verdicts.json holding a
+// single outcome-level record bound to ac, stamped with source — the exact
+// on-disk shape evidence.LoadRecords reads.
+func evidenceRecordJSON(t *testing.T, ac, commit string, source artifact.ProvenanceSource) string {
+	t.Helper()
+	rec := artifact.Evidence{
+		Schema:      "verdi.evidence/v1",
+		EvidenceFor: []string{ac},
+		Kind:        artifact.EvidenceStatic,
+		Verdict:     artifact.VerdictPass,
+		Witness:     "fixture outcome check",
+		Provenance:  artifact.EvidenceProvenance{Source: source, Pipeline: "1", Commit: commit},
+		Digest:      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	data, err := json.Marshal([]artifact.Evidence{rec})
+	if err != nil {
+		t.Fatalf("marshaling the fixture evidence record: %v", err)
+	}
+	return string(data)
+}
+
+// TestProject_EventualFoldReadsAuthoritativeEvidenceOnly is R-RRF-2's proof
+// (independent review 2026-09-21 R2): the outcome-floor eventual blocker
+// names the debt the CLOSURE gate will read, and closure folds source: ci
+// ONLY (cmd/verdi/closefeature.go's foldFeature keeps Preview false; 03
+// §Evidence records makes source: local advisory). A passing source: local
+// record must therefore leave the debt standing — advisory progress is the
+// matrix preview's job, never a silently discharged closure debt. The
+// source: ci row is the positive control: the same bytes, authoritative,
+// do clear it, so the local row proves the provenance rule and not a
+// fixture that can never clear.
+func TestProject_EventualFoldReadsAuthoritativeEvidenceOnly(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      artifact.ProvenanceSource
+		wantBlocker bool
+	}{
+		{name: "an advisory local pass leaves the closure debt standing", source: artifact.SourceLocal, wantBlocker: true},
+		{name: "an authoritative ci pass discharges it", source: artifact.SourceCI, wantBlocker: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildEventualFixtureRepo(t)
+			cfg := openConfig(t, repo.Dir)
+			ctx := context.Background()
+
+			before, err := NewProjector().Project(ctx, cfg, "spec/checkout")
+			if err != nil {
+				t.Fatalf("Project (baseline): %v", err)
+			}
+			if findBlocker(before.Blockers.Eventual.Items, "outcome-floor/ac-2") == nil {
+				t.Fatalf("baseline Blockers.Eventual.Items = %v, want outcome-floor/ac-2 (the fixture's unattested AC)", before.Blockers.Eventual.Items)
+			}
+
+			rel := store.DerivedSpecRelDir(store.RefSlug("spec/checkout")) + "/" + repo.Head + "/verdicts.json"
+			writeUncommitted(t, repo.Dir, rel, evidenceRecordJSON(t, "ac-2", repo.Head, tt.source))
+
+			after, err := NewProjector().Project(ctx, cfg, "spec/checkout")
+			if err != nil {
+				t.Fatalf("Project (with a %s record): %v", tt.source, err)
+			}
+			got := findBlocker(after.Blockers.Eventual.Items, "outcome-floor/ac-2") != nil
+			if got != tt.wantBlocker {
+				t.Fatalf("outcome-floor/ac-2 present = %v, want %v (source %s; items=%v, eventual disclosures=%v)",
+					got, tt.wantBlocker, tt.source, after.Blockers.Eventual.Items, after.Blockers.Eventual.Disclosures)
+			}
+		})
+	}
 }
