@@ -1,0 +1,117 @@
+oq-1 evidence: go-mutesting (avito-tech fork, v0.0.0-20251226130216-48d0401f00fb)
+disqualification witness.
+
+Command (run in the scratch worktree, detached at e963f4d0):
+  $ /tmp/mutation-ratchet-bin-avito/go-mutesting ./internal/readinessload/...
+  exit status: 0
+  wall clock: ~40s (not separately timed; folded into this spike's
+  interrupted-and-resumed session — see the README's oq-1 section for the
+  caveat this carries)
+
+Reduction: the full stdout was 499 lines, almost all of them one PASS
+line + one 152-dash separator line per mutant (239 mutants total: 67
+conflict.go + 94 load.go + 77 facts.go + 1 options.go, exact per-file
+counts below). Kept below: every "undefined:" compiler-error line (11
+total, verbatim, in original order), six representative PASS lines
+bracketing them for context, and the final summary line. Elided: 233 of
+the 239 PASS/separator line pairs, replaced with "... [N line-pairs
+elided] ..." noting exactly which mutant-file ranges. Full JSON --output
+(report.json,
+6.2MB — embeds the complete mutated source of every one of the 239
+mutants) was inspected inline in this session and then removed by the
+mandated scratch-worktree restore (`git checkout -- . && git clean -fd`)
+before a reduced copy could be written to this fence; the four aggregate
+fields below were read directly from it before removal and are quoted
+verbatim, not reconstructed.
+
+report.json top-level stats (quoted from the tool's own JSON, verbatim):
+  "stats":{"totalMutantsCount":239,"killedCount":239,"notCoveredCount":0,
+  "escapedCount":0,"errorCount":0,"skippedCount":0,"timeOutCount":0,
+  "msi":1,"mutationCodeCoverage":0,"coveredCodeMsi":0}
+
+That reports a perfect mutation score (msi:1, 239/239 "killed", 0
+"escaped") together with 0% mutation code coverage — those two numbers
+cannot both be true of a genuine run: a 0%-covered mutant is definitionally
+untested, not killed. The stdout below shows why: at least two of this
+package's four source files (conflict.go, load.go) fail to COMPILE inside
+the tool's own per-mutant temporary copy, because that copy is missing
+sibling-file declarations (JudgeMode, JudgeRun, ActorsResolver,
+PredecodedRequest, Options — all defined in this same package's
+options.go, per `grep -n "^type JudgeMode\|^const.*JudgeRun\|type
+PredecodedRequest" internal/readinessload/options.go`). A build failure
+that has nothing to do with the specific mutation is being counted as a
+"kill" (PASS, in this tool's own vocabulary — see below), not flagged as
+an error or excluded: killedCount ends up counting compiler-error noise,
+not test detections, for every mutant of at least those two files (185 of
+239 by file-count share this fate; see the file-by-file mutant counts in
+this spike's README oq-1 section).
+
+Vocabulary note: this tool's stdout says "PASS" for a KILLED mutant (the
+mutated build+test invocation exited non-zero, which includes both a
+genuine failing test and — as here — a compile error) and would say "FAIL"
+for a SURVIVED one; the final line's "239 passed, 0 failed" is 239 killed,
+0 survived, in the vocabulary this spike's README otherwise uses.
+
+--- reduced stdout (see note above for what was elided) ------------------
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/conflict.go:40:97: undefined: JudgeMode
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/conflict.go:40:115: undefined: ActorsResolver
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/conflict.go:235:69: undefined: PredecodedRequest
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/conflict.go:62:26: undefined: JudgeRun
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/conflict.go:251:24: undefined: PredecodedRequest
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/conflict.go.0" with checksum 7c5c2d8cfc83217f7ae800c0a5e1e23f
+------------------------------------------------------------------------------------------------------------------------------------------------------
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/conflict.go.1" with checksum 083efc98f14f8cc3100f924bb441dcf9
+------------------------------------------------------------------------------------------------------------------------------------------------------
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/conflict.go.2" with checksum 85894894d556853f543d74b299fc0800
+------------------------------------------------------------------------------------------------------------------------------------------------------
+... [140 PASS/separator line-pairs elided: conflict.go's remaining 64
+     mutants (.3..66) and all but the last of facts.go's 77 (.0..77).
+     conflict.go has no further "undefined:" blocks after the one above,
+     but every one of its mutants still shares the same broken per-mutant
+     compile — nothing distinguishes conflict.go.3..66's PASS lines from
+     .0..2's, which is exactly the problem: the tool's own output cannot
+     tell a human reader which PASSes are genuine. facts.go's mutants are
+     NOT shown to share this defect (see the exact counts below).] ...
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/facts.go.78" with checksum 659fa08c6dad8ceda6dc0e16d34799e7
+------------------------------------------------------------------------------------------------------------------------------------------------------
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:43:7: undefined: Options
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:60:76: undefined: JudgeMode
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:60:87: undefined: ActorsResolver
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:35:55: undefined: Options
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:67:66: undefined: Options
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:105:26: undefined: ValidatedContextRequestPath
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:211:20: undefined: NewConflictProvider
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:223:13: undefined: reportIdentity
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:252:33: undefined: readinessDigest
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:253:189: undefined: readinessDigest
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:257:21: undefined: provenanceFacts
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:261:19: undefined: mutationFacts
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:271:16: undefined: boardFacts
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:287:22: undefined: claimedQuestionsOf
+/Users/johnyang/code/verdi-system/verdi-wt/scratch-mutation-w1/internal/readinessload/load.go:332:18: undefined: readinessDigest
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/load.go.0" with checksum 91a5b86c91b114dd650bb937067e1779
+------------------------------------------------------------------------------------------------------------------------------------------------------
+... [93 PASS/separator line-pairs elided: load.go's remaining 93 mutants
+     (.1..99, non-contiguous numbering in the tool's own output)] ...
+PASS "/var/folders/.../go-mutesting-2264654287/internal/readinessload/options.go.0" with checksum fa0000038c902e51eecd125d5510d9bb
+------------------------------------------------------------------------------------------------------------------------------------------------------
+The mutation score is 1.000000 (239 passed, 0 failed, 16 duplicated, 0 skipped, total is 239)
+
+Post-run clean-tree check:
+  $ git status --porcelain   (empty)
+  $ git diff --stat           (empty)
+  (this tool DID restore the working tree correctly on a normal exit in
+  this run; the dirty-tree episode logged elsewhere in this spike's
+  session came from a DIFFERENT run of this same binary that was
+  interrupted mid-mutation by an unrelated infrastructure fault — see the
+  README's "Deviations from the investigation plan" section — and was
+  cleaned per the scratch-worktree discipline before any further tool ran.)
+
+Exact per-file PASS-line counts (`grep -c 'PASS ".*conflict\.go\.' ` etc.
+over the raw log): conflict.go 67, load.go 94, facts.go 77, options.go 1
+(sums to 239). facts.go's own 77 mutants show no "undefined:" errors in
+this run (its file-local code apparently doesn't reference the
+options.go-defined identifiers this tool's temp copy dropped), so
+facts.go's 77 "killed" results are not, by this specific evidence, shown
+to be false positives — only conflict.go's 67 and load.go's 94 are (161
+of 239 mutants, 67%, by this file-level accounting).

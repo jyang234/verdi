@@ -1,0 +1,117 @@
+oq-3 evidence: reach of the technique into the PA-017 witness class.
+
+Preliminary fact this spike had to establish first: internal/readinessload
+has NO file-write call anywhere in its production source at either
+1be75d01 or 410db101 —
+
+  $ git show 1be75d01:internal/readinessload/load.go | grep -niE "os\.(WriteFile|Create|Mkdir|OpenFile|Remove)|ioutil\."
+  (no output)
+  $ for f in load.go conflict.go facts.go options.go doc.go; do git show 1be75d01:internal/readinessload/$f | grep -niE "os\.(WriteFile|Create|Mkdir|OpenFile|Remove)|ioutil\."; done
+  (no output for any file)
+
+— confirmed exhaustively across the whole package, not sampled. co-2's
+whole point is that Load persists nothing, so this absence is the
+package working as designed, not a gap. It follows that no catalog
+mutation operator (arithmetic, comparison, conditionals-negation,
+statement removal, boundary, etc. — every operator this spike's three
+candidates implement) can produce "a mutant that writes an arbitrary
+file" from this file's content: every operator perturbs an existing
+expression or statement, none synthesizes a new I/O call from nothing.
+See the README's oq-3 section for how this is handled (a hand-seeded
+regression fixture, matching the parent spec's own ac-3 wording — "a
+committed regression fixture" — rather than an organic tool discovery).
+
+The seeded mutant (identical text planted at both commits, in each
+commit's own version of the file, at the same point: the first statement
+inside `func (l loader) load(...)`, immediately after its opening brace,
+before the pre-existing `ctx.Err()` check):
+
+  File: internal/readinessload/load.go
+  Line: 68 (the first statement of `load`, both at 1be75d01 and 410db101 —
+        the function's own opening lines are unchanged by the 410db101 fix;
+        only later lines in the function's body differ)
+  Injected text:
+    if mkErr := os.MkdirAll(filepath.Join(root, ".verdi", "data"), 0o755); mkErr == nil {
+    	if wErr := os.WriteFile(filepath.Join(root, ".verdi", "data", "scratch-cache.tmp"), []byte("x"), 0o644); wErr != nil {
+    		panic("seeded fault write failed: " + wErr.Error())
+    	}
+    } else {
+    	panic("seeded fault mkdir failed: " + mkErr.Error())
+    }
+  Operator (in this spike's own vocabulary, since no candidate tool's
+  catalog has one that produces this): STATEMENT-INSERTION, unconditional
+  file write. os/path-filepath are both already imported by load.go at
+  both commits, so this is a single self-contained insertion, not a
+  multi-file change. The panic-on-failure guards are diagnostic scaffolding
+  for this spike only (they proved the write genuinely lands rather than
+  silently no-op'ing against a fixture directory that might not
+  pre-exist — an earlier attempt using `_ = os.WriteFile(...)` with no
+  parent-directory creation silently failed both before AND after
+  410db101, which would have been a false NOT-ANSWERED; MkdirAll fixed
+  that, and the panics would have surfaced immediately if it had not).
+
+--- Step 1: checkout 1be75d01 (pre-fix), inject, build, test ------------
+
+  $ git checkout --detach 1be75d01                    # HEAD 1be75d01e884...
+  $ <inject the text above>
+  $ gofmt -l internal/readinessload/load.go            # (no output — clean)
+  $ go build ./internal/readinessload/...              # exit 0
+  $ go test ./internal/readinessload/... -run 'Persistence|CacheMiss|CacheHit' -v
+  === RUN   TestLoad_WithRequestCacheMissNeverRunsJudge
+  --- PASS: TestLoad_WithRequestCacheMissNeverRunsJudge (0.82s)
+  === RUN   TestLoad_WithRequestCacheHit
+  --- PASS: TestLoad_WithRequestCacheHit (1.56s)
+  === RUN   TestLoad_PersistenceBoundary
+  --- PASS: TestLoad_PersistenceBoundary (0.57s)
+  PASS
+  ok  	github.com/jyang234/verdi/internal/readinessload	3.173s
+  $ go test ./internal/readinessload/... -count=1      # whole package, for completeness
+  ok  	github.com/jyang234/verdi/internal/readinessload	18.097s
+
+  Result: SURVIVES. No panic fired (the write genuinely happened and
+  nothing noticed), and the whole package suite is green — exactly PA-017's
+  own class of miss: the pre-410db101 assertNoPersistence only greps
+  written file NAMES for the substring "readiness"; "scratch-cache.tmp"
+  does not contain it.
+
+--- Step 2: restore, checkout 410db101 (fixed), inject the SAME text ----
+
+  $ git checkout -- internal/readinessload/load.go
+  $ git checkout --detach 410db101                     # HEAD 410db101019797...
+  $ <inject the identical text at the identical point>
+  $ go build ./internal/readinessload/...              # exit 0
+  $ go test ./internal/readinessload/... -run 'Persistence|CacheMiss|CacheHit' -v
+  === RUN   TestLoad_WithRequestCacheMissNeverRunsJudge
+      load_test.go:192: .verdi/data changed during a derivation that must persist nothing:
+          before=map[]
+          after= map[.verdi/data/scratch-cache.tmp:1]
+  --- FAIL: TestLoad_WithRequestCacheMissNeverRunsJudge (0.75s)
+  === RUN   TestLoad_WithRequestCacheHit
+  --- PASS: TestLoad_WithRequestCacheHit (1.28s)
+  === RUN   TestLoad_PersistenceBoundary
+      load_test.go:958: .verdi/data changed during a derivation that must persist nothing:
+          before=map[]
+          after= map[.verdi/data/scratch-cache.tmp:1]
+  --- FAIL: TestLoad_PersistenceBoundary (0.56s)
+  FAIL
+  FAIL	github.com/jyang234/verdi/internal/readinessload	2.833s
+
+  Result: KILLED. Two independent tests
+  (TestLoad_WithRequestCacheMissNeverRunsJudge, TestLoad_PersistenceBoundary)
+  fail with the exact before/after file-tree diff naming the seeded file.
+  TestLoad_WithRequestCacheHit does not call assertNoPersistence at all
+  (it asserts judge-call counts, not the persistence boundary), so its
+  continued PASS is expected and not a gap.
+
+--- Step 3: restore scratch worktree -------------------------------------
+
+  $ git checkout -- internal/readinessload/load.go
+  $ git clean -fd
+  $ git checkout --detach e963f4d0
+  $ git status --porcelain                             (empty)
+  $ git diff --stat                                     (empty)
+
+oq-3 answer: YES, with the caveat recorded in the README (hand-seeded
+fixture, not an organically tool-discovered mutant — no candidate tool's
+operator catalog could have produced this specific mutant from this
+file's actual content, per the exhaustive grep above).

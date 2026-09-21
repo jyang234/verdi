@@ -1,0 +1,118 @@
+oq-5 evidence: attempting file -> package -> test files -> verdi.bindings.yaml
+producer -> criteria -> dc-6 tier, for the 30 touched non-test .go files of
+b810c302..e963f4d0.
+
+Step 0 (discrepancy, recorded per the brief's constraint 10): the owning
+spec of this diff, spec/readiness-recovery, does not exist anywhere in the
+scratch worktree (detached at e963f4d0, cut from
+agent/readiness-recovery-wave-1) — neither active nor archived:
+
+  $ cd scratch-mutation-w1 && find .verdi/specs -iname "*readiness-recovery*"
+  (no output)
+  $ ls .verdi/specs/active/ | grep -i readiness
+  (no output)
+
+It DOES exist at this lane's deliverable worktree base (main, 5f60c76c):
+
+  $ cd spike-mutation-ratchet && find .verdi/specs -iname "*readiness-recovery*"
+  .verdi/specs/active/readiness-recovery
+
+This means the wave-1 implementation branch never merged the spec that
+describes the very feature it implements (the spec was drafted and
+reviewed on a separate design/readiness-recovery branch/PR, per this
+session's own memory of that PR's state, and only reached main afterward).
+Substitution made: this spike reads dc-6 from the CURRENT, merged spec at
+main (5f60c76c) rather than treating "the owning spec" as unavailable —
+the alternative (declaring oq-5 entirely NOT ANSWERED because the commit
+range's own tree lacks the spec) would throw away a real, decisive finding
+in favor of a technicality; the substitution is disclosed here and in the
+README rather than made silently.
+
+dc-6 of spec/readiness-recovery (main, 5f60c76c), verbatim:
+
+  - { id: dc-6, text: "Risk tiers: Tier 3 with an owner risk gate for ac-9
+    and ac-10's executable choices; Tier 2 for ac-1 through ac-4, ac-6,
+    ac-8; Tier 1 for ac-5 and ac-7's lint and chip fixes. Waves: 1 =
+    ac-1..ac-5 (readiness); 2 = ac-6, ac-7 (attestations); 3 = ac-8..ac-10
+    (recovery); each ends with the full gate; the integration unit of the
+    orchestration index follows against the merged head.", anchor: dc-6 }
+
+Step 1: locate every verdi.bindings.yaml in the tree.
+
+  $ find . -name "verdi.bindings.yaml"
+  ./verdi.bindings.yaml                        (the real, store-root file)
+  ./testdata/svcfix/verdi.bindings.yaml         (a FIXTURE, not real evidence)
+
+There is exactly one real bindings file in this repository. It is 2235
+lines, a concatenation of `spec: <ref>` / `bindings: [...]` blocks, one
+per spec that has had evidence authored for it so far.
+
+Step 2: does it mention spec/readiness-recovery, or the touched packages'
+directory names, as an OWNING spec block?
+
+  $ grep -in "readiness" verdi.bindings.yaml
+  (no output — zero matches, not even in a comment)
+
+  $ grep -in "journey\|policyconflict\|mcpserve\|e2eharness" verdi.bindings.yaml
+  (no output for any of these four package names, as an owning spec block
+  OR as a comment aside — zero matches)
+
+  $ grep -in "workbench" verdi.bindings.yaml | wc -l
+  62
+
+workbench's 62 hits are all comments justifying evidence for OTHER,
+pre-existing specs (spec/workbench-directory, spec/workbench-legibility,
+spec/draft-boards, spec/stub-cards, spec/scoping-canvas, and others) that
+happen to also touch internal/workbench — none of them is
+spec/readiness-recovery. Matching on the package name alone, without
+checking which spec the match's OWN `spec:` block belongs to, would
+misattribute a tier to these 6 touched workbench files from an unrelated
+feature's evidence entry — recorded here as a hazard, not exercised as a
+mapping.
+
+Also notable, from the same read: every `producer:` id in this file (e.g.
+"verdi-verify-behavioral") names something a human comment then explains
+in prose ("the closed story's rollup publishes...", "proven by
+close_test.go's PublishedField assertions") — there is no separate,
+machine-readable producer -> test-file index anywhere in the tree. Even
+for a spec that DID have a bindings block, going from "producer id" to
+"which _test.go file/function implements it" is a prose-reading step, not
+a mechanical one.
+
+Step 3: count, per the story's own bins.
+
+  Touched files: 30 (cmd/e2eharness/readinessallproven.go,
+    cmd/verdi/{conflictgate,context,context_conflict,context_constitution,
+    mcp,readiness_snapshot,serve,specdoc}.go, internal/journey/{derive,
+    eventual,facts,port,project,reason}.go,
+    internal/mcpserve/{backend,tool_get_document}.go,
+    internal/policyconflict/{cachejudge,service}.go,
+    internal/readinessload/{conflict,doc,facts,load,options}.go,
+    internal/readinesspilot/derive.go,
+    internal/readinesspilot/readinesstest/readinesstest.go,
+    internal/store/paths.go,
+    internal/workbench/{boarddocument,boardspec,branchboard,handler,
+    readiness,readinessrender}.go)
+
+  Resolve to exactly one tier (via the intended chain: this file's package
+  -> a verdi.bindings.yaml block whose `spec:` is spec/readiness-recovery
+  -> one of that spec's ac-ids -> dc-6's tier for that ac-id): 0 of 30.
+
+  Resolve to several tiers (via the SAME correct chain — i.e. genuinely
+  ambiguous, not a naming coincidence): 0 of 30 (there is nothing to be
+  ambiguous between, since step 2 above is already empty).
+
+  Resolve to none: 30 of 30 (100%), because spec/readiness-recovery has no
+  verdi.bindings.yaml block at all as of this diff's own head — the chain
+  breaks at "package -> producer" for every single file, before dc-6 is
+  even consulted.
+
+  Caveat / hazard, kept separate from the count above: a NAIVE
+  implementation that matched on package name alone (ignoring which
+  spec's block a hit belongs to) would find internal/workbench's 6 touched
+  files "resolving" to several DIFFERENT, WRONG tiers borrowed from
+  unrelated specs' bindings entries (workbench-directory, workbench-
+  legibility, etc. — none of which is dc-6 of spec/readiness-recovery).
+  This is not counted as a real multi-tier resolution above; it is
+  recorded because a manifest-generation script naive enough to grep by
+  package name alone would produce exactly this wrong answer silently.

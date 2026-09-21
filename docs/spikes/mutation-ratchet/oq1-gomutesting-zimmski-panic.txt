@@ -1,0 +1,91 @@
+oq-1 evidence: go-mutesting (zimmski, v0.0.0-20210610104036-6d9217011a00)
+disqualification witness.
+
+Command (run in the scratch worktree, detached at e963f4d0):
+  $ /tmp/mutation-ratchet-bin-zimmski/go-mutesting ./internal/readinessload/...
+  exit status: 2
+
+Reduction: none — this is the complete, unedited stderr (60 lines). No
+"NOT_ANSWERED" step is downstream of this: the crash happens during the
+tool's own go/packages type-check pass, before it generates a single
+mutant, so no partial result exists to report.
+
+Root cause (from the trace): the tool pins
+golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a (2019-10-18) for its
+go/packages-based static analysis. That snapshot's go/types checker
+segfaults inside go1.25.5's runtime while type-checking a binary
+(go/types.(*StdSizes).Sizeof on a nil receiver, via representableConst) —
+a five-year-old AST/type-checking library is not forward-compatible with
+the current Go toolchain it is asked to analyze. This is exactly the
+failure mode oq-1's investigation plan asks to check for ("installs
+cleanly on Go 1.25" is necessary but not sufficient; this tool installs
+clean and crashes at first real use).
+
+--- verbatim stderr -----------------------------------------------------
+panic: runtime error: invalid memory address or nil pointer dereference [recovered, repanicked]
+[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x1049da978]
+
+goroutine 394 [running]:
+go/types.(*Checker).handleBailout(0x1400042c000, 0x140001d5c68)
+	/usr/local/go/src/go/types/check.go:467 +0x9c
+panic({0x104bb1fa0?, 0x104e27d70?})
+	/usr/local/go/src/runtime/panic.go:783 +0x120
+go/types.(*StdSizes).Sizeof(0x0, {0x104c15ce0, 0x104e2bf80})
+	/usr/local/go/src/go/types/sizes.go:229 +0x2f8
+go/types.(*Config).sizeof(...)
+	/usr/local/go/src/go/types/sizes.go:334
+go/types.representableConst.func1(...)
+	/usr/local/go/src/go/types/const.go:77
+go/types.representableConst({0x104c17280, 0x104b6fd60}, 0x1400042c000, 0x104e2bf80, 0x140001d4c98)
+	/usr/local/go/src/go/types/const.go:93 +0x17c
+go/types.(*Checker).representation(0x1400042c000, 0x140000c6800, 0x104e2bf80)
+	/usr/local/go/src/go/types/const.go:257 +0x54
+go/types.(*Checker).implicitTypeAndValue(0x1400042c000, 0x140000c6800, {0x104c15ce0, 0x104e2bf80})
+	/usr/local/go/src/go/types/expr.go:404 +0x3b0
+go/types.(*Checker).convertUntyped(0x1400042c000, 0x140000c6800, {0x104c15ce0, 0x104e2bf80})
+	/usr/local/go/src/go/types/const.go:290 +0x30
+go/types.(*Checker).matchTypes(0x1400042c000, 0x140000c67c0, 0x140000c6800)
+	/usr/local/go/src/go/types/expr.go:925 +0x2b4
+go/types.(*Checker).binary(0x1400042c000, 0x140000c67c0, {0x104c16770, 0x1400007f500}, {0x104c164d0, 0x140006fc3c0}, {0x104c16830, 0x140006fc3e0}, 0x28, 0x40096)
+	/usr/local/go/src/go/types/expr.go:799 +0x10c
+go/types.(*Checker).exprInternal(0x1400042c000, 0x0, 0x140000c67c0, {0x104c16770, 0x1400007f500}, {0x0?, 0x0?})
+	/usr/local/go/src/go/types/expr.go:1155 +0x6e4
+go/types.(*Checker).rawExpr(0x1400042c000, 0x0, 0x140000c67c0, {0x104c16770?, 0x1400007f500?}, {0x0?, 0x0?}, 0x0)
+	/usr/local/go/src/go/types/expr.go:978 +0x114
+go/types.(*Checker).expr(0x1400042c000, 0x104c15ab0?, 0x140000c67c0, {0x104c16770?, 0x1400007f500?})
+	/usr/local/go/src/go/types/expr.go:1252 +0x38
+go/types.(*Checker).stmt(0x1400042c000, 0x0, {0x104c16ad0, 0x14000226180})
+	/usr/local/go/src/go/types/stmt.go:611 +0xc9c
+go/types.(*Checker).stmtList(0x1400042c000, 0x0, {0x140006fc540?, 0x13040f1c0?, 0x109846b80?})
+	/usr/local/go/src/go/types/stmt.go:125 +0x80
+go/types.(*Checker).funcBody(0x1400042c000, 0x104c164d0?, {0x1400058a088?, 0x14000226bf0?}, 0x14000226c00, 0x1400007f5f0, {0x0?, 0x0?})
+	/usr/local/go/src/go/types/stmt.go:42 +0x204
+go/types.(*Checker).funcDecl.func1()
+	/usr/local/go/src/go/types/decl.go:879 +0x38
+go/types.(*Checker).processDelayed(0x1400042c000, 0x0)
+	/usr/local/go/src/go/types/check.go:583 +0x164
+go/types.(*Checker).checkFiles(0x1400042c000, {0x14000490000?, 0x68?, 0x104bfe080?})
+	/usr/local/go/src/go/types/check.go:525 +0x2f0
+go/types.(*Checker).Files(0x14000130180?, {0x14000490000?, 0x1400050af60?, 0x4?})
+	/usr/local/go/src/go/types/check.go:485 +0x80
+golang.org/x/tools/go/packages.(*loader).loadPackage(0x14000130180, 0x1400049b600)
+	/Users/johnyang/go/pkg/mod/golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a/go/packages/packages.go:835 +0x52c
+golang.org/x/tools/go/packages.(*loader).loadRecursive.func1()
+	/Users/johnyang/go/pkg/mod/golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a/go/packages/packages.go:685 +0x15c
+sync.(*Once).doSlow(0x0?, 0x0?)
+	/usr/local/go/src/sync/once.go:78 +0xe0
+sync.(*Once).Do(...)
+	/usr/local/go/src/sync/once.go:69
+golang.org/x/tools/go/packages.(*loader).loadRecursive(0x0?, 0x0?)
+	/Users/johnyang/go/pkg/mod/golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a/go/packages/packages.go:673 +0x44
+golang.org/x/tools/go/packages.(*loader).loadRecursive.func1.1(0x0?)
+	/Users/johnyang/go/pkg/mod/golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a/go/packages/packages.go:680 +0x2c
+created by golang.org/x/tools/go/packages.(*loader).loadRecursive.func1 in goroutine 336
+	/Users/johnyang/go/pkg/mod/golang.org/x/tools@v0.0.0-20191018212557-ed542cd5b28a/go/packages/packages.go:679 +0x78
+
+Post-run clean-tree check:
+  $ git status --porcelain   (empty)
+  $ git diff --stat           (empty)
+  (the crash happened before any file was mutated, so the clean-tree
+  check passes vacuously here — it is the runtime crash itself, not tree
+  corruption, that disqualifies this candidate.)
