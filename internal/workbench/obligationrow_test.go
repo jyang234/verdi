@@ -1,6 +1,6 @@
 package workbench
 
-// Tests for R-RR2-7 (readiness-recovery wave 2, SI-210): the obligation
+// Tests for R-RR2-7 (readiness-recovery wave 2, SI-212): the obligation
 // row attaches to EVERY class's acceptance-criterion cards, so a feature
 // AC card wears one obligationView per declared evidence kind — Present
 // reflecting the obligation document's real presence on disk exactly as

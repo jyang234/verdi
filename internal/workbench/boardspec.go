@@ -493,7 +493,7 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 }
 
 // attachObligations enriches a board's AC cards — every class alike, story
-// and feature (R-RR2-7, SI-210) — with their evidence obligations
+// and feature (R-RR2-7, SI-212) — with their evidence obligations
 // (spec/obligation-wall ac-2), so what each AC demands is read on the wall
 // itself (feature co-3, legible-without-the-sidecar) rather than recovered
 // by opening the obligation file. For each evidence kind an AC

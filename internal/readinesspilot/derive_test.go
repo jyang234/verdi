@@ -1073,13 +1073,13 @@ func attentionContains(attention []Concern, id string) bool {
 	return false
 }
 
-// --- R-RRF-1 / SI-213: the eventual-derivation concern --------------------
+// --- R-RRF-1 / SI-215: the eventual-derivation concern --------------------
 
 const eventualFoldUnavailable = "the outcome-floor fold for example could not be computed: permission denied"
 
 const eventualUnderivedDisclosure = "the eventual section was not derived for this projection"
 
-// TestDeriveEventualDerivationConcern is SI-213's consumer-side proof
+// TestDeriveEventualDerivationConcern is SI-215's consumer-side proof
 // (independent review 2026-09-21 R1). The readiness projection carries one
 // dedicated concern for the completeness of the journey's eventual
 // derivation, and its state depends on that derivation ALONE — not on the

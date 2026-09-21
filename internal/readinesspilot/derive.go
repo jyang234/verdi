@@ -447,7 +447,7 @@ func deriveReview(input Input) []Concern {
 
 // eventualDerivationConcern states, on its own, whether the journey's
 // eventual-blocker section was derived from EVERY declared source
-// (spec/readiness-recovery ac-1, co-6; SI-213 / R-RRF-1).
+// (spec/readiness-recovery ac-1, co-6; SI-215 / R-RRF-1).
 //
 // It is deliberately independent of lifecycle, profile and safe-action
 // state. Before R-RRF-1 the only carrier of the journey's eventual

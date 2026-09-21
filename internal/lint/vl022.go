@@ -26,8 +26,8 @@ import (
 // attestation whose `verifies` edge resolves to a class: story spec — the
 // D6-18 misfiling class the story rule exists to kill. `verdi attest`
 // itself now scaffolds both classes (spec/readiness-recovery ac-6, ledger
-// SI-211), and this rule covers both to match (ac-7, R-RR2-2, ledger
-// SI-212, reversing ADJ-51's story-only scope below). ADJ-51's original
+// SI-213), and this rule covers both to match (ac-7, R-RR2-2, ledger
+// SI-214, reversing ADJ-51's story-only scope below). ADJ-51's original
 // ruling left a genuine residual gap for a
 // `verifies` edge to a class: feature spec: this is the smallest reversible
 // reading forced by the store's own real data — frozen dc-4 asserts "every

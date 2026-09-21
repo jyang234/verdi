@@ -136,7 +136,7 @@ func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string)
 		Actors:             resolveConflictActors,
 		Judge:              readinessload.JudgeRun,
 		PredecodedRequest:  predecoded,
-		// R-RRF-3 (SI-214): the WARM-UP is the only caller that still
+		// R-RRF-3 (SI-216): the WARM-UP is the only caller that still
 		// refuses a request whose `expected` branch/HEAD does not describe
 		// this checkout — a request already stale at startup is a
 		// misconfiguration, and serve exits 2 on it. The per-request

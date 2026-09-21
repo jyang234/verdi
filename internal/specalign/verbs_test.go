@@ -140,7 +140,7 @@
 // argument grammar — including `attest`'s. The shipped verb accepts
 // `verdi attest <spec-ref> <ac-id>`, admitting a story ref, a story spec
 // ref, or a feature spec ref (spec/readiness-recovery ac-6, R-RR2-4,
-// ledger SI-211), which DIVERGES from verdi-surfaces §CLI's
+// ledger SI-213), which DIVERGES from verdi-surfaces §CLI's
 // `verdi attest <story-ref> <ac-id>` row (still story-only, "a declared
 // (story, AC) pair of an active `class: story` spec"). The divergence is
 // deliberate and disclosed, not an oversight: both specifications are

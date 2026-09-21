@@ -49,7 +49,7 @@ func transitionVerbs(trs []model.Transition) []string {
 	return out
 }
 
-// TestLaterTransitions pins R-RR1-11 (ledger SI-207) directly: "later"
+// TestLaterTransitions pins R-RR1-11 (ledger SI-209) directly: "later"
 // transitions are the ones FORWARD-REACHABLE from the target's current
 // lifecycle state, minus the immediate candidates — never a transition
 // already behind the state. The superseded resolution (a) (every declared
@@ -108,7 +108,7 @@ func TestLaterTransitions_UndeclaredClass(t *testing.T) {
 	}
 }
 
-// TestResolveEventualScope pins R-RR1-12's verb table (ledger SI-207):
+// TestResolveEventualScope pins R-RR1-12's verb table (ledger SI-209):
 // the CLOSURE verb is resolved from the lifecycle as the transition whose
 // target is the closed state, and the POLICY verb is the acceptance
 // transition (resolved as the transition whose target is the accepted
@@ -556,7 +556,7 @@ func TestDeriveEventual_UndeclaredClassDerivesNothingAndDiscloses(t *testing.T) 
 
 // TestDeriveEventual_NoUnknownTransition sweeps every source at once: no
 // derived item may ever carry the literal "unknown" as its transition
-// (SI-207), even when the lifecycle state itself is unproven.
+// (SI-209), even when the lifecycle state itself is unproven.
 func TestDeriveEventual_NoUnknownTransition(t *testing.T) {
 	in := eventualInput{
 		Class: "feature", Model: model.Canonical(), State: statusOf(specstate.Unproven), Owner: testOwner(),

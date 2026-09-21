@@ -91,7 +91,7 @@ const ATTENTION_QUEUE = [
 
 // Every and only the proven concerns, in existing AllConcerns order (area
 // order, then id). review/eventual-derivation (spec/readiness-recovery
-// ac-1/co-6, SI-213 / R-RRF-1) is the review area's one proven row here:
+// ac-1/co-6, SI-215 / R-RRF-1) is the review area's one proven row here:
 // the fixture's eventual section derives with nothing unavailable (its
 // stub reconciliation and outcome-floor fold both compute — the
 // outcome-floor blockers above are that fold's output), so it closes the

@@ -180,7 +180,7 @@ type Blocker struct {
 // Derived is false, Items must be empty and Disclosures must be
 // non-empty.
 //
-// Unavailable (spec/readiness-recovery co-6, SI-213 / R-RRF-1) is the
+// Unavailable (spec/readiness-recovery co-6, SI-215 / R-RRF-1) is the
 // three-valued honesty seam BELOW that whole-section rule: a section that
 // derived everything it could, while one named source could not be
 // computed at all, is a PARTIAL derivation. Each such source contributes
@@ -534,7 +534,7 @@ func (eb EventualBlockers) validate() error {
 		if len(eb.Disclosures) == 0 {
 			return fmt.Errorf("journey: blockers.eventual: derived is false but disclosures is empty: an underived section must disclose itself")
 		}
-		// SI-213: an underived section is unavailable as a whole; naming
+		// SI-215: an underived section is unavailable as a whole; naming
 		// individual unavailable sources beside it would claim a partial
 		// derivation that did not happen.
 		if len(eb.Unavailable) != 0 {

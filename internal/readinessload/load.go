@@ -42,10 +42,10 @@ const noContextRequestWitness = "no context request supplied for this derivation
 // vector already points at.
 const staleConflictReportWitness = "the policy-conflict report was computed for different spec bytes than the ones on disk; re-run the context-conflict verb to refresh it"
 
-// staleExpectedRepositoryWitness is R-RRF-3's (SI-214) fixed witness
+// staleExpectedRepositoryWitness is R-RRF-3's (SI-216) fixed witness
 // sentence for a per-request derivation whose --context-request carries an
 // optional `expected` claim that no longer matches the checkout. It is the
-// SI-208 shape one level earlier: nothing was evaluated for these bytes, so
+// SI-210 shape one level earlier: nothing was evaluated for these bytes, so
 // the honest answer is disclosed-as-unproven, not an operational failure
 // that blanks every unrelated area of the page (CLAUDE.md's three-valued
 // honesty). It names both repositories because that pair is exactly what an
@@ -59,7 +59,7 @@ const staleConflictReportWitness = "the policy-conflict report was computed for 
 // disclosure straight back into the operational failure the ruling
 // removes. %q escapes every such rune, so the sentence is display-safe by
 // construction for any request the decoder accepts. It carries no path and
-// no digest (the SI-208 reasoning): the request-bound contextFallback
+// no digest (the SI-210 reasoning): the request-bound contextFallback
 // vector already names the file, and a digest tells an operator nothing
 // they can act on.
 func staleExpectedRepositoryWitness(expected, computed contextcompile.Expected) string {
@@ -236,7 +236,7 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 		// quietly discloses it forever.
 		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: --context-request expected repository %+v does not match computed repository %+v", *request.Expected, computed)
 	case staleExpected:
-		// R-RRF-3 (SI-214, independent review R3): on an ordinary
+		// R-RRF-3 (SI-216, independent review R3): on an ordinary
 		// per-request load the mismatch is the ac-3 ConflictUnavailable
 		// posture, not an error. `verdi serve` keeps deriving against the
 		// request bundle it validated at startup (R-RR1-17), so one

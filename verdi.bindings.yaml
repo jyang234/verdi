@@ -656,7 +656,7 @@ bindings:
       # empty-bucket suite — the exact 1:1 stub/AC mapping the feature's
       # own `stubs:` list declares. The attestation legs, once authored,
       # will live at .verdi/attestations/workbench-legibility/ac-{1,2,3}.md
-      # — as of spec/readiness-recovery ac-6 (ledger SI-211), `verdi
+      # — as of spec/readiness-recovery ac-6 (ledger SI-213), `verdi
       # attest` scaffolds feature outcome attestations too (`verdi attest
       # <feature-ref> <ac-id>`); this feature's three legs are still
       # unauthored/hand-authored until someone runs it, mirroring the

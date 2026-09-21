@@ -4,7 +4,7 @@ Status: COMPLETE — READY_FOR_OWNER_RISK_GATE (gate #4 `verify OK` at code head
 Risk tier: Tier 2 (Tasks 1–4), Tier 1 (Task 5); Tasks 1 and 3 escalated to Tier 3 on one Critical finding each; the final fix wave (Task 4b) ran as Tier 3.
 Base..Head: e768cf9c..eefe44fe (code head; main merged at 6c3518ff, clean, 0 conflicts), plus this docs-only wave-close commit on top.
 Plan: docs/superpowers/plans/2026-09-19-readiness-recovery-wave-1.md (rulings R-RR1-1..21; amendments recorded in place).
-Ledger: docs/superpowers/invention-ledger.md SI-207 (R-RR1-11/12), SI-208 (R-RR1-18), SI-209 (R-RR1-21).
+Ledger: docs/superpowers/invention-ledger.md SI-209 (R-RR1-11/12), SI-210 (R-RR1-18), SI-211 (R-RR1-21).
 
 ## Lanes and accepted ranges
 
@@ -44,7 +44,7 @@ Accepted (`.superpowers/sdd/…/wave-review.md`, at 29fa3adf before Tasks 2b/4c)
 - e2e addSticky commit-before-locator window is suite-wide (26/49/50) — suite-level sweep, post-design lane.
 - R-RR1-19 gates on closureAhead; a lifecycle where acceptance is reachable but closure is not would suppress genuinely-ahead policy debt (no such model is declared; Model.checkFrontier rejects divergent models).
 - The context/verdict destination may name a request file the server has outlived (4b M4, inside R-RR1-17's accepted trade).
-- The ac-5 witness derives on the claim-wall Go fixture, not the e2e harness fixture (SI-209); the harness fixture's own gap is inherited unproven by the post-design lane.
+- The ac-5 witness derives on the claim-wall Go fixture, not the e2e harness fixture (SI-211); the harness fixture's own gap is inherited unproven by the post-design lane.
 - Sealed consolidation witness: four Task 2 sources are bound as successors (R-RR1-22, SI-200 mechanism); `checks.json` untouched. Any lane editing a pinned path must run the sealedexec consolidation tests.
 - Suite 49's isolated fixture: the warm GET still carries the API request context's own 30s default; no fixture scratch dir is removed (peer parity); `stop()` leaves a dead cached URL (unreachable).
 - `./cmd/verdi` under `-race` runs ~10 min on this machine against Go's default per-package timeout; `make test` sets no `-timeout` (pre-existing at base; observed value at gate #1: 594s at gate #1, then cached).

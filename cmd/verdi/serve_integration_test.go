@@ -547,7 +547,7 @@ func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing
 }
 
 // TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest is R-RRF-3's
-// (SI-214) warm-up half. A per-request load now DISCLOSES a stale
+// (SI-216) warm-up half. A per-request load now DISCLOSES a stale
 // `expected` branch/HEAD claim instead of failing
 // (internal/readinessload's own
 // TestLoad_ExpectedMismatchPostureIsTheExplicitOption), so the startup

@@ -39,7 +39,7 @@ func failingPortProjector(reconcileErr, foldErr func(root string) error) Project
 // TestProject_PortErrorsAreNeverProjectionFailures is co-6's proof: a
 // Reconcile error and a Fold error each become a stated, unavailable
 // source — in Facts.EventualUnavailable and in the projected record's own
-// eventual section (SI-213 moved these sentences out of Disclosures; the
+// eventual section (SI-215 moved these sentences out of Disclosures; the
 // sibling TestProject_PortErrorsBecomeUnavailableSources pins where they
 // land) — and neither is ever a projection failure. The feature-only
 // sources simply derive nothing, and the record still validates and
@@ -437,9 +437,9 @@ func TestProject_EventualFoldReadsAuthoritativeEvidenceOnly(t *testing.T) {
 	}
 }
 
-// --- R-RRF-1 / SI-213: a failed source is unavailable, not a disclosure ---
+// --- R-RRF-1 / SI-215: a failed source is unavailable, not a disclosure ---
 
-// TestProject_PortErrorsBecomeUnavailableSources is SI-213's gathering-side
+// TestProject_PortErrorsBecomeUnavailableSources is SI-215's gathering-side
 // proof: a Reconcile error and a Fold error each name a source that COULD
 // NOT BE COMPUTED, so they travel in Facts.EventualUnavailable and in the
 // record's own blockers.eventual.unavailable — never mixed in among the
