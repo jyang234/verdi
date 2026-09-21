@@ -21,17 +21,33 @@ Build the ground rules as **policy claims with a new `rung` field on
 `Claim`** exactly as ac-2 already commits to (oq-2: all five rules decode
 as claims today, but only as inert labels — none is genuinely
 checkable by any existing operator without that field; oq-3: it is a
-schema change, cheap to draft, but its blast radius on committed
-fixtures across five packages is real and should be budgeted, not
-discovered mid-build). Do **not** expect the golangci-lint exemption to
-do anything observable today (oq-4: proven no, both a lapsed and a
-future window, byte-identical before/after). Record the disclosure index
-as **a new record file in the journey `Blocker` shape**, not as
-obligations and not left in the ledger (oq-5: obligations are the wrong
-artifact shape and require a story spec that does not exist; the ledger
-is free prose with no machine-detectable item boundary; a dedicated
-record file is structurally ready the moment a small journey reader is
-added, and is what dc-3 already names).
+schema change, cheap to draft, but its blast radius — measured at ~480
+failing test cases across roughly 20 packages, not five — is real and
+should be budgeted, not discovered mid-build). The golangci-lint
+exemption's review window is read by `verdi lint`/`verdi journey`
+nowhere, but IS read by the policy-conflict path (`context conflict`,
+`gate`, `close`, `build start`, the readiness snapshot) and does exactly
+what dc-8 promises there, proven both ways (oq-4, revised in fix round
+1: this is a wiring gap between two existing surfaces, not a dead
+mechanism). Record the disclosure index as **a new record file in the
+journey `Blocker` shape**, not as obligations and not left in the ledger
+(oq-5: obligations are the wrong artifact shape and require a story spec
+that does not exist; the ledger is free prose with no
+machine-detectable item boundary; a dedicated record file is
+structurally ready the moment a small journey reader is added, and is
+what dc-3 already names).
+
+**Fix round 1 (independent review, `lane-self-governance-review.md`):**
+seven findings, all accepted by the controller and addressed below in
+place, each marked where it lands — F1 (blast-radius package count was
+double-counted), F2 (oq-4's "no" was over-generalized past the two
+surfaces measured; the policy-conflict path reads the window and this
+round proves it with new transcripts), F3 (an oq-3 "no MCP tool"
+sentence was false — three `constitution_*` tools exist), F4 (every
+number now carries its command), F5 (28 active specs → 39, measured),
+F6 (a source path in the oq-5 exemplar record pointed nowhere real),
+F7 (the blast-radius failure shapes are broken down, not asserted
+uniform).
 
 ## oq-1 — adoption dry run
 
@@ -99,7 +115,13 @@ before/after except the trailing `"Source: matrix over the working tree
 at <sha>."` line, which simply names the new adoption commit.
 
 **Answer:** adopting the starter store, either profile, on a copy of
-this 28-active-spec repository is inert to lint, model check, and spec
+this repository — `ls -d .verdi/specs/active/*/ | wc -l` = **39** active
+spec directories today, not the story's own "28" (fix round 1, F5: the
+story's figure is unverified in its own text and this spike never
+checked it before now; the two numbers are not reconciled further here —
+see "Deviations" — but inertness does not depend on which is right,
+since every measurement below ran against the real, current store) — is
+inert to lint, model check, and spec
 doc, and downgrades exactly one blocker's remaining-condition text
 without changing any reason code, any blocker count, or introducing any
 new blocker. The two profiles are behaviorally identical on every probed
@@ -221,26 +243,50 @@ directory; `git status --porcelain` was clean again immediately after
 (verified).
 
 **Touched-sites list**, measured by making the field *mandatory* and
-running the real suite (`evidence/oq3-rung-field-blast-radius.txt`):
-`go test ./...` goes from green to **480 failing test cases across 41
-packages** (up from the single `internal/policyartifact` package this
-story anticipated). Every failure is the same shape —
-`policyartifact: policy.claims[0].rung is missing` — from two sources:
+running the real suite in a fresh clone (`evidence/
+oq3-rung-field-blast-radius.txt`, fix round 1 rewrite — review finding
+F1 caught the original number's methodology bug, F4 asks for the command
+beside every figure, F7 asks for the shapes named, all three folded into
+that one file and summarized here):
 
-- **Hand-built `Claim{}` Go literals** that never set the new field
-  (zero-valued `Rung("")` fails the closed-enum check): dozens of cases
-  each in `internal/policyartifact` (`claim_test.go`), `internal/
-  policyauthority`, `internal/policyconflict`, and `internal/
-  contextcompile` — every package that constructs or decodes a real
-  `policyartifact.Claim` value in its own tests.
-- **Committed YAML fixtures** missing a `rung:` line: `internal/
-  policyartifact/testdata/store/policies/go-toolchain.md` and its sibling
-  fixtures (`TestFixtureDigests_Ratchet`, which also ratchets `testdata/
-  golden-digests.json` — every existing fixture's digest changes the
-  moment a mandatory field is added, so that golden file needs
-  regenerating too), plus `TestDecodePolicy_Happy` and eight
-  `TestDecodePolicy_Negative` subtests whose fixture YAML predates the
-  field.
+  git clone -q --no-hardlinks <lane worktree> /tmp/sg-fix-rung
+  cd /tmp/sg-fix-rung && git apply oq3-rung-field.patch && go test ./... > testall.log 2>&1
+  grep -c '^--- FAIL' testall.log            # => 480  (top-level cases; anchored excludes indented nested subtests)
+  grep -cE '^FAIL[[:space:]]+github' testall.log   # => 20  (distinct packages; anchored excludes one nested false-positive, below)
+
+`go test ./...` goes from green to **~480 failing top-level test cases
+across 20 packages** (fix round 1 correction: the original evidence said
+"41 packages" from `grep '^FAIL' | wc -l`, which double-counts — every
+failing package prints both a bare `FAIL` trailer line and a
+`FAIL<tab>pkg<tab>time` line, so an unanchored count runs to roughly
+double the real figure). This spike's own two independent fresh-clone
+re-derivations of this fix round agree with each other (480/20 both
+times) but land one case and one package above the independent review's
+own single re-derivation (479/19); the residual is disclosed, not
+resolved, in the evidence file — most likely run-to-run variance in
+`internal/sealedexec/claude`, the one failing package whose test spawns
+a real `go test ./cmd/verdi` subprocess rather than running in-process.
+Either figure is "the high hundreds across roughly a fifth of the
+module's packages," which is what drives the recommendation; the exact
+last digit does not.
+
+Not one failure shape but (at least) three, all rooted in the same
+change (counted over all 976 `--- FAIL` lines including nested subtests,
+`grep -c -- '--- FAIL' testall.log`; review finding F7):
+
+- **494 lines** — the field is absent from an encoded claim: `policyartifact: policy.claims[0].rung is missing` (`grep -cE 'policy\.claims\[[0-9]+\]\.rung is missing' testall.log`). Committed YAML fixtures and JSON round-trips.
+- **310 lines** — the field is present but zero-valued: `policyartifact: unknown enforcement rung ""` (`grep -cE 'unknown enforcement rung \\?"\\?"' testall.log`). Hand-built `Claim{}` Go literals across `internal/policyartifact` (`claim_test.go`), `internal/policyauthority`, `internal/policyconflict`, and `internal/contextcompile` — every package that constructs a real `policyartifact.Claim` value in its own tests, never just the one package the story anticipated. **34 of these 310** are a distinct migration cost worth naming on their own, not just more of the same: `policyconflict: apply exemptions: row "row-1" claim [0] sha256:...: ...unknown enforcement rung ""` (`grep -cE 'apply exemptions:.*claim \[[0-9]+\]' testall.log`) — an EXISTING committed exemption fixture witnessing an EXISTING committed claim also breaks, so a real migration has to update every committed exemption fixture too, a cost `testdata/golden-digests.json`'s digest ratchet alone does not disclose.
+- **54 lines** — a design-failure classification surfaces the same root cause through a different rendering: `authority-invalid: resolving effective policy` (CLI/log text) or the equivalent embedded `{"code":"authority-invalid","detail":"resolving effective policy",...}` (MCP tool-result JSON) (`grep -cE 'authority-invalid: resolving effective policy|"code":"authority-invalid"' testall.log`).
+- **118 lines residual**, not itemized further (proportionate to a spike's timebox, not a migration audit): a sample is `recordvalidate_test.go`'s "no published record exercised evidence kind/origin/disposition/transform ..." coverage-completeness assertions, which fail as a side effect of upstream fixtures no longer decoding, not because they test `rung` directly.
+
+Committed-fixture consequence, named once rather than per-shape:
+`internal/policyartifact/testdata/store/policies/go-toolchain.md` and its
+siblings (`TestFixtureDigests_Ratchet`, which also ratchets `testdata/
+golden-digests.json` — every existing fixture's digest changes the
+moment a mandatory field is added, so that golden file needs
+regenerating too), plus `TestDecodePolicy_Happy` and eight
+`TestDecodePolicy_Negative` subtests whose fixture YAML predates the
+field.
 
 Not broken by the same change, and worth naming precisely: `go build
 ./...` (every consumer uses keyed literals) and `internal/humanartifact`'s
@@ -251,13 +297,29 @@ existing touch points on policy content at all (grep-verified: no VL-0xx
 rule references `Policy`/`Claim`), so ac-2's "a missing sentence on those
 rungs is a lint finding" is wholly new code, not a modification.
 
-**Consumer that counts rules per rung:** none exists today. `cmd/verdi/
+**Consumer that counts rules per rung:** none exists today — this
+narrower claim survives fix round 1 (review finding F3); a broader one
+this README made alongside it does not and is retracted here. `cmd/verdi/
 policy.go` implements only `adopt` (`cmdPolicy` refuses any other
-subcommand); no MCP tool references policy content at all
-(grep-verified across `internal/mcpserve`); no lint rule touches policy
-content. The nearest planned home is exactly what spec/self-governance
-ac-3 already names: a new `verdi policy` subcommand plus an MCP policy
-tool — genuinely new code either way, not a repurposed existing surface.
+subcommand); no lint rule touches policy content (grep-verified: no
+VL-0xx rule references `Policy`/`Claim`). But "no MCP tool references
+policy content at all" was false, not merely imprecise: `internal/
+mcpserve/tooldefs.go:300,307,314` register three real tools —
+`constitution_inspect` (the accepted/proposed constitution's "complete
+effective rule ledger, unflattened"), `constitution_validate` (strict
+cross-validation of the proposed store), and `constitution_impact_review`
+(diffs constitution layers through the policy-conflict path) — and
+`internal/mcpserve/tool_experiment.go` imports both `policyartifact` and
+`policyauthority` directly, calling `policyauthority.Load`/`Resolve` to
+select applicable payloads for an experiment-policy decision. None of the
+four counts rules **by rung** — `constitution_inspect` returns the whole
+unflattened ledger, `constitution_impact_review` diffs the whole layer
+set, and `tool_experiment.go`'s resolution is about a different,
+already-registered payload kind (`experimentpolicy`, not ground rules)
+— so the oq-3 answer itself (no per-rung counter exists) is unchanged;
+only the "no MCP tool touches policy at all" evidence sentence was wrong,
+and ac-3's "a new MCP policy tool" is new work landing NEXT TO three
+existing constitution-facing tools, not onto a greenfield MCP surface.
 
 **Amendment order — the caveat.** co-1 says: "if the enforcement rung
 needs a schema field, the artifact contract amendment lands first."
@@ -273,7 +335,25 @@ context-integrity-v2 amendment, and nothing here requires touching
 02-artifact-contract first — unless co-1's "artifact contract" is using
 that phrase loosely to mean "whichever spec owns this schema" rather than
 naming the numbered document, in which case co-1 and this reading agree
-trivially. This spike cannot resolve which co-1 meant from the text
+trivially.
+
+Fix round 1 (controller instruction): there is a third candidate referent
+for "artifact contract," and it is checked, not just named. This store
+self-hosts a component spec at the same name, `spec/verdi-artifact-
+contract` (`schema: verdi.artifact/v1`, "Identity and references,"
+"lint" — the same subject matter as the workspace-root 02-artifact-
+contract.md, self-hosted rather than imported). Its full 713 lines carry
+**zero** occurrences of "policy claim," "Claim," "policyartifact," or
+"enforcement rung" (`grep -n 'policy claim\|Claim\b\|policyartifact\|
+enforcement rung' .verdi/specs/active/verdi-artifact-contract/spec.md` —
+one incidental hit, "constitution 2," a citation of the workspace
+constitution's clause 2, unrelated to policy-authority constitution
+artifacts). So this third referent does not cover policy claims either,
+and the lane's context-integrity-v2 reading stands against it too — but
+its existence means co-1's ambiguity is now three-way (02-artifact-
+contract.md, spec/verdi-artifact-contract, spec/context-integrity-v2),
+not two-way, and none of the first two is where a rung field would
+actually land. This spike cannot resolve which co-1 meant from the text
 alone; spec/self-governance's author should confirm the referent before
 treating the amendment order as settled. Either way, co-1's outer rule
 ("through the ratification flow") is unaffected: whichever spec owns the
@@ -282,8 +362,9 @@ after.
 
 ## oq-4 — exemption review window, end to end
 
-**Status: ANSWERED** (no, on a real build rule, proven with both a
-lapsed and a future window).
+**Status: ANSWERED** (yes on the policy-conflict path; no on lint/journey
+— revised in fix round 1, review finding F2, from an over-generalized
+"no" to a scoped answer naming both).
 
 Setup, in a throwaway clone (`/tmp/spike-sg-exempt`, adopted solo
 profile): the starter policy ships `claims: []` and the starter
@@ -307,6 +388,8 @@ committed `legacy-service-go.md` fixture's own exact-witness discipline),
 first with `expiry: "2026-01-01"` (lapsed as of 2026-09-20) and then, in
 the same clone, with `expiry: "2027-06-30"` (future).
 
+### `verdi lint` / `verdi journey` — no, confirmed unchanged
+
 Two full transcripts (`evidence/oq4-exemption/{lapsed,future}-
 {lint,journey}.std{out,err}`):
 
@@ -317,33 +400,87 @@ Two full transcripts (`evidence/oq4-exemption/{lapsed,future}-
 
 `diff` between the lapsed and future runs is empty for both commands —
 the review window's direction has **zero** observable effect on either
-surface today. `diff` between lint with and without the exemption file
-present at all is also empty (`no-exemption-lint.stdout`). `verdi
-journey`'s blocker list is the unchanged 3-blocker baseline from oq-1 in
-both cases.
+surface. `diff` between lint with and without the exemption file present
+at all is also empty (`no-exemption-lint.stdout`). `verdi journey`'s
+blocker list is the unchanged 3-blocker baseline from oq-1 in both cases.
+`internal/journey`'s closed `ReasonCode` vocabulary (`reason.go`, 9
+codes, all `obligation-*`/`principal-*`/`forge-facts`/`lifecycle-state`/
+`default-branch`) has no code for an exemption at all; `internal/journey`
+imports `policyauthority` only for *profile* loading (`port.go`,
+`project.go`), never `policyartifact` or `policyconflict`.
 
-This is not a shape gap in the exemption artifact — `Expiry`/
-`ReviewCondition` decode and validate exactly as documented (DC-8: at
-least one required). It is a wiring gap: `internal/journey`'s closed
-`ReasonCode` vocabulary (`reason.go`, 9 codes, all
-`obligation-*`/`principal-*`/`forge-facts`/`lifecycle-state`/
-`default-branch`) has **no code for an exemption at all**, lapsed or not
-— confirmed by reading the closed map (exhaustive, no catch-all) and then
-by running both windows and finding no trace. `internal/journey` imports
-`policyauthority` only for *profile* loading (`port.go`, `project.go`);
-it never imports `policyartifact` or `policyconflict`, so nothing in the
-readiness derivation path is positioned to notice an exemption exists,
-let alone whether its window has lapsed. The actual bound-checking logic
-(`policyconflict/authority.go`'s `resolveBound`: proven / violated /
-unproven by expiry vs. review condition) exists and is exercised by that
-package's own tests — it is simply never called from `verdi lint` or
-`verdi journey` today.
+### `verdi context conflict` — yes: the window is read, and it changes the outcome (fix round 1)
 
-**Answer: no**, an exemption's review window does not work end to end
-today for a build rule — not because the exemption artifact is broken,
-but because neither surface the story names reads exemptions at all yet.
-This turns oq-4 into the defect against spec/readiness-recovery ac-1 the
-story's own "Spec seed" anticipates, not a confirmation of ac-4.
+The independent review (finding F2) traced a real, live consumer this
+spike had not exercised: `internal/policyconflict/service.go:120-131`
+calls `ResolveExemptionAuthority` (→ `authority.go:285`
+`resolveBound(e.Expiry, e.ReviewCondition, in.EvaluatedOn)`) then
+`ApplyEffectiveExemptions`; `cmd/verdi/context_conflict.go`'s own doc
+comment says `context conflict`, `build start`, `gate`, and `close` all
+share that service; `cmd/verdi/readiness_snapshot.go:218` feeds the same
+`Report` into `readinesspilot`, which `serve`, workbench, `specdoc`, and
+MCP all consume downstream. This fix round re-ran oq-4 through that exact
+path, end to end, against a real store, and kept both transcripts under
+the fence (`evidence/oq4-exemption/conflict-{future,lapsed}-window-
+report.json`, `conflict-path-SUMMARY.txt`).
+
+Building a real request required three more real gaps this exercise
+surfaced along the way (all fixed in the same throwaway clone, never in
+this worktree): the starter constitution registers no harness adapter
+(`context conflict` refuses "adapter mismatch: requested codex/1;
+registered []" until one is added and `verdi context project` generates
+its managed instruction projection); the untouched starter-solo profile
+maps no role to the `policy-exemption-approval` transition at all (every
+exemption approval resolves "violated-with-witness" regardless of the
+window until the profile and the constitution's transition catalog both
+name it); and the repository's own committed `align.judge_cmd` is
+`[claude, -p, --output-format, json]` — the REAL Claude Code CLI — which
+this exercise's first attempt actually invoked (it failed on an unrelated
+real-CLI response-schema mismatch, `unknown field "duration_api_ms"`,
+before this was caught) in violation of this spike's own "no network"
+constraint; every run after that one points `judge_cmd` at a hermetic
+local `/bin/sh` script returning a canned no-conflict result instead
+(`conflict-path-SUMMARY.txt` discloses the one real-CLI call rather than
+hiding it).
+
+With those gaps closed, two identical requests (`_scratch/oq4context`
+built each through the real `contextcompile`/`policyconflict` encode
+seams, never hand-typed JSON), differing in nothing but the exemption's
+own `expiry`:
+
+| | `resolution.bound` | `resolution.{match,freshness,scope,authorization}` | `removed_claims` | mechanical domain |
+|---|---|---|---|---|
+| future window (2027-06-30) | **proven** | all proven | `[golangci-lint-standard-set]` — excused | `open_domain: true`, no active values |
+| lapsed window (2026-01-01) | **violated-with-witness** | all proven, unchanged | `[]` — not excused | `open_domain: false`, `["standard"]` still active |
+
+Every other field in both full reports is either byte-identical
+(`verdict` — both "blocked-unproven," `semantic`, `disclosures`) or a
+content-address digest that trivially differs because it hashes the
+changed `expiry` byte (the report's own digest, `effective_policy_digest`,
+the named commit, `manifest_digest`, the judge's `input_digest`). The
+window is the one substantive variable, and it alone flips whether the
+claim is excused — exactly matching `authority_test.go:922`'s own unit
+proof, now reproduced end to end through the real CLI over a real store.
+(Both runs' overall verdict stays "blocked-unproven" for an unrelated
+reason — `spec/self-governance-spike`'s own prose registers as semantic
+candidates needing a disposition, which a "no-conflict" judge finding
+alone does not supply; a target spec with no semantic candidates would
+very likely reach "pass" for the future window, not attempted here.)
+
+**Answer:** no on `verdi lint` and `verdi journey` (measured, unchanged
+from before this fix round); **yes** on the policy-conflict path
+(`context conflict`/`gate`/`close`/`build start`/the readiness snapshot),
+now measured rather than assumed. This makes oq-4 a **wiring gap between
+two existing surfaces** — the mechanism spec/self-governance ac-4 asks
+for already exists and already works, `verdi lint`/`verdi journey` are
+simply not two of the places it is wired to — rather than either a
+confirmation of ac-4 as originally read or a defect against
+spec/readiness-recovery ac-1 as this README first proposed. Whether
+lint/journey *should* consume the policy-conflict path (making the gap
+ac-4's to close) or whether ac-4 is satisfied by the path that already
+exists (making this a documentation-and-cross-reference fix, not a
+defect) is a decision for spec/self-governance's own author, not this
+spike.
 
 ## oq-5 — home of the process-disclosure index
 
@@ -464,6 +601,22 @@ inventing a story spec for (a) or building robust prose-parsing for (c).
   fully completed). No spike state was lost; the interrupted command was
   simply re-issued once billing recovered, and both clones' git state was
   re-verified against the pre-interruption record before continuing.
+- (Fix round 1, F5) The parent spec's own ac-1 text asserts "the 28
+  active specs"; `ls -d .verdi/specs/active/*/ | wc -l` measures **39**
+  today. This spike does not reconcile the two further (a first check —
+  comparing each spec directory's first-commit timestamp against
+  spec/self-governance's own — did not cleanly separate "older than
+  self-governance" from "newer," so a precise account of which 11 specs
+  the story's count predates was not reached inside this round's timebox)
+  — the discrepancy is recorded, per Global Constraint 10, rather than
+  either silently keeping "28" or silently asserting a reconciliation
+  this spike did not actually verify.
+- (Fix round 1) An independent Opus review of the base..head this spike
+  had already committed returned REVISE with seven findings (F1-F7,
+  `lane-self-governance-review.md`); the controller accepted all seven
+  and this round addresses each in place, with a fix-round-1 marker at
+  its exact location rather than a silent rewrite — see the
+  "Fix round 1" section of the lane report for the finding-to-commit map.
 
 ## Evidence index
 
@@ -474,13 +627,21 @@ inventing a story spec for (a) or building robust prose-parsing for (c).
   payload-kind probe, verbatim.
 - `oq3-rung-field.patch` (top of this directory) — the draft field,
   captured and reverted; `evidence/oq3-rung-field-blast-radius.txt` — the
-  480-test/41-package blast radius, measured.
+  blast radius, corrected in fix round 1 (F1/F4/F7: commands beside every
+  number, the failure-shape breakdown); `evidence/oq3-testall-summary.txt`
+  — the fix round's own fresh-clone `go test ./...` per-package roll-up
+  (101 lines) every headline number is reproducible from.
 - `evidence/oq4-exemption/` — the claim, the registered subject, both
-  exemption variants, all four transcripts, and the subject-catalog
-  refusal.
+  exemption variants, the lint/journey transcripts, the subject-catalog
+  refusal, and (fix round 1, F2) the policy-conflict path's own request
+  (`conflict-request.json`), both full reports (`conflict-{future,
+  lapsed}-window-report.json`), the corrected profile
+  (`profile-with-exemption-approval.md`), and `conflict-path-SUMMARY.txt`.
 - `evidence/oq5-candidate-{a,b}/`, `evidence/oq5-candidate-c-ledger-
   test.txt`, `disclosures.md` — all three candidates tried, the item
   enumeration, and the recommendation's supporting transcripts.
-- `_scratch/` — `oq2decode/`, `oq4digest/`, `oq5ledger/` (Go, gofmt-clean,
-  excluded from `./...` by its underscore prefix), `sg-battery.sh` (the
-  oq-1 battery, re-runnable).
+- `_scratch/` — `oq2decode/`, `oq4digest/`, `oq4context/` (fix round 1:
+  builds the real `context conflict --request` document through the
+  exported `contextcompile`/`policyconflict` encode seams),
+  `oq5ledger/` (Go, gofmt-clean, excluded from `./...` by its underscore
+  prefix), `sg-battery.sh` (the oq-1 battery, re-runnable).
