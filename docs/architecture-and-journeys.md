@@ -280,17 +280,24 @@ attributes the load-bearing ones to the component that embodies them.
    saying what would verify it — VL-019 proves the obligation's `verifies` edge
    targets the story that genuinely declares that AC; VL-020 refuses a declared
    kind with no obligation artifact behind it. An attestation is the one
-   evidence kind a human authors directly: **`verdi attest <story-ref>
-   <ac-id>`** (attest-helper) scaffolds the frozen provenance block and an
+   evidence kind a human authors directly: **`verdi attest <spec-ref>
+   <ac-id>`** (attest-helper, widened to feature criteria by spec/
+   readiness-recovery ac-6) scaffolds the frozen provenance block and an
    unauthored marker plus instructional prose at the exact slugged path the
    fold reads — it never authors the claim itself (closure-ergonomics dc-2:
-   verdi writes structure, the human writes every word). The fold counts only a
-   marker-removed scaffold as authored — an unauthored one folds exactly as
-   absent, and an unreadable attestation file fails operationally (exit 2),
-   never a silent absent. VL-022 is attestation's own coherence check,
-   story-scoped (ADJ-51): it refuses a story-targeting attestation whose own
-   path/slug disagrees with the (story, AC) its `verifies` edge names,
-   skipping a feature-outcome attestation's edge entirely.
+   verdi writes structure, the human writes every word). Given a `<spec-ref>`
+   that resolves to a class: feature spec, the scaffold's body additionally
+   quotes the criterion's own accepted text and declared evidence kinds, under
+   a clearly labeled "Criterion under attestation (accepted text, quoted for
+   context):" section — quoted context, never the claim (guided-lifecycle-
+   governance-v3 dc-12). The fold counts only a marker-removed scaffold as
+   authored — an unauthored one folds exactly as absent, and an unreadable
+   attestation file fails operationally (exit 2), never a silent absent.
+   VL-022 is attestation's own coherence check, story-scoped as of this
+   feature's first wave (ADJ-51): it refuses a story-targeting attestation
+   whose own path/slug disagrees with the (story, AC) its `verifies` edge
+   names, skipping a feature-outcome attestation's edge entirely — the same
+   feature scope R-RR2-2's own follow-on wave widens VL-022 to cover.
 2. **Sync.** Post-merge, evidence keeps accruing: every CI run produces
    `source: ci` records; `runtime-probe.yml` on its cron emits `kind: runtime`
    records through `verdi sync --produce-runtime` (bare, it is a disclosed
