@@ -273,3 +273,101 @@ func TestVL022_FragmentForm_FailsClosed(t *testing.T) {
 		t.Fatalf("VL-022 did not fire on a fragment-bearing verifies target:\n%s", findingsString(findings))
 	}
 }
+
+// TestVL022_FeatureMisslug is R-RR2-2's own witness: a feature-targeting
+// attestation whose own directory/id segment ("wrong-name") disagrees
+// with its `verifies` target's own name ("vl-022-feature") — for an AC
+// that DECLARES the attestation evidence kind — is refused with the
+// feature-scoped mis-slug wording, naming both disagreeing values and the
+// feature. The fixture's sibling attestation (ac-2, at the same wrong
+// directory) verifies an AC that declares NO attestation kind at all, so
+// it must produce no finding: the kind-declaration boundary is checked
+// independent of slug agreement.
+func TestVL022_FeatureMisslug(t *testing.T) {
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-022", "feature-misslug"))
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-022")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if findings[0].Path != ".verdi/attestations/wrong-name/ac-1.md" {
+		t.Errorf("finding path = %q, want the mis-slugged ac-1.md, not ac-2.md", findings[0].Path)
+	}
+	if !strings.Contains(findings[0].Message, `whose own name is "vl-022-feature"`) {
+		t.Errorf("finding does not name the feature's own name: %s", findings[0].Message)
+	}
+	if !strings.Contains(findings[0].Message, `this attestation's own directory/id segment is "wrong-name"`) {
+		t.Errorf("finding does not name the attestation's own (wrong) directory segment: %s", findings[0].Message)
+	}
+	if !strings.Contains(findings[0].Message, "spec/vl-022-feature") {
+		t.Errorf("finding does not name the feature target: %s", findings[0].Message)
+	}
+}
+
+// TestVL022_FeatureUndeclaredKindSkipped is R-RR2-2's dedicated boundary
+// witness, isolated from slug correctness: a CORRECTLY-slugged feature
+// attestation verifies an AC that declares no attestation evidence kind
+// at all — outside every consumer of that AC — so VL-022 must produce no
+// finding, proving the skip is about kind declaration, never slug
+// agreement (which is already correct here).
+func TestVL022_FeatureUndeclaredKindSkipped(t *testing.T) {
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-022", "feature-undeclared-kind"))
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-022" {
+			t.Fatalf("VL-022 fired on a correctly-slugged feature attestation whose AC declares no attestation kind (R-RR2-2 boundary): %s", f.String())
+		}
+	}
+}
+
+// vl022FeatureUndeclaredACMD verifies spec/vl-022-feature (correctly
+// slugged: directory vl-022-feature agrees with the feature's own name)
+// but its own id names ac-9, which that feature does not declare —
+// proving the story rule's undeclared-AC shape (badAttestationVerifiesTarget's
+// common "declared" check, shared across both classes) fires identically
+// for a feature target.
+const vl022FeatureUndeclaredACMD = `---
+id: attestation/vl-022-feature--ac-9
+kind: attestation
+title: "VL-022: id names an AC the target feature does not declare"
+owners: [platform-team]
+links:
+  - { type: verifies, ref: "spec/vl-022-feature" }
+frozen: { at: 2026-07-16, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-022: id names an AC the target feature does not declare
+
+spec/vl-022-feature declares only ac-1 and ac-2; this attestation's own
+id names ac-9, which that feature does not declare — VL-022 must refuse
+it, naming the undeclared ac and the target, exactly as it does for a
+story target.
+`
+
+// TestVL022_FeatureUndeclaredAC proves the "target's acceptance_criteria
+// does not declare the AC named by the attestation's own id/path" refusal
+// shape fires for a feature target too, isolated from both the slug check
+// and the kind-declaration boundary (the directory here is correct, and
+// the fixture's own ac-2.md attestation produces no finding on its own —
+// see TestVL022_FeatureUndeclaredKindSkipped).
+func TestVL022_FeatureUndeclaredAC(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/attestations/vl-022-feature/ac-9.md", vl022FeatureUndeclaredACMD)
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-022", "feature-undeclared-kind"), dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	found := false
+	for _, f := range findings {
+		if f.Rule == "VL-022" {
+			if !strings.Contains(f.Message, "ac-9") {
+				t.Errorf("finding does not name the undeclared ac: %s", f.Message)
+			}
+			if !strings.Contains(f.Message, "spec/vl-022-feature") {
+				t.Errorf("finding does not name the target: %s", f.Message)
+			}
+			if strings.Contains(f.Message, "ac-9") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("VL-022 did not fire on a feature-targeting attestation whose id names an undeclared AC:\n%s", findingsString(findings))
+	}
+}
