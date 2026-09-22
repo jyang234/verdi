@@ -357,8 +357,64 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 			return 0
 		}
 
+		// SI-231 (ledger; owner D4, 2026-09-22; R-W1-6: recognized once, HERE,
+		// in this shared fork, so close's freeze and --prepare/bare align's
+		// freeze=false branch below both treat a committed one-behind report
+		// as current): the branch above requires a LIVING, uncommitted report,
+		// which a CI checkout can never have — it holds only committed state.
+		// evaluateOneBehindReport (onebehind.go) is the ONE predicate
+		// closuregate.go's condition 4 also decides from, so what close's own
+		// gate accepted can never diverge from what this freeze actually does.
+		// Only reached when the living-report branch above already declined,
+		// so the ordinary local-operator run never pays for the extra git
+		// reads this needs.
+		oneBehind, err := evaluateOneBehindReport(ctx, root, specRef.Name, covers)
+		if err != nil {
+			fmt.Fprintln(stderr, "align:", err)
+			return 2
+		}
+		if oneBehind.Accepted {
+			// Freeze the COMMITTED report in place, keeping its own `covers`
+			// (HEAD's parent, the content-final head it actually audited) —
+			// never overwritten to HEAD, which merely carries the report
+			// commit itself and changes no code. Never regenerated, never
+			// judged, for the identical D6-21 reason the branch above avoids
+			// it: the judge is non-reproducible and a fresh run's content-hash
+			// identities cannot be matched back to these dispositions.
+			report, err := align.FreezeInPlace(oneBehind.Report, string(oneBehind.Body), frozenAt)
+			if err != nil {
+				fmt.Fprintln(stderr, "align:", err)
+				return 2
+			}
+			if err := atomicfile.Write(reportPath, report.Markdown, 0o644); err != nil {
+				fmt.Fprintln(stderr, "align:", err)
+				return 2
+			}
+			fmt.Fprintf(stdout, "align: froze %s in place under SI-231 (a committed one-behind report at %s covers %s, %d findings, dispositions preserved)\n", reportPath, covers, report.Frontmatter.Covers, len(report.Frontmatter.Findings))
+			fmt.Fprintf(stdout, "align: frozen at %s\n", report.Frontmatter.Frozen.At)
+			return 0
+		}
+
 		in.Freeze = true
 		in.FrozenAt = frozenAt
+	} else {
+		// SI-231, freeze=false half (--prepare, bare align): the committed
+		// one-behind report is already final and every finding is
+		// dispositioned — regenerating here would re-run the non-reproducible
+		// judge and silently drop every disposition, exactly the trap the
+		// freeze=true branch above avoids. Leave the file untouched and say
+		// so, rather than falling through to the unconditional regenerate
+		// below (today's freeze=false behavior for every other state,
+		// unchanged).
+		oneBehind, err := evaluateOneBehindReport(ctx, root, specRef.Name, covers)
+		if err != nil {
+			fmt.Fprintln(stderr, "align:", err)
+			return 2
+		}
+		if oneBehind.Accepted {
+			fmt.Fprintf(stdout, "align: %s is current under SI-231 (a committed one-behind report at %s covers %s, %d findings, all dispositioned); left byte-identical, no judge run\n", reportPath, covers, oneBehind.Report.Covers, len(oneBehind.Report.Findings))
+			return 0
+		}
 	}
 
 	// Cross-level re-recording awareness (ledger L-N14 companion): a
