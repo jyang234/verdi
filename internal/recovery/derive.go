@@ -128,15 +128,16 @@ func closeRitualAmbiguous(f Facts) (other StateCode, ambiguous bool) {
 	return "", false
 }
 
-// stagedPathsPhrase renders f.StagedPaths for an operator: the count
+// pathsPhrase renders one group of paths for an operator: the count
 // always, the first few paths themselves, and the remainder as a count —
-// never an unbounded dump into a single canonical line.
-func stagedPathsPhrase(paths []string) string {
+// never an unbounded dump into a single canonical line. label names the
+// group ("staged", "changed").
+func pathsPhrase(label string, paths []string) string {
 	const shown = 3
 	if len(paths) <= shown {
-		return fmt.Sprintf("%d staged: %s", len(paths), strings.Join(paths, ", "))
+		return fmt.Sprintf("%d %s: %s", len(paths), label, strings.Join(paths, ", "))
 	}
-	return fmt.Sprintf("%d staged: %s, and %d more", len(paths), strings.Join(paths[:shown], ", "), len(paths)-shown)
+	return fmt.Sprintf("%d %s: %s, and %d more", len(paths), label, strings.Join(paths[:shown], ", "), len(paths)-shown)
 }
 
 // uncleanTreeUncertainty implements R-RR3-21: the unwind's own "index is
@@ -144,17 +145,23 @@ func stagedPathsPhrase(paths []string) string {
 // DERIVE time, from the same Facts the choice would be built from. When
 // either is already false the choice cannot prove where it starts, so
 // parent DC-13 leaves diagnosis only: the state is still emitted, no
-// executable choice is offered, and this uncertainty names what it can
-// (the staged paths from Facts; the working tree's own changed paths are
-// not gathered) with the witness that settles both. Reports false when
-// the tree is clean, in which case no uncertainty is added at all.
+// executable choice is offered, and this uncertainty names the staged OR
+// CHANGED paths — both groups are gathered (Facts.StagedPaths,
+// Facts.WorktreeChangedPaths) — with the witness that settles both. A
+// group whose listing failed is disclosed by Gather and simply leaves
+// its own sentence unqualified here. Reports false when the tree is
+// clean, in which case no uncertainty is added at all.
 func uncleanTreeUncertainty(f Facts, branch string) (Uncertainty, bool) {
 	var reasons []string
 	if len(f.StagedPaths) != 0 {
-		reasons = append(reasons, fmt.Sprintf("the index is not empty (%s)", stagedPathsPhrase(f.StagedPaths)))
+		reasons = append(reasons, fmt.Sprintf("the index is not empty (%s)", pathsPhrase("staged", f.StagedPaths)))
 	}
 	if f.Dirty {
-		reasons = append(reasons, "the working tree is not clean")
+		dirtyReason := "the working tree is not clean"
+		if len(f.WorktreeChangedPaths) != 0 {
+			dirtyReason += fmt.Sprintf(" (%s)", pathsPhrase("changed", f.WorktreeChangedPaths))
+		}
+		reasons = append(reasons, dirtyReason)
 	}
 	if len(reasons) == 0 {
 		return Uncertainty{}, false

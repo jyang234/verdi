@@ -367,6 +367,7 @@ func TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree(t *testing.T) {
 	f := baseFacts()
 	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
 	f.Dirty = true
+	f.WorktreeChangedPaths = []string{".verdi/specs/active/checkout/plan.md"}
 	p := Derive(f)
 	mustValidate(t, p)
 
@@ -383,6 +384,39 @@ func TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree(t *testing.T) {
 	}
 	if !strings.Contains(u.Text, "the working tree is not clean") {
 		t.Fatalf("uncertainty %q does not state the working tree fact", u.Text)
+	}
+	// R-RR3-21 names the staged OR CHANGED paths, and Facts carries the
+	// changed ones (re-review N1).
+	if !strings.Contains(u.Text, ".verdi/specs/active/checkout/plan.md") {
+		t.Fatalf("uncertainty %q does not name the changed path Facts already holds", u.Text)
+	}
+}
+
+// TestDerive_EmptyBranchCut_WithheldUncertaintyNamesBothGroups is
+// re-review N1's other half: when the index and the working tree are BOTH
+// unclean the uncertainty names both groups, each with its own count and
+// truncation.
+func TestDerive_EmptyBranchCut_WithheldUncertaintyNamesBothGroups(t *testing.T) {
+	f := baseFacts()
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
+	f.StagedPaths = []string{"staged-one.md"}
+	f.Dirty = true
+	f.WorktreeChangedPaths = []string{"c1.md", "c2.md", "c3.md", "c4.md"}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, _ := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	u, ok := uncleanTreeUncertaintyOf(s)
+	if !ok {
+		t.Fatalf("Uncertainties = %+v, want the tree uncertainty", s.Uncertainties)
+	}
+	for _, want := range []string{"1 staged: staged-one.md", "4 changed: c1.md, c2.md, c3.md, and 1 more"} {
+		if !strings.Contains(u.Text, want) {
+			t.Fatalf("uncertainty %q does not carry %q", u.Text, want)
+		}
+	}
+	if strings.Contains(u.Text, "c4.md") {
+		t.Fatalf("uncertainty %q dumps every changed path", u.Text)
 	}
 }
 
@@ -466,8 +500,12 @@ func TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind(t *testing.T) {
 	if len(s.Choices) != 0 {
 		t.Fatalf("Choices = %+v, want none (one untracked file makes the tree unclean)", s.Choices)
 	}
-	if _, ok := uncleanTreeUncertaintyOf(s); !ok {
+	u, ok := uncleanTreeUncertaintyOf(s)
+	if !ok {
 		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+	}
+	if !strings.Contains(u.Text, "leftover.txt") {
+		t.Fatalf("uncertainty %q does not name the one file that made the tree unclean", u.Text)
 	}
 }
 
