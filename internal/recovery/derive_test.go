@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -27,10 +28,14 @@ func baseFacts() Facts {
 		Head:                  "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		DefaultBranch:         branchbase.Resolution{Kind: branchbase.ResolvedDefault, Ref: "main", BranchName: "main", Commit: "deadbeef"},
 		DefaultBranchResolved: true,
-		Design:                RitualBranch{Name: "design/checkout"},
-		Feature:               RitualBranch{Name: "feature/checkout"},
-		Close:                 RitualBranch{Name: "close/checkout"},
-		PolicyAdopt:           RitualBranch{Name: "policy/adopt"},
+		// main is the one "other local branch" every ritual-branch test
+		// below relies on for hasOtherLocalBranch (2B-F9) to read true —
+		// the zero-other-branches case has its own dedicated test.
+		LocalBranches: []BranchTip{{Name: "main", Tip: "deadbeef"}},
+		Design:        RitualBranch{Name: "design/checkout"},
+		Feature:       RitualBranch{Name: "feature/checkout"},
+		Close:         RitualBranch{Name: "close/checkout"},
+		PolicyAdopt:   RitualBranch{Name: "policy/adopt"},
 	}
 }
 
@@ -147,8 +152,13 @@ func TestDerive_EmptyBranchCut_UndecidableDeletedSource(t *testing.T) {
 	}
 }
 
-func TestDerive_EmptyBranchCut_AmbiguousCandidates(t *testing.T) {
+// TestDerive_EmptyBranchCut_AmbiguousContainingCandidates is R-RR3-5's
+// tier-2 ambiguity: neither witness sits exactly at the cut point (both
+// only descend from it), and there is more than one of them, so no
+// unique containing candidate exists either.
+func TestDerive_EmptyBranchCut_AmbiguousContainingCandidates(t *testing.T) {
 	f := baseFacts()
+	f.LocalBranches = []BranchTip{{Name: "main", Tip: "m2"}, {Name: "feature/other", Tip: "f2"}}
 	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main", "feature/other"}}
 	p := Derive(f)
 	mustValidate(t, p)
@@ -158,7 +168,63 @@ func TestDerive_EmptyBranchCut_AmbiguousCandidates(t *testing.T) {
 		t.Fatal("no empty-branch-cut state")
 	}
 	if len(s.Choices) != 0 {
-		t.Fatalf("Choices = %+v, want none (ambiguous candidates)", s.Choices)
+		t.Fatalf("Choices = %+v, want none (ambiguous containing candidates)", s.Choices)
+	}
+	if len(s.Uncertainties) != 1 {
+		t.Fatalf("Uncertainties = %+v, want exactly one", s.Uncertainties)
+	}
+	if strings.Contains(s.Uncertainties[0].Text, "shares its exact cut point") || strings.Contains(s.Uncertainties[0].Text, "sits at its exact tip") {
+		t.Fatalf("Uncertainties = %+v, must never claim a mere descendant shares/sits at the exact cut point (2B-F1: none of these candidates do)", s.Uncertainties)
+	}
+}
+
+// TestDerive_EmptyBranchCut_TipEqualWinsOverContaining is 2B-F1's own
+// reviewer fixture (R-RR3-5/SI-221's two-tier rule): topic/z sits
+// exactly at the cut point (tip-equal); main has since advanced past it
+// (containing only, not tip-equal). The unique tip-equal candidate wins
+// even though a containing candidate also exists — the return branch is
+// topic/z, not undecidable.
+func TestDerive_EmptyBranchCut_TipEqualWinsOverContaining(t *testing.T) {
+	f := baseFacts()
+	f.LocalBranches = []BranchTip{{Name: "main", Tip: "m2"}, {Name: "topic/z", Tip: "c1"}}
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main", "topic/z"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	if !ok {
+		t.Fatal("no empty-branch-cut state")
+	}
+	if len(s.Choices) != 1 {
+		t.Fatalf("Choices = %+v, want exactly one: topic/z is the unique tip-equal candidate", s.Choices)
+	}
+	c := s.Choices[0]
+	wantEffects := []string{"switch back to topic/z", "delete close/checkout with git branch -d"}
+	if !reflect.DeepEqual(c.Effects, wantEffects) {
+		t.Fatalf("Effects = %v, want %v", c.Effects, wantEffects)
+	}
+	if c.Preconditions[3] != "topic/z resolves" {
+		t.Fatalf("Preconditions = %v, want the last entry to be \"topic/z resolves\"", c.Preconditions)
+	}
+}
+
+// TestDerive_EmptyBranchCut_AmbiguousTipEqualCandidates is R-RR3-5's
+// tier-1 tie: more than one local branch sits at the EXACT cut point
+// (a rare shape right after a cut, before anything diverges) — still
+// undecidable, never guessed.
+func TestDerive_EmptyBranchCut_AmbiguousTipEqualCandidates(t *testing.T) {
+	f := baseFacts()
+	f.LocalBranches = []BranchTip{{Name: "main", Tip: "c1"}, {Name: "topic/z", Tip: "c1"}}
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main", "topic/z"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	if !ok {
+		t.Fatal("no empty-branch-cut state")
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none (tied tip-equal candidates)", s.Choices)
 	}
 }
 
@@ -260,6 +326,29 @@ func TestDerive_ArtifactsStagedUncommitted(t *testing.T) {
 	}
 }
 
+// TestDerive_ArtifactsStagedUncommitted_ReciprocalUncertainty is 2B-F2:
+// when close/checkout is ALSO an empty cut, artifacts-staged-uncommitted
+// carries its own uncertainty naming empty-branch-cut back — not just
+// the other way around.
+func TestDerive_ArtifactsStagedUncommitted_ReciprocalUncertainty(t *testing.T) {
+	f := baseFacts()
+	f.StagedPaths = []string{".verdi/specs/active/checkout/spec.md", ".verdi/specs/archive/checkout/spec.md"}
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateArtifactsStagedUncommitted, "close/checkout")
+	if !ok {
+		t.Fatalf("no artifacts-staged-uncommitted state: %+v", p.States)
+	}
+	if len(s.Uncertainties) != 1 {
+		t.Fatalf("Uncertainties = %+v, want one naming empty-branch-cut", s.Uncertainties)
+	}
+	if !strings.Contains(s.Uncertainties[0].Text, string(StateEmptyBranchCut)) {
+		t.Fatalf("Uncertainties[0].Text = %q, want it to name empty-branch-cut", s.Uncertainties[0].Text)
+	}
+}
+
 func TestDerive_ArtifactsStagedUncommitted_Cleared(t *testing.T) {
 	f := baseFacts()
 	p := Derive(f)
@@ -301,11 +390,50 @@ func TestDerive_ArchiveMoveUncommitted_ClearedWhenActivePresent(t *testing.T) {
 	}
 }
 
+// TestDerive_ArchiveMoveUncommitted_ReciprocalUncertainty is 2B-F2's
+// other reciprocal half.
+func TestDerive_ArchiveMoveUncommitted_ReciprocalUncertainty(t *testing.T) {
+	f := baseFacts()
+	f.ArchiveSpecOnDisk = true
+	f.ActiveSpecAtHead = true
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateArchiveMoveUncommitted, "close/checkout")
+	if !ok {
+		t.Fatalf("no archive-move-uncommitted state: %+v", p.States)
+	}
+	if len(s.Uncertainties) != 1 || !strings.Contains(s.Uncertainties[0].Text, string(StateEmptyBranchCut)) {
+		t.Fatalf("Uncertainties = %+v, want one naming empty-branch-cut", s.Uncertainties)
+	}
+}
+
+// TestDerive_EmptyBranchCut_NotWithheldOnDifferentBranch is 2B-F8's own
+// scoping fix: a staged closure on close/checkout must never withhold an
+// UNRELATED design/checkout empty cut — R-RR3-8's ambiguity guard only
+// ever applies to close/<name> itself.
+func TestDerive_EmptyBranchCut_NotWithheldOnDifferentBranch(t *testing.T) {
+	f := baseFacts()
+	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", EmptyWitnesses: []string{"main"}}
+	f.StagedPaths = []string{".verdi/specs/active/checkout/spec.md", ".verdi/specs/archive/checkout/spec.md"}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "design/checkout")
+	if !ok {
+		t.Fatal("no empty-branch-cut state for design/checkout")
+	}
+	if len(s.Choices) != 1 {
+		t.Fatalf("Choices = %+v, want design/checkout's own unwind choice, not withheld by close/checkout's staged closure", s.Choices)
+	}
+}
+
 // --- closure-unpublished / board-push-failed --------------------------
 
 func TestDerive_ClosureUnpublished(t *testing.T) {
 	f := baseFacts()
-	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1"}
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", RemoteChecked: true}
 	p := Derive(f)
 	mustValidate(t, p)
 
@@ -333,7 +461,7 @@ func TestDerive_ClosureUnpublished_ClearedWhenPublished(t *testing.T) {
 
 func TestDerive_BoardPushFailed(t *testing.T) {
 	f := baseFacts()
-	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", HasRemoteTracking: true, Ahead: 1}
+	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", RemoteChecked: true, HasRemoteTracking: true, Ahead: 1}
 	p := Derive(f)
 	mustValidate(t, p)
 
@@ -353,6 +481,57 @@ func TestDerive_BoardPushFailed_ClearedWhenPublished(t *testing.T) {
 	mustValidate(t, p)
 	if _, ok := stateFor(p.States, StateBoardPushFailed, "design/checkout"); ok {
 		t.Fatal("board-push-failed present when fully published")
+	}
+}
+
+// TestDerive_ClosureUnpublished_RemoteCheckFailed_NeitherFires is 2B-F3:
+// when the remote-tracking read itself failed (RemoteChecked false),
+// neither remote-shaped recognizer may fire on the resulting zero-value
+// "no remote-tracking branch" — that would turn a failed read into a
+// guessed positive fact.
+func TestDerive_ClosureUnpublished_RemoteCheckFailed_NeitherFires(t *testing.T) {
+	f := baseFacts()
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", RemoteChecked: false}
+	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", RemoteChecked: false}
+	p := Derive(f)
+	mustValidate(t, p)
+	if _, ok := stateFor(p.States, StateClosureUnpublished, "close/checkout"); ok {
+		t.Fatal("closure-unpublished fired on a failed remote-tracking read")
+	}
+	if _, ok := stateFor(p.States, StateBoardPushFailed, "design/checkout"); ok {
+		t.Fatal("board-push-failed fired on a failed remote-tracking read")
+	}
+}
+
+// TestDerive_ClosureUnpublished_NoOtherLocalBranch_OwnCommitIsUncertain
+// is 2B-F9: when no other local branch exists at all, Empty() cannot
+// decide, so the "carries its own commit" claim must be an uncertainty,
+// never a stated fact/step.
+func TestDerive_ClosureUnpublished_NoOtherLocalBranch_OwnCommitIsUncertain(t *testing.T) {
+	f := baseFacts()
+	f.LocalBranches = []BranchTip{{Name: "close/checkout", Tip: "c1"}} // no OTHER branch at all
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", RemoteChecked: true}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateClosureUnpublished, "close/checkout")
+	if !ok {
+		t.Fatalf("no closure-unpublished state: %+v", p.States)
+	}
+	if len(s.StepsCompleted) != 0 {
+		t.Fatalf("StepsCompleted = %v, want none: own-commit is undecidable, not a stated step", s.StepsCompleted)
+	}
+	foundOwnCommitUncertainty := false
+	for _, u := range s.Uncertainties {
+		if strings.Contains(u.Text, "carries a commit of its own") {
+			foundOwnCommitUncertainty = true
+			if !strings.Contains(u.Witness, "git log") {
+				t.Fatalf("Witness = %q, want a git log <base>..<branch> witness", u.Witness)
+			}
+		}
+	}
+	if !foundOwnCommitUncertainty {
+		t.Fatalf("Uncertainties = %+v, want one about the undecidable own-commit claim", s.Uncertainties)
 	}
 }
 

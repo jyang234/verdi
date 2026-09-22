@@ -14,7 +14,9 @@ import (
 // randomness): each recognizer inspects Facts and emits the
 // RecognizedStates it finds evidence for; R-RR3-8 withholds an executable
 // choice when two states share a branch; the result is sorted by
-// (code, target) and validated before it is returned.
+// (code, target) before it is returned. Derive itself never calls
+// Validate (2B-F5) — codec.Canonical, the seam every caller (Task 3/4)
+// goes through, is what validates, downstream of every caller of Derive.
 func Derive(f Facts) Projection {
 	var states []RecognizedState
 	states = append(states, recognizeEmptyBranchCut(f)...)
@@ -60,6 +62,19 @@ func Derive(f Facts) Projection {
 	}
 }
 
+// headInvariant is the one invariant every recognized state can always
+// truthfully name regardless of its own specifics (2B-F4): Gather and
+// Derive together make zero mutating git calls (proven by the AST gate),
+// so HEAD's own value never moves and no ritual branch is ever touched
+// by the act of producing this projection.
+func headInvariant(f Facts) string {
+	head := f.Head
+	if head == "" {
+		head = "unknown"
+	}
+	return fmt.Sprintf("HEAD is %s and no ritual branch was modified by this run", head)
+}
+
 // --- empty-branch-cut (R-RR3-5, R-RR3-8) -----------------------------
 
 // ritualCandidate pairs one of the four ritual branches with its scope
@@ -80,6 +95,37 @@ func ritualCandidates(f Facts) []ritualCandidate {
 		{f.Close, ScopeRef, "current"},
 		{f.PolicyAdopt, ScopeStore, "resolved-base"},
 	}
+}
+
+// ambiguousClosureUncertainty is R-RR3-8's reciprocal uncertainty (review
+// 2B-F2): both partner states in a same-branch ambiguity name each
+// other, so an operator reading either one alone still learns the other
+// exists and that no executable choice was guessed. Scoped by R-RR3-8's
+// own amendment (review 2B-F8) to the SAME branch name only — an
+// unrelated ritual branch's empty cut is never withheld by this ref's
+// close/<name> staged closure or archive move.
+func ambiguousClosureUncertainty(branch string, otherState StateCode) Uncertainty {
+	return Uncertainty{
+		Text:    fmt.Sprintf("%s also shows evidence of %s — withholding any executable choice until this is resolved (never guess which the operator intended)", branch, otherState),
+		Witness: fmt.Sprintf("resolve the %s state first, then re-run `verdi recover`", otherState),
+	}
+}
+
+// closeRitualAmbiguous reports whether f.Close (the only ritual branch
+// R-RR3-8's staged-closure/archive-move partners can ever be about —
+// review 2B-F8) is itself an empty cut, and if so which of the two
+// artifact-shaped states it is ambiguous with.
+func closeRitualAmbiguous(f Facts) (other StateCode, ambiguous bool) {
+	if !f.Close.Exists || !f.Close.Empty() {
+		return "", false
+	}
+	if closureStagedSpecName(f.StagedPaths) == f.Name {
+		return StateArtifactsStagedUncommitted, true
+	}
+	if f.ArchiveSpecOnDisk && !f.ActiveSpecOnDisk && f.ActiveSpecAtHead && !f.ArchiveSpecAtHead {
+		return StateArchiveMoveUncommitted, true
+	}
+	return "", false
 }
 
 func recognizeEmptyBranchCut(f Facts) []RecognizedState {
@@ -104,33 +150,28 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 			},
 			Uncertainties:  []Uncertainty{},
 			StepsCompleted: []string{rb.Name + " was cut"},
-			InvariantsHeld: []string{},
-			Choices:        []Choice{},
+			InvariantsHeld: []string{
+				fmt.Sprintf("no commit exists on %s that is not already on %s", rb.Name, strings.Join(rb.EmptyWitnesses, " or ")),
+				headInvariant(f),
+			},
+			Choices: []Choice{},
 		}
 
-		// R-RR3-8: withhold the unwind choice when this SAME ref's index
-		// or disk also shows an uncommitted closure move — never guess
-		// which the operator intended.
-		if c.scope == ScopeRef && f.Name != "" {
-			staged := closureStagedSpecName(f.StagedPaths) == f.Name
-			archiveMove := f.ArchiveSpecOnDisk && !f.ActiveSpecOnDisk && f.ActiveSpecAtHead && !f.ArchiveSpecAtHead
-			if staged || archiveMove {
-				other := StateArchiveMoveUncommitted
-				if staged {
-					other = StateArtifactsStagedUncommitted
-				}
-				state.Uncertainties = append(state.Uncertainties, Uncertainty{
-					Text:    fmt.Sprintf("%s looks like an empty branch cut, but spec/%s's index/disk also shows evidence of %s — withholding the unwind choice rather than guessing which the operator intended", rb.Name, f.Name, other),
-					Witness: fmt.Sprintf("resolve the %s state first, then re-run `verdi recover`", other),
-				})
+		// R-RR3-8/2B-F8: withhold the unwind choice ONLY when THIS is the
+		// close/<name> branch and this ref's own index/disk also shows an
+		// uncommitted closure move — never a design/<name> or
+		// feature/<name> cut, which those artifacts are never about.
+		if rb.Name == "close/"+f.Name {
+			if other, ambiguous := closeRitualAmbiguous(f); ambiguous {
+				state.Uncertainties = append(state.Uncertainties, ambiguousClosureUncertainty(rb.Name, other))
 				states = append(states, state)
 				continue
 			}
 		}
 
-		originalBranch, candidateNames, undecidable := resolveReturnBranch(f, c, rb, ritualNames)
+		originalBranch, tipEqual, containing, undecidable := resolveReturnBranch(f, c, rb, ritualNames)
 		if undecidable {
-			state.Uncertainties = append(state.Uncertainties, undecidableReturnBranchUncertainty(c, rb, candidateNames))
+			state.Uncertainties = append(state.Uncertainties, undecidableReturnBranchUncertainty(c, rb, tipEqual, containing))
 			states = append(states, state)
 			continue
 		}
@@ -164,47 +205,82 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 	return states
 }
 
-// resolveReturnBranch implements R-RR3-5's two-way rule: a cut-from-
-// current branch's return target is the unique OTHER local branch its
-// own ancestry predicate already named (excluding the four ritual
-// branches themselves); a cut-from-resolved-base branch's return target
-// is the freshly re-resolved default branch. Either can be undecidable.
-func resolveReturnBranch(f Facts, c ritualCandidate, rb RitualBranch, ritualNames map[string]bool) (originalBranch string, candidateNames []string, undecidable bool) {
+// resolveReturnBranch implements R-RR3-5's two-way rule (review 2B-F1: a
+// cut-from-current branch's return target is TWO-TIERED, not a single
+// flat candidate list): among the OTHER local branches the ancestry
+// predicate already named (excluding the four ritual branches
+// themselves), tipEqual holds every one whose tip EQUALS rb's own tip
+// (the branch this was actually cut from, if still exactly at the cut
+// point) and containing holds every one whose tip properly descends
+// (contains rb's tip as an ancestor, but has since moved on). The return
+// branch is the unique tipEqual candidate when exactly one exists, else
+// the unique containing candidate when exactly one exists, else
+// UNDECIDABLE (SI-221) — a deleted source branch (both empty) or a tie
+// (either list with more than one entry) are both undecidable, never
+// guessed. A cut-from-resolved-base branch's return target is instead
+// the freshly re-resolved default branch, independent of this predicate.
+func resolveReturnBranch(f Facts, c ritualCandidate, rb RitualBranch, ritualNames map[string]bool) (originalBranch string, tipEqual, containing []string, undecidable bool) {
 	if c.mechanism == "resolved-base" {
 		if f.DefaultBranchResolved && f.DefaultBranch.BranchName != "" {
-			return f.DefaultBranch.BranchName, nil, false
+			return f.DefaultBranch.BranchName, nil, nil, false
 		}
-		return "", nil, true
+		return "", nil, nil, true
+	}
+
+	tipByName := make(map[string]string, len(f.LocalBranches))
+	for _, bt := range f.LocalBranches {
+		tipByName[bt.Name] = bt.Tip
 	}
 	for _, w := range rb.EmptyWitnesses {
 		if ritualNames[w] {
 			continue
 		}
-		candidateNames = append(candidateNames, w)
+		if tipByName[w] == rb.Tip {
+			tipEqual = append(tipEqual, w)
+		} else {
+			containing = append(containing, w)
+		}
 	}
-	sort.Strings(candidateNames)
-	if len(candidateNames) == 1 {
-		return candidateNames[0], candidateNames, false
+	sort.Strings(tipEqual)
+	sort.Strings(containing)
+
+	if len(tipEqual) == 1 {
+		return tipEqual[0], tipEqual, containing, false
 	}
-	return "", candidateNames, true
+	if len(tipEqual) == 0 && len(containing) == 1 {
+		return containing[0], tipEqual, containing, false
+	}
+	return "", tipEqual, containing, true
 }
 
-func undecidableReturnBranchUncertainty(c ritualCandidate, rb RitualBranch, candidateNames []string) Uncertainty {
+func undecidableReturnBranchUncertainty(c ritualCandidate, rb RitualBranch, tipEqual, containing []string) Uncertainty {
 	if c.mechanism == "resolved-base" {
 		return Uncertainty{
 			Text:    fmt.Sprintf("%s's return branch (the re-resolved default branch) could not be determined", rb.Name),
 			Witness: "git remote set-head origin --auto, or the CI_DEFAULT_BRANCH environment variable",
 		}
 	}
-	if len(candidateNames) == 0 {
+	if len(tipEqual) == 0 && len(containing) == 0 {
 		return Uncertainty{
 			Text:    fmt.Sprintf("%s's original branch cannot be determined: the branch it was cut from was deleted (no local branch reaches its cut point except %s itself)", rb.Name, rb.Name),
 			Witness: "inspect the reflog's own \"Created from\" line, corroboration only",
 		}
 	}
+	if len(tipEqual) > 1 {
+		// 2B-F1: every one of these is genuinely AT the exact cut point —
+		// the only case where "shares the exact cut point" is a true
+		// claim.
+		return Uncertainty{
+			Text:    fmt.Sprintf("%s's original branch is ambiguous: more than one local branch sits at its exact tip", rb.Name),
+			Witness: "the candidate branches: " + strings.Join(tipEqual, ", "),
+		}
+	}
+	// len(tipEqual) == 0 && len(containing) != 1: every candidate here
+	// only DESCENDS from rb's tip — never claim it "shares the exact cut
+	// point" (2B-F1's other concrete defect).
 	return Uncertainty{
-		Text:    fmt.Sprintf("%s's original branch is ambiguous: more than one local branch shares its exact cut point", rb.Name),
-		Witness: "the candidate branches: " + strings.Join(candidateNames, ", "),
+		Text:    fmt.Sprintf("%s's original branch is ambiguous: more than one local branch descends from its cut point, none of them still at the exact tip", rb.Name),
+		Witness: "the candidate branches: " + strings.Join(containing, ", "),
 	}
 }
 
@@ -240,7 +316,7 @@ func recognizeScaffoldUnstaged(f Facts) []RecognizedState {
 		Facts:          []string{fmt.Sprintf("%s has unstaged changes under %s: %s", f.Design.Name, activePrefix, strings.Join(changed, ", "))},
 		Uncertainties:  []Uncertainty{},
 		StepsCompleted: []string{"design start scaffolded and committed the spec"},
-		InvariantsHeld: []string{},
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        fmt.Sprintf("commit the in-progress scaffold edits on %s", f.Design.Name),
@@ -264,7 +340,9 @@ func recognizeScaffoldUnstaged(f Facts) []RecognizedState {
 // index-shape predicate, copied here (recovery cannot import cmd/verdi,
 // package main): the index carries nothing but one spec's own closure
 // paths (both the active-zone deletion and the archive-zone tree, no
-// other path), returning that spec's name or "" otherwise.
+// other path), returning that spec's name or "" otherwise. Pinned
+// against close.go's own source text by
+// TestClosureAdviceCommandsPinned (2B-F6).
 func closureStagedSpecName(paths []string) string {
 	const activeRoot = ".verdi/specs/active/"
 	const archiveRoot = ".verdi/specs/archive/"
@@ -300,8 +378,9 @@ func closureStagedSpecName(paths []string) string {
 // close.go:1059 (closureResidueRefusal) and close.go:1123
 // (reportUncommittedArchiveMove)'s own advice commands, copied here
 // verbatim as templates — recovery cannot import cmd/verdi (package
-// main). Pinned by TestClosureAdviceCommandsPinned against close.go's
-// own text.
+// main). Pinned by TestClosureAdviceCommandsPinned (2B-F6), which reads
+// cmd/verdi/close.go as a file and asserts these literals occur in it,
+// so drift in the source trips the recovery copy.
 const (
 	closureResidueCompleteCommand    = "git commit"
 	closureResidueRestoreActiveTmpl  = "git restore --source=HEAD --staged --worktree -- %s"
@@ -327,15 +406,22 @@ func recognizeArtifactsStagedUncommitted(f Facts) []RecognizedState {
 	target := "close/" + f.Name
 	id := "resolve-staged-closure:" + target
 
+	uncertainties := []Uncertainty{}
+	if f.Close.Exists && f.Close.Empty() {
+		// 2B-F2: reciprocal half of recognizeEmptyBranchCut's own
+		// uncertainty — both partner states name each other.
+		uncertainties = append(uncertainties, ambiguousClosureUncertainty(target, StateEmptyBranchCut))
+	}
+
 	return []RecognizedState{{
 		Code:          StateArtifactsStagedUncommitted,
 		Scope:         ScopeRef,
 		Target:        target,
 		Facts:         []string{fmt.Sprintf("the index carries spec/%s's own closure paths (%s, %s) and nothing else", f.Name, active, archive)},
-		Uncertainties: []Uncertainty{},
+		Uncertainties: uncertainties,
 		// vocab:identity — "close" names the git verb/branch-prefix identity, never the renameable lifecycle status
 		StepsCompleted: []string{"close staged the active-to-archive move"},
-		InvariantsHeld: []string{},
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "resolve the staged, uncommitted closure of spec/" + f.Name,
@@ -362,6 +448,11 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 	target := "close/" + f.Name
 	id := "restore-uncommitted-archive-move:" + target
 
+	uncertainties := []Uncertainty{}
+	if f.Close.Exists && f.Close.Empty() {
+		uncertainties = append(uncertainties, ambiguousClosureUncertainty(target, StateEmptyBranchCut))
+	}
+
 	return []RecognizedState{{
 		Code:   StateArchiveMoveUncommitted,
 		Scope:  ScopeRef,
@@ -370,10 +461,10 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 			fmt.Sprintf("%s is absent on disk but present in HEAD's tree", active),
 			fmt.Sprintf("%s is present on disk but absent from HEAD's tree", archive),
 		},
-		Uncertainties: []Uncertainty{},
+		Uncertainties: uncertainties,
 		// vocab:identity — "close" names the git verb/branch-prefix identity, never the renameable lifecycle status
 		StepsCompleted: []string{"close moved the spec directory on disk"},
-		InvariantsHeld: []string{},
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "restore the uncommitted archive move for spec/" + f.Name,
@@ -407,9 +498,38 @@ func aheadOrNoRemoteFact(rb RitualBranch) string {
 	return fmt.Sprintf("%s is %d commit(s) ahead of its remote-tracking branch", rb.Name, rb.Ahead)
 }
 
+// hasOtherLocalBranch reports whether at least one local branch besides
+// rb itself exists (2B-F9): the ancestry predicate needs at least one
+// other branch to test against, so when none exists at all, "not empty"
+// cannot be told apart from "cannot be decided" — Empty() reads false in
+// both cases.
+func hasOtherLocalBranch(f Facts, rb RitualBranch) bool {
+	for _, bt := range f.LocalBranches {
+		if bt.Name != rb.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// ownCommitUncertainty is 2B-F9's own fix: when no other local branch
+// exists at all, closure-unpublished/board-push-failed must not assert
+// "carries its own commit" as a fact — it becomes an uncertainty with
+// the witness that would decide it.
+func ownCommitUncertainty(f Facts, rb RitualBranch) Uncertainty {
+	base := "<default branch>"
+	if f.DefaultBranchResolved {
+		base = f.DefaultBranch.Ref
+	}
+	return Uncertainty{
+		Text:    fmt.Sprintf("whether %s carries a commit of its own could not be determined: no other local branch exists to test its ancestry against", rb.Name),
+		Witness: fmt.Sprintf("git log %s..%s", base, rb.Name),
+	}
+}
+
 func recognizeClosureUnpublished(f Facts) []RecognizedState {
 	rb := f.Close
-	if !rb.Exists || rb.Empty() {
+	if !rb.Exists || rb.Empty() || !rb.RemoteChecked {
 		return nil
 	}
 	if rb.HasRemoteTracking && rb.Ahead == 0 {
@@ -418,14 +538,22 @@ func recognizeClosureUnpublished(f Facts) []RecognizedState {
 	target := rb.Name
 	id := "publish-closure:" + target
 
+	steps := []string{}
+	uncertainties := []Uncertainty{remoteComparisonUncertainty()}
+	if hasOtherLocalBranch(f, rb) {
+		steps = append(steps, target+" carries its own closure commit")
+	} else {
+		uncertainties = append(uncertainties, ownCommitUncertainty(f, rb))
+	}
+
 	return []RecognizedState{{
 		Code:           StateClosureUnpublished,
 		Scope:          ScopeRef,
 		Target:         target,
 		Facts:          []string{aheadOrNoRemoteFact(rb)},
-		Uncertainties:  []Uncertainty{remoteComparisonUncertainty()},
-		StepsCompleted: []string{target + " carries its own closure commit"},
-		InvariantsHeld: []string{},
+		Uncertainties:  uncertainties,
+		StepsCompleted: steps,
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "publish " + target,
@@ -442,7 +570,7 @@ func recognizeClosureUnpublished(f Facts) []RecognizedState {
 
 func recognizeBoardPushFailed(f Facts) []RecognizedState {
 	rb := f.Design
-	if !rb.Exists || rb.Empty() {
+	if !rb.Exists || rb.Empty() || !rb.RemoteChecked {
 		return nil
 	}
 	if rb.HasRemoteTracking && rb.Ahead == 0 {
@@ -451,20 +579,28 @@ func recognizeBoardPushFailed(f Facts) []RecognizedState {
 	target := rb.Name
 	id := "publish-board-branch:" + target
 
-	return []RecognizedState{{
-		Code:   StateBoardPushFailed,
-		Scope:  ScopeRef,
-		Target: target,
-		Facts:  []string{aheadOrNoRemoteFact(rb)},
-		Uncertainties: []Uncertainty{
-			remoteComparisonUncertainty(),
-			{
-				Text:    fmt.Sprintf("whether a push of %s was attempted and failed, or was never attempted at all — no artifact records a failed push", target),
-				Witness: fmt.Sprintf("the board's own commit response, or git push -u origin %s", target),
-			},
+	steps := []string{}
+	uncertainties := []Uncertainty{
+		remoteComparisonUncertainty(),
+		{
+			Text:    fmt.Sprintf("whether a push of %s was attempted and failed, or was never attempted at all — no artifact records a failed push", target),
+			Witness: fmt.Sprintf("the board's own commit response, or git push -u origin %s", target),
 		},
-		StepsCompleted: []string{target + " carries a commit not on its remote-tracking branch"},
-		InvariantsHeld: []string{},
+	}
+	if hasOtherLocalBranch(f, rb) {
+		steps = append(steps, target+" carries a commit not on its remote-tracking branch")
+	} else {
+		uncertainties = append(uncertainties, ownCommitUncertainty(f, rb))
+	}
+
+	return []RecognizedState{{
+		Code:           StateBoardPushFailed,
+		Scope:          ScopeRef,
+		Target:         target,
+		Facts:          []string{aheadOrNoRemoteFact(rb)},
+		Uncertainties:  uncertainties,
+		StepsCompleted: steps,
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "publish " + target,
@@ -483,20 +619,20 @@ func recognizeBoardPushFailed(f Facts) []RecognizedState {
 
 func recognizeStaleLock(f Facts) []RecognizedState {
 	var states []RecognizedState
-	states = append(states, staleLockState(f.WriterLock, ScopeStore)...)
+	states = append(states, staleLockState(f, f.WriterLock, ScopeStore)...)
 	for _, lf := range f.RitualLocks {
 		// A ritual branch's own worktree lock is ref-scoped; the writer
 		// lock and every execution-workspace lock are store-scoped.
-		states = append(states, staleLockState(lf, ScopeRef)...)
+		states = append(states, staleLockState(f, lf, ScopeRef)...)
 	}
 	for _, lf := range f.WorkspaceLocks {
-		states = append(states, staleLockState(lf, ScopeStore)...)
+		states = append(states, staleLockState(f, lf, ScopeStore)...)
 	}
 	sort.Slice(states, func(i, j int) bool { return states[i].Target < states[j].Target })
 	return states
 }
 
-func staleLockState(lf LockFact, scope Scope) []RecognizedState {
+func staleLockState(f Facts, lf LockFact, scope Scope) []RecognizedState {
 	if lf.Inspection.Status != filelock.LockStale {
 		return nil
 	}
@@ -512,7 +648,7 @@ func staleLockState(lf LockFact, scope Scope) []RecognizedState {
 		},
 		Uncertainties:  []Uncertainty{},
 		StepsCompleted: []string{},
-		InvariantsHeld: []string{},
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "remove the stale lock " + lf.Path,
@@ -565,7 +701,7 @@ func recognizeGovernedActionInterrupted(f Facts) []RecognizedState {
 			Facts:          []string{fmt.Sprintf("the draft-mutation journal for %s is in phase %q", f.Journal.Spec, f.Journal.Phase)},
 			Uncertainties:  []Uncertainty{},
 			StepsCompleted: steps,
-			InvariantsHeld: []string{},
+			InvariantsHeld: []string{headInvariant(f)},
 			Choices: []Choice{{
 				ID: id,
 				// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
@@ -594,7 +730,7 @@ func recognizeGovernedActionInterrupted(f Facts) []RecognizedState {
 			Facts:          []string{fmt.Sprintf("execution-workspace %s has a sibling entry with no unit directory", u.ID)},
 			Uncertainties:  []Uncertainty{},
 			StepsCompleted: []string{},
-			InvariantsHeld: []string{},
+			InvariantsHeld: []string{headInvariant(f)},
 			Choices: []Choice{{
 				ID:             id,
 				Summary:        "reclaim the orphan execution-workspace entry " + u.ID,
@@ -631,7 +767,7 @@ func recognizeStrandedResidue(f Facts) []RecognizedState {
 				Facts:          []string{row.Line()},
 				Uncertainties:  []Uncertainty{},
 				StepsCompleted: []string{},
-				InvariantsHeld: []string{},
+				InvariantsHeld: []string{headInvariant(f)},
 				Choices: []Choice{{
 					ID:             id,
 					Summary:        "reclaim " + target,
@@ -652,7 +788,7 @@ func recognizeStrandedResidue(f Facts) []RecognizedState {
 				Facts:          []string{row.Line()},
 				Uncertainties:  []Uncertainty{},
 				StepsCompleted: []string{},
-				InvariantsHeld: []string{},
+				InvariantsHeld: []string{headInvariant(f)},
 				Choices:        []Choice{},
 			})
 		}
@@ -669,21 +805,15 @@ func recognizeStrandedResidue(f Facts) []RecognizedState {
 // governed action recovery reasons about).
 var knownJournalPhases = map[string]bool{"prepared": true}
 
-// unrecognizedWitness is every unrecognized state's shared uncertainty:
-// dc-7's own closed inventory names nothing else this could be.
-func unrecognizedWitness(witness string) []Uncertainty {
-	return []Uncertainty{{Text: "state is outside the ritual inventory (dc-7)", Witness: witness}}
-}
-
-func newUnrecognizedState(scope Scope, target string, facts []string, witness string) RecognizedState {
+func newUnrecognizedState(f Facts, scope Scope, target string, facts []string, witness string) RecognizedState {
 	return RecognizedState{
 		Code:           StateUnrecognized,
 		Scope:          scope,
 		Target:         target,
 		Facts:          facts,
-		Uncertainties:  unrecognizedWitness(witness),
+		Uncertainties:  []Uncertainty{{Text: "state is outside the ritual inventory (dc-7)", Witness: witness}},
 		StepsCompleted: []string{},
-		InvariantsHeld: []string{},
+		InvariantsHeld: []string{headInvariant(f)},
 		Choices:        []Choice{},
 	}
 }
@@ -707,12 +837,12 @@ func newUnrecognizedState(scope Scope, target string, facts []string, witness st
 func recognizeUnrecognized(f Facts) []RecognizedState {
 	var states []RecognizedState
 
-	states = append(states, unrecognizedLockStates(f.WriterLock, ScopeStore)...)
+	states = append(states, unrecognizedLockStates(f, f.WriterLock, ScopeStore)...)
 	for _, lf := range f.RitualLocks {
-		states = append(states, unrecognizedLockStates(lf, ScopeRef)...)
+		states = append(states, unrecognizedLockStates(f, lf, ScopeRef)...)
 	}
 	for _, lf := range f.WorkspaceLocks {
-		states = append(states, unrecognizedLockStates(lf, ScopeStore)...)
+		states = append(states, unrecognizedLockStates(f, lf, ScopeStore)...)
 	}
 
 	if f.Journal.Present && (!f.Journal.Decoded || !knownJournalPhases[f.Journal.Phase]) {
@@ -722,12 +852,12 @@ func recognizeUnrecognized(f Facts) []RecognizedState {
 			// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 			fact = fmt.Sprintf("draft-mutation journal %s decoded with phase %q, outside the known set", f.Journal.Path, f.Journal.Phase)
 		}
-		states = append(states, newUnrecognizedState(ScopeRef, f.Journal.Path, []string{fact}, f.Journal.Path))
+		states = append(states, newUnrecognizedState(f, ScopeRef, f.Journal.Path, []string{fact}, f.Journal.Path))
 	}
 
 	for _, name := range f.WorkspaceUnclassified {
 		states = append(states, newUnrecognizedState(
-			ScopeStore, name,
+			f, ScopeStore, name,
 			[]string{fmt.Sprintf("execution-workspace entry %q does not match the workspace-unit grammar", name)},
 			name,
 		))
@@ -736,7 +866,7 @@ func recognizeUnrecognized(f Facts) []RecognizedState {
 	if f.ActiveSpecOnDisk && f.ArchiveSpecOnDisk && f.Name != "" {
 		target := f.Ref.String()
 		states = append(states, newUnrecognizedState(
-			ScopeRef, target,
+			f, ScopeRef, target,
 			[]string{fmt.Sprintf("%s exists on disk in both the active and archive zones", target)},
 			target,
 		))
@@ -746,12 +876,12 @@ func recognizeUnrecognized(f Facts) []RecognizedState {
 	return states
 }
 
-func unrecognizedLockStates(lf LockFact, scope Scope) []RecognizedState {
+func unrecognizedLockStates(f Facts, lf LockFact, scope Scope) []RecognizedState {
 	if lf.ReadError == "" {
 		return nil
 	}
 	return []RecognizedState{newUnrecognizedState(
-		scope, lf.Path,
+		f, scope, lf.Path,
 		[]string{fmt.Sprintf("%s could not be inspected: %s", lf.Path, lf.ReadError)},
 		lf.Path,
 	)}
