@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -259,21 +260,62 @@ func TestRecover_JSONAndBareFormsAreByteIdentical(t *testing.T) {
 	}
 }
 
-// TestRecover_ApplyStubRefusesWithExit2 proves the Task 3 --apply stub
-// (internal/recovery.ErrNotImplemented) is wired all the way through:
-// cmdRecover maps it to exit 2. Task 4 replaces this stub and this test
-// alongside it.
-func TestRecover_ApplyStubRefusesWithExit2(t *testing.T) {
+// TestRecover_ApplyUnknownChoiceRefusesWithExit1 proves R-RR3-9's own
+// exit mapping for an unknown choice id: cmdRecover's own --apply path
+// (Task 4's real protocol, replacing Task 3's stub and its own now-
+// retired exit-2 stub test) exits 1, nothing changed, and stderr lists
+// every known choice id.
+func TestRecover_ApplyUnknownChoiceRefusesWithExit1(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
+	recoverCutEmptyBranch(t, repo, "close/checkout")
 	var stdout, stderr bytes.Buffer
 	code := recoverRunInDir(t, repo.Dir, func() int {
-		return cmdRecover([]string{"spec/checkout", "--apply", "unwind-branch-cut:close/checkout"}, &stdout, &stderr)
+		return cmdRecover([]string{"spec/checkout", "--apply", "no-such-choice"}, &stdout, &stderr)
 	})
-	if code != 2 {
-		t.Fatalf("exit %d, want 2; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	if code != 1 {
+		t.Fatalf("exit %d, want 1; stdout %q stderr %q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), recovery.ErrNotImplemented.Error()) {
-		t.Fatalf("stderr %q does not mention %q", stderr.String(), recovery.ErrNotImplemented.Error())
+	if !strings.Contains(stderr.String(), "unwind-branch-cut:close/checkout") {
+		t.Fatalf("stderr %q, want it to list the known choice id", stderr.String())
+	}
+}
+
+// TestRecover_ApplyNoExecutorRefusesWithExit1 proves R-RR3-9's own exit
+// mapping for a choice with no executor: cmdRecover's own --apply path
+// never touches the repository and exits 1, stderr naming the manual
+// commands.
+func TestRecover_ApplyNoExecutorRefusesWithExit1(t *testing.T) {
+	repo, _ := recoverFixtureStore(t)
+	lockPath := recoverWriteStaleWriterLock(t, repo)
+
+	var readOut bytes.Buffer
+	code := recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"--json", "spec/checkout"}, &readOut, io.Discard)
+	})
+	if code != 1 {
+		t.Fatalf("read exit %d, want 1; stdout %q", code, readOut.String())
+	}
+	p, err := recovery.Decode(bytes.TrimRight(readOut.Bytes(), "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.States) == 0 || len(p.States[0].Choices) == 0 {
+		t.Fatalf("no choice recognized: %+v", p.States)
+	}
+	id := p.States[0].Choices[0].ID
+
+	var stdout, stderr bytes.Buffer
+	code = recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"spec/checkout", "--apply", id}, &stdout, &stderr)
+	})
+	if code != 1 {
+		t.Fatalf("apply exit %d, want 1; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "rm ") {
+		t.Fatalf("stderr %q, want the manual command", stderr.String())
+	}
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatal("lock removed by a choice with no executor")
 	}
 }
 
@@ -322,5 +364,119 @@ func TestRecover_GitLogEnvRecordsCommands(t *testing.T) {
 		if recovery.IsForbiddenArgv(strings.Fields(parts[1])) {
 			t.Fatalf("gitlog line %q carries a forbidden token", line)
 		}
+	}
+}
+
+// TestRecover_ApplyViolatedPostconditionIsExit1 is I2's own end-to-end
+// proof of R-RR3-9's VIOLATED branch over a REACHABLE state: close/
+// checkout is held by a linked worktree, so branchcut.Unwind switches
+// back correctly and git's own safe `branch -d` REFUSES. The verb must
+// print the violated postcondition with its observed value and exit 1 —
+// never report a giving-up outcome as success.
+func TestRecover_ApplyViolatedPostconditionIsExit1(t *testing.T) {
+	repo, _ := recoverFixtureStore(t)
+	cut := recoverCutEmptyBranch(t, repo, "close/checkout")
+	if err := gitx.CheckoutExisting(context.Background(), repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	wt := filepath.Join(t.TempDir(), "held-wt")
+	if err := gitx.WorktreeAdd(context.Background(), repo.Dir, wt, "close/checkout"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"spec/checkout", "--apply", "unwind-branch-cut:close/checkout"}, &stdout, &stderr)
+	})
+	if code != 1 {
+		t.Fatalf("exit %d, want 1; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	want := "postcondition: close/checkout does not exist: VIOLATED (exists at " + cut + ")\n"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout %q, want it to carry %q", stdout.String(), want)
+	}
+	if strings.Count(stdout.String(), "VIOLATED") != 1 {
+		t.Fatalf("stdout %q, want exactly one VIOLATED line (the switch back itself succeeded)", stdout.String())
+	}
+	if ok, _ := gitx.HasLocalBranch(context.Background(), repo.Dir, "close/checkout"); !ok {
+		t.Fatal("close/checkout deleted although git refused the delete")
+	}
+}
+
+// TestReportApplyOutcome_ExitMapping is I2's own direct table over the
+// two branches of R-RR3-9's post-execution exit mapping that no test
+// reached: a VIOLATED postcondition is exit 1 with the "VIOLATED
+// (<observed>)" rendering, and a failed journey re-derivation is exit 2
+// with the projection STILL printed ("the projection still prints what
+// it observed"), the executor having already run in both.
+func TestReportApplyOutcome_ExitMapping(t *testing.T) {
+	held := recovery.PostconditionResult{Text: "close/checkout does not exist", Held: true, Observed: "does not exist"}
+	violated := recovery.PostconditionResult{Text: "current branch is main", Held: false, Observed: "current branch is close/checkout"}
+	// The projection printed after the postcondition lines is the
+	// re-derived one; a VALID empty projection (nothing recognized any
+	// more) is what a successful unwind actually leaves behind.
+	after := recovery.Projection{
+		Schema:      recovery.SchemaID,
+		Ref:         "spec/checkout",
+		Branch:      "main",
+		Head:        strings.Repeat("a", 40),
+		States:      []recovery.RecognizedState{},
+		Disclosures: []string{},
+	}
+
+	cases := []struct {
+		name        string
+		out         recovery.Outcome
+		wantExit    int
+		wantStdout  []string
+		wantStderr  string
+		wantNoStdrr bool
+	}{
+		{
+			name:        "every postcondition held",
+			out:         recovery.Outcome{ChoiceID: "unwind-branch-cut:close/checkout", After: after, Postconditions: []recovery.PostconditionResult{held}},
+			wantExit:    0,
+			wantStdout:  []string{"postcondition: close/checkout does not exist: held (does not exist)\n"},
+			wantNoStdrr: true,
+		},
+		{
+			name:        "one postcondition violated",
+			out:         recovery.Outcome{ChoiceID: "unwind-branch-cut:close/checkout", After: after, Postconditions: []recovery.PostconditionResult{held, violated}},
+			wantExit:    1,
+			wantStdout:  []string{"postcondition: current branch is main: VIOLATED (current branch is close/checkout)\n"},
+			wantNoStdrr: true,
+		},
+		{
+			name: "journey re-derivation failed after the executor ran",
+			out: recovery.Outcome{
+				ChoiceID:       "unwind-branch-cut:close/checkout",
+				After:          after,
+				Postconditions: []recovery.PostconditionResult{held},
+				JourneyErr:     errors.New("journey: target spec not found"),
+			},
+			wantExit:   2,
+			wantStdout: []string{"postcondition: close/checkout does not exist: held (does not exist)\n", `"schema"`},
+			wantStderr: "recover: journey: target spec not found\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := reportApplyOutcome(tc.out, &stdout, &stderr)
+			if code != tc.wantExit {
+				t.Fatalf("exit %d, want %d; stdout %q stderr %q", code, tc.wantExit, stdout.String(), stderr.String())
+			}
+			for _, want := range tc.wantStdout {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout %q, want it to carry %q", stdout.String(), want)
+				}
+			}
+			if tc.wantNoStdrr && stderr.String() != "" {
+				t.Fatalf("stderr %q, want empty", stderr.String())
+			}
+			if tc.wantStderr != "" && stderr.String() != tc.wantStderr {
+				t.Fatalf("stderr %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
 	}
 }

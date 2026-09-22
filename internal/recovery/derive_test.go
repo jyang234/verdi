@@ -84,7 +84,7 @@ func TestDerive_EmptyBranchCut_CutFromCurrent(t *testing.T) {
 	if !reflect.DeepEqual(c.Effects, wantEff) {
 		t.Fatalf("Effects = %v, want %v", c.Effects, wantEff)
 	}
-	wantPost := []string{"close/checkout does not exist", "current branch is main", "HEAD is c1"}
+	wantPost := []string{"close/checkout does not exist", "current branch is main", "HEAD is the tip of main"}
 	if !reflect.DeepEqual(c.Postconditions, wantPost) {
 		t.Fatalf("Postconditions = %v, want %v", c.Postconditions, wantPost)
 	}
