@@ -14,10 +14,24 @@ func TestCommandLog_ForbiddenTokens(t *testing.T) {
 	got := l.Forbidden()
 	want := [][]string{{"push", "--force-with-lease"}, {"restore", "--staged", "a"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v", got)
+		t.Fatalf("got %v, want %v", got, want)
 	}
 	if len(l.Entries()) != 4 {
 		t.Fatal("entries lost")
+	}
+}
+
+// TestCommandLog_ForbiddenTokens_ShortForceFlag is R-RR3-17: the short
+// "-f" force flag (git push -f / git branch -f / git checkout -f) is
+// forbidden too, not just "--force" and its long-form derivatives.
+func TestCommandLog_ForbiddenTokens_ShortForceFlag(t *testing.T) {
+	var l CommandLog
+	l.Observe("/r", []string{"push", "-f"})
+	l.Observe("/r", []string{"rev-parse", "HEAD"})
+	got := l.Forbidden()
+	want := [][]string{{"push", "-f"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 

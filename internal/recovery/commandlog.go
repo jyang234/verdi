@@ -3,17 +3,26 @@ package recovery
 import (
 	"strings"
 	"sync"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // ForbiddenTokens is dc-4/ac-9's own command-surface guard: no recovery
 // run's git command log may contain any of these as a whole argv
 // element, or — for a "--"-prefixed flag — as an argv element's prefix
-// ("--force" matches both "--force" and "--force-with-lease"). Message
-// TEXT (a commit message, say) is never scanned for these words: the
-// check is over argv elements only, so `commit -m "reset the counter"`
-// is never forbidden merely because its (whole, single) message argument
-// happens to start with the word "reset".
-var ForbiddenTokens = []string{"reset", "restore", "clean", "stash", "--force", "update-ref"}
+// ("--force" matches both "--force" and "--force-with-lease"). "-f"
+// (R-RR3-17) is the short force flag `git push -f` / `git branch -f` /
+// `git checkout -f` all accept, which "--force" alone does not catch; a
+// recovery run never legitimately passes it to any command it issues.
+// The check is over argv ELEMENTS only, never message TEXT: `commit -m
+// "reset the counter"` is not forbidden merely because its (whole,
+// single) message argument happens to start with the word "reset" — an
+// exact one-word match ("commit -m reset") would still be forbidden by
+// construction, since the check cannot distinguish a message argument
+// from any other bare argv element, but this is unreachable inside a
+// recovery run: neither of this feature's two executors
+// (branchcut.Unwind, reclaim.Apply) ever issues a `git commit`.
+var ForbiddenTokens = []string{"reset", "restore", "clean", "stash", "--force", "-f", "update-ref"}
 
 // CommandLog records every gitx invocation on a context via the
 // gitx.Observer seam (R-RR3-2): recover.go (a later task) attaches one
@@ -26,12 +35,15 @@ type CommandLog struct {
 	entries [][]string
 }
 
-// Observe implements the method signature gitx.Observer declares
-// (Observe(dir string, args []string)) — Task 1, running concurrently,
-// adds that interface and the compile-time `var _ gitx.Observer =
-// (*CommandLog)(nil)` assertion at integration; this package does not
-// import or reference gitx.Observer itself. dir is deliberately not
-// recorded: Forbidden's contract is over argv shape alone.
+// _ is the compile-time proof that CommandLog implements gitx.Observer
+// (2A-M4): gitx cannot host this assertion itself (internal/gitx
+// importing internal/recovery would cycle, since facts.go imports
+// gitx), so it lives on this, the implementing, side.
+var _ gitx.Observer = (*CommandLog)(nil)
+
+// Observe implements gitx.Observer's Observe(dir string, args []string)
+// method. dir is deliberately not recorded: Forbidden's contract is over
+// argv shape alone.
 func (l *CommandLog) Observe(dir string, args []string) {
 	entry := make([]string, len(args))
 	copy(entry, args)
