@@ -298,7 +298,7 @@ digest: sha256:%s
 // rollup_test.go's own evidenceRecordJSON (a different, ac-1-only,
 // full-array-returning helper) to avoid colliding in this package.
 func featureFixtureEvidenceJSON(ac, kind, verdict, commit string) string {
-	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind + `","verdict":"` + verdict + `","witness":"fixture witness","producer":"fixture-` + kind + `","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
+	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind + `","verdict":"` + verdict + `","witness":"fixture witness","producer":"fixture-` + kind + `","provenance":{"source":"ci","pipeline":"1","job":"1","job_name":"1","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
 }
 
 // writeFixtureVerdicts writes records (already-rendered JSON objects) as a

@@ -262,7 +262,7 @@ func TestRunClose_EndToEnd(t *testing.T) {
 
 	// Phase 2's producer, exercised for real: this is what makes a story
 	// declaring [static, behavioral] reach evidenced from CI records alone.
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestRunClose_EndToEnd(t *testing.T) {
 func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
 func TestRunClose_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := buildCloseFixtureRepo(t)
 			ctx := context.Background()
-			prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+			prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 			if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 				t.Fatalf("produceSelfHostedEvidence: %v", err)
 			}
@@ -873,7 +873,7 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -1580,7 +1580,7 @@ func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T)
 func TestRunClose_StagingFailure_UnwindsBranchCut(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -1635,7 +1635,7 @@ func TestRunClose_StagingFailure_UnwindsBranchCut(t *testing.T) {
 func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
@@ -1693,7 +1693,7 @@ func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
 // path.
 func seedCloseHappyPath(t *testing.T, repo *fixturegit.Repo) {
 	t.Helper()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}

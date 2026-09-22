@@ -780,7 +780,7 @@ func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
 	// run would have produced and uploaded, keyed per spec — assembled
 	// through the real self-hosted producer path so they are byte-for-byte
 	// what CI serves.
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "7", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "7", JobName: "7", Commit: repo.Head}
 	bySpec, err := selfHostedEvidence(repo.Dir, prov)
 	if err != nil {
 		t.Fatalf("selfHostedEvidence: %v", err)

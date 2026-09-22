@@ -73,9 +73,13 @@ func readRuntimeRecords(t *testing.T, root, specRef, commit string) []artifact.E
 	return recs
 }
 
+// fakeRuntimeDeps' CIContext reports job_name "7" — the same value as Job,
+// matching every close_*_test.go runtime-probe fixture's
+// fixtureElaboratedObligationMD(..., "7", ...) authoritative_source ref
+// (this helper is shared package-wide, not private to this file).
 func fakeRuntimeDeps() (*fake.Forge, syncDeps, *bytes.Buffer, *bytes.Buffer) {
 	f := fake.New()
-	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "runtime-probe"})
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "7"})
 	var stdout, stderr bytes.Buffer
 	return f, syncDeps{Forge: f, Stdout: &stdout, Stderr: &stderr}, &stdout, &stderr
 }
@@ -119,8 +123,8 @@ func TestRunProduceRuntime_Happy(t *testing.T) {
 	if r.Provenance.Pipeline != "913" || r.Provenance.Job != "7" {
 		t.Errorf("Provenance = %+v, want pipeline=913 job=7", r.Provenance)
 	}
-	if r.Provenance.JobName != "runtime-probe" {
-		t.Errorf("Provenance.JobName = %q, want %q (SI-229)", r.Provenance.JobName, "runtime-probe")
+	if r.Provenance.JobName != "7" {
+		t.Errorf("Provenance.JobName = %q, want %q (SI-229)", r.Provenance.JobName, "7")
 	}
 	if !strings.Contains(stdout.String(), "spec/runtime-fixture") || !strings.Contains(stdout.String(), "ac-2") {
 		t.Errorf("stdout = %q, want it to name the spec and AC", stdout.String())
