@@ -114,6 +114,22 @@
 # dispositioned by the operator's own --prepare rehearsal, step 1 above) or
 # needs a real judge available on the runner is unproven by this lane and
 # is left for the pilot run to prove or refute.
+# PUBLICATION PRECEDES THE PUSH. `verdi close` publishes the rollup to
+# the tracker (cmd/verdi/close.go, PublishRollup) before this job's final
+# `git push`. If that push is rejected, because close/<name> moved on
+# origin after the dispatch (for example an operator push during the
+# approval wait), the job fails with the rollup already published for the
+# closed commit, and the archive commit exists only on the runner, which
+# discards it. Origin is unchanged: the spec is still active there, and
+# the closure pull request shows whatever close/<name> now holds. The
+# operator then does NOT merge that pull request. They put close/<name>
+# back into the shape step 1 of the operator sequence above describes (one
+# commit whose only change is the dispositioned deviation-report.md, on
+# top of the candidate), wait
+# for that commit's evidence run, and dispatch and approve again. The new
+# run publishes again; PublishRollup is idempotent on (story, commit)
+# (internal/provider/port.go), so republishing the same commit updates the
+# earlier publication rather than duplicating it.
 name: close
 
 on:
@@ -129,6 +145,19 @@ on:
           for evidence on (see this file's header comment).
         required: true
         type: string
+
+# One close run per spec ref at a time. GitHub's documented concurrency
+# behaviour: a run queued while another run in the same group is in
+# progress waits as `pending`, and a newer queued run cancels an older
+# pending one. cancel-in-progress: false means a running close is never
+# cancelled, because it may already have published and not yet pushed
+# (see PUBLICATION PRECEDES THE PUSH above). The group is keyed on the
+# input text, so a spec/<name> dispatch and a tracker-ref dispatch naming
+# the same spec do not share a group; the approval step is where an
+# approver refuses such a duplicate.
+concurrency:
+  group: close-${{ inputs.spec_ref }}
+  cancel-in-progress: false
 
 jobs:
   close:

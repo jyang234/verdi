@@ -580,3 +580,23 @@ func TestCloseDispatchCloseStepHasACommitterIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestCloseDispatchRunsSerializePerSpecRef proves close.yml declares a
+// document-level concurrency group keyed on the dispatched spec ref, with
+// cancel-in-progress explicitly false (review m-5). Two runs for the same
+// ref would otherwise race: the loser's push is rejected after its rollup
+// is already published. With the group, a second dispatch waits as pending
+// until the first finishes, and false keeps GitHub from cancelling a run
+// that may already have published but not yet pushed.
+func TestCloseDispatchRunsSerializePerSpecRef(t *testing.T) {
+	doc := decodeWorkflow(t, closeDispatchPath(verdiRepoRoot))
+	if doc.Concurrency == nil {
+		t.Fatalf("close.yml: expected a document-level concurrency: block, found none")
+	}
+	if got, want := doc.Concurrency.Group, "close-"+specRefFromInput; got != want {
+		t.Errorf("close.yml: concurrency group = %q, want %q (one group per spec ref)", got, want)
+	}
+	if doc.Concurrency.CancelInProgress == nil || *doc.Concurrency.CancelInProgress {
+		t.Errorf("close.yml: concurrency must declare cancel-in-progress: false explicitly (a cancelled run can strand a published rollup with no pushed archive commit), got keys %v", doc.Concurrency.Keys)
+	}
+}
