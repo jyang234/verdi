@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestDerive_EmptyBranchCut_CutFromCurrent(t *testing.T) {
 	if c.ID != wantID || c.Executor != "branchcut.Unwind" {
 		t.Fatalf("Choice = %+v, want id=%s executor=branchcut.Unwind", c, wantID)
 	}
-	wantPre := []string{"close/checkout still points at c1", "index is empty", "working tree is clean", "main resolves"}
+	wantPre := []string{"close/checkout still points at c1", "close/checkout has no commits of its own", "index is empty", "working tree is clean", "main resolves"}
 	if !reflect.DeepEqual(c.Preconditions, wantPre) {
 		t.Fatalf("Preconditions = %v, want %v", c.Preconditions, wantPre)
 	}
@@ -246,7 +247,7 @@ func TestDerive_EmptyBranchCut_TipEqualWinsOverContaining(t *testing.T) {
 	if !reflect.DeepEqual(c.Effects, wantEffects) {
 		t.Fatalf("Effects = %v, want %v", c.Effects, wantEffects)
 	}
-	if c.Preconditions[3] != "topic/z resolves" {
+	if last := c.Preconditions[len(c.Preconditions)-1]; last != "topic/z resolves" {
 		t.Fatalf("Preconditions = %v, want the last entry to be \"topic/z resolves\"", c.Preconditions)
 	}
 }
@@ -312,6 +313,161 @@ func TestDerive_EmptyBranchCut_WithheldByArchiveMove(t *testing.T) {
 	}
 	if _, ok := stateFor(p.States, StateArchiveMoveUncommitted, "close/checkout"); !ok {
 		t.Fatal("archive-move-uncommitted state must also be emitted")
+	}
+}
+
+// uncleanTreeUncertaintyOf returns the one uncertainty R-RR3-21's own
+// derive-time tree guard emits for s (the one carrying the `git status
+// --porcelain` witness), and whether it is present at all.
+func uncleanTreeUncertaintyOf(s RecognizedState) (Uncertainty, bool) {
+	for _, u := range s.Uncertainties {
+		if u.Witness == "git status --porcelain" {
+			return u, true
+		}
+	}
+	return Uncertainty{}, false
+}
+
+// TestDerive_EmptyBranchCut_WithheldByStagedIndex is R-RR3-21: the
+// unwind's own "index is empty" precondition is FALSE at derive time, so
+// the choice must never be offered as executable — the state is still
+// emitted, and an uncertainty names the staged paths with the witness
+// that settles them (parent DC-13: each choice proves where it starts,
+// else diagnosis only).
+func TestDerive_EmptyBranchCut_WithheldByStagedIndex(t *testing.T) {
+	f := baseFacts()
+	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", EmptyWitnesses: []string{"main"}}
+	f.StagedPaths = []string{"notes/one.md", "notes/two.md"}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "design/checkout")
+	if !ok {
+		t.Fatalf("empty-branch-cut state must still be emitted: %+v", p.States)
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the index is not empty, so the choice cannot prove where it starts", s.Choices)
+	}
+	u, ok := uncleanTreeUncertaintyOf(s)
+	if !ok {
+		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+	}
+	for _, want := range []string{"notes/one.md", "notes/two.md"} {
+		if !strings.Contains(u.Text, want) {
+			t.Fatalf("uncertainty %q does not name the staged path %q", u.Text, want)
+		}
+	}
+}
+
+// TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree is R-RR3-21's
+// other half: Facts.Dirty alone (nothing staged) withholds the choice
+// too — the carried 2B-R2 residual (Dirty gathered, never surfaced),
+// which this composition turns from cosmetic into operative.
+func TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree(t *testing.T) {
+	f := baseFacts()
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
+	f.Dirty = true
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	if !ok {
+		t.Fatalf("empty-branch-cut state must still be emitted: %+v", p.States)
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the working tree is not clean", s.Choices)
+	}
+	u, ok := uncleanTreeUncertaintyOf(s)
+	if !ok {
+		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+	}
+	if !strings.Contains(u.Text, "the working tree is not clean") {
+		t.Fatalf("uncertainty %q does not state the working tree fact", u.Text)
+	}
+}
+
+// TestDerive_EmptyBranchCut_WithheldUncertaintyTruncatesManyPaths pins
+// R-RR3-21's own rendering rule for a large index: the count plus the
+// first few paths, never an unbounded dump.
+func TestDerive_EmptyBranchCut_WithheldUncertaintyTruncatesManyPaths(t *testing.T) {
+	f := baseFacts()
+	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
+	f.StagedPaths = []string{"a.md", "b.md", "c.md", "d.md", "e.md"}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, _ := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	u, ok := uncleanTreeUncertaintyOf(s)
+	if !ok {
+		t.Fatalf("Uncertainties = %+v, want the tree uncertainty", s.Uncertainties)
+	}
+	if !strings.Contains(u.Text, "5 staged") || !strings.Contains(u.Text, "a.md") || !strings.Contains(u.Text, "and 2 more") {
+		t.Fatalf("uncertainty %q, want the count, the first few paths, and the remainder", u.Text)
+	}
+	if strings.Contains(u.Text, "e.md") {
+		t.Fatalf("uncertainty %q dumps every staged path", u.Text)
+	}
+}
+
+// TestDerive_InterruptedDesignStart_WithholdsUnwind is R-RR3-21's own
+// headline composition, over a REAL repository rather than hand-built
+// facts: an interrupted `verdi design start` leaves design/checkout cut
+// AND its scaffold edit unstaged in the working tree, by construction —
+// the scaffold edit is exactly what makes the tree dirty. R-RR3-8's
+// ambiguity guard does not withhold here (it is scoped to close/<name>),
+// so before R-RR3-21 the operator was handed an --apply confirmation for
+// a choice certain to refuse.
+func TestDerive_InterruptedDesignStart_WithholdsUnwind(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	// design/<name> is cut from the RESOLVED BASE, so its return branch is
+	// only decidable with a resolved default branch (fixtureStore pins the
+	// variable empty; this call wins). Without it the choice would be
+	// withheld as undecidable and this test would pass for the wrong
+	// reason.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	cutEmptyBranch(t, repo, "design/checkout")
+	writeUnstagedScaffold(t, repo)
+
+	p := Derive(mustGather(t, cfg, "spec/checkout"))
+	mustValidate(t, p)
+
+	if !hasState(p, StateScaffoldUnstaged) {
+		t.Fatalf("no scaffold-unstaged state: %+v", p.States)
+	}
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "design/checkout")
+	if !ok {
+		t.Fatalf("no empty-branch-cut state for design/checkout: %+v", p.States)
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the scaffold edit is uncommitted, so the unwind cannot prove where it starts", s.Choices)
+	}
+	if _, ok := uncleanTreeUncertaintyOf(s); !ok {
+		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+	}
+}
+
+// TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind is the whole-wave
+// review's own live witness, over a real repository: one untracked file
+// next to an empty cut is enough (Dirty=true, StagedPaths empty).
+func TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	cutEmptyBranch(t, repo, "close/checkout")
+	if err := os.WriteFile(filepath.Join(repo.Dir, "leftover.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatalf("writing leftover.txt: %v", err)
+	}
+
+	p := Derive(mustGather(t, cfg, "spec/checkout"))
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "close/checkout")
+	if !ok {
+		t.Fatalf("no empty-branch-cut state for close/checkout: %+v", p.States)
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none (one untracked file makes the tree unclean)", s.Choices)
+	}
+	if _, ok := uncleanTreeUncertaintyOf(s); !ok {
+		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
 	}
 }
 
@@ -454,8 +610,12 @@ func TestDerive_ArchiveMoveUncommitted_ReciprocalUncertainty(t *testing.T) {
 
 // TestDerive_EmptyBranchCut_NotWithheldOnDifferentBranch is 2B-F8's own
 // scoping fix: a staged closure on close/checkout must never withhold an
-// UNRELATED design/checkout empty cut — R-RR3-8's ambiguity guard only
-// ever applies to close/<name> itself.
+// UNRELATED design/checkout empty cut through R-RR3-8's AMBIGUITY guard,
+// which only ever applies to close/<name> itself. Since R-RR3-21 a
+// non-empty index withholds every unwind on its own (the state here
+// carries the tree uncertainty and no choice), so what this test
+// discriminates is which guard fired: design/checkout must never be told
+// it is ambiguous with close/checkout's closure.
 func TestDerive_EmptyBranchCut_NotWithheldOnDifferentBranch(t *testing.T) {
 	f := baseFacts()
 	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1", EmptyWitnesses: []string{"main"}}
@@ -467,8 +627,26 @@ func TestDerive_EmptyBranchCut_NotWithheldOnDifferentBranch(t *testing.T) {
 	if !ok {
 		t.Fatal("no empty-branch-cut state for design/checkout")
 	}
-	if len(s.Choices) != 1 {
-		t.Fatalf("Choices = %+v, want design/checkout's own unwind choice, not withheld by close/checkout's staged closure", s.Choices)
+	for _, u := range s.Uncertainties {
+		if strings.Contains(u.Text, "also shows evidence of") {
+			t.Fatalf("uncertainty %q: R-RR3-8's ambiguity guard must not reach design/checkout", u.Text)
+		}
+	}
+	if _, ok := uncleanTreeUncertaintyOf(s); !ok {
+		t.Fatalf("Uncertainties = %+v, want R-RR3-21's tree uncertainty, the only guard that applies here", s.Uncertainties)
+	}
+
+	// With a clean index the same facts DO offer design/checkout's own
+	// unwind: nothing about close/checkout's closure withholds it.
+	f.StagedPaths = nil
+	clean := Derive(f)
+	mustValidate(t, clean)
+	cs, ok := stateFor(clean.States, StateEmptyBranchCut, "design/checkout")
+	if !ok {
+		t.Fatal("no empty-branch-cut state for design/checkout over a clean index")
+	}
+	if len(cs.Choices) != 1 {
+		t.Fatalf("Choices = %+v, want design/checkout's own unwind choice", cs.Choices)
 	}
 }
 

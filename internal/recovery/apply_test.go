@@ -545,3 +545,95 @@ func TestApply_RefusesWhenEmptinessLostInReproveWindow_CutFromCurrent(t *testing
 		t.Fatalf("close/checkout = %s, want %s untouched", got, closeTip)
 	}
 }
+
+// TestApply_UnwindRefusesOnATreeThatWentUnclean covers the window
+// R-RR3-21's derive-time guard cannot close: the projection was derived
+// over a clean tree, and the tree went unclean before the executor ran.
+// The re-proof still refuses (R-RR3-9, nothing changed) — and its
+// sentence states the FACT it can actually prove ("the working tree is
+// not clean"), never a transition ("no longer"), which it has no
+// observation of: derive and re-prove both read the same fresh Gather
+// here, and the guard means the offered choice's own start was clean.
+func TestApply_UnwindRefusesOnATreeThatWentUnclean(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	cutEmptyBranch(t, repo, "close/checkout")
+
+	applyReproveHook = func() {
+		if err := os.WriteFile(filepath.Join(repo.Dir, "leftover.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+			t.Fatalf("dirtying %s: %v", repo.Dir, err)
+		}
+	}
+	t.Cleanup(func() { applyReproveHook = nil })
+
+	_, err := Apply(context.Background(), cfg, "spec/checkout", "unwind-branch-cut:close/checkout", io.Discard)
+	if !errors.Is(err, ErrPreconditionFailed) {
+		t.Fatalf("err = %v, want ErrPreconditionFailed", err)
+	}
+	if !strings.Contains(err.Error(), "the working tree is not clean") {
+		t.Fatalf("err = %v, want it to state the working-tree fact", err)
+	}
+	// ErrPreconditionFailed's own sentinel ("precondition no longer
+	// holds") IS a transition this path observed — the choice was offered,
+	// so its start was proved clean. The re-proof's own SENTENCE is what
+	// must not invent one.
+	if strings.Contains(err.Error(), "no longer clean") {
+		t.Fatalf("err = %v, must not assert a transition the tree check never observed", err)
+	}
+	if ok, _ := gitx.HasLocalBranch(context.Background(), repo.Dir, "close/checkout"); !ok {
+		t.Fatal("close/checkout deleted by a refused Apply call")
+	}
+}
+
+// TestApply_UnwindRefusesOnAnIndexThatWentNonEmpty is the same window for
+// the index half.
+func TestApply_UnwindRefusesOnAnIndexThatWentNonEmpty(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	cutEmptyBranch(t, repo, "close/checkout")
+
+	applyReproveHook = func() {
+		path := filepath.Join(repo.Dir, "staged.txt")
+		if err := os.WriteFile(path, []byte("staged\n"), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", path, err)
+		}
+		if err := gitx.AddPaths(context.Background(), repo.Dir, "staged.txt"); err != nil {
+			t.Fatalf("AddPaths: %v", err)
+		}
+	}
+	t.Cleanup(func() { applyReproveHook = nil })
+
+	_, err := Apply(context.Background(), cfg, "spec/checkout", "unwind-branch-cut:close/checkout", io.Discard)
+	if !errors.Is(err, ErrPreconditionFailed) {
+		t.Fatalf("err = %v, want ErrPreconditionFailed", err)
+	}
+	if !strings.Contains(err.Error(), "the index is not empty") {
+		t.Fatalf("err = %v, want it to state the index fact", err)
+	}
+	if strings.Contains(err.Error(), "no longer empty") {
+		t.Fatalf("err = %v, must not assert a transition the index check never observed", err)
+	}
+	if ok, _ := gitx.HasLocalBranch(context.Background(), repo.Dir, "close/checkout"); !ok {
+		t.Fatal("close/checkout deleted by a refused Apply call")
+	}
+}
+
+// TestApply_UnknownChoiceWithNoChoicesOffered is wave-review m1: a
+// projection that offers nothing renders that fact, never the label
+// "known choices:" with an empty list after it.
+func TestApply_UnknownChoiceWithNoChoicesOffered(t *testing.T) {
+	_, cfg := fixtureStore(t) // a healthy store: no ritual branch, no lock, nothing recognized
+	p := Derive(mustGather(t, cfg, "spec/checkout"))
+	if len(choiceIDs(p)) != 0 {
+		t.Fatalf("fixture offers choices %v; this case needs a projection with none", choiceIDs(p))
+	}
+
+	_, err := Apply(context.Background(), cfg, "spec/checkout", "bogus:x", io.Discard)
+	if !errors.Is(err, ErrUnknownChoice) {
+		t.Fatalf("err = %v, want ErrUnknownChoice", err)
+	}
+	if !strings.Contains(err.Error(), "no choices are offered for spec/checkout") {
+		t.Fatalf("err = %v, want it to state that nothing is offered", err)
+	}
+	if strings.Contains(err.Error(), "known choices") {
+		t.Fatalf("err = %v, want no empty known-choices tail", err)
+	}
+}

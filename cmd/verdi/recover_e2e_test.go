@@ -335,17 +335,20 @@ func TestRecoverE2E_ApplyUnwindReturnBranchAhead(t *testing.T) {
 	}
 }
 
-// TestRecoverE2E_ApplyRefusesWhenPreconditionMoved proves R-RR3-9's own
-// re-proof over a SINGLE static repository state a subprocess test can
-// set up directly (no in-process hook is reachable across a real OS
-// process boundary): an unrelated, uncommitted change left in the
-// working tree does not affect recognizeEmptyBranchCut's own recognition
-// gate at all (it checks only branch existence and emptiness, never
-// Dirty/StagedPaths), so the choice is still found — but the SAME fact
-// fails the choice's own "working tree is clean" precondition on
-// re-proof. Exit 1, nothing executed: the gitlog carries no checkout or
-// branch command at all.
-func TestRecoverE2E_ApplyRefusesWhenPreconditionMoved(t *testing.T) {
+// TestRecoverE2E_UncleanTreeWithholdsTheUnwind proves R-RR3-21 through
+// the REAL binary, over the single static repository state a subprocess
+// test can set up directly (no in-process hook reaches across a real OS
+// process boundary): an empty close/checkout cut with one uncommitted
+// file beside it. The state is still recognized and still printed, but
+// no executable choice is offered — before R-RR3-21 the operator was
+// handed `--apply unwind-branch-cut:close/checkout` for a choice that
+// was certain to refuse. The withheld choice's own uncertainty carries
+// the `git status --porcelain` witness, and asking for the choice
+// anyway is exit 1 with nothing executed: the gitlog carries no checkout
+// or branch command at all. The refusal also shows m1's own rendering —
+// with no choices in the projection the error says so instead of
+// trailing an empty "known choices:" list.
+func TestRecoverE2E_UncleanTreeWithholdsTheUnwind(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -355,19 +358,55 @@ func TestRecoverE2E_ApplyRefusesWhenPreconditionMoved(t *testing.T) {
 		t.Fatalf("writing leftover.txt: %v", err)
 	}
 
+	readOut, readErr, readCode := runVerdiBinary(t, bin, repo.Dir, nil, "recover", "--json", "spec/checkout")
+	if readCode != 1 {
+		t.Fatalf("verdi recover: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", readCode, readOut, readErr)
+	}
+	proj, err := recovery.Decode([]byte(strings.TrimRight(readOut, "\n")))
+	if err != nil {
+		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, readOut)
+	}
+	var cut recovery.RecognizedState
+	for _, st := range proj.States {
+		if st.Code == recovery.StateEmptyBranchCut && st.Target == "close/checkout" {
+			cut = st
+		}
+	}
+	if cut.Code == "" {
+		t.Fatalf("no empty-branch-cut state for close/checkout: %+v", proj.States)
+	}
+	if len(cut.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the working tree is not clean", cut.Choices)
+	}
+	witnessed := false
+	for _, u := range cut.Uncertainties {
+		if u.Witness == "git status --porcelain" {
+			witnessed = true
+		}
+	}
+	if !witnessed {
+		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", cut.Uncertainties)
+	}
+
 	logPath := filepath.Join(t.TempDir(), "gitlog.txt")
 	env := []string{recoveryGitLogEnv + "=" + logPath}
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "recover", "spec/checkout", "--apply", "unwind-branch-cut:close/checkout")
 	if code != 1 {
 		t.Fatalf("verdi recover --apply: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "no longer clean") {
-		t.Fatalf("stderr = %q, want it to name the violated precondition", stderr)
+	if !strings.Contains(stderr, "unknown choice") {
+		t.Fatalf("stderr = %q, want it to refuse the withheld choice id", stderr)
+	}
+	if !strings.Contains(stderr, "no choices are offered for spec/checkout") {
+		t.Fatalf("stderr = %q, want m1's own no-choices rendering", stderr)
+	}
+	if strings.Contains(stderr, "known choices:") {
+		t.Fatalf("stderr = %q, want no empty \"known choices:\" tail", stderr)
 	}
 
 	for _, argv := range gitlogArgvs(t, logPath) {
 		if argv[0] == "checkout" || argv[0] == "branch" {
-			t.Fatalf("a precondition-moved run issued a checkout/branch command: %v", argv)
+			t.Fatalf("a withheld-choice run issued a checkout/branch command: %v", argv)
 		}
 	}
 	if cur, err := gitx.CurrentBranch(context.Background(), repo.Dir); err != nil || cur != "close/checkout" {

@@ -113,7 +113,12 @@ func Apply(ctx context.Context, cfg *store.Config, ref, choiceID string, stderr 
 
 	choice, state, ok := findChoice(before, choiceID)
 	if !ok {
-		return Outcome{}, fmt.Errorf("%w: %q; known choices: %s", ErrUnknownChoice, choiceID, strings.Join(choiceIDs(before), ", "))
+		// Wave review m1: a projection with no choices at all renders its
+		// own fact, never a "known choices:" label with nothing after it.
+		if known := choiceIDs(before); len(known) != 0 {
+			return Outcome{}, fmt.Errorf("%w: %q; known choices: %s", ErrUnknownChoice, choiceID, strings.Join(known, ", "))
+		}
+		return Outcome{}, fmt.Errorf("%w: %q; no choices are offered for %s", ErrUnknownChoice, choiceID, before.Ref)
 	}
 	if choice.Executor == executorNone {
 		return Outcome{}, fmt.Errorf("%w: %s; the manual commands are: %s", ErrNoExecutor, choiceID, strings.Join(choice.ManualCommands, "; "))
@@ -299,11 +304,15 @@ func reproveUnwind(facts Facts, choice Choice, fresh Facts) string {
 	if !freshRB.Empty() {
 		return fmt.Sprintf("%s now carries commit(s) of its own: no other local branch reaches its tip %s any more", name, freshRB.Tip)
 	}
+	// R-RR3-21: state the fact this check actually observed. "No longer"
+	// would assert a transition nothing here witnessed — the derive-time
+	// guard now withholds the choice outright when either is already
+	// false, so this path only ever sees the tree as it is right now.
 	if len(fresh.StagedPaths) != 0 {
-		return "the index is no longer empty"
+		return "the index is not empty"
 	}
 	if fresh.Dirty {
-		return "the working tree is no longer clean"
+		return "the working tree is not clean"
 	}
 
 	origCand, ok := candidateFor(facts, name)

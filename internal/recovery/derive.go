@@ -128,6 +128,43 @@ func closeRitualAmbiguous(f Facts) (other StateCode, ambiguous bool) {
 	return "", false
 }
 
+// stagedPathsPhrase renders f.StagedPaths for an operator: the count
+// always, the first few paths themselves, and the remainder as a count —
+// never an unbounded dump into a single canonical line.
+func stagedPathsPhrase(paths []string) string {
+	const shown = 3
+	if len(paths) <= shown {
+		return fmt.Sprintf("%d staged: %s", len(paths), strings.Join(paths, ", "))
+	}
+	return fmt.Sprintf("%d staged: %s, and %d more", len(paths), strings.Join(paths[:shown], ", "), len(paths)-shown)
+}
+
+// uncleanTreeUncertainty implements R-RR3-21: the unwind's own "index is
+// empty" and "working tree is clean" preconditions are evaluated at
+// DERIVE time, from the same Facts the choice would be built from. When
+// either is already false the choice cannot prove where it starts, so
+// parent DC-13 leaves diagnosis only: the state is still emitted, no
+// executable choice is offered, and this uncertainty names what it can
+// (the staged paths from Facts; the working tree's own changed paths are
+// not gathered) with the witness that settles both. Reports false when
+// the tree is clean, in which case no uncertainty is added at all.
+func uncleanTreeUncertainty(f Facts, branch string) (Uncertainty, bool) {
+	var reasons []string
+	if len(f.StagedPaths) != 0 {
+		reasons = append(reasons, fmt.Sprintf("the index is not empty (%s)", stagedPathsPhrase(f.StagedPaths)))
+	}
+	if f.Dirty {
+		reasons = append(reasons, "the working tree is not clean")
+	}
+	if len(reasons) == 0 {
+		return Uncertainty{}, false
+	}
+	return Uncertainty{
+		Text:    fmt.Sprintf("no unwind of %s is offered: %s — a branch cut is only unwound from an empty index and a clean working tree, and this run cannot prove that starting point", branch, strings.Join(reasons, "; ")),
+		Witness: "git status --porcelain",
+	}, true
+}
+
 func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 	ritualNames := map[string]bool{
 		f.Design.Name: true, f.Feature.Name: true, f.Close.Name: true, f.PolicyAdopt.Name: true,
@@ -169,9 +206,22 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 			}
 		}
 
+		// R-RR3-21: both tree preconditions are evaluated HERE, not left
+		// for the executor to refuse. The uncertainty is recorded before
+		// the return-branch resolution below so a state that is both
+		// unclean AND undecidable carries both diagnoses.
+		treeUncertainty, treeUnclean := uncleanTreeUncertainty(f, rb.Name)
+		if treeUnclean {
+			state.Uncertainties = append(state.Uncertainties, treeUncertainty)
+		}
+
 		originalBranch, tipEqual, containing, undecidable := resolveReturnBranch(f, c, rb, ritualNames)
 		if undecidable {
 			state.Uncertainties = append(state.Uncertainties, undecidableReturnBranchUncertainty(c, rb, tipEqual, containing))
+			states = append(states, state)
+			continue
+		}
+		if treeUnclean {
 			states = append(states, state)
 			continue
 		}
@@ -182,6 +232,10 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 			Summary: fmt.Sprintf("unwind the empty %s branch cut", rb.Name),
 			Preconditions: []string{
 				fmt.Sprintf("%s still points at %s", rb.Name, rb.Tip),
+				// ac-9's literal third clause, DECLARED as well as
+				// re-proved (Task 4 re-review N1): apply.go's
+				// reproveUnwind re-checks Empty() on its own.
+				fmt.Sprintf("%s has no commits of its own", rb.Name),
 				"index is empty",
 				"working tree is clean",
 				fmt.Sprintf("%s resolves", originalBranch),
