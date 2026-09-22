@@ -259,21 +259,62 @@ func TestRecover_JSONAndBareFormsAreByteIdentical(t *testing.T) {
 	}
 }
 
-// TestRecover_ApplyStubRefusesWithExit2 proves the Task 3 --apply stub
-// (internal/recovery.ErrNotImplemented) is wired all the way through:
-// cmdRecover maps it to exit 2. Task 4 replaces this stub and this test
-// alongside it.
-func TestRecover_ApplyStubRefusesWithExit2(t *testing.T) {
+// TestRecover_ApplyUnknownChoiceRefusesWithExit1 proves R-RR3-9's own
+// exit mapping for an unknown choice id: cmdRecover's own --apply path
+// (Task 4's real protocol, replacing Task 3's stub and its own now-
+// retired exit-2 stub test) exits 1, nothing changed, and stderr lists
+// every known choice id.
+func TestRecover_ApplyUnknownChoiceRefusesWithExit1(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
+	recoverCutEmptyBranch(t, repo, "close/checkout")
 	var stdout, stderr bytes.Buffer
 	code := recoverRunInDir(t, repo.Dir, func() int {
-		return cmdRecover([]string{"spec/checkout", "--apply", "unwind-branch-cut:close/checkout"}, &stdout, &stderr)
+		return cmdRecover([]string{"spec/checkout", "--apply", "no-such-choice"}, &stdout, &stderr)
 	})
-	if code != 2 {
-		t.Fatalf("exit %d, want 2; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	if code != 1 {
+		t.Fatalf("exit %d, want 1; stdout %q stderr %q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), recovery.ErrNotImplemented.Error()) {
-		t.Fatalf("stderr %q does not mention %q", stderr.String(), recovery.ErrNotImplemented.Error())
+	if !strings.Contains(stderr.String(), "unwind-branch-cut:close/checkout") {
+		t.Fatalf("stderr %q, want it to list the known choice id", stderr.String())
+	}
+}
+
+// TestRecover_ApplyNoExecutorRefusesWithExit1 proves R-RR3-9's own exit
+// mapping for a choice with no executor: cmdRecover's own --apply path
+// never touches the repository and exits 1, stderr naming the manual
+// commands.
+func TestRecover_ApplyNoExecutorRefusesWithExit1(t *testing.T) {
+	repo, _ := recoverFixtureStore(t)
+	lockPath := recoverWriteStaleWriterLock(t, repo)
+
+	var readOut bytes.Buffer
+	code := recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"--json", "spec/checkout"}, &readOut, io.Discard)
+	})
+	if code != 1 {
+		t.Fatalf("read exit %d, want 1; stdout %q", code, readOut.String())
+	}
+	p, err := recovery.Decode(bytes.TrimRight(readOut.Bytes(), "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.States) == 0 || len(p.States[0].Choices) == 0 {
+		t.Fatalf("no choice recognized: %+v", p.States)
+	}
+	id := p.States[0].Choices[0].ID
+
+	var stdout, stderr bytes.Buffer
+	code = recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"spec/checkout", "--apply", id}, &stdout, &stderr)
+	})
+	if code != 1 {
+		t.Fatalf("apply exit %d, want 1; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "rm ") {
+		t.Fatalf("stderr %q, want the manual command", stderr.String())
+	}
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatal("lock removed by a choice with no executor")
 	}
 }
 

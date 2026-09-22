@@ -27,9 +27,14 @@
 // git/decoding failure — including a run that ever issued a forbidden git
 // command, R-RR3-10, which is an operational failure of this verb's own
 // contract, never a verdict). `--apply` has its own three-way exit
-// mapping (R-RR3-9): 0 when every postcondition holds, 1 for a refused
-// choice, 2 operational; Task 4 implements that path's success case, this
-// task only wires the stub's uniform refusal.
+// mapping (R-RR3-9, Task 4): 0 when every postcondition holds after
+// execution, 1 for a refused choice (an unknown choice id, a choice with
+// no executor, or a precondition that no longer holds — nothing changes
+// in any of those three, per R-RR3-9's own ruling text) or for a
+// postcondition that comes up VIOLATED after a real execution, 2
+// operational (no resolvable store root, a Gather failure, or the
+// post-execution journey re-derivation itself failing — R-RR3-9: "the
+// projection still prints what it observed" even then).
 //
 // recoverErr guarantees a stderr line is "recover: "-prefixed exactly
 // once, mirroring journey.go's journeyErr — internal/recovery's own
@@ -43,6 +48,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -82,8 +88,8 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 
 	// R-RR3-10: attach the command log for the WHOLE run, so any forbidden
 	// git command this run issues — whether during Gather/Derive's own
-	// read-only facts or (later, Task 4) an executor's mutation — is
-	// caught.
+	// read-only facts or one of the two executors' own mutation
+	// (branchcut.Unwind, reclaim.Apply) — is caught.
 	var log recovery.CommandLog
 	ctx := gitx.WithObserver(context.Background(), &log)
 	if recoverObserverHook != nil {
@@ -102,14 +108,7 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 			recoverErr(stderr, cfgErr)
 			exit = 2
 		default:
-			if _, applyErr := recovery.Apply(ctx, cfg, ref, applyID, stderr); applyErr != nil {
-				recoverErr(stderr, applyErr)
-				exit = 2
-			}
-			// Task 4 replaces this branch with the full postcondition
-			// report (R-RR3-9); the Task 3 stub (recovery.ErrNotImplemented)
-			// never succeeds, so the success path above is presently
-			// unreachable.
+			exit = applyAndReport(ctx, cfg, ref, applyID, stdout, stderr)
 		}
 	} else {
 		proj, loadErr := recovery.Loader{Root: root}.Load(ctx, ref)
@@ -152,6 +151,60 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return exit
+}
+
+// applyAndReport runs R-RR3-9's whole apply protocol and reports its own
+// exit code (R-RR3-9/R-RR3-1): a refused choice (unknown id, no
+// executor, or a precondition that no longer holds — recovery.Apply's
+// own three sentinels, nothing changed in any of the three) is exit 1;
+// any other error recovery.Apply itself returns (a Gather failure) is
+// operational, exit 2. On success, every postcondition is printed as
+// "postcondition: <text>: held|VIOLATED (<observed>)" on stdout, followed
+// by the canonical JSON of the re-derived projection — printed
+// regardless of what follows, since R-RR3-9 requires "the projection
+// still prints what it observed" even when the journey re-derivation
+// itself then fails operationally. Exit is 0 only when every
+// postcondition held AND the journey re-derivation itself succeeded; a
+// failed journey re-derivation is operational (exit 2, overriding a
+// held-postconditions success); any postcondition VIOLATED is exit 1.
+func applyAndReport(ctx context.Context, cfg *store.Config, ref, choiceID string, stdout, stderr io.Writer) int {
+	out, applyErr := recovery.Apply(ctx, cfg, ref, choiceID, stderr)
+	if applyErr != nil {
+		recoverErr(stderr, applyErr)
+		if errors.Is(applyErr, recovery.ErrUnknownChoice) || errors.Is(applyErr, recovery.ErrNoExecutor) || errors.Is(applyErr, recovery.ErrPreconditionFailed) {
+			return 1
+		}
+		return 2
+	}
+
+	allHeld := true
+	for _, pc := range out.Postconditions {
+		status := "held"
+		if !pc.Held {
+			status = "VIOLATED"
+			allHeld = false
+		}
+		fmt.Fprintf(stdout, "postcondition: %s: %s (%s)\n", pc.Text, status, pc.Observed)
+	}
+
+	data, canonErr := recovery.Canonical(out.After)
+	if canonErr != nil {
+		recoverErr(stderr, canonErr)
+		return 2
+	}
+	if _, werr := stdout.Write(data); werr != nil {
+		recoverErr(stderr, werr)
+		return 2
+	}
+
+	if out.JourneyErr != nil {
+		recoverErr(stderr, out.JourneyErr)
+		return 2
+	}
+	if !allHeld {
+		return 1
+	}
+	return 0
 }
 
 // recoverObserverHook is a test-only seam (fix round 1, I1's mutation-
