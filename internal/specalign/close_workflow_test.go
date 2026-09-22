@@ -15,6 +15,8 @@ package specalign
 
 import (
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -30,18 +32,18 @@ func closeDispatchPath(root string) string {
 
 // TestVerifyWorkflowExcludesCloseBranchesFromItsOwnPushTrigger proves
 // verify.yml's push trigger no longer fires on close/** branches (the
-// close-evidence workflow owns that branch namespace now — see
-// close-evidence.yml's own head comment for why the SAME commit must never
-// be evidenced by two workflows), while leaving every other branch's
-// path-filtered behaviour untouched (the paths: list itself, and the
-// absence of a `branches:` allow-list, are unchanged).
+// close-evidence workflow owns that branch namespace now, so one push to a
+// close/** branch runs the evidence job once, not twice), while leaving
+// every other branch's path-filtered behaviour untouched: branches-ignore
+// is EXACTLY ["close/**"] (no other branch is carved out), and the paths:
+// list and the absence of a `branches:` allow-list are unchanged.
 func TestVerifyWorkflowExcludesCloseBranchesFromItsOwnPushTrigger(t *testing.T) {
 	doc := decodeWorkflow(t, workflowPath(verdiRepoRoot, "verify.yml"))
 	if doc.On.Push == nil {
 		t.Fatalf("verify.yml: expected a push trigger, found none")
 	}
-	if !slices.Contains(doc.On.Push.BranchesIgnore, "close/**") {
-		t.Errorf(`verify.yml: push trigger must carry branches-ignore: ["close/**", ...], got BranchesIgnore=%v — without it, a push to close/** touching a code path would ALSO fire this job, uploading a second "verdi-evidence" artifact for the same commit close-evidence.yml already produced one for (forge.FetchEvidenceBundle picks whichever the API lists first, ambiguously)`, doc.On.Push.BranchesIgnore)
+	if !slices.Equal(doc.On.Push.BranchesIgnore, []string{"close/**"}) {
+		t.Errorf(`verify.yml: push trigger branches-ignore: must be exactly ["close/**"], got %v — without close/**, a push to close/** touching a code path would ALSO fire this job and upload a second "verdi-evidence" bundle for the push close-evidence.yml already evidences; any further entry (e.g. "main") silently stops evidence on a branch whose behaviour this carve-out must leave unchanged`, doc.On.Push.BranchesIgnore)
 	}
 	if doc.On.Push.Branches != nil {
 		t.Errorf("verify.yml: push trigger must not gain a branches: allow-list (that would narrow it beyond the close/** exclusion this lane makes), got Branches=%v", doc.On.Push.Branches)
@@ -105,6 +107,16 @@ func TestCloseEvidenceWorkflowTriggersOnCloseBranchesUnfiltered(t *testing.T) {
 	if len(doc.On.Push.Paths) != 0 {
 		t.Errorf("close-evidence.yml: push trigger must carry NO paths: filter (every close/** push gets evidence, regardless of what changed), got Paths=%v", doc.On.Push.Paths)
 	}
+	// The whitelist net (triggerFilter.Keys): the push body may carry
+	// `branches:` and nothing else. paths-ignore:, tags:, branches-ignore:
+	// and any future narrowing keyword would each let some close/** push go
+	// unevidenced while the targeted paths: check above stays green.
+	if want := []string{"branches"}; !slices.Equal(doc.On.Push.Keys, want) {
+		t.Errorf("close-evidence.yml: push trigger body must declare exactly %v, got %v (a paths-ignore: or any other filter would leave some close/** commit with no exact-commit evidence)", want, doc.On.Push.Keys)
+	}
+	if want := []string{"push"}; !slices.Equal(doc.On.Keys, want) {
+		t.Errorf("close-evidence.yml: on: must declare exactly %v, got %v", want, doc.On.Keys)
+	}
 }
 
 // TestCloseEvidenceWorkflowCallsVerifyThroughWorkflowCall proves the one
@@ -119,15 +131,20 @@ func TestCloseEvidenceWorkflowTriggersOnCloseBranchesUnfiltered(t *testing.T) {
 // environment: (that lives on close.yml's job alone, and jobs.<job_id>.uses
 // + jobs.<job_id>.environment together is not a keyword combination GitHub
 // permits on a reusable-workflow caller job).
+//
+// The caller job's id is pinned to `verify` as well. GitHub documents that
+// "the github context is always associated with the caller workflow" when a
+// reusable workflow runs, which would make GITHUB_JOB the CALLER's job id;
+// community reports show the called job's id instead. Because the evidence
+// records' provenance.job_name comes from GITHUB_JOB (SI-229) and elaborated
+// obligations name CI job `verify`, both ids must be `verify` for the
+// construction to hold under either reading.
 func TestCloseEvidenceWorkflowCallsVerifyThroughWorkflowCall(t *testing.T) {
 	doc := decodeWorkflow(t, closeEvidencePath(verdiRepoRoot))
-	if len(doc.Jobs) != 1 {
-		t.Fatalf("close-evidence.yml: expected exactly one job, found %d: %v", len(doc.Jobs), doc.Jobs)
+	if got, want := jobKeys(doc.Jobs), []string{"verify"}; !slices.Equal(got, want) {
+		t.Fatalf("close-evidence.yml: jobs must be exactly %v (the caller job id must be `verify`: GITHUB_JOB may report the caller's job id, and it feeds provenance.job_name, SI-229), got %v", want, got)
 	}
-	var job workflowJob
-	for _, j := range doc.Jobs {
-		job = j
-	}
+	job := doc.Jobs["verify"]
 	if job.Uses != "./.github/workflows/verify.yml" {
 		t.Errorf("close-evidence.yml: the one job must declare uses: ./.github/workflows/verify.yml (a local reusable-workflow call), got %q", job.Uses)
 	}
@@ -165,6 +182,13 @@ func TestCloseDispatchWorkflowIsDispatchOnly(t *testing.T) {
 	}
 	if doc.On.WorkflowDispatch == nil {
 		t.Fatalf("close.yml: expected a workflow_dispatch trigger, found none")
+	}
+	// The whitelist net (workflowTriggers.Keys): the three named negatives
+	// above cannot see a trigger this package does not model, such as
+	// schedule: or pull_request_target:, either of which would run the
+	// archive-and-publish job without an operator's dispatch.
+	if want := []string{"workflow_dispatch"}; !slices.Equal(doc.On.Keys, want) {
+		t.Errorf("close.yml: on: must declare exactly %v and no other trigger, got %v", want, doc.On.Keys)
 	}
 	input, ok := doc.On.WorkflowDispatch.Inputs["spec_ref"]
 	if !ok {
@@ -343,5 +367,121 @@ func TestCloseDispatchChecksOutExactCommitDetached(t *testing.T) {
 	}
 	if got := step.With["ref"]; got != "${{ github.sha }}" {
 		t.Errorf(`close.yml: actions/checkout ref: must be "${{ github.sha }}" (detached-HEAD-at-exact-commit; see this test's doc comment for why the default branch-name form collides with verdi close's own branch cut), got %q`, got)
+	}
+}
+
+// TestCloseEvidenceCalledJobGatesThenProducesThenUploads proves, in the job
+// close-evidence.yml actually calls (resolved from its `uses:` path, not
+// assumed), that `make verify` runs before `verdi sync --produce`, which runs
+// before the upload of the "verdi-evidence" artifact from
+// .verdi/data/derived/. The self-hosted evidence producer is honest only when
+// it runs strictly after a `make verify` that already passed in the same job
+// (verify.yml's head comment), and close's `verdi sync` fetches the bundle by
+// that exact artifact name. Each command is matched by exact text and must
+// occur once, so `make verify || true` or a duplicate step does not count.
+func TestCloseEvidenceCalledJobGatesThenProducesThenUploads(t *testing.T) {
+	caller := decodeWorkflow(t, closeEvidencePath(verdiRepoRoot))
+	job, ok := caller.Jobs["verify"]
+	if !ok {
+		t.Fatalf("close-evidence.yml: no `verify` caller job found, got jobs %v", jobKeys(caller.Jobs))
+	}
+	rel, ok := strings.CutPrefix(job.Uses, "./")
+	if !ok || rel == "" {
+		t.Fatalf("close-evidence.yml: the caller job must call a local reusable workflow (uses: ./.github/workflows/<file>), got %q", job.Uses)
+	}
+	called := decodeWorkflow(t, filepath.Join(verdiRepoRoot, filepath.FromSlash(rel)))
+	if got, want := jobKeys(called.Jobs), []string{"verify"}; !slices.Equal(got, want) {
+		t.Fatalf("%s: the called workflow must declare exactly the jobs %v (its job id is GITHUB_JOB, which feeds provenance.job_name), got %v", rel, want, got)
+	}
+	steps := called.Jobs["verify"].Steps
+
+	exactlyOnce := func(cmd string) int {
+		t.Helper()
+		matches := findExactRunSteps(steps, cmd)
+		if len(matches) != 1 {
+			t.Fatalf("%s: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", rel, cmd, len(matches), runCommands(steps))
+		}
+		return matches[0]
+	}
+	gate := exactlyOnce("make verify")
+	produce := exactlyOnce("./.build/verdi sync --produce")
+
+	upload := -1
+	for i, step := range steps {
+		if !strings.HasPrefix(step.Uses, "actions/upload-artifact@") {
+			continue
+		}
+		if upload != -1 {
+			t.Fatalf("%s: more than one actions/upload-artifact step (indexes %d and %d)", rel, upload, i)
+		}
+		upload = i
+		if got := step.With["name"]; got != "verdi-evidence" {
+			t.Errorf(`%s: the upload step's artifact name must be "verdi-evidence" (the name close's verdi sync fetches by), got %q`, rel, got)
+		}
+		if got := step.With["path"]; got != ".verdi/data/derived/" {
+			t.Errorf(`%s: the upload step must upload ".verdi/data/derived/" (where verdi sync --produce writes the bundle), got %q`, rel, got)
+		}
+	}
+	if upload == -1 {
+		t.Fatalf("%s: no actions/upload-artifact step found", rel)
+	}
+	if gate >= produce || produce >= upload {
+		t.Errorf("%s: steps must run in the order make verify (%d) < verdi sync --produce (%d) < upload verdi-evidence (%d)", rel, gate, produce, upload)
+	}
+}
+
+// TestCloseDispatchJobNeverProducesEvidence proves the close job only PULLS
+// evidence: no step runs `verdi sync --produce` (or --produce-runtime). DC-1
+// makes evidence authoritative only because it is fetched from the forge
+// artifact store by (ref, commit); a record this same run produced would be
+// folded without ever taking that round trip.
+func TestCloseDispatchJobNeverProducesEvidence(t *testing.T) {
+	job := closeJob(t)
+	for i, step := range job.Steps {
+		if strings.Contains(step.Run, "--produce") {
+			t.Errorf("close.yml: step %d runs evidence production, which this job must never do (DC-1: close folds only bundles fetched from the forge artifact store): %q", i, strings.TrimSpace(step.Run))
+		}
+	}
+}
+
+// TestCloseDispatchSyncIsAPlainPull proves the evidence step is exactly
+// `./.build/verdi sync`, once, and that no step passes --or-regen, which
+// would regenerate records locally (source: local) when no CI bundle exists
+// instead of failing.
+func TestCloseDispatchSyncIsAPlainPull(t *testing.T) {
+	job := closeJob(t)
+	if matches := findExactRunSteps(job.Steps, "./.build/verdi sync"); len(matches) != 1 {
+		t.Errorf("close.yml: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", "./.build/verdi sync", len(matches), runCommands(job.Steps))
+	}
+	for i, step := range job.Steps {
+		if strings.Contains(step.Run, "--or-regen") {
+			t.Errorf("close.yml: step %d passes --or-regen, which falls back to local regeneration instead of the forge round trip: %q", i, strings.TrimSpace(step.Run))
+		}
+	}
+}
+
+// gitPushRE finds a git push invocation anywhere in a run: script,
+// tolerating any run of whitespace between the two words.
+var gitPushRE = regexp.MustCompile(`\bgit\s+push\b`)
+
+// TestCloseDispatchPushIsAPlainFastForwardOfTheCloseBranch proves the job
+// pushes exactly once, with exactly `git push origin HEAD`. After `verdi
+// close` exits 0 HEAD is the local close/<name> branch it cut, and `git push
+// origin HEAD` pushes that branch to the same name on origin. Exact equality
+// refuses a `+` force refspec (`+HEAD`), an explicit destination
+// (`HEAD:main`), and any flag, none of which a substring check would see.
+func TestCloseDispatchPushIsAPlainFastForwardOfTheCloseBranch(t *testing.T) {
+	job := closeJob(t)
+	var pushes []int
+	for i, step := range job.Steps {
+		if gitPushRE.MatchString(step.Run) {
+			pushes = append(pushes, i)
+		}
+	}
+	if len(pushes) != 1 {
+		t.Fatalf("close.yml: expected exactly one step running git push, found %d (indexes %v)", len(pushes), pushes)
+	}
+	if got, want := strings.TrimSpace(job.Steps[pushes[0]].Run), "git push origin HEAD"; got != want {
+		t.Errorf("close.yml: the push step must be exactly %q (the current close/<name> branch to the same name, fast-forward only), got %q", want, got)
 	}
 }
