@@ -41,21 +41,25 @@ var readOnlyGitxCalls = map[string]bool{
 	// pure function over a prefix and a path list). Together they are the
 	// one bridge between git's repository-relative listings and the
 	// store-relative zone prefixes the ownership recognizers compare
-	// against.
-	"RepoPrefix": true,
+	// against, and (R-RR3-27) the one that makes specClassAt's
+	// `git show <rev>:<path>` legs name a repository-rooted path.
+	"RepoPrefix":         true,
+	"StoreRelativePaths": true,
 	// Show joins the read half's allow-list per R-RR3-15 (plan amendment):
 	// read-only blob-content-at-a-ref plumbing, already on
 	// internal/residue's own allow-list — specClassAt's own fallback
 	// chain (facts.go) needs it to resolve a spec's class from a ritual
 	// branch's or the default branch's own tree when it is not visible
 	// on disk in the current checkout.
-	"Show":        true,
-	"StagedPaths": true,
-	// StatusDirty is deliberately ABSENT (owner risk review F1): its plain
-	// `git status --porcelain` honors status.showUntrackedFiles, so it
-	// cannot carry a configuration-independent clean-tree proof, and the
-	// two explicit listings answer the same question without it.
-	"StoreRelativePaths":   true,
+	"Show": true,
+	// StagedPaths and WorktreeChangedPaths are the two explicit listings
+	// every clean-tree question in this package is answered from. Their
+	// companion StatusDirty is deliberately ABSENT (owner risk review
+	// F1): its plain `git status --porcelain` honors
+	// status.showUntrackedFiles, so it cannot carry a configuration-
+	// independent clean-tree proof, and these two answer the same
+	// question without it.
+	"StagedPaths":          true,
 	"WorktreeChangedPaths": true,
 }
 
