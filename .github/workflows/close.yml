@@ -17,11 +17,11 @@
 #     only committed state, so until L3b lands every run of this job that
 #     reaches the closure gate fails that condition ("closure: 4. deviation
 #     report ready to freeze", exit 1) before the branch cut, with nothing
-#     committed, published, or pushed. SI-231
-#     adds one accepted shape: HEAD has exactly one parent, HEAD's commit
-#     changes nothing but that spec's deviation-report.md, the report's
-#     `covers` is HEAD's parent, it is not frozen, and every finding is
-#     dispositioned. Close then freezes that report in place.
+#     committed, published, or pushed. SI-231 adds one accepted shape: HEAD
+#     has exactly one parent, HEAD's commit changes nothing but that spec's
+#     deviation-report.md, the report's `covers` is HEAD's parent, it is
+#     not frozen, and every finding is dispositioned. Close then freezes
+#     that report in place.
 #   - Lane L2: the countersign (SI-230). `verdi close` resolves the
 #     countersign at HEAD before it cuts its branch (cmd/verdi/close.go),
 #     and the resolver takes the pull request's source branch from
@@ -63,7 +63,9 @@
 #      --ref close/<name> -f spec_ref=spec/<name>`, or "Run workflow" on
 #      that branch in the Actions UI. Dispatching from that branch is what
 #      makes github.sha equal R. The job's `verdi sync` lists only
-#      successful runs for R, so an earlier dispatch finds no bundle for R.
+#      completed, successful runs, so an earlier dispatch finds no bundle
+#      for R and falls back to the nearest ancestor's bundle, if any,
+#      instead of R's exact-commit evidence.
 #   5. Approve the run in the `close` environment. The close job declares
 #      `environment: close`, a protected environment the owner configures
 #      with required reviewers; GitHub holds the job before its first step
@@ -76,10 +78,10 @@
 #   6. Merge the closure pull request (03 §Closure ritual step 4: "merging
 #      it *is* closure"). The archive commit was pushed with the job's
 #      GITHUB_TOKEN, and GitHub creates no push-triggered run for such a
-#      push, so close-evidence.yml does not run on it. For the pull request
-#      it creates the merge-gate run in an approval-required state: a user
-#      with write access selects "Approve workflows to run" so merge-gate
-#      reports on the archive commit before the merge.
+#      push, so close-evidence.yml does not run on it. For the updated pull
+#      request GitHub creates the merge-gate run in an approval-required
+#      state: a user with write access selects "Approve workflows to run"
+#      so merge-gate reports on the archive commit before the merge.
 #
 # WHY `verdi sync` (not `--produce`) here: this job only ever PULLS the
 # bundle close-evidence.yml already produced and uploaded for the exact
