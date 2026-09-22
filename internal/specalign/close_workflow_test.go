@@ -49,6 +49,19 @@ func TestVerifyWorkflowExcludesCloseBranchesFromItsOwnPushTrigger(t *testing.T) 
 	if doc.On.Push.Branches != nil {
 		t.Errorf("verify.yml: push trigger must not gain a branches: allow-list (that would narrow it beyond the close/** exclusion this lane makes), got Branches=%v", doc.On.Push.Branches)
 	}
+	// Tag pushes (review m-2). Before the carve-out verify.yml defined no
+	// branch or tag filter, so every tag push ran it (GitHub does not
+	// evaluate path filters for tag pushes). Defining only branches-ignore
+	// would stop every tag push ("If you define only tags/tags-ignore or
+	// only branches/branches-ignore, the workflow won't run for events
+	// affecting the undefined Git ref"), so tags: ["**"], which matches
+	// every tag name, keeps the old behaviour.
+	if !slices.Equal(doc.On.Push.Tags, []string{"**"}) {
+		t.Errorf(`verify.yml: push trigger must declare tags: ["**"] so tag pushes keep running this workflow exactly as before the close/** carve-out, got %v`, doc.On.Push.Tags)
+	}
+	if want := []string{"branches-ignore", "paths", "tags"}; !slices.Equal(doc.On.Push.Keys, want) {
+		t.Errorf("verify.yml: push trigger body must declare exactly %v, got %v (tags-ignore:, paths-ignore:, or any other filter changes which pushes produce evidence)", want, doc.On.Push.Keys)
+	}
 	wantPaths := []string{
 		"**.go", "go.mod", "go.sum", "Makefile", "e2e/**",
 		".github/workflows/**", "testdata/**", "scripts/**", "verdi.bindings.yaml",

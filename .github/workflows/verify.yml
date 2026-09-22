@@ -118,6 +118,13 @@ on:
   push:
     branches-ignore:
       - "close/**"
+    # Tag pushes keep running this workflow exactly as before the close/**
+    # carve-out. With no branch or tag filter every tag push ran it, since
+    # path filters are not evaluated for tag pushes; GitHub runs a workflow
+    # that defines only branches/branches-ignore for no tag at all, so "**"
+    # (every tag name) restores the old behaviour.
+    tags:
+      - "**"
     paths:
       - "**.go"
       - "go.mod"
