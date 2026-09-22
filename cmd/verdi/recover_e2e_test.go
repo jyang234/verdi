@@ -462,6 +462,120 @@ func TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind(t *testi
 	}
 }
 
+// TestRecoverE2E_ReclaimMustPreserveUntrackedHiddenByStatusConfig is the
+// owner closure check's C1 (P1, data loss) through the REAL binary,
+// exactly as it was witnessed: a merged, unmanaged worktree on
+// feature/checkout, the repository's own ordinary display setting
+// status.showUntrackedFiles=no, and one unignored, untracked file inside
+// that worktree. Before R-RR3-28/29 this run exited 0, printed both
+// declared postconditions as held, and deleted the worktree, the file and
+// the branch — the plan's keep-dirty check and git's own `worktree
+// remove` refusal were BOTH answered through a query honoring that
+// setting, so a single display preference switched both guards off.
+//
+// spec/verdi-store-layout §gc-reclaim admits an unmanaged worktree only
+// when it carries "no uncommitted changes", keeps dirty worktrees, and
+// never forces; readiness-recovery-v2 ac-9 delegates to that same
+// contract. So: the projection's reclaim row reads keep-dirty, no
+// executable choice is offered, asking for it anyway is exit 1, the
+// command log issues no worktree-removal (and no write at all), and all
+// three artifacts are still on disk afterwards.
+func TestRecoverE2E_ReclaimMustPreserveUntrackedHiddenByStatusConfig(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := recoverE2ERepo(t)
+	ctx := context.Background()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo.Dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// A merged branch with an UNMANAGED worktree of its own: reclaim's
+	// stranded-residue unit.
+	git("checkout", "--quiet", "-b", "feature/checkout")
+	if err := os.WriteFile(filepath.Join(repo.Dir, "unit.txt"), []byte("merged work\n"), 0o644); err != nil {
+		t.Fatalf("writing unit.txt: %v", err)
+	}
+	git("add", "unit.txt")
+	git("commit", "--quiet", "-m", "unit")
+	git("checkout", "--quiet", "main")
+	git("merge", "--quiet", "--no-ff", "-m", "merge unit", "feature/checkout")
+	wt := filepath.Join(t.TempDir(), "unit-wt")
+	git("worktree", "add", "--quiet", wt, "feature/checkout")
+
+	// The operator's ordinary display preference, and their own
+	// uncommitted work sitting inside that worktree.
+	git("config", "status.showUntrackedFiles", "no")
+	protected := filepath.Join(wt, "unfinished.txt")
+	if err := os.WriteFile(protected, []byte("uncommitted operator work\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", protected, err)
+	}
+
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+	readOut, readErr, readCode := runVerdiBinary(t, bin, repo.Dir, env, "recover", "--json", "spec/checkout")
+	if readCode != 1 {
+		t.Fatalf("verdi recover: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", readCode, readOut, readErr)
+	}
+	proj, err := recovery.Decode([]byte(strings.TrimRight(readOut, "\n")))
+	if err != nil {
+		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, readOut)
+	}
+	var residueState recovery.RecognizedState
+	for _, st := range proj.States {
+		if st.Code == recovery.StateStrandedResidue && st.Target == "feature/checkout" {
+			residueState = st
+		}
+	}
+	if residueState.Code == "" {
+		t.Fatalf("no stranded-residue state for feature/checkout: %+v", proj.States)
+	}
+	if len(residueState.Facts) != 1 || !strings.Contains(residueState.Facts[0], "kept:") || !strings.Contains(residueState.Facts[0], "dirty") {
+		t.Fatalf("Facts = %q, want reclaim's own kept:dirty row verbatim", residueState.Facts)
+	}
+	if len(residueState.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the worktree holds the operator's untracked work", residueState.Choices)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "gitlog.txt")
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, append(env, recoveryGitLogEnv+"="+logPath),
+		"recover", "spec/checkout", "--apply", "reclaim:feature/checkout")
+	if code != 1 {
+		t.Fatalf("verdi recover --apply reclaim over a worktree whose untracked work a display setting hides: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	// The removal primitive's argv is `-c status.showUntrackedFiles=all
+	// worktree remove <path>` (R-RR3-29), so this scans argv ELEMENTS for
+	// the adjacent pair rather than a "worktree remove" substring the
+	// global option now splits. reclaim.Apply's paired branch delete and
+	// branchcut's checkout are excluded the same way the two sibling
+	// withheld-choice cases above exclude them.
+	for _, argv := range gitlogArgvs(t, logPath) {
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == "worktree" && argv[i+1] == "remove" {
+				t.Fatalf("a refused reclaim issued a worktree removal: %v", argv)
+			}
+		}
+		for _, arg := range argv {
+			if arg == "checkout" || arg == "branch" {
+				t.Fatalf("a refused reclaim issued a checkout/branch command: %v", argv)
+			}
+		}
+	}
+
+	if _, statErr := os.Stat(protected); statErr != nil {
+		t.Fatalf("the operator's own untracked file was deleted: %v", statErr)
+	}
+	if _, statErr := os.Stat(wt); statErr != nil {
+		t.Fatalf("the worktree directory was removed: %v", statErr)
+	}
+	if ok, hasErr := gitx.HasLocalBranch(ctx, repo.Dir, "feature/checkout"); hasErr != nil || !ok {
+		t.Fatalf("HasLocalBranch(feature/checkout) = %v, err = %v: the branch was deleted", ok, hasErr)
+	}
+}
+
 // TestRecoverE2E_ApplyNoExecutor proves a manual-only choice (the stale
 // writer lock's own "rm <path>") refuses through the real binary: exit
 // 1, the manual command named on stderr, and the lock file itself
