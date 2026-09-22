@@ -79,11 +79,6 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 		recoverErr(stderr, err)
 		return 2
 	}
-	cfg, err := store.Open(root)
-	if err != nil {
-		recoverErr(stderr, err)
-		return 2
-	}
 
 	// R-RR3-10: attach the command log for the WHOLE run, so any forbidden
 	// git command this run issues — whether during Gather/Derive's own
@@ -91,16 +86,31 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 	// caught.
 	var log recovery.CommandLog
 	ctx := gitx.WithObserver(context.Background(), &log)
+	if recoverObserverHook != nil {
+		recoverObserverHook(&log)
+	}
 
 	exit := 0
 	if apply {
-		if _, applyErr := recovery.Apply(ctx, cfg, ref, applyID, stderr); applyErr != nil {
-			recoverErr(stderr, applyErr)
+		// cfg is needed only on this branch (fix round 1, M1): the read
+		// path below opens its own store.Config inside Loader.Load, so
+		// opening it here unconditionally would read the store twice
+		// (and fail operationally twice) on every plain `verdi recover`.
+		cfg, cfgErr := store.Open(root)
+		switch {
+		case cfgErr != nil:
+			recoverErr(stderr, cfgErr)
 			exit = 2
+		default:
+			if _, applyErr := recovery.Apply(ctx, cfg, ref, applyID, stderr); applyErr != nil {
+				recoverErr(stderr, applyErr)
+				exit = 2
+			}
+			// Task 4 replaces this branch with the full postcondition
+			// report (R-RR3-9); the Task 3 stub (recovery.ErrNotImplemented)
+			// never succeeds, so the success path above is presently
+			// unreachable.
 		}
-		// Task 4 replaces this branch with the full postcondition report
-		// (R-RR3-9); the Task 3 stub (recovery.ErrNotImplemented) never
-		// succeeds, so the success path above is presently unreachable.
 	} else {
 		proj, loadErr := recovery.Loader{Root: root}.Load(ctx, ref)
 		switch {
@@ -124,6 +134,16 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// R-RR3-10: a recovery run that ever issued a forbidden git command is
+	// an operational failure of this verb's OWN contract, never a
+	// verdict — this overrides whatever exit the run above computed, and
+	// is checked BEFORE the VERDI_RECOVERY_GITLOG write below (fix round
+	// 1, M2: a write failure there must never hide which command was
+	// forbidden).
+	if reportForbiddenCommands(stderr, log.Entries()) {
+		return 2
+	}
+
 	if path := os.Getenv(recoveryGitLogEnv); path != "" {
 		if err := appendRecoveryGitLog(path, root, log.Entries()); err != nil {
 			recoverErr(stderr, err)
@@ -131,17 +151,34 @@ func cmdRecover(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// R-RR3-10: a recovery run that ever issued a forbidden git command is
-	// an operational failure of this verb's OWN contract, never a
-	// verdict — this overrides whatever exit the run above computed.
-	if forbidden := log.Forbidden(); len(forbidden) > 0 {
-		for _, entry := range forbidden {
-			fmt.Fprintf(stderr, "recover: forbidden git command issued: git %s\n", strings.Join(entry, " "))
-		}
-		return 2
-	}
-
 	return exit
+}
+
+// recoverObserverHook is a test-only seam (fix round 1, I1's mutation-
+// proof witness): when non-nil, cmdRecover calls it with the run's own
+// *recovery.CommandLog right after attaching it, so a test can inject a
+// command an ordinary run would never issue (e.g. `log.Observe(dir,
+// []string{"reset", "--hard"})`) and prove the WHOLE R-RR3-10 reaction —
+// attach, detect, report, exit 2 — fires end to end. Always nil in
+// production.
+var recoverObserverHook func(*recovery.CommandLog)
+
+// reportForbiddenCommands prints "recover: forbidden git command issued:
+// git <argv>" to stderr, in order, for every entry recovery.IsForbiddenArgv
+// accepts, and reports whether any were forbidden — R-RR3-10's own
+// runtime reaction, extracted (fix round 1, I1) so it has a direct table
+// test independent of recovery.CommandLog.Forbidden()'s own upstream
+// matching test.
+func reportForbiddenCommands(stderr io.Writer, entries [][]string) bool {
+	any := false
+	for _, entry := range entries {
+		if !recovery.IsForbiddenArgv(entry) {
+			continue
+		}
+		any = true
+		fmt.Fprintf(stderr, "recover: forbidden git command issued: git %s\n", strings.Join(entry, " "))
+	}
+	return any
 }
 
 // parseRecoverArgs implements recoverUsage's grammar: an optional leading

@@ -72,7 +72,7 @@ func TestRecoverE2E_EmptyBranchCut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, stdout)
 	}
-	if !hasState(proj, recovery.StateEmptyBranchCut) {
+	if !recoverHasState(proj, recovery.StateEmptyBranchCut) {
 		t.Fatalf("no empty-branch-cut state in %+v", proj.States)
 	}
 
@@ -83,19 +83,13 @@ func TestRecoverE2E_EmptyBranchCut(t *testing.T) {
 	if len(data) == 0 {
 		t.Fatal("gitlog file is empty; want at least one recorded command")
 	}
-	forbidden := map[string]bool{}
-	for _, tok := range recovery.ForbiddenTokens {
-		forbidden[tok] = true
-	}
 	for _, ln := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
 		parts := strings.SplitN(ln, "\t", 2)
 		if len(parts) != 2 {
 			t.Fatalf("gitlog line %q is not <root>\\t<argv...>", ln)
 		}
-		for _, word := range strings.Fields(parts[1]) {
-			if forbidden[word] {
-				t.Fatalf("gitlog line %q carries forbidden token %q", ln, word)
-			}
+		if recovery.IsForbiddenArgv(strings.Fields(parts[1])) {
+			t.Fatalf("gitlog line %q carries a forbidden token", ln)
 		}
 	}
 }

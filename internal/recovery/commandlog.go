@@ -70,14 +70,27 @@ func (l *CommandLog) Forbidden() [][]string {
 	defer l.mu.Unlock()
 	var out [][]string
 	for _, entry := range l.entries {
-		for _, arg := range entry {
-			if matchesForbiddenToken(arg) {
-				out = append(out, append([]string(nil), entry...))
-				break
-			}
+		if IsForbiddenArgv(entry) {
+			out = append(out, append([]string(nil), entry...))
 		}
 	}
 	return out
+}
+
+// IsForbiddenArgv reports whether argv — one command's whole argument
+// list — contains a ForbiddenTokens match by matchesForbiddenToken's own
+// rule (exact equality, or the "--"-prefix rule for a "--"-prefixed
+// token). Exported so a caller gating on the SAME rule Forbidden uses
+// (cmd/verdi's recover.go, R-RR3-10's own runtime reaction) scans through
+// this one seam rather than a bespoke copy that can silently drift from
+// it (fix round 1, M4).
+func IsForbiddenArgv(argv []string) bool {
+	for _, arg := range argv {
+		if matchesForbiddenToken(arg) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesForbiddenToken reports whether arg — one whole argv element —

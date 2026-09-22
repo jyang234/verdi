@@ -19,18 +19,21 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// runInDir chdirs to dir for the duration of fn's call (t.Chdir handles
-// its own restore/serialization; this just gives cmdRecover's own tests a
-// one-line call shape matching the brief's own table-test code).
-func runInDir(t *testing.T, dir string, fn func() int) int {
+// recoverRunInDir chdirs to dir for the duration of fn's call (t.Chdir
+// handles its own restore/serialization; this just gives cmdRecover's
+// own tests a one-line call shape matching the brief's own table-test
+// code). Prefixed `recover` (fix round 1, M5): cmd/verdi is a large test
+// package and Task 4 adds more test files here, so a generic name would
+// risk a collision.
+func recoverRunInDir(t *testing.T, dir string, fn func() int) int {
 	t.Helper()
 	t.Chdir(dir)
 	return fn()
 }
 
-// hasState reports whether p carries a recognized state with the given
-// code, regardless of target.
-func hasState(p recovery.Projection, code recovery.StateCode) bool {
+// recoverHasState reports whether p carries a recognized state with the
+// given code, regardless of target.
+func recoverHasState(p recovery.Projection, code recovery.StateCode) bool {
 	for _, s := range p.States {
 		if s.Code == code {
 			return true
@@ -74,10 +77,10 @@ acceptance_criteria:
 	return repo, cfg
 }
 
-// cutEmptyBranch mirrors internal/recovery/fixtures_test.go's own helper
-// of the same name: cuts name from repo's current checkout and stays
+// recoverCutEmptyBranch mirrors internal/recovery/fixtures_test.go's own
+// cutEmptyBranch: cuts name from repo's current checkout and stays
 // checked out on it.
-func cutEmptyBranch(t *testing.T, repo *fixturegit.Repo, name string) (cutPoint string) {
+func recoverCutEmptyBranch(t *testing.T, repo *fixturegit.Repo, name string) (cutPoint string) {
 	t.Helper()
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, name); err != nil {
 		t.Fatalf("CheckoutNewBranch(%s): %v", name, err)
@@ -89,10 +92,10 @@ func cutEmptyBranch(t *testing.T, repo *fixturegit.Repo, name string) (cutPoint 
 	return tip
 }
 
-// deadPID mirrors internal/recovery/fixtures_test.go's own helper of the
-// same name: starts and waits a `true` subprocess and returns its pid,
+// recoverDeadPID mirrors internal/recovery/fixtures_test.go's own
+// deadPID: starts and waits a `true` subprocess and returns its pid,
 // guaranteed reaped.
-func deadPID(t *testing.T) int {
+func recoverDeadPID(t *testing.T) int {
 	t.Helper()
 	cmd := exec.Command("true")
 	if err := cmd.Run(); err != nil {
@@ -101,16 +104,16 @@ func deadPID(t *testing.T) int {
 	return cmd.Process.Pid
 }
 
-// writeStaleWriterLock mirrors internal/recovery/fixtures_test.go's own
-// helper of the same name: writes store.WriterLockPath(root) naming a
+// recoverWriteStaleWriterLock mirrors internal/recovery/fixtures_test.go's
+// own writeStaleWriterLock: writes store.WriterLockPath(root) naming a
 // dead pid with an old start time.
-func writeStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
+func recoverWriteStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 	t.Helper()
 	path := store.WriterLockPath(repo.Dir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("creating lock directory: %v", err)
 	}
-	info := filelock.Info{PID: deadPID(t), Start: time.Now().Add(-time.Hour).Unix()}
+	info := filelock.Info{PID: recoverDeadPID(t), Start: time.Now().Add(-time.Hour).Unix()}
 	data, err := json.Marshal(info)
 	if err != nil {
 		t.Fatalf("marshaling lock info: %v", err)
@@ -121,6 +124,64 @@ func writeStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 	return path
 }
 
+// TestReportForbiddenCommands_Table is fix round 1's I1 fix: the
+// review's mutation probe proved R-RR3-10's runtime reaction (print +
+// exit 2) was entirely unproven — deleting the guard in recover.go left
+// the whole TestRecover suite green. Extracted so the reaction itself,
+// not just recovery.CommandLog.Forbidden()'s own upstream matching, has a
+// direct table test: one entry per ForbiddenTokens rule (exact match,
+// the "--"-prefix rule, and R-RR3-17's short "-f" flag) plus a clean
+// entry that must print nothing and report false.
+func TestReportForbiddenCommands_Table(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries [][]string
+		want    bool
+		wantOut string
+	}{
+		{"reset", [][]string{{"reset", "--hard"}}, true, "recover: forbidden git command issued: git reset --hard\n"},
+		{"force_with_lease_prefix", [][]string{{"push", "--force-with-lease"}}, true, "recover: forbidden git command issued: git push --force-with-lease\n"},
+		{"short_force_flag", [][]string{{"checkout", "-f"}}, true, "recover: forbidden git command issued: git checkout -f\n"},
+		{"clean", [][]string{{"status", "--porcelain"}}, false, ""},
+		{"mixed_clean_then_forbidden", [][]string{{"rev-parse", "HEAD"}, {"reset", "--hard"}}, true, "recover: forbidden git command issued: git reset --hard\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			got := reportForbiddenCommands(&stderr, tc.entries)
+			if got != tc.want {
+				t.Fatalf("reportForbiddenCommands() = %v, want %v", got, tc.want)
+			}
+			if stderr.String() != tc.wantOut {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantOut)
+			}
+		})
+	}
+}
+
+// TestRecoverCmd_ForbiddenCommandInjectedViaHook is I1's cmdRecover-level
+// mutation-proof witness: recoverObserverHook (test-only, nil in
+// production) injects a forbidden command into the run's own
+// recovery.CommandLog after it is attached, proving the WHOLE reaction —
+// attach, detect, report, exit 2 — fires for a command an ordinary
+// read-only run never issues.
+func TestRecoverCmd_ForbiddenCommandInjectedViaHook(t *testing.T) {
+	repo, _ := recoverFixtureStore(t)
+	recoverObserverHook = func(log *recovery.CommandLog) {
+		log.Observe(repo.Dir, []string{"reset", "--hard"})
+	}
+	defer func() { recoverObserverHook = nil }()
+
+	var stdout, stderr bytes.Buffer
+	code := recoverRunInDir(t, repo.Dir, func() int { return cmdRecover([]string{"spec/checkout"}, &stdout, &stderr) })
+	if code != 2 {
+		t.Fatalf("exit %d, want 2; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "recover: forbidden git command issued: git reset --hard") {
+		t.Fatalf("stderr %q missing the forbidden-command line", stderr.String())
+	}
+}
+
 func TestRecover_Table(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -129,15 +190,15 @@ func TestRecover_Table(t *testing.T) {
 		wantCode string // a state code expected in stdout, "" for none
 	}{
 		{"nothing recognized", func(*testing.T, *fixturegit.Repo) {}, 0, ""},
-		{"empty branch cut", func(t *testing.T, r *fixturegit.Repo) { cutEmptyBranch(t, r, "close/checkout") }, 1, "empty-branch-cut"},
-		{"stale writer lock", func(t *testing.T, r *fixturegit.Repo) { writeStaleWriterLock(t, r) }, 1, "stale-lock"},
+		{"empty branch cut", func(t *testing.T, r *fixturegit.Repo) { recoverCutEmptyBranch(t, r, "close/checkout") }, 1, "empty-branch-cut"},
+		{"stale writer lock", func(t *testing.T, r *fixturegit.Repo) { recoverWriteStaleWriterLock(t, r) }, 1, "stale-lock"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, _ := recoverFixtureStore(t)
 			tc.prepare(t, repo)
 			var stdout, stderr bytes.Buffer
-			code := runInDir(t, repo.Dir, func() int { return cmdRecover([]string{"--json", "spec/checkout"}, &stdout, &stderr) })
+			code := recoverRunInDir(t, repo.Dir, func() int { return cmdRecover([]string{"--json", "spec/checkout"}, &stdout, &stderr) })
 			if code != tc.wantExit {
 				t.Fatalf("exit %d, want %d; stderr %s", code, tc.wantExit, stderr.String())
 			}
@@ -148,7 +209,7 @@ func TestRecover_Table(t *testing.T) {
 			if tc.wantCode == "" && len(p.States) != 0 {
 				t.Fatalf("states %+v", p.States)
 			}
-			if tc.wantCode != "" && !hasState(p, recovery.StateCode(tc.wantCode)) {
+			if tc.wantCode != "" && !recoverHasState(p, recovery.StateCode(tc.wantCode)) {
 				t.Fatalf("no %s in %+v", tc.wantCode, p.States)
 			}
 		})
@@ -159,7 +220,7 @@ func TestRecover_UsageBeforeStore(t *testing.T) {
 	// bare, malformed, and --apply-without-ref all fail on shape with exit 2 and the usage line, in a dir with no store
 	for _, args := range [][]string{{}, {"--apply"}, {"--apply", "x"}, {"spec/a", "spec/b"}, {"--json"}} {
 		var stderr bytes.Buffer
-		if code := runInDir(t, t.TempDir(), func() int { return cmdRecover(args, io.Discard, &stderr) }); code != 2 || !strings.Contains(stderr.String(), recoverUsage) {
+		if code := recoverRunInDir(t, t.TempDir(), func() int { return cmdRecover(args, io.Discard, &stderr) }); code != 2 || !strings.Contains(stderr.String(), recoverUsage) {
 			t.Fatalf("args %v: exit %d stderr %q", args, code, stderr.String())
 		}
 	}
@@ -168,18 +229,33 @@ func TestRecover_UsageBeforeStore(t *testing.T) {
 // TestRecover_JSONAndBareFormsAreByteIdentical proves the explicit --json
 // flag and the legacy no-flag form delegate to the same call
 // (recover.go's own package comment: "byte-identical, mirroring
-// journey.Canonical's own contract").
+// journey.Canonical's own contract"), over a POPULATED projection (fix
+// round 1, M3): the zero-state case a byte-mismatch could trivially
+// smuggle through (e.g. two forms disagreeing only inside a non-empty
+// states/choices tree) is exercised by cutting an empty branch first,
+// rather than only over the vacuous "nothing recognized" projection.
 func TestRecover_JSONAndBareFormsAreByteIdentical(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
+	recoverCutEmptyBranch(t, repo, "close/checkout")
 
 	var jsonOut, bareOut bytes.Buffer
-	jsonCode := runInDir(t, repo.Dir, func() int { return cmdRecover([]string{"--json", "spec/checkout"}, &jsonOut, io.Discard) })
-	bareCode := runInDir(t, repo.Dir, func() int { return cmdRecover([]string{"spec/checkout"}, &bareOut, io.Discard) })
+	jsonCode := recoverRunInDir(t, repo.Dir, func() int { return cmdRecover([]string{"--json", "spec/checkout"}, &jsonOut, io.Discard) })
+	bareCode := recoverRunInDir(t, repo.Dir, func() int { return cmdRecover([]string{"spec/checkout"}, &bareOut, io.Discard) })
 	if jsonCode != bareCode {
 		t.Fatalf("exit codes differ: --json %d, bare %d", jsonCode, bareCode)
 	}
+	if jsonCode != 1 {
+		t.Fatalf("exit %d, want 1 (a populated projection, not the vacuous case)", jsonCode)
+	}
 	if jsonOut.String() != bareOut.String() {
 		t.Fatalf("--json and bare forms differ:\n--json: %s\nbare:   %s", jsonOut.String(), bareOut.String())
+	}
+	p, err := recovery.Decode(bytes.TrimRight(jsonOut.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("recovery.Decode: %v", err)
+	}
+	if !recoverHasState(p, recovery.StateEmptyBranchCut) {
+		t.Fatalf("no empty-branch-cut state in %+v (the byte-identity check ran over an empty projection after all)", p.States)
 	}
 }
 
@@ -190,7 +266,7 @@ func TestRecover_JSONAndBareFormsAreByteIdentical(t *testing.T) {
 func TestRecover_ApplyStubRefusesWithExit2(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
 	var stdout, stderr bytes.Buffer
-	code := runInDir(t, repo.Dir, func() int {
+	code := recoverRunInDir(t, repo.Dir, func() int {
 		return cmdRecover([]string{"spec/checkout", "--apply", "unwind-branch-cut:close/checkout"}, &stdout, &stderr)
 	})
 	if code != 2 {
@@ -206,7 +282,7 @@ func TestRecover_ApplyStubRefusesWithExit2(t *testing.T) {
 // prefixed (recoverErr's own guarantee).
 func TestRecover_UnresolvableRootIsOperational(t *testing.T) {
 	var stderr bytes.Buffer
-	code := runInDir(t, t.TempDir(), func() int { return cmdRecover([]string{"spec/checkout"}, io.Discard, &stderr) })
+	code := recoverRunInDir(t, t.TempDir(), func() int { return cmdRecover([]string{"spec/checkout"}, io.Discard, &stderr) })
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
 	}
@@ -217,14 +293,17 @@ func TestRecover_UnresolvableRootIsOperational(t *testing.T) {
 
 // TestRecover_GitLogEnvRecordsCommands proves VERDI_RECOVERY_GITLOG
 // (R-RR3-10) is honored: a plain read-only run appends its command log,
-// and none of the recorded commands carry a forbidden token.
+// and none of the recorded commands carry a forbidden token — checked
+// through recovery.IsForbiddenArgv itself (fix round 1, M4), not a local
+// exact-match-only copy that would silently drift from the "--"-prefix
+// rule.
 func TestRecover_GitLogEnvRecordsCommands(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
 	logPath := filepath.Join(t.TempDir(), "gitlog.txt")
 	t.Setenv(recoveryGitLogEnv, logPath)
 
 	var stdout, stderr bytes.Buffer
-	code := runInDir(t, repo.Dir, func() int { return cmdRecover([]string{"spec/checkout"}, &stdout, &stderr) })
+	code := recoverRunInDir(t, repo.Dir, func() int { return cmdRecover([]string{"spec/checkout"}, &stdout, &stderr) })
 	if code != 0 {
 		t.Fatalf("exit %d, want 0; stderr %s", code, stderr.String())
 	}
@@ -235,19 +314,13 @@ func TestRecover_GitLogEnvRecordsCommands(t *testing.T) {
 	if len(data) == 0 {
 		t.Fatal("gitlog file is empty; want at least one recorded command")
 	}
-	forbidden := map[string]bool{}
-	for _, tok := range recovery.ForbiddenTokens {
-		forbidden[tok] = true
-	}
 	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
 		parts := strings.SplitN(line, "\t", 2)
 		if len(parts) != 2 {
 			t.Fatalf("gitlog line %q is not <root>\\t<argv...>", line)
 		}
-		for _, word := range strings.Fields(parts[1]) {
-			if forbidden[word] {
-				t.Fatalf("gitlog line %q carries forbidden token %q", line, word)
-			}
+		if recovery.IsForbiddenArgv(strings.Fields(parts[1])) {
+			t.Fatalf("gitlog line %q carries a forbidden token", line)
 		}
 	}
 }

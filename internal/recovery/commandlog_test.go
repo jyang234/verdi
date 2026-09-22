@@ -46,6 +46,30 @@ func TestCommandLog_MessageTextNeverScanned(t *testing.T) {
 	}
 }
 
+// TestIsForbiddenArgv table-tests the exported seam fix round 1 (M4)
+// added, over each rule ForbiddenTokens names: exact match, the
+// "--"-prefix rule, R-RR3-17's short "-f" flag, and a clean argv.
+func TestIsForbiddenArgv(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want bool
+	}{
+		{"exact_match", []string{"reset", "--hard"}, true},
+		{"force_with_lease_prefix", []string{"push", "--force-with-lease"}, true},
+		{"short_force_flag", []string{"checkout", "-f"}, true},
+		{"clean", []string{"rev-parse", "HEAD"}, false},
+		{"empty_argv", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsForbiddenArgv(tc.argv); got != tc.want {
+				t.Fatalf("IsForbiddenArgv(%v) = %v, want %v", tc.argv, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCommandLog_EntriesAreCopies(t *testing.T) {
 	var l CommandLog
 	l.Observe("/r", []string{"rev-parse", "HEAD"})
