@@ -84,6 +84,17 @@ type Outcome struct {
 // Always nil in production.
 var applyReproveHook func()
 
+// applyJourneyHook, when non-nil, runs immediately after the post-
+// execution Gather and immediately before the journey re-derivation —
+// the ONLY window in which R-RR3-9's "the journey re-derivation failing
+// is operational (exit 2) AFTER the executor ran" branch is reachable in
+// a single synchronous call, since every input the journey reads is
+// already consistent by then unless something else writes to the store.
+// A test-only seam, mirroring applyReproveHook above; always nil in
+// production, assigned only from apply_test.go under t.Cleanup, and
+// unreachable from the CLI or MCP.
+var applyJourneyHook func()
+
 // Apply implements R-RR3-9: derive fresh -> find the choice -> refuse a
 // non-executable one (ErrNoExecutor with the manual commands in the error
 // text) -> re-prove preconditions from a fresh Gather -> execute ->
@@ -153,11 +164,17 @@ func Apply(ctx context.Context, cfg *store.Config, ref, choiceID string, stderr 
 	case "reclaim.Apply":
 		postconditions = checkReclaimPostconditions(choice, state, afterFacts, reclaimRows)
 	}
+	if err := assertPostconditionsDeclared(choice, postconditions); err != nil {
+		return Outcome{}, err
+	}
 
 	out := Outcome{
 		ChoiceID:       choiceID,
 		After:          Derive(afterFacts),
 		Postconditions: postconditions,
+	}
+	if applyJourneyHook != nil {
+		applyJourneyHook()
 	}
 	rec, jerr := journey.NewProjector().Project(ctx, cfg, ref)
 	if jerr != nil {
@@ -269,6 +286,18 @@ func reproveUnwind(facts Facts, choice Choice, fresh Facts) string {
 	}
 	if freshRB.Tip != origRB.Tip {
 		return fmt.Sprintf("%s no longer points at %s (now %s)", name, origRB.Tip, freshRB.Tip)
+	}
+	// ac-9's literal third clause, re-proved STRUCTURALLY and on its own
+	// (review I1): "has no commits of its own" at execution time. For the
+	// cut-from-current mechanism this is transitively implied by the
+	// return-branch re-resolution below (its candidates ARE the emptiness
+	// witnesses), but a resolved-base cut's return branch (design/<name>,
+	// policy/adopt) is the re-resolved default branch and ignores the
+	// witnesses entirely — so a branch that LOST its emptiness inside the
+	// re-prove window would otherwise reach the executor. R-RR3-9: exit
+	// 1, nothing changed.
+	if !freshRB.Empty() {
+		return fmt.Sprintf("%s now carries commit(s) of its own: no other local branch reaches its tip %s any more", name, freshRB.Tip)
 	}
 	if len(fresh.StagedPaths) != 0 {
 		return "the index is no longer empty"
@@ -387,13 +416,32 @@ func executeUnwind(ctx context.Context, root string, state RecognizedState, fres
 	return branchcut.Unwind(ctx, root, originalBranch, name, rb.Tip, "recover", stderr)
 }
 
+// branchTip returns f's own recorded tip for the local branch name.
+func branchTip(f Facts, name string) (string, bool) {
+	for _, bt := range f.LocalBranches {
+		if bt.Name == name {
+			return bt.Tip, true
+		}
+	}
+	return "", false
+}
+
 // checkUnwindPostconditions structurally re-derives the three values an
 // unwind choice's own Postconditions name (does-not-exist, current
-// branch, HEAD) from facts (the ORIGINAL, pre-execution gather — the
-// values a successful unwind is supposed to leave in place) and checks
-// each against afterFacts (the post-execution gather), positionally
-// matched against choice.Postconditions (recognizeEmptyBranchCut always
-// builds exactly these three, in this order).
+// branch, HEAD-is-the-return-branch's-tip) from facts (the ORIGINAL,
+// pre-execution gather — which named the return branch the choice
+// promised to switch back to) and checks each against afterFacts (the
+// post-execution gather), positionally matched against
+// choice.Postconditions (recognizeEmptyBranchCut always builds exactly
+// these three, in this order; Apply's own assertPostconditionsDeclared
+// refuses any drift between the two).
+//
+// R-RR3-19: the third value is the RETURN BRANCH'S OWN TIP, re-read from
+// the post-execution facts, never the cut point — R-RR3-5's return branch
+// "may sit ahead of the ritual tip", so comparing HEAD with the cut point
+// would report a correct unwind as VIOLATED in the ordinary case (the
+// containing tier, and every resolved-base cut whose default branch moved
+// on).
 func checkUnwindPostconditions(facts Facts, choice Choice, state RecognizedState, afterFacts Facts) []PostconditionResult {
 	name := state.Target
 	origRB, _ := ritualBranchByName(facts, name)
@@ -427,13 +475,41 @@ func checkUnwindPostconditions(facts Facts, choice Choice, state RecognizedState
 	if head == "" {
 		head = "unknown"
 	}
+	returnTip, returnKnown := branchTip(afterFacts, originalBranch)
+	tipObs := returnTip
+	if !returnKnown {
+		// Fail closed: with no post-execution tip for the return branch
+		// there is nothing to compare HEAD against (never "held" from no
+		// evidence).
+		tipObs = "not a local branch any more"
+	}
 	results = append(results, PostconditionResult{
 		Text:     text(2),
-		Held:     head == origRB.Tip,
-		Observed: fmt.Sprintf("HEAD is %s", head),
+		Held:     returnKnown && head == returnTip,
+		Observed: fmt.Sprintf("HEAD is %s, %s is at %s", head, originalBranch, tipObs),
 	})
 
 	return results
+}
+
+// assertPostconditionsDeclared is M1's own structural pin: every declared
+// postcondition sentence was evaluated, in order, under its own declared
+// text. The two check functions build their results positionally, so a
+// fourth declared postcondition (or a reordering) would otherwise be
+// silently neither evaluated nor printed — which ac-10's "prints the
+// postconditions" would not survive. A mismatch is this verb's own
+// operational failure (exit 2), never a verdict: the executor already
+// ran, and the projection cannot honestly say what held.
+func assertPostconditionsDeclared(choice Choice, results []PostconditionResult) error {
+	if len(results) != len(choice.Postconditions) {
+		return fmt.Errorf("recovery: apply: choice %s declares %d postcondition(s) but %d were evaluated; the projection cannot report what held", choice.ID, len(choice.Postconditions), len(results))
+	}
+	for i, r := range results {
+		if r.Text != choice.Postconditions[i] {
+			return fmt.Errorf("recovery: apply: choice %s postcondition[%d] was evaluated as %q but declared as %q", choice.ID, i, r.Text, choice.Postconditions[i])
+		}
+	}
+	return nil
 }
 
 // checkReclaimPostconditions reports a reclaim choice's own declared
@@ -445,7 +521,22 @@ func checkUnwindPostconditions(facts Facts, choice Choice, state RecognizedState
 // captured row at all) is checked structurally against afterFacts.
 func checkReclaimPostconditions(choice Choice, state RecognizedState, afterFacts Facts, rows []reclaim.Row) []PostconditionResult {
 	results := make([]PostconditionResult, 0, len(choice.Postconditions))
-	if len(rows) == 1 && rows[0].Kind != reclaim.KindReclaimed {
+	// M4: no row at all is no evidence at all. reclaim.Apply returns
+	// exactly one row per applied PlanItem (internal/reclaim/execute.go),
+	// so this is unreachable today — but a postcondition that reports
+	// "held" from nothing fails OPEN, the wrong direction for a check
+	// whose whole job is to verify where the run ended (DC-13).
+	if len(rows) != 1 {
+		observed := "no reclaim row returned"
+		if len(rows) > 1 {
+			observed = fmt.Sprintf("%d reclaim rows returned for one plan item", len(rows))
+		}
+		for _, text := range choice.Postconditions {
+			results = append(results, PostconditionResult{Text: text, Held: false, Observed: observed})
+		}
+		return results
+	}
+	if rows[0].Kind != reclaim.KindReclaimed {
 		line := rows[0].Line()
 		for _, text := range choice.Postconditions {
 			results = append(results, PostconditionResult{Text: text, Held: false, Observed: line})
@@ -470,10 +561,7 @@ func checkReclaimPostconditions(choice Choice, state RecognizedState, afterFacts
 	}
 
 	if len(choice.Postconditions) > 1 {
-		wtPath := ""
-		if len(rows) == 1 {
-			wtPath = rows[0].Unit.WorktreePath
-		}
+		wtPath := rows[0].Unit.WorktreePath
 		gone := wtPath == "" || !pathExists(wtPath)
 		obs := "does not exist"
 		if !gone {

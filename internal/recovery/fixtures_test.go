@@ -315,3 +315,56 @@ func writeOrphanWorkspaceStaging(t *testing.T, repo *fixturegit.Repo) string {
 	}
 	return id
 }
+
+// advanceBranch commits one new file on branch (creating it only if it
+// already exists — the caller names an existing branch) and returns
+// branch's new tip, leaving repo checked out on whatever branch it was on
+// before. It is the fixture for R-RR3-5's ordinary "the return branch sat
+// ahead of the cut" case: anyone merging into the default branch after a
+// ritual branch was cut moves that branch on without touching the cut.
+func advanceBranch(t *testing.T, repo *fixturegit.Repo, branch, filename string) (tip string) {
+	t.Helper()
+	ctx := context.Background()
+	was, err := gitx.CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+	if was != branch {
+		if err := gitx.CheckoutExisting(ctx, repo.Dir, branch); err != nil {
+			t.Fatalf("CheckoutExisting(%s): %v", branch, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, filename), []byte(filename+"\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", filename, err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, filename); err != nil {
+		t.Fatalf("AddPaths(%s): %v", filename, err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "advance "+branch+" with "+filename); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	tip, err = gitx.RevParse(ctx, repo.Dir, branch)
+	if err != nil {
+		t.Fatalf("RevParse(%s): %v", branch, err)
+	}
+	if was != branch {
+		if err := gitx.CheckoutExisting(ctx, repo.Dir, was); err != nil {
+			t.Fatalf("CheckoutExisting(%s): %v", was, err)
+		}
+	}
+	return tip
+}
+
+// holdBranchInLinkedWorktree checks branch out in a linked worktree
+// outside the store, so git's own `branch -d` safely REFUSES to delete it
+// ("checked out at ..."): the reachable state in which branchcut.Unwind
+// switches back correctly but gives up on the delete, which a
+// postcondition must report as VIOLATED rather than swallow.
+func holdBranchInLinkedWorktree(t *testing.T, repo *fixturegit.Repo, branch string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "held-wt")
+	if err := gitx.WorktreeAdd(context.Background(), repo.Dir, path, branch); err != nil {
+		t.Fatalf("WorktreeAdd(%s): %v", branch, err)
+	}
+	return path
+}

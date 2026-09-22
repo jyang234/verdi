@@ -171,6 +171,23 @@ var applyExecutorAllowList = map[string]map[string]bool{
 	"branchcut": {"Unwind": true},
 	"reclaim":   {"Apply": true, "Compute": true},
 	"residue":   {"Scan": true},
+	// R-RR3-20 (review M3): the three executor packages alone export
+	// only those four functions today, so a gate keyed on them could bite
+	// only on a NEW export. The gate therefore also covers every other
+	// package identifier apply.go could reach a write through: gitx
+	// (allowed at exactly the read-only names, so gitx.DeleteBranch and
+	// every other mutator is rejected HERE and not only by the
+	// package-wide walker), and os / os/exec / filelock / wtmanager /
+	// execworkspace / store, none of whose functions apply.go may call at
+	// all. A future write path in this file therefore cannot land
+	// ungated.
+	"gitx":          readOnlyGitxCalls,
+	"os":            {},
+	"exec":          {},
+	"filelock":      {},
+	"wtmanager":     {},
+	"execworkspace": {},
+	"store":         {},
 }
 
 // TestCommandSurface_ApplyExecutorAllowList walks ONLY apply.go (Task 4's
@@ -220,6 +237,34 @@ func TestCommandSurface_ApplyExecutorAllowList(t *testing.T) {
 	}
 	if !found["branchcut"] || !found["reclaim"] {
 		t.Fatal("apply.go calls neither branchcut.* nor reclaim.* at all — this guard would pass vacuously")
+	}
+}
+
+// TestCommandSurface_ApplyGateCoversEveryWriteCapablePackage is
+// R-RR3-20's own self-check on the table above: the gate is only as wide
+// as its key set, so every package identifier apply.go could reach a git
+// or filesystem write through must be a key — and the three mutator
+// names below must be REJECTED by the table rather than merely absent
+// from apply.go today. (The walker's own biting power is proven by
+// mutation in the fix round's report: os.RemoveAll and gitx.DeleteBranch
+// injected into executeUnwind each fail
+// TestCommandSurface_ApplyExecutorAllowList.)
+func TestCommandSurface_ApplyGateCoversEveryWriteCapablePackage(t *testing.T) {
+	for _, pkg := range []string{"gitx", "os", "exec", "filelock", "wtmanager", "execworkspace", "store", "branchcut", "reclaim", "residue"} {
+		if _, gated := applyExecutorAllowList[pkg]; !gated {
+			t.Fatalf("applyExecutorAllowList does not gate package %q; a write through it in apply.go would be invisible to this test", pkg)
+		}
+	}
+	rejected := map[string]string{
+		"gitx":      "DeleteBranch",
+		"os":        "RemoveAll",
+		"exec":      "Command",
+		"wtmanager": "Remove",
+	}
+	for pkg, fn := range rejected {
+		if applyExecutorAllowList[pkg][fn] {
+			t.Fatalf("applyExecutorAllowList wrongly admits the mutating call %s.%s in apply.go", pkg, fn)
+		}
 	}
 }
 

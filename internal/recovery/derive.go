@@ -195,7 +195,17 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 			Postconditions: []string{
 				fmt.Sprintf("%s does not exist", rb.Name),
 				fmt.Sprintf("current branch is %s", originalBranch),
-				fmt.Sprintf("HEAD is %s", rb.Tip),
+				// R-RR3-19: the third postcondition names the RETURN
+				// BRANCH'S OWN TIP, never the cut point. R-RR3-5 is
+				// explicit that "the return branch may sit ahead of the
+				// ritual tip" — the containing tier resolves to a branch
+				// that has since moved on, and a resolved-base cut
+				// returns to a freshly re-resolved default branch under
+				// no obligation to still sit at the cut point at all. A
+				// correct unwind leaves HEAD wherever that branch now
+				// is, which is exactly what the choice's own effects
+				// promise ("switch back to <branch>").
+				fmt.Sprintf("HEAD is the tip of %s", originalBranch),
 			},
 			Executor:       "branchcut.Unwind",
 			ManualCommands: []string{},
