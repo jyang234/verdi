@@ -360,7 +360,7 @@ attributes the load-bearing ones to the component that embodies them.
    shims; `verdi-mcp` pins the binary, runs `sync --or-regen`, then proxies to a
    running `serve` over the per-checkout socket — or serves standalone under the
    writer lock. Agents and the board never race.
-2. **Nine read tools highlighted here** (of 21 total — `internal/mcpserve/
+2. **Nine read tools highlighted here** (of 22 total — `internal/mcpserve/
    doc.go` has the complete inventory): `search_artifacts`, `get_artifact`,
    `get_links` (+backlinks, including `resolved-by`/`exempted-by` — D-7),
    `get_matrix`, `get_context_bundle`, `list_annotations` (fresh/moved/gone
@@ -525,6 +525,20 @@ closure gate all speak): `evidenced` · `violated` · `pending` · `no-signal` �
 Diagram proposals speak their own four-value disclosed vocabulary: authored
 `proposed → accepted`, computed `realized` / `stale` — the computed pair is never
 written to any artifact (ADJ-6).
+
+**Recovering from an interrupted ritual.** Any of the branch cuts above
+(`design start`, `build start`, `close`) can be interrupted before its own
+commit or archive-move lands — a crashed terminal, an abandoned worktree, a
+stale lock. `verdi recover [--json] <spec-ref> [--apply <choice-id>]`
+(spec/readiness-recovery-v2 ac-8..ac-10) derives a read-only projection of a
+closed inventory of such states from git and store facts alone — never a new
+artifact, never authority — and, when a state has one, its exact resolving
+choice. `--apply` re-proves that choice's preconditions immediately before
+acting and executes it through exactly one of two executors: `branchcut.Unwind`
+(the same branch-cut unwind `close` already uses) or `reclaim.Apply` (managed-
+worktree reclamation). MCP's `get_recovery` mirrors the same projection
+read-only, structurally excluding both executors: it takes no apply/choice
+argument at all.
 
 ---
 

@@ -316,6 +316,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi mcp` | MCP server over stdio |
 | `verdi dex build -o <dir>` | Emit the static docs site |
 | `verdi policy adopt --starter [--profile solo\|team]` | Adopt a starter constitution (constitution, profile, policy, consumers inventory) on a policy/adopt branch |
+| `verdi recover [--json] <spec-ref> [--apply <choice-id>]` | Diagnose an interrupted lifecycle state (an empty branch cut, a stale lock, ...) and offer its safe choices; a read-only projection, never authority |
 
 ## MCP server
 

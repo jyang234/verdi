@@ -51,7 +51,6 @@ acceptance_criteria:
 	})
 }
 
-// guide-claim: 7.6-recover
 func TestRecoverE2E_EmptyBranchCut(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)

@@ -80,6 +80,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/recovery"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -788,4 +789,27 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			t.Fatalf("constitution_impact_review() coverage = %+v, want the canonical missing-inventory disclosure", out.Coverage)
 		}
 	})
+}
+
+// TestMCPShowcaseGetRecovery (mcp:get_recovery, spec/readiness-recovery-v2
+// ac-8, ac-10's MCP half, wave 3 Task 3) drives the live get_recovery
+// tool, wired with a real internal/recovery.Loader (never nil, matching
+// the get_document/readinessload.Loader precedent above), against the
+// real, already-landed spec/stale-decline feature from examples/showcase,
+// asserting the result strict-decodes via recovery.Decode and names the
+// requested ref.
+func TestMCPShowcaseGetRecovery(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	srv := mcpserve.NewServer(root)
+	srv.Backend.RecoveryLoader = recovery.Loader{Root: root}
+
+	text := callMCPToolOK(t, srv, "get_recovery", map[string]any{"ref": "spec/stale-decline"})
+	proj, err := recovery.Decode([]byte(text))
+	if err != nil {
+		t.Fatalf("recovery.Decode(get_recovery result): %v\ntext: %s", err, text)
+	}
+	if proj.Ref != "spec/stale-decline" {
+		t.Fatalf("get_recovery(spec/stale-decline).Ref = %q, want spec/stale-decline", proj.Ref)
+	}
 }

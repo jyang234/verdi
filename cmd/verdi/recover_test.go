@@ -121,7 +121,6 @@ func writeStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 	return path
 }
 
-// guide-claim: 7.6-recover
 func TestRecover_Table(t *testing.T) {
 	cases := []struct {
 		name     string
