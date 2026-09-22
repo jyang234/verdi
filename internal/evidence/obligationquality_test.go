@@ -166,10 +166,15 @@ func TestAssessObligation_RejectsMisbindingAtConventionPath(t *testing.T) {
 func TestAssessObligation_ExactMatching(t *testing.T) {
 	root := t.TempDir()
 	writeQualityObligation(t, root, artifact.EvidenceBehavioral, elaboratedQualityYAML(), "authored")
+	// Job carries I-25's retry-ordering id ("1"), distinct from JobName,
+	// the CI job's declared name ("verify") SI-229 compares against the
+	// obligation's authoritative_source ref. A record whose Job happens to
+	// equal a former (pre-SI-229) ref value must NOT match on that alone;
+	// only JobName decides (see "job ordering id alone does not match").
 	base := artifact.Evidence{
 		Kind: artifact.EvidenceBehavioral, Verdict: artifact.VerdictPass,
 		Producer:   "verify:behavioral",
-		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "1", JobName: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	tests := []struct {
 		name   string
@@ -182,8 +187,9 @@ func TestAssessObligation_ExactMatching(t *testing.T) {
 		{"producer missing", func(e *artifact.Evidence) { e.Producer = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonProducerMissing},
 		{"producer mismatch", func(e *artifact.Evidence) { e.Producer = "other" }, qualityGitStub{}, ObligationUnproven, ObligationReasonProducerMismatch},
 		{"source mismatch", func(e *artifact.Evidence) { e.Provenance.Source = artifact.SourceLocal }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceMismatch},
-		{"source ref missing", func(e *artifact.Evidence) { e.Provenance.Job = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMissing},
-		{"source ref mismatch", func(e *artifact.Evidence) { e.Provenance.Job = "other" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMismatch},
+		{"source ref missing", func(e *artifact.Evidence) { e.Provenance.JobName = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMissing},
+		{"source ref mismatch", func(e *artifact.Evidence) { e.Provenance.JobName = "other" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMismatch},
+		{"job ordering id alone does not match (job_name required, SI-229)", func(e *artifact.Evidence) { e.Provenance.Job = "verify"; e.Provenance.JobName = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMissing},
 		{"code stale", func(e *artifact.Evidence) { e.Provenance.Commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, qualityGitStub{}, ObligationUnproven, ObligationReasonFreshnessStale},
 	}
 	for _, tt := range tests {
@@ -211,7 +217,7 @@ func TestAssessObligation_CodeEvaluationCommitUnavailableIsOperational(t *testin
 	record := artifact.Evidence{
 		Kind: artifact.EvidenceBehavioral, Verdict: artifact.VerdictPass,
 		Producer:   "verify:behavioral",
-		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", JobName: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	_, err := AssessObligation(context.Background(), ObligationAssessmentInput{
 		StoreRoot: root, SpecName: "loan-refi", ACID: "ac-2", Kind: artifact.EvidenceBehavioral,
@@ -249,7 +255,7 @@ func TestAssessObligation_AttestationAndUnprovableFreshness(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeQualityObligation(t, root, tt.kind, tt.quality, "authored")
-			record := artifact.Evidence{Kind: tt.kind, Verdict: artifact.VerdictPass, Producer: "verify:behavioral", Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+			record := artifact.Evidence{Kind: tt.kind, Verdict: artifact.VerdictPass, Producer: "verify:behavioral", Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", JobName: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
 			got, err := AssessObligation(context.Background(), ObligationAssessmentInput{StoreRoot: root, SpecName: "loan-refi", ACID: "ac-2", Kind: tt.kind, Record: &record, EvaluationCommit: record.Provenance.Commit})
 			if err != nil {
 				t.Fatalf("AssessObligation: %v", err)

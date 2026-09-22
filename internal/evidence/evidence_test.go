@@ -39,6 +39,9 @@ func withPipeline(p string) func(*artifact.Evidence) {
 func withJob(j string) func(*artifact.Evidence) {
 	return func(e *artifact.Evidence) { e.Provenance.Job = j }
 }
+func withJobName(j string) func(*artifact.Evidence) {
+	return func(e *artifact.Evidence) { e.Provenance.JobName = j }
+}
 func withCommit(c string) func(*artifact.Evidence) {
 	return func(e *artifact.Evidence) { e.Provenance.Commit = c }
 }

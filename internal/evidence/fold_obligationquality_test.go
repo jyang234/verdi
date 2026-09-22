@@ -46,7 +46,7 @@ func TestFold_ObligationQualityProspectiveSemantics(t *testing.T) {
 				recordCommit = qualityAfterCommit
 			}
 			record := testEvidence(artifact.EvidenceStatic, tt.verdict, "ac-1",
-				withProducer("verify:static"), withJob("verify"), withCommit(recordCommit))
+				withProducer("verify:static"), withJobName("verify"), withCommit(recordCommit))
 			result, err := Fold(Input{
 				Spec: testSpec("jira:TEST-1", ac("ac-1", artifact.EvidenceStatic)), Records: []artifact.Evidence{record},
 				StoreRoot: root, StorySlug: "test-1", EvaluationCommit: tt.evaluation,
@@ -102,7 +102,7 @@ func TestFold_ObligationQualityMisbindingIsOperational(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := testEvidence(artifact.EvidenceStatic, artifact.VerdictPass, "ac-1",
-		withProducer("verify:static"), withJob("verify"), withCommit(qualityAfterCommit))
+		withProducer("verify:static"), withJobName("verify"), withCommit(qualityAfterCommit))
 
 	result, err := Fold(Input{
 		Spec: testSpec("jira:TEST-1", ac("ac-1", artifact.EvidenceStatic)), Records: []artifact.Evidence{record},
@@ -136,7 +136,7 @@ func TestFold_ObligationQualityAttestationAndFreshnessRemainUnproven(t *testing.
 			if tt.kind == artifact.EvidenceAttestation {
 				writeAttestation(t, root, "test-1", "ac-1", testAttestation)
 			}
-			record := testEvidence(tt.kind, artifact.VerdictPass, "ac-1", withProducer("verify:static"), withJob("verify"), withCommit(qualityAfterCommit))
+			record := testEvidence(tt.kind, artifact.VerdictPass, "ac-1", withProducer("verify:static"), withJobName("verify"), withCommit(qualityAfterCommit))
 			result, err := Fold(Input{Spec: testSpec("jira:TEST-1", ac("ac-1", tt.kind)), Records: []artifact.Evidence{record}, StoreRoot: root, StorySlug: "test-1", EvaluationCommit: qualityAfterCommit})
 			if err != nil {
 				t.Fatalf("Fold: %v", err)
