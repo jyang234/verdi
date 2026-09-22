@@ -59,6 +59,12 @@ func TestIsForbiddenArgv(t *testing.T) {
 		{"force_with_lease_prefix", []string{"push", "--force-with-lease"}, true},
 		{"short_force_flag", []string{"checkout", "-f"}, true},
 		{"clean", []string{"rev-parse", "HEAD"}, false},
+		// R-RR3-29: the removal primitive now passes git's global -c
+		// option before its subcommand. -c is a configuration override,
+		// not a force flag, so SI-224's floor must still read this argv
+		// as clean — and "-c" must not be caught by the short-flag rule
+		// that catches "-f".
+		{"worktree_remove_with_config_override", []string{"-c", "status.showUntrackedFiles=all", "worktree", "remove", "/tmp/wt"}, false},
 		{"empty_argv", nil, false},
 	}
 	for _, tc := range cases {

@@ -143,7 +143,11 @@ func TestReportForbiddenCommands_Table(t *testing.T) {
 		{"reset", [][]string{{"reset", "--hard"}}, true, "recover: forbidden git command issued: git reset --hard\n"},
 		{"force_with_lease_prefix", [][]string{{"push", "--force-with-lease"}}, true, "recover: forbidden git command issued: git push --force-with-lease\n"},
 		{"short_force_flag", [][]string{{"checkout", "-f"}}, true, "recover: forbidden git command issued: git checkout -f\n"},
-		{"clean", [][]string{{"status", "--porcelain"}}, false, ""},
+		{"clean", [][]string{{"status", "--porcelain", "--untracked-files=all"}}, false, ""},
+		// R-RR3-29: `git -c status.showUntrackedFiles=all worktree
+		// remove <path>` is the reclaim executor's real argv. The
+		// configuration override must not read as a force flag.
+		{"worktree_remove_with_config_override", [][]string{{"-c", "status.showUntrackedFiles=all", "worktree", "remove", "/tmp/wt"}}, false, ""},
 		{"mixed_clean_then_forbidden", [][]string{{"rev-parse", "HEAD"}, {"reset", "--hard"}}, true, "recover: forbidden git command issued: git reset --hard\n"},
 	}
 	for _, tc := range cases {
