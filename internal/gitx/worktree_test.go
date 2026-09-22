@@ -9,27 +9,94 @@ import (
 	"testing"
 )
 
+// TestStatusDirty table-drives StatusDirty's own documented contract —
+// "any uncommitted change (staged, unstaged, or untracked-and-unignored)"
+// — including the row that contract only actually holds for once the
+// query is configuration-independent (R-RR3-28): an untracked, unignored
+// file in a repository whose operator set the ordinary DISPLAY setting
+// `status.showUntrackedFiles=no`. A plain `git status --porcelain`
+// honors that setting and answers "clean" with the operator's work
+// sitting on disk; `--untracked-files=all` overrides it at the query, so
+// every consumer of this single dirty check reads the same answer
+// whatever the repository's configuration says.
 func TestStatusDirty(t *testing.T) {
-	repo := buildRepo(t)
 	ctx := context.Background()
 
-	dirty, err := StatusDirty(ctx, repo.Dir)
-	if err != nil {
-		t.Fatalf("StatusDirty: %v", err)
-	}
-	if dirty {
-		t.Fatal("fresh fixture repo reported dirty")
-	}
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+		want  bool
+	}{
+		{
+			name:  "clean tree → clean",
+			setup: func(*testing.T, string) {},
+			want:  false,
+		},
+		{
+			name: "modified tracked file → dirty",
+			setup: func(t *testing.T, dir string) {
+				writeFixtureFile(t, filepath.Join(dir, "a.txt"), "changed\n")
+			},
+			want: true,
+		},
+		{
+			name: "untracked unignored file → dirty",
+			setup: func(t *testing.T, dir string) {
+				writeFixtureFile(t, filepath.Join(dir, "unfinished.txt"), "operator work\n")
+			},
+			want: true,
+		},
+		{
+			name: "ignored file → clean",
+			setup: func(t *testing.T, dir string) {
+				writeFixtureFile(t, filepath.Join(dir, ".gitignore"), "ignored.txt\n")
+				gitConfigure(t, dir, "add", ".gitignore")
+				gitConfigure(t, dir, "commit", "--quiet", "-m", "ignore ignored.txt")
+				writeFixtureFile(t, filepath.Join(dir, "ignored.txt"), "build output\n")
+			},
+			want: false,
+		},
+		{
+			name: "untracked file hidden by status.showUntrackedFiles=no → dirty",
+			setup: func(t *testing.T, dir string) {
+				gitConfigure(t, dir, "config", "status.showUntrackedFiles", "no")
+				writeFixtureFile(t, filepath.Join(dir, "unfinished.txt"), "operator work\n")
+			},
+			want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildRepo(t)
+			tc.setup(t, repo.Dir)
 
-	if err := os.WriteFile(filepath.Join(repo.Dir, "a.txt"), []byte("changed\n"), 0o644); err != nil {
-		t.Fatal(err)
+			got, err := StatusDirty(ctx, repo.Dir)
+			if err != nil {
+				t.Fatalf("StatusDirty: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("StatusDirty = %v, want %v", got, tc.want)
+			}
+		})
 	}
-	dirty, err = StatusDirty(ctx, repo.Dir)
-	if err != nil {
-		t.Fatalf("StatusDirty: %v", err)
+}
+
+// writeFixtureFile writes a fixture file, failing the test on error.
+func writeFixtureFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
 	}
-	if !dirty {
-		t.Fatal("modified tree reported clean")
+}
+
+// gitConfigure runs one git command against dir for fixture setup only —
+// deliberately NOT through this package's own run(), so a fixture never
+// depends on the very seam the test is measuring.
+func gitConfigure(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

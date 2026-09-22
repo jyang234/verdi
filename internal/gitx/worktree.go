@@ -25,9 +25,20 @@ var ErrBranchCheckedOut = errors.New("gitx: branch is already checked out in thi
 
 // StatusDirty reports whether dir's working tree has any uncommitted
 // change (staged, unstaged, or untracked-and-unignored) — the
-// uncommitted-changes indicator's single source of truth.
+// uncommitted-changes indicator's single source of truth, and the single
+// dirty check spec/verdi-store-layout §gc-reclaim names before any
+// destructive operation.
+//
+// The query passes --untracked-files=all explicitly (R-RR3-28) so the
+// answer is independent of the repository's own display configuration: a
+// plain `git status --porcelain` honors status.showUntrackedFiles, so an
+// operator who set it to "no" — an ordinary display preference, not a
+// safety decision — would otherwise be told a tree holding their own
+// untracked, unignored work is clean. Ignored files stay out of scope
+// (--untracked-files=all still respects .gitignore), which is exactly
+// what "untracked-and-unignored" above promises.
 func StatusDirty(ctx context.Context, dir string) (bool, error) {
-	out, err := run(ctx, dir, "status", "--porcelain")
+	out, err := run(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return false, err
 	}
