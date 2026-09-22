@@ -75,7 +75,7 @@ func readRuntimeRecords(t *testing.T, root, specRef, commit string) []artifact.E
 
 func fakeRuntimeDeps() (*fake.Forge, syncDeps, *bytes.Buffer, *bytes.Buffer) {
 	f := fake.New()
-	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7"})
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "runtime-probe"})
 	var stdout, stderr bytes.Buffer
 	return f, syncDeps{Forge: f, Stdout: &stdout, Stderr: &stderr}, &stdout, &stderr
 }
@@ -84,8 +84,8 @@ func fakeRuntimeDeps() (*fake.Forge, syncDeps, *bytes.Buffer, *bytes.Buffer) {
 // runtime-evidence ac-1, dc-1): given --story/--ac/--verdict/--witness
 // inside a genuine CI environment, it writes exactly one well-formed,
 // source: ci runtime record into derived/<spec>/<commit>/runtime.json,
-// pulling pipeline/job from the forge's CIContext like every other
-// producer.
+// pulling pipeline/job/job_name from the forge's CIContext like every
+// other producer (SI-229).
 func TestRunProduceRuntime_Happy(t *testing.T) {
 	t.Setenv("CI", "true")
 	root := buildRuntimeProbeStore(t)
@@ -118,6 +118,9 @@ func TestRunProduceRuntime_Happy(t *testing.T) {
 	}
 	if r.Provenance.Pipeline != "913" || r.Provenance.Job != "7" {
 		t.Errorf("Provenance = %+v, want pipeline=913 job=7", r.Provenance)
+	}
+	if r.Provenance.JobName != "runtime-probe" {
+		t.Errorf("Provenance.JobName = %q, want %q (SI-229)", r.Provenance.JobName, "runtime-probe")
 	}
 	if !strings.Contains(stdout.String(), "spec/runtime-fixture") || !strings.Contains(stdout.String(), "ac-2") {
 		t.Errorf("stdout = %q, want it to name the spec and AC", stdout.String())

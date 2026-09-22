@@ -22,6 +22,7 @@ func TestEmit_Happy(t *testing.T) {
 		Commit:   testCommit,
 		Pipeline: "913",
 		Job:      "7",
+		JobName:  "runtime-probe",
 		InCI:     true,
 	})
 	if err != nil {
@@ -47,6 +48,9 @@ func TestEmit_Happy(t *testing.T) {
 	}
 	if rec.Provenance.Pipeline != "913" || rec.Provenance.Job != "7" || rec.Provenance.Commit != testCommit {
 		t.Errorf("Provenance = %+v, want pipeline=913 job=7 commit=%s", rec.Provenance, testCommit)
+	}
+	if rec.Provenance.JobName != "runtime-probe" {
+		t.Errorf("Provenance.JobName = %q, want %q (SI-229)", rec.Provenance.JobName, "runtime-probe")
 	}
 	if !strings.HasPrefix(rec.Digest, "sha256:") {
 		t.Errorf("Digest = %q, want sha256:<hex> form", rec.Digest)
