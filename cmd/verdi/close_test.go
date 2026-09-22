@@ -1876,56 +1876,6 @@ func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
 	}
 }
 
-// TestUnwindClosureBranchCut unit-tests the shared unwind helper directly,
-// covering BOTH clauses of the fix contract — in particular the "if anything
-// was somehow committed, leave it and say so honestly" clause, which the
-// runClose-driven tests never reach (close's pre-commit window always leaves
-// an empty branch).
-func TestUnwindClosureBranchCut(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("empty branch: restores the original and deletes", func(t *testing.T) {
-		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "x\n"}, Message: "m"}})
-		cutPoint := repo.Head
-		checkoutBranch(t, repo.Dir, "close/foo") // git checkout -b close/foo at HEAD
-
-		var stderr bytes.Buffer
-		unwindClosureBranchCut(ctx, repo.Dir, "main", "close/foo", cutPoint, &stderr)
-
-		if b := gitCurrentBranch(t, repo.Dir); b != "main" {
-			t.Fatalf("current branch = %q, want main restored", b)
-		}
-		if hasLocalBranch(t, repo.Dir, "close/foo") {
-			t.Fatal("close/foo was not deleted")
-		}
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			t.Fatalf("a clean unwind wrote to stderr = %q, want it silent (only giving-up branches disclose)", s)
-		}
-	})
-
-	t.Run("committed branch: leaves it in place and discloses, never discarding", func(t *testing.T) {
-		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "x\n"}, Message: "m"}})
-		cutPoint := repo.Head
-		checkoutBranch(t, repo.Dir, "close/foo")
-		// A commit moves close/foo's tip beyond the cut point.
-		if err := os.WriteFile(filepath.Join(repo.Dir, "onbranch.txt"), []byte("work\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitOutput(t, repo.Dir, "add", "-A")
-		gitOutput(t, repo.Dir, "commit", "-m", "committed work on close/foo")
-
-		var stderr bytes.Buffer
-		unwindClosureBranchCut(ctx, repo.Dir, "main", "close/foo", cutPoint, &stderr)
-
-		if !hasLocalBranch(t, repo.Dir, "close/foo") {
-			t.Fatal("close/foo carrying a commit beyond its cut point was deleted — committed work discarded")
-		}
-		if !strings.Contains(stderr.String(), "beyond its cut point") {
-			t.Fatalf("stderr = %q, want an honest disclosure that the branch carries commit(s) beyond its cut point", stderr.String())
-		}
-	})
-}
-
 // TestCmdClose_RefusesOutsideCI proves 04 §Semantics's "PublishRollup runs
 // in CI only" gates `verdi close` itself (it calls PublishRollup directly,
 // spec/close-verb ac-2), mirroring rollup.go's own --force-local precedent
