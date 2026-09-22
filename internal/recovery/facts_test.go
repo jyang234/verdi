@@ -579,3 +579,183 @@ func TestGather_UnprovenResidue_SkipsReclaimAndDiscloses(t *testing.T) {
 		t.Fatalf("Disclosures = %v, want gc's own refusal sentence", f.Disclosures)
 	}
 }
+
+// TestGather_SpecClassFromCloseBranch is R-RR3-15's close/<name> leg
+// (2B-F10: previously untested): the checkout is on "main", spec/checkout
+// does not exist there at all, but close/checkout carries its own
+// committed copy (the shape a close ritual's own cut-point commit
+// leaves, before any archive move).
+func TestGather_SpecClassFromCloseBranch(t *testing.T) {
+	repo, cfg := fixtureStoreNoSpec(t)
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "close/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch(close/checkout): %v", err)
+	}
+	specDir := store.ActiveSpecDir(repo.Dir, "checkout")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", specDir, err)
+	}
+	if err := os.WriteFile(store.ActiveSpecPath(repo.Dir, "checkout"), []byte(checkoutSpecMD), 0o644); err != nil {
+		t.Fatalf("writing spec.md: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, store.SpecDirRelPath(store.ZoneActive, "checkout")); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "close: cut close/checkout"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if pathExists(store.ActiveSpecPath(repo.Dir, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout is visible on disk on main")
+	}
+
+	f := gather(t, cfg, "spec/checkout")
+	if f.CurrentBranch != "main" {
+		t.Fatalf("CurrentBranch = %q, want main", f.CurrentBranch)
+	}
+	if !f.Close.Exists {
+		t.Fatal("Close.Exists = false, want true")
+	}
+}
+
+// buildUnrelatedCheckoutRepo builds a fixtureStoreNoSpec repo, lands
+// writeToDefault's own commit(s) on main, then switches to a THIRD
+// branch ("unrelated", cut from main after landing) with no on-disk
+// trace of spec/checkout and neither a design/checkout nor a
+// close/checkout branch at all — the shape that can only be resolved via
+// R-RR3-15's default-branch-base leg.
+func buildUnrelatedCheckoutRepo(t *testing.T, writeToDefault func(t *testing.T, repo *fixturegit.Repo)) (*fixturegit.Repo, *store.Config) {
+	t.Helper()
+	repo, cfg := fixtureStoreNoSpec(t)
+	ctx := context.Background()
+	// Cut "unrelated" BEFORE writeToDefault lands its commit(s) on main,
+	// so switching back to "unrelated" at the end removes the spec from
+	// the working tree again (it was never tracked on that branch at
+	// all) rather than leaving main's own commit visible there too.
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "unrelated"); err != nil {
+		t.Fatalf("CheckoutNewBranch(unrelated): %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	writeToDefault(t, repo)
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "unrelated"); err != nil {
+		t.Fatalf("CheckoutExisting(unrelated): %v", err)
+	}
+	return repo, cfg
+}
+
+// TestGather_SpecClassFromDefaultBranchBase_ActiveZone is R-RR3-15's
+// final fallback leg (2B-F10): the spec is absent from disk and from
+// every ritual branch, but the resolved default branch's own active
+// zone carries it (a merged, never-closed spec).
+func TestGather_SpecClassFromDefaultBranchBase_ActiveZone(t *testing.T) {
+	repo, cfg := buildUnrelatedCheckoutRepo(t, func(t *testing.T, repo *fixturegit.Repo) {
+		ctx := context.Background()
+		dir := store.ActiveSpecDir(repo.Dir, "checkout")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+		if err := os.WriteFile(store.ActiveSpecPath(repo.Dir, "checkout"), []byte(checkoutSpecMD), 0o644); err != nil {
+			t.Fatalf("writing spec.md: %v", err)
+		}
+		if err := gitx.AddPaths(ctx, repo.Dir, store.SpecDirRelPath(store.ZoneActive, "checkout")); err != nil {
+			t.Fatalf("AddPaths: %v", err)
+		}
+		if _, err := gitx.CreateCommit(ctx, repo.Dir, "land spec/checkout on main"); err != nil {
+			t.Fatalf("CreateCommit: %v", err)
+		}
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	if pathExists(store.ActiveSpecPath(repo.Dir, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout is visible on disk on the unrelated branch")
+	}
+
+	f := gather(t, cfg, "spec/checkout")
+	if f.CurrentBranch != "unrelated" {
+		t.Fatalf("CurrentBranch = %q, want unrelated", f.CurrentBranch)
+	}
+}
+
+// TestGather_SpecClassFromDefaultBranchBase_ArchiveZone is the archive-
+// zone half of the same leg — the disclosed addition beyond R-RR3-15's
+// literal wording (2B-F10 flagged this untested): a spec already closed
+// and merged lives in the default branch's archive zone only.
+func TestGather_SpecClassFromDefaultBranchBase_ArchiveZone(t *testing.T) {
+	repo, cfg := buildUnrelatedCheckoutRepo(t, func(t *testing.T, repo *fixturegit.Repo) {
+		ctx := context.Background()
+		dir := store.ArchiveSpecDir(repo.Dir, "checkout")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+		if err := os.WriteFile(store.ArchiveSpecPath(repo.Dir, "checkout"), []byte(checkoutSpecMD), 0o644); err != nil {
+			t.Fatalf("writing spec.md: %v", err)
+		}
+		if err := gitx.AddPaths(ctx, repo.Dir, store.SpecDirRelPath(store.ZoneArchive, "checkout")); err != nil {
+			t.Fatalf("AddPaths: %v", err)
+		}
+		if _, err := gitx.CreateCommit(ctx, repo.Dir, "land spec/checkout's archive copy on main"); err != nil {
+			t.Fatalf("CreateCommit: %v", err)
+		}
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	if pathExists(store.ArchiveSpecPath(repo.Dir, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout's archive copy is visible on disk on the unrelated branch")
+	}
+
+	f := gather(t, cfg, "spec/checkout")
+	if f.CurrentBranch != "unrelated" {
+		t.Fatalf("CurrentBranch = %q, want unrelated", f.CurrentBranch)
+	}
+}
+
+// TestGather_Determinism (2B-F10) proves three independent Gather+Derive
+// runs over the same fixture produce byte-identical canonical output and
+// a strictly-ascending state order — no map-iteration order reaches
+// facts, disclosures, or choice order.
+func TestGather_Determinism(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	cutEmptyBranch(t, repo, "close/checkout")
+	writeStaleWriterLock(t, repo)
+	writePreparedJournal(t, repo)
+	writeOrphanWorkspaceStaging(t, repo)
+
+	var canon [][]byte
+	for i := 0; i < 3; i++ {
+		f := gather(t, cfg, "spec/checkout")
+		p := Derive(f)
+		if err := p.Validate(); err != nil {
+			t.Fatalf("run %d: Validate: %v", i, err)
+		}
+		for j := 1; j < len(p.States); j++ {
+			if stateTargetKey(p.States[j-1]) >= stateTargetKey(p.States[j]) {
+				t.Fatalf("run %d: states not strictly ascending at %d: %+v", i, j, p.States)
+			}
+		}
+		data, err := Canonical(p)
+		if err != nil {
+			t.Fatalf("run %d: Canonical: %v", i, err)
+		}
+		canon = append(canon, data)
+	}
+	for i := 1; i < len(canon); i++ {
+		if !bytesEqual(canon[0], canon[i]) {
+			t.Fatalf("run %d differs from run 0:\n%s\nvs\n%s", i, canon[0], canon[i])
+		}
+	}
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

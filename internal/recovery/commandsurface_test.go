@@ -10,31 +10,40 @@ import (
 	"testing"
 )
 
-// readOnlyGitxCalls is Task 2's own command-surface allow-list (Step 15):
-// every read-only gitx primitive facts.go, derive.go, schema.go, codec.go,
-// and commandlog.go may legitimately call. Task 4's apply.go additionally
+// readOnlyGitxCalls is Task 2's own command-surface allow-list (Step 15),
+// trimmed (2B-F11) to EXACTLY the gitx names facts.go, derive.go,
+// schema.go, codec.go, and commandlog.go actually call — not Step 15's
+// own superset (which additionally named DefaultBranch and WorktreeList,
+// both read-only but unused here). Task 4's apply.go additionally
 // allow-lists branchcut.Unwind and reclaim.Apply only — not this test's
 // concern (a different file, added by a later task).
+//
+// Limitation (noted, not fixed): the walker below keys on the bare
+// identifier "gitx", so `import gx "github.com/jyang234/verdi/internal/
+// gitx"` followed by a call through that alias would evade both this
+// list and the vacuity guard's own name-based check — only a wholesale
+// rename of the import is caught (TestCommandSurface_OnlyReadOnlyGitxCallsInProductionSource's
+// own vacuity guard fires when NO "gitx.*" call is found at all, which a
+// consistently-aliased package still trips). internal/residue's own gate
+// (commandsurface_test.go there) shares the same shape.
 var readOnlyGitxCalls = map[string]bool{
-	"CurrentBranch":           true,
-	"RevParse":                true,
-	"MergeBase":               true,
-	"DefaultBranch":           true,
-	"LocalBranches":           true,
-	"StagedPaths":             true,
-	"WorktreeChangedPaths":    true,
-	"StatusDirty":             true,
-	"LsTree":                  true,
-	"HasRemoteTrackingBranch": true,
 	"AheadBehind":             true,
-	"WorktreeList":            true,
+	"CurrentBranch":           true,
+	"HasRemoteTrackingBranch": true,
+	"LocalBranches":           true,
+	"LsTree":                  true,
+	"MergeBase":               true,
+	"RevParse":                true,
 	// Show joins the read half's allow-list per R-RR3-15 (plan amendment):
 	// read-only blob-content-at-a-ref plumbing, already on
 	// internal/residue's own allow-list — specClassAt's own fallback
 	// chain (facts.go) needs it to resolve a spec's class from a ritual
 	// branch's or the default branch's own tree when it is not visible
 	// on disk in the current checkout.
-	"Show": true,
+	"Show":                 true,
+	"StagedPaths":          true,
+	"StatusDirty":          true,
+	"WorktreeChangedPaths": true,
 }
 
 // TestCommandSurface_OnlyReadOnlyGitxCallsInProductionSource mirrors

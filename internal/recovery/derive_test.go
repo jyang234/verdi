@@ -117,6 +117,48 @@ func TestDerive_EmptyBranchCut_ResolvedBaseMechanism(t *testing.T) {
 	}
 }
 
+// TestDerive_EmptyBranchCut_FeatureBranch is 2B-F10: no existing test
+// exercised an empty cut on feature/<name> (build start's own
+// cut-from-current ritual) specifically.
+func TestDerive_EmptyBranchCut_FeatureBranch(t *testing.T) {
+	f := baseFacts()
+	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1", EmptyWitnesses: []string{"main"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "feature/checkout")
+	if !ok {
+		t.Fatalf("no empty-branch-cut state for feature/checkout: %+v", p.States)
+	}
+	if s.Scope != ScopeRef {
+		t.Fatalf("Scope = %q, want ref", s.Scope)
+	}
+	if len(s.Choices) != 1 || s.Choices[0].Effects[0] != "switch back to main" {
+		t.Fatalf("Choices = %+v, want a return to main", s.Choices)
+	}
+}
+
+// TestDerive_EmptyBranchCut_PolicyAdopt is 2B-F10: policy/adopt is
+// store-scoped (R-RR3-4) and cut-from-resolved-base (like design start);
+// no existing test exercised its own empty cut.
+func TestDerive_EmptyBranchCut_PolicyAdopt(t *testing.T) {
+	f := baseFacts()
+	f.PolicyAdopt = RitualBranch{Name: "policy/adopt", Exists: true, Tip: "p1", EmptyWitnesses: []string{"main"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "policy/adopt")
+	if !ok {
+		t.Fatalf("no empty-branch-cut state for policy/adopt: %+v", p.States)
+	}
+	if s.Scope != ScopeStore {
+		t.Fatalf("Scope = %q, want store (R-RR3-4)", s.Scope)
+	}
+	if len(s.Choices) != 1 || s.Choices[0].Effects[0] != "switch back to main" {
+		t.Fatalf("Choices = %+v, want a return to the re-resolved default branch main", s.Choices)
+	}
+}
+
 func TestDerive_EmptyBranchCut_UndecidableResolvedBase(t *testing.T) {
 	f := baseFacts()
 	f.DefaultBranchResolved = false
