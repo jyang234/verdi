@@ -2,7 +2,8 @@
 id: conflict/vatc-forge-countersign-solo-approval-unreachable
 kind: conflict
 title: "vatc-forge-countersign leaves a solo repository no approval evidence"
-status: open
+status: superseded
+frozen: { at: 2026-09-22, commit: 71bcb8762c0c03c043f28dde0f657ad7e531fc44 }
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/vatc-forge-countersign }
