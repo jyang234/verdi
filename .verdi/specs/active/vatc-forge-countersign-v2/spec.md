@@ -21,7 +21,7 @@ acceptance_criteria:
     evidence: [behavioral]
     anchor: ac-3
   - id: ac-4
-    text: "under a selected solo governance profile whose close roles map to the owner's forge-authenticated principal, the GitHub adapter returns an approval fact for an approved environment review of the dispatch-only close workflow run: its identity is the composite of repository, run id, run attempt, environment id, and reviewer id; its candidate is the run's head commit, which must equal both the open close change head and the locally evaluated full commit SHA; its approved-at stamp is the gated job's own start time, a provider stamp no earlier than the review, disclosed as derived; a rejected, pending, or absent review, a cancelled run, or a review of another run or attempt yields no approval; the fact is honored only under the solo profile, and the countersign witness carries the kernel's solo role-collapse disclosure"
+    text: "under a selected solo governance profile whose close roles map to the owner's forge-authenticated principal, the GitHub adapter returns an approval fact for an approved environment review of the dispatch-only close workflow run, honored only on the run's first attempt because GitHub's review history carries no attempt, so a rerun yields no approval and a retry must be a new dispatch: its identity is the composite of repository, run id, run attempt, environment id, and reviewer id; its candidate is the run's head commit, which must equal both the open close change head and the locally evaluated full commit SHA; its normalized state is active, with GitHub's own state kept as a provider witness; its approved-at stamp is the gated job's creation stamp for that attempt, the earliest provider-reported instant at which the review could have occurred, a conservative lower bound disclosed as derived so approval age is never understated, while the job's start stays a separate witness; a rejected, pending, or absent review, a bypassed protection rule, a cancelled run, or a later attempt yields no approval; the fact is honored only under the solo profile, and the countersign witness carries the kernel's solo role-collapse disclosure"
     evidence: [static, behavioral]
     anchor: ac-4
 links:
@@ -41,7 +41,7 @@ decisions:
     text: "freshness binds the governance policy id and digest, evaluation and observation stamps, maximum observation age, optional maximum approval age, and provider snapshot identity; observation is fresh only when its nonnegative age is within the maximum, approval age is additionally checked when configured, and a configured but unreachable forge or any unproven operand is disclosed or blocking according to the consuming transition, never interpreted as approval"
     anchor: dc-4
   - id: dc-5
-    text: "a GitHub environment review is the solo owner's approval act because GitHub refuses an author's approval of their own change and dc-3 bars claims, comments, and reactions: it is a forge-authenticated decision by the reviewer on one exact workflow run, recorded by the forge and never written by Verdi; GitHub's review history carries no review id and no review time, so approval_id is the ac-4 composite and approved_at is the gated job's start, each disclosed in provider_witnesses as derived; a review is never reused across runs or attempts, so withdrawal is not approving or cancelling the run; environment reviews are not a countersign source under team or high-assurance profiles; the environment must allow self-review for the solo owner to approve, and the adapter discloses that setting when the forge reports it"
+    text: "a GitHub environment review is the solo owner's approval act because GitHub refuses an author's approval of their own change and dc-3 bars claims, comments, and reactions: it is a forge-authenticated decision by the reviewer on one exact workflow run, recorded by the forge and never written by Verdi; GitHub's review history carries no review id, no review time, and no attempt, so approval_id is the ac-4 composite, approved_at is the gated job's creation stamp, which cannot be later than the review and so overstates rather than understates approval age, and only a first attempt is honored because a review cannot be tied to a retry; each derived field is disclosed in provider_witnesses, and the job's start stamp is recorded there separately, never as the approval instant; GitHub's approved state is normalized to the shared active state; a review is never reused across runs or attempts, so withdrawal is not approving or cancelling the run; environment reviews are not a countersign source under team or high-assurance profiles; the environment must allow self-review for the solo owner to approve, and the adapter discloses that setting when the forge reports it"
     anchor: dc-5
 constraints:
   - id: co-1
@@ -106,6 +106,11 @@ exact run, so it binds the candidate the way a change approval does. It is
 honored only under solo and never substitutes for independent review under
 team or high-assurance.
 
+GitHub cannot tie a review to a retry, so only a first attempt counts; a
+retry is a new dispatch that needs a new review. GitHub reports no review
+time either, so the approval is dated by the earliest moment it could have
+happened. Its age can then only be overstated, never understated.
+
 ## Decisions
 
 ### DC-1
@@ -130,8 +135,10 @@ unauthenticated facts are blocking or disclosed-unproven, never approval.
 ### DC-5
 
 An environment review is the only forge-recorded approval a solo owner can
-make on GitHub. Its two missing provider fields are derived, never invented:
-the composite identity and the gated job's start time, both disclosed.
+make on GitHub. Its missing provider fields are derived, never invented, and
+each is disclosed: the composite identity, and an approval instant taken from
+the gated job's creation, which cannot be later than the review. The job's
+start is a separate witness, and only a first attempt is honored.
 
 ## Constraints
 
@@ -195,8 +202,14 @@ reduced to a pass.
 
 Environment review rows (ac-4, dc-5) fill the same closed row shape:
 `approval_id` is the composite `github-environment-review:<repository>:<run
-id>:<run attempt>:<environment id>:<reviewer id>`; `approval_ref` is the run's
-URL and environment name; `state` is `approved`; `approved_at` and
-`updated_at` are the gated job's start stamp; `candidate_sha` is the run's
-head commit; and `provider_witnesses` states that the identity and the stamp
-are derived and records the environment's self-review setting when reported.
+id>:<run attempt>:<environment id>:<reviewer id>`, and only run attempt 1 is
+honored; `approval_ref` is the run's URL and environment name; `state` is the
+shared `active`, with GitHub's `approved` kept in `provider_witnesses`;
+`approved_at` and `updated_at` are the gated job's creation stamp for that
+attempt, a conservative lower bound on the review instant, so the inherited
+approval-age check can only overstate age; `candidate_sha` is the run's head
+commit; and `provider_witnesses` states that the identity and the stamp are
+derived, records the job's start stamp separately, and records the
+environment's self-review setting when reported. When the creation stamp is
+unavailable, the approval-age operand is unproven and blocks wherever a
+maximum approval age is configured.
