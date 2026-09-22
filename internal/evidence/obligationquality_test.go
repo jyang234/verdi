@@ -190,6 +190,7 @@ func TestAssessObligation_ExactMatching(t *testing.T) {
 		{"source ref missing", func(e *artifact.Evidence) { e.Provenance.JobName = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMissing},
 		{"source ref mismatch", func(e *artifact.Evidence) { e.Provenance.JobName = "other" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMismatch},
 		{"job ordering id alone does not match (job_name required, SI-229)", func(e *artifact.Evidence) { e.Provenance.Job = "verify"; e.Provenance.JobName = "" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMissing},
+		{"job ordering id equal to the ref never rescues a mismatched job_name (SI-229)", func(e *artifact.Evidence) { e.Provenance.Job = "verify"; e.Provenance.JobName = "other" }, qualityGitStub{}, ObligationUnproven, ObligationReasonSourceRefMismatch},
 		{"code stale", func(e *artifact.Evidence) { e.Provenance.Commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, qualityGitStub{}, ObligationUnproven, ObligationReasonFreshnessStale},
 	}
 	for _, tt := range tests {
