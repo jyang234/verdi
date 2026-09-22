@@ -55,10 +55,12 @@ var readOnlyGitxCalls = map[string]bool{
 	// StagedPaths and WorktreeChangedPaths are the two explicit listings
 	// every clean-tree question in this package is answered from. Their
 	// companion StatusDirty is deliberately ABSENT (owner risk review
-	// F1): its plain `git status --porcelain` honors
-	// status.showUntrackedFiles, so it cannot carry a configuration-
-	// independent clean-tree proof, and these two answer the same
-	// question without it.
+	// F1): a single bool cannot carry the PER-LISTING validity the
+	// re-proof needs — R-RR3-23/24's unobserved-versus-empty
+	// distinction, where a listing whose read failed withholds the
+	// executor instead of reading as clean — and it cannot name which
+	// fact is unavailable. (Its own query is configuration-independent
+	// since R-RR3-28; that is no longer the reason it is absent.)
 	"StagedPaths":          true,
 	"WorktreeChangedPaths": true,
 }

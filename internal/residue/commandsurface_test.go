@@ -24,7 +24,7 @@ var readOnlyGitxCalls = map[string]bool{
 	"LsTree":        true, // archive-path presence at a ref, via git plumbing
 	"Show":          true, // git show <ref>:<path>: archive spec.md content at a ref (pattern (b)'s realization read)
 	"WorktreeList":  true, // git worktree list --porcelain
-	"StatusDirty":   true, // git status --porcelain: the clean/dirty signal
+	"StatusDirty":   true, // git status --porcelain --untracked-files=all: the clean/dirty signal
 }
 
 // TestCommandSurface_OnlyReadOnlyGitxCallsInProductionSource is ac-3's own

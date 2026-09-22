@@ -265,14 +265,16 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 
 	// The two listings below are the whole of this projection's
 	// working-tree evidence. gitx.StatusDirty's single bool is
-	// deliberately NOT gathered beside them: it runs a plain `git status
-	// --porcelain`, which honors status.showUntrackedFiles, so an
-	// ordinary display setting makes it answer "clean" over untracked
-	// work that WorktreeChangedPaths (--untracked-files=all, which
-	// overrides the setting) names outright. One configuration-
-	// independent answer, read from the explicit listings, is the only
-	// one anything here proves a precondition from (owner risk review
-	// F1).
+	// deliberately NOT gathered beside them: a bool cannot distinguish
+	// "this listing read empty" from "this listing could not be read",
+	// and it cannot name which fact is unavailable — the per-listing
+	// validity R-RR3-23/24 requires so a failed read withholds the
+	// executor rather than passing as clean. Both listings below pin
+	// --untracked-files explicitly, so what they prove a precondition
+	// from is independent of the repository's own display configuration
+	// (owner risk review F1; StatusDirty itself became configuration-
+	// independent under R-RR3-28, which does not restore the missing
+	// validity bits).
 	if staged, err := gitx.StagedPaths(ctx, root); err != nil {
 		disclosures = append(disclosures, fmt.Sprintf("could not list staged paths: %v", err))
 	} else {
