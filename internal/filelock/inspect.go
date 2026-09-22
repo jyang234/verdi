@@ -28,12 +28,19 @@ type Inspection struct {
 // Inspect reads path without acquiring or taking over anything. It
 // distinguishes the states Peek deliberately collapses (R-RR3-6): a
 // complete body whose pid is not alive is LockStale; a young empty or
-// partial body is LockHeld (mid-flush, exactly Peek's charity); an old
-// empty body is LockStale with reason "empty lock body older than 2s"; a
-// live pid whose start time cannot be cross-checked (ps unparseable) is
-// LockUndecidable with the ps error as reason — never reported stale.
-// Peek's own behavior and tests are unchanged: Peek still calls alive,
-// which keeps its documented kill-probe-only fallback.
+// partial body is LockHeld (mid-flush, exactly Peek's charity — R-RR3-6
+// amended: the ruling's first wording called this LockUndecidable, but
+// that reading is withdrawn, since SI-218's own chosen shape for
+// LockUndecidable is a disclosure naming "the path, the pid, and the
+// witness `ps -o lstart= -p <pid>`", and a young empty/partial body has
+// no pid to name — LockHeld, the Task 2 Interfaces block's own reading,
+// is the coherent one, and this is now the sole authority for it); an
+// old empty body is LockStale with reason "empty lock body older than
+// 2s"; a live pid whose start time cannot be cross-checked (ps
+// unparseable) is LockUndecidable with the ps error as reason — never
+// reported stale. Peek's own behavior and tests are unchanged: Peek
+// still calls alive, which keeps its documented kill-probe-only
+// fallback.
 func Inspect(path string) (Inspection, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

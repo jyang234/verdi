@@ -24,9 +24,12 @@ func writeLockInfo(t *testing.T, path string, info Info) {
 	}
 }
 
-// deadPID starts and waits a `true` subprocess and returns its pid,
-// guaranteed reaped and never confusable with a live process.
-func deadPID(t *testing.T) int {
+// reapedPID starts and waits a `true` subprocess and returns its pid,
+// guaranteed reaped and never confusable with a live process. Named
+// distinctly from filelock_test.go's own local variables named "deadPID"
+// (2A-M9): a package-level function of that same name would be shadowed,
+// not an error, but confusing to read.
+func reapedPID(t *testing.T) int {
 	t.Helper()
 	cmd := exec.Command("true")
 	if err := cmd.Run(); err != nil {
@@ -52,7 +55,7 @@ func TestInspect_Table(t *testing.T) {
 		}, nil, LockHeld, ""},
 		{"stale dead pid", func(t *testing.T) string {
 			p := filepath.Join(dir, "stale.lock")
-			writeLockInfo(t, p, Info{PID: deadPID(t), Start: 1})
+			writeLockInfo(t, p, Info{PID: reapedPID(t), Start: 1})
 			return p
 		}, nil, LockStale, "pid"},
 		{"undecidable ps", func(t *testing.T) string {
@@ -71,6 +74,23 @@ func TestInspect_Table(t *testing.T) {
 			}
 			return p
 		}, nil, LockStale, "empty lock body"},
+		// R-RR3-6 amended (2A-I3): a YOUNG empty or partial body is
+		// LockHeld (mid-flush, Peek's own charity), never LockUndecidable
+		// — the contested branch review 2A found untested.
+		{"young empty body", func(t *testing.T) string {
+			p := filepath.Join(dir, "young-empty.lock")
+			if err := os.WriteFile(p, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}, nil, LockHeld, ""},
+		{"young partial body", func(t *testing.T) string {
+			p := filepath.Join(dir, "young-partial.lock")
+			if err := os.WriteFile(p, []byte(`{"pid":1`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}, nil, LockHeld, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
