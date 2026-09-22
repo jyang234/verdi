@@ -1,27 +1,202 @@
 ---
 id: spec/vatc-forge-countersign-v2
 kind: spec
-title: "jira:VERDI-ATC-2"
-owners: [unassigned]
+title: "Authenticated forge approvals as countersigns"
+owners: [platform-team]
 class: story
 story: jira:VERDI-ATC-2
 problem: { text: "a solo repository can never satisfy a close countersign: GitHub forbids an author's approval of their own change, while spec/vatc-forge-countersign accepts only change approvals, refuses self-approval unconditionally, and bars comments and claims as substitutes, so the solo governance profile GLG v3 defines is unreachable at close", anchor: problem }
 outcome: { text: "under a solo governance profile, the owner's GitHub environment approval of the dispatch-only close run is a forge-authenticated approval fact bound to that run's exact head commit and satisfies the close countersign with the solo role collapse and every derived witness field disclosed, while team and high-assurance profiles keep independent change approvals and the self-approval refusal", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static], anchor: ac-1 }
+  - id: ac-1
+    text: "the forge consumer port and both GitHub and GitLab adapters return strict approval facts bound to repository, change, immutable approval identity, exact current candidate SHA, forge state, authenticated principal evidence, and forge freshness witnesses"
+    evidence: [static, behavioral]
+    anchor: ac-1
+  - id: ac-2
+    text: "the countersign resolver emits canonical verdi.countersign-witness/v1 carrying a deterministically ordered approval set and satisfies an attestation/countersign obligation only when the required story-review or feature-UAT role, authenticated principals, active approval states, candidate SHA, bound freshness policy, distinct-principal count, and configured separation of duties are proven"
+    evidence: [static, behavioral]
+    anchor: ac-2
+  - id: ac-3
+    text: "build gate and story or feature close preflight consume the same resolver, preserve the approval reference and principal in canonical journey or closure evidence, reject revoked, dismissed, stale, wrong-head, duplicated, unconfigured, or unreachable cases honestly, reject a self-approval wherever the selected governance profile requires separation of duties, and write no countersign file"
+    evidence: [behavioral]
+    anchor: ac-3
+  - id: ac-4
+    text: "under a selected solo governance profile whose close roles map to the owner's forge-authenticated principal, the GitHub adapter returns an approval fact for an approved environment review of the dispatch-only close workflow run: its identity is the composite of repository, run id, run attempt, environment id, and reviewer id; its candidate is the run's head commit, which must equal both the open close change head and the locally evaluated full commit SHA; its approved-at stamp is the gated job's own start time, a provider stamp no earlier than the review, disclosed as derived; a rejected, pending, or absent review, a cancelled run, or a review of another run or attempt yields no approval; the fact is honored only under the solo profile, and the countersign witness carries the kernel's solo role-collapse disclosure"
+    evidence: [static, behavioral]
+    anchor: ac-4
 links:
-  - { type: implements, ref: "spec/todo-replace-feature-name#ac-1" }
+  - { type: implements, ref: "spec/verdi-atc-prerequisites#ac-2" }
+  - { type: supersedes, ref: "spec/vatc-forge-countersign" }
+decisions:
+  - id: dc-1
+    text: "U2 adds no standalone CLI or MCP operation: existing verdi gate, verdi close --preflight, verdi close --prepare, and close publication consume the forge-backed resolver; machine consumers read its witness through the canonical journey or closure evidence they already consume"
+    anchor: dc-1
+  - id: dc-2
+    text: "verdi.countersign-witness/v1 contains schema, repository, forge, change_id, candidate_sha, obligation, freshness, approvals, reduction, verdict, witnesses, and digest; approvals is ordered by canonical principal id then approval id and each row binds approval id/ref/state/times/candidate SHA/principal resolution/provider witnesses; reduction binds eligible approval ids, sorted distinct principals, satisfied and required counts, separation verdict, and freshness verdict"
+    anchor: dc-2
+  - id: dc-3
+    text: "the current candidate is the forge-reported change head and must equal the locally evaluated full commit SHA; branch names, tree equality alone, display names, author claims, comments, reactions, and historical approvals cannot substitute"
+    anchor: dc-3
+  - id: dc-4
+    text: "freshness binds the governance policy id and digest, evaluation and observation stamps, maximum observation age, optional maximum approval age, and provider snapshot identity; observation is fresh only when its nonnegative age is within the maximum, approval age is additionally checked when configured, and a configured but unreachable forge or any unproven operand is disclosed or blocking according to the consuming transition, never interpreted as approval"
+    anchor: dc-4
+  - id: dc-5
+    text: "a GitHub environment review is the solo owner's approval act because GitHub refuses an author's approval of their own change and dc-3 bars claims, comments, and reactions: it is a forge-authenticated decision by the reviewer on one exact workflow run, recorded by the forge and never written by Verdi; GitHub's review history carries no review id and no review time, so approval_id is the ac-4 composite and approved_at is the gated job's start, each disclosed in provider_witnesses as derived; a review is never reused across runs or attempts, so withdrawal is not approving or cancelling the run; environment reviews are not a countersign source under team or high-assurance profiles; the environment must allow self-review for the solo owner to approve, and the adapter discloses that setting when the forge reports it"
+    anchor: dc-5
+constraints:
+  - id: co-1
+    text: "forge response decoders reject unknown fields where the provider contract is closed, trailing data, unknown states, missing IDs (a GitHub environment review has no provider id, so its ac-4 composite must be complete and unique instead), ambiguous pagination, and duplicate approval identities; adapters normalize provider-specific shapes behind the existing consumer-defined forge port"
+    anchor: co-1
+  - id: co-2
+    text: "tests use httptest and the shared forge contract fake only, include GitHub and GitLab pagination and revocation cases, and make no network calls"
+    anchor: co-2
+  - id: co-3
+    text: "the resolver is read-only with respect to the candidate Git tree and cannot create, edit, stage, commit, or request an approval"
+    anchor: co-3
 ---
-# jira:VERDI-ATC-2
+# Authenticated forge approvals as countersigns (v2)
 
 ## Problem
 
-TODO: design notes.
+The approval that satisfies a countersign lives at the forge, not in the
+candidate. A local file would mutate the bytes after review, while a bare
+approval label would not prove actor, state, freshness, or candidate binding.
+
+Version 1 accepted only change approvals and refused self-approval outright.
+GLG v3 AC-3 defines a solo profile in which one authenticated principal fills
+author and approver roles with the collapse disclosed, but GitHub refuses an
+author's approval of their own change and dc-3 bars claims, comments, and
+reactions. So a solo repository could never produce approval evidence, and
+nothing in it could close. The conflict record
+`conflict/vatc-forge-countersign-solo-approval-unreachable` carries the witness.
 
 ## Outcome
 
-TODO: design notes.
+One resolver translates provider facts into Verdi's three-valued authority
+model. Story review approvals satisfy the story countersign; the owner's G3
+approval satisfies the feature-UAT countersign. The witness remains evidence,
+not a second lifecycle state.
 
-## Ac 1
+## AC-1
 
-TODO: design notes.
+The port returns provider facts rather than provider judgments. Principal
+authentication remains the governance kernel's responsibility.
+
+## AC-2
+
+The witness names every operand needed to reproduce the countersign verdict.
+`proven` is reachable only when all operands prove the required obligation;
+violations carry witnesses and unavailable facts remain disclosed as unproven.
+
+## AC-3
+
+Gate and closure share the resolver. Their adverse exit behavior follows the
+existing transition contract, and neither path changes candidate bytes.
+
+Amended in v2: the self-approval refusal applies wherever the selected
+profile requires separation of duties. Under team and high-assurance it is
+unchanged. Under solo, the kernel decides, and the witness carries its
+role-collapse disclosure.
+
+## AC-4
+
+Added in v2. Under a solo profile, the owner approves the dispatch-only close
+run in a protected GitHub environment. That review is a forge fact about one
+exact run, so it binds the candidate the way a change approval does. It is
+honored only under solo and never substitutes for independent review under
+team or high-assurance.
+
+## Decisions
+
+### DC-1
+
+Existing gate, close, journey, and closure evidence carry the resolver; no new
+standalone command exists.
+
+### DC-2
+
+The witness schema contains the closed multi-approval, obligation, freshness,
+reduction, verdict, and witness fields declared above.
+
+### DC-3
+
+Only the full forge change-head SHA matched to local HEAD binds a candidate.
+
+### DC-4
+
+Freshness is computed from the bound policy and forge snapshot. Unavailable or
+unauthenticated facts are blocking or disclosed-unproven, never approval.
+
+### DC-5
+
+An environment review is the only forge-recorded approval a solo owner can
+make on GitHub. Its two missing provider fields are derived, never invented:
+the composite identity and the gated job's start time, both disclosed.
+
+## Constraints
+
+### CO-1
+
+Both provider adapters strict-decode and reject ambiguous or duplicate facts.
+Amended in v2: an environment review's composite identity replaces the
+provider id it lacks and must be complete and unique.
+
+### CO-2
+
+Forge contract tests use hermetic HTTP and in-memory fakes without network.
+
+### CO-3
+
+Countersign resolution is read-only and cannot request approval or mutate Git.
+
+## Countersign witness contract
+
+The canonical witness has this closed shape:
+
+```text
+schema: "verdi.countersign-witness/v1"
+repository, forge, change_id, candidate_sha
+obligation: {
+  transition, scheme, kind, role, required_count,
+  governance_profile_id, governance_profile_digest, separation_rule
+}
+freshness: {
+  policy_id, policy_digest, evaluated_at, observed_at,
+  maximum_observation_age_seconds, maximum_approval_age_seconds,
+  provider_snapshot_id
+}
+approvals[]: {
+  approval_id, approval_ref, state, approved_at, updated_at, candidate_sha,
+  principal_resolution, provider_witnesses[]
+}
+reduction: {
+  eligible_approval_ids[], distinct_principal_ids[],
+  eligible_count, required_count, freshness_verdict, separation_verdict
+}
+verdict, witnesses[], digest
+```
+
+Times are normalized UTC RFC3339Nano stamps. `maximum_approval_age_seconds`
+is zero only when the bound policy imposes no approval-age ceiling; the live
+observation-age check always applies. A negative age, missing snapshot id,
+future provider stamp, or age above its configured maximum is not fresh.
+
+The adapter rejects duplicate approval ids. The resolver retains every
+normalized approval row, then selects rows that are active, exact-candidate,
+fresh, role-authorized, and authenticated. Eligible rows sort by canonical
+principal id and approval id. Multiple rows for one canonical principal count
+once; `eligible_approval_ids` retains all contributing ids while
+`distinct_principal_ids` is the kernel-normalized set used for
+`eligible_count`. The governance kernel evaluates the declared separation
+rule against those principals and the candidate author. `proven` requires
+`eligible_count >= required_count` and a proven separation verdict. Missing,
+violated, or unproven operands preserve their own witnesses and cannot be
+reduced to a pass.
+
+Environment review rows (ac-4, dc-5) fill the same closed row shape:
+`approval_id` is the composite `github-environment-review:<repository>:<run
+id>:<run attempt>:<environment id>:<reviewer id>`; `approval_ref` is the run's
+URL and environment name; `state` is `approved`; `approved_at` and
+`updated_at` are the gated job's start stamp; `candidate_sha` is the run's
+head commit; and `provider_witnesses` states that the identity and the stamp
+are derived and records the environment's self-review setting when reported.
