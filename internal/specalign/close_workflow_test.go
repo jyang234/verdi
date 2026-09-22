@@ -306,7 +306,7 @@ func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 		switch {
 		case strings.HasPrefix(s.Uses, "actions/checkout@"):
 			checkoutIdx = i
-		case strings.Contains(s.Run, "spec_ref") && (strings.Contains(s.Run, "=~") || strings.Contains(s.Run, "regex")):
+		case strings.Contains(s.Run, "$SPEC_REF") && strings.Contains(s.Run, "=~"):
 			validateIdx = i
 		case strings.Contains(s.Run, "verdi sync") && !strings.Contains(s.Run, "--produce"):
 			syncIdx = i
@@ -318,7 +318,10 @@ func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 	}
 
 	if validateIdx == -1 {
-		t.Fatalf("close.yml: no step validating the spec_ref input (a shell regex check against inputs.spec_ref) found; decoded run steps: %v", runCommands(steps))
+		t.Fatalf("close.yml: no step validating the spec_ref input (a shell regex check against $SPEC_REF) found; decoded run steps: %v", runCommands(steps))
+	}
+	if validateIdx != 0 {
+		t.Errorf("close.yml: spec_ref validation must be the FIRST step (index 0), got index %d", validateIdx)
 	}
 	if checkoutIdx == -1 {
 		t.Fatalf("close.yml: no actions/checkout step found")
@@ -483,5 +486,63 @@ func TestCloseDispatchPushIsAPlainFastForwardOfTheCloseBranch(t *testing.T) {
 	}
 	if got, want := strings.TrimSpace(job.Steps[pushes[0]].Run), "git push origin HEAD"; got != want {
 		t.Errorf("close.yml: the push step must be exactly %q (the current close/<name> branch to the same name, fast-forward only), got %q", want, got)
+	}
+}
+
+// specRefFromInput is the only form in which close.yml may hand its
+// dispatch input to a step: as the value of an env: entry, which the runner
+// passes to the shell as data.
+const specRefFromInput = "${{ inputs.spec_ref }}"
+
+// TestCloseDispatchRunScriptsNeverInterpolateExpressions proves no run:
+// script in close.yml contains a `${{ ... }}` expression, and in particular
+// never `${{ inputs.spec_ref }}`. The runner substitutes an expression into
+// the script text before the shell starts, so a crafted input would run as
+// code inside the approved run, before any validation (review m-4). The
+// input reaches the shell only through env: (SPEC_REF).
+func TestCloseDispatchRunScriptsNeverInterpolateExpressions(t *testing.T) {
+	job := closeJob(t)
+	for i, step := range job.Steps {
+		if strings.Contains(step.Run, "${{") {
+			t.Errorf("close.yml: step %d (name %q) interpolates an expression into its run: script; pass the value through env: instead (a `${{ inputs.spec_ref }}` in run: executes a crafted input before validation): %q", i, step.Name, step.Run)
+		}
+	}
+}
+
+// TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation
+// proves the validation step (index 0) and the close step both read the
+// input as env SPEC_REF, that the close step's command is exactly
+// `./.build/verdi close "$SPEC_REF"`, and that no step other than those two
+// receives the input at all.
+func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *testing.T) {
+	job := closeJob(t)
+	if len(job.Steps) == 0 {
+		t.Fatalf("close.yml: the close job has no steps")
+	}
+	if got := job.Steps[0].Env["SPEC_REF"]; got != specRefFromInput {
+		t.Errorf("close.yml: the first (validation) step must receive the input as env SPEC_REF: %q, got %q", specRefFromInput, got)
+	}
+	closeCmd := `./.build/verdi close "$SPEC_REF"`
+	matches := findExactRunSteps(job.Steps, closeCmd)
+	if len(matches) != 1 {
+		t.Fatalf("close.yml: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", closeCmd, len(matches), runCommands(job.Steps))
+	}
+	if got := job.Steps[matches[0]].Env["SPEC_REF"]; got != specRefFromInput {
+		t.Errorf("close.yml: the close step must receive the input as env SPEC_REF: %q, got %q", specRefFromInput, got)
+	}
+	for i, step := range job.Steps {
+		if i == 0 || i == matches[0] {
+			continue
+		}
+		for name, value := range step.Env {
+			if strings.Contains(value, "inputs.") {
+				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through env %s=%q; only the validation and close steps may", i, step.Name, name, value)
+			}
+		}
+		for name, value := range step.With {
+			if strings.Contains(value, "inputs.") {
+				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through with %s=%q; only the validation and close steps may", i, step.Name, name, value)
+			}
+		}
 	}
 }

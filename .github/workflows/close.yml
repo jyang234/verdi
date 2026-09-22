@@ -139,15 +139,22 @@ jobs:
       actions: read
       pull-requests: read
     steps:
+      # The input reaches the shell only as the env value SPEC_REF, never
+      # as `${{ inputs.spec_ref }}` inside run: text: the runner substitutes
+      # an expression into the script before the shell starts, so an
+      # interpolated input would run as code before this check. printf %q
+      # prints a rejected value with any newline escaped, so it cannot
+      # start a workflow command of its own.
       - name: Validate spec_ref before running any verdi verb
+        env:
+          SPEC_REF: ${{ inputs.spec_ref }}
         run: |
-          ref="${{ inputs.spec_ref }}"
           spec_re='^spec/[a-z0-9]+(-[a-z0-9]+)*$'
           story_re='^[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*$'
-          if [[ "$ref" =~ $spec_re ]] || [[ "$ref" =~ $story_re ]]; then
+          if [[ "$SPEC_REF" =~ $spec_re ]] || [[ "$SPEC_REF" =~ $story_re ]]; then
             exit 0
           fi
-          echo "::error::spec_ref '$ref' is neither a spec ref (spec/<name>) nor a scheme-prefixed story ref (scheme:key, e.g. jira:LOAN-1482) — refusing before running any verdi verb"
+          printf '::error::spec_ref %q is neither a spec ref (spec/<name>) nor a scheme-prefixed story ref (scheme:key, e.g. jira:LOAN-1482); refusing before running any verdi verb\n' "$SPEC_REF"
           exit 1
       - uses: actions/checkout@v4
         with:
@@ -179,6 +186,7 @@ jobs:
       - name: Run the close ritual (gate, freeze, archive move, commit, publish) — never --force-local
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./.build/verdi close "${{ inputs.spec_ref }}"
+          SPEC_REF: ${{ inputs.spec_ref }}
+        run: ./.build/verdi close "$SPEC_REF"
       - name: "Push the close/<name> branch verdi close committed to (dc-3: the verb stops at the branch; this job's own push is what makes the closure MR possible)"
         run: git push origin HEAD
