@@ -40,13 +40,24 @@
 # reusable-workflows documentation and community-confirmed runtime
 # behavior; see this lane's report for the exact citations).
 #
-# The caller job below declares ONLY `uses:` — GitHub's documented keyword
-# whitelist for a job that calls a reusable workflow is name/uses/with/
-# secrets/strategy/needs/if/concurrency/permissions/cache-mode;
-# `environment:` is explicitly NOT among them, so this job (which needs no
-# approval — it only produces evidence) cannot and does not declare one.
+# The caller job below declares only `uses:` and `permissions:`. GitHub's
+# documented keyword whitelist for a job that calls a reusable workflow is
+# name/uses/with/secrets/strategy/needs/if/concurrency/permissions/
+# cache-mode; `environment:` is not among them, so this job (which needs
+# no approval; it only produces evidence) cannot and does not declare one.
 # The close.yml workflow's own close job is the one that declares
 # `environment: close`.
+#
+# permissions: GitHub documents that when the calling job does not specify
+# jobs.<job_id>.permissions, the called workflow gets the default
+# GITHUB_TOKEN permissions, and a called workflow can only downgrade what
+# it is passed. The called verify job needs contents: read and nothing
+# else: actions/checkout reads the repository (the scope its README
+# recommends), `verdi sync --produce` never dials the forge (sync.go), no
+# step of verify.yml is given the token, and actions/upload-artifact
+# authenticates with the runner's ACTIONS_RUNTIME_TOKEN rather than
+# GITHUB_TOKEN. Every unlisted scope is set to none, so the token checkout
+# persists in .git/config for later steps is read-only.
 name: close-evidence
 
 on:
@@ -56,4 +67,6 @@ on:
 
 jobs:
   verify:
+    permissions:
+      contents: read
     uses: ./.github/workflows/verify.yml

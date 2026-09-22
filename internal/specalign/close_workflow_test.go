@@ -165,9 +165,21 @@ func TestCloseEvidenceWorkflowCallsVerifyThroughWorkflowCall(t *testing.T) {
 	if job.Environment != "" {
 		t.Errorf("close-evidence.yml: the caller job must not declare environment: %q — GitHub does not permit environment: alongside a job-level uses: reusable-workflow call, and this job needs no approval gate (it only produces evidence)", job.Environment)
 	}
-	wantKeys := []string{"uses"}
+	wantKeys := []string{"permissions", "uses"}
 	if !slices.Equal(job.Keys, wantKeys) {
 		t.Errorf("close-evidence.yml: the caller job must declare exactly the key(s) %v and nothing else (GitHub's reusable-workflow-caller keyword whitelist is name/uses/with/secrets/strategy/needs/if/concurrency/permissions/cache-mode — environment: is NOT among them), got %v", wantKeys, job.Keys)
+	}
+	// Least privilege for the called job (review m-7). GitHub documents
+	// that when jobs.<job_id>.permissions is not specified in the calling
+	// job, the called workflow gets the default GITHUB_TOKEN permissions,
+	// and actions/checkout persists that token in .git/config for every
+	// later step. The called verify job needs only contents: read (the
+	// checkout): verdi sync --produce never dials the forge, verify.yml
+	// passes no token to any step, and actions/upload-artifact
+	// authenticates with the runner's ACTIONS_RUNTIME_TOKEN, not
+	// GITHUB_TOKEN. Every scope left unlisted is set to none.
+	if want := map[string]string{"contents": "read"}; !maps.Equal(job.Permissions, want) {
+		t.Errorf("close-evidence.yml: the caller job's permissions must be exactly %v, got %v", want, job.Permissions)
 	}
 }
 
