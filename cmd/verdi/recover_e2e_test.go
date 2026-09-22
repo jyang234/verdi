@@ -380,12 +380,12 @@ func TestRecoverE2E_UncleanTreeWithholdsTheUnwind(t *testing.T) {
 	}
 	witnessed := false
 	for _, u := range cut.Uncertainties {
-		if u.Witness == "git status --porcelain" {
+		if strings.Contains(u.Witness, "git status --porcelain") && strings.Contains(u.Witness, "--untracked-files=all") {
 			witnessed = true
 		}
 	}
 	if !witnessed {
-		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", cut.Uncertainties)
+		t.Fatalf("Uncertainties = %+v, want one with the configuration-independent `git status` witness", cut.Uncertainties)
 	}
 
 	logPath := filepath.Join(t.TempDir(), "gitlog.txt")
@@ -411,6 +411,54 @@ func TestRecoverE2E_UncleanTreeWithholdsTheUnwind(t *testing.T) {
 	}
 	if cur, err := gitx.CurrentBranch(context.Background(), repo.Dir); err != nil || cur != "close/checkout" {
 		t.Fatalf("current branch = %q, err = %v, want close/checkout untouched", cur, err)
+	}
+}
+
+// TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind is
+// the owner risk review's F1 through the REAL binary: the same empty cut
+// beside one uncommitted file, with the ordinary display setting
+// status.showUntrackedFiles=no in the repository's own config. `git
+// status --porcelain` — what the old clean-tree gate read — then reports
+// nothing, while the changed-path listing (--untracked-files=all
+// overrides the setting) still names the file. The verb must refuse:
+// exit 1, no checkout or branch command issued, close/checkout still
+// checked out and still existing, and the operator's file still on disk.
+func TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := recoverE2ERepo(t)
+	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	cfgCmd := exec.Command("git", "config", "status.showUntrackedFiles", "no")
+	cfgCmd.Dir = repo.Dir
+	if out, err := cfgCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config status.showUntrackedFiles no: %v\n%s", err, out)
+	}
+	unfinished := filepath.Join(repo.Dir, "unfinished.txt")
+	if err := os.WriteFile(unfinished, []byte("operator work\n"), 0o644); err != nil {
+		t.Fatalf("writing unfinished.txt: %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "gitlog.txt")
+	env := []string{recoveryGitLogEnv + "=" + logPath}
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "recover", "spec/checkout", "--apply", "unwind-branch-cut:close/checkout")
+	if code != 1 {
+		t.Fatalf("verdi recover --apply over a tree whose untracked work a display setting hides: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	for _, argv := range gitlogArgvs(t, logPath) {
+		if argv[0] == "checkout" || argv[0] == "branch" {
+			t.Fatalf("a refused run issued a checkout/branch command: %v", argv)
+		}
+	}
+	if cur, err := gitx.CurrentBranch(context.Background(), repo.Dir); err != nil || cur != "close/checkout" {
+		t.Fatalf("current branch = %q, err = %v, want close/checkout untouched", cur, err)
+	}
+	if ok, err := gitx.HasLocalBranch(context.Background(), repo.Dir, "close/checkout"); err != nil || !ok {
+		t.Fatalf("HasLocalBranch(close/checkout) = %v, err = %v: the branch cut was unwound over uncommitted work", ok, err)
+	}
+	if _, err := os.Stat(unfinished); err != nil {
+		t.Fatalf("the operator's own uncommitted file is gone: %v", err)
 	}
 }
 
