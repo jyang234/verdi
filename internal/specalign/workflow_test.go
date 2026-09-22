@@ -53,17 +53,41 @@ import (
 )
 
 // workflowTriggers is the subset of a GitHub Actions workflow's `on:` block
-// this file cares about. Only pull_request and push are modeled — anything
-// else in a real workflow's `on:` block is simply not extracted, which is
-// fine: this package asserts presence/absence and filter shape, not an
-// exhaustive schema of every trigger GitHub supports. A nil field means
-// the trigger was absent from the document; a non-nil *triggerFilter with
-// empty Branches/Paths means the trigger fired with no filter narrowing it
-// (a bare `pull_request:` or the explicit empty-mapping `pull_request: {}`
-// form).
+// this file cares about. pull_request, push, workflow_dispatch, and
+// workflow_call are modeled — anything else in a real workflow's `on:`
+// block is simply not extracted, which is fine: this package asserts
+// presence/absence and filter shape, not an exhaustive schema of every
+// trigger GitHub supports. A nil field means the trigger was absent from
+// the document; a non-nil *triggerFilter with empty Branches/Paths means
+// the trigger fired with no filter narrowing it (a bare `pull_request:` or
+// the explicit empty-mapping `pull_request: {}` form).
+//
+// WorkflowCall reuses triggerFilter purely for its Keys whitelist net
+// (on.workflow_call's body is `inputs:`/`outputs:`/`secrets:`, never
+// branches/paths — those two fields are simply unused for this trigger,
+// left zero).
 type workflowTriggers struct {
-	PullRequest *triggerFilter
-	Push        *triggerFilter
+	PullRequest      *triggerFilter
+	Push             *triggerFilter
+	WorkflowDispatch *workflowDispatchTrigger
+	WorkflowCall     *triggerFilter
+}
+
+// workflowDispatchInput models one on.workflow_dispatch.inputs.<id> entry:
+// the fields the close workflow's own input-validation contract cares
+// about (required, type, description).
+type workflowDispatchInput struct {
+	Required    bool
+	Type        string
+	Description string
+}
+
+// workflowDispatchTrigger models on.workflow_dispatch, plus Keys: the
+// trigger body's COMPLETE raw key set (same whitelist-net rationale as
+// triggerFilter.Keys).
+type workflowDispatchTrigger struct {
+	Inputs map[string]workflowDispatchInput
+	Keys   []string
 }
 
 // triggerFilter models the branches/paths narrowing a single trigger can
@@ -80,9 +104,10 @@ type workflowTriggers struct {
 // (no body at all) and empty for the explicit `pull_request: {}` form; both
 // mean "the trigger fires, nothing narrows it".
 type triggerFilter struct {
-	Branches []string
-	Paths    []string
-	Keys     []string
+	Branches       []string
+	BranchesIgnore []string
+	Paths          []string
+	Keys           []string
 }
 
 // workflowJob is the subset of a job's fields this file asserts on: whether
@@ -99,10 +124,20 @@ type triggerFilter struct {
 // context reports green over a failing gate). Asserting the key set is
 // exactly {"runs-on", "steps"} closes all of those, and every future
 // sibling of them, at once.
+//
+// Uses, Environment, and Permissions are additive fields for the
+// close/close-evidence workflows (R-CM-4): a caller job that calls a
+// reusable workflow (`uses:`), the close job's protected `environment:`
+// declaration, and a job's own `permissions:` map (scope -> "read"/
+// "write"/"none"). Environment is decoded from either the bare-string
+// form (`environment: close`) or the `{name, url}` mapping form.
 type workflowJob struct {
-	Name  string
-	Steps []workflowStep
-	Keys  []string
+	Name        string
+	Steps       []workflowStep
+	Uses        string
+	Environment string
+	Permissions map[string]string
+	Keys        []string
 }
 
 // workflowStep models one step of a job: either an `uses:` action reference
@@ -296,7 +331,49 @@ func decodeTriggers(v interface{}) workflowTriggers {
 		tf := decodeTriggerFilter(push)
 		triggers.Push = &tf
 	}
+	if wd, present := m["workflow_dispatch"]; present {
+		t := decodeWorkflowDispatchTrigger(wd)
+		triggers.WorkflowDispatch = &t
+	}
+	if wc, present := m["workflow_call"]; present {
+		tf := decodeTriggerFilter(wc)
+		triggers.WorkflowCall = &tf
+	}
 	return triggers
+}
+
+// decodeWorkflowDispatchTrigger handles on.workflow_dispatch's shape: a
+// bare `workflow_dispatch:`/`workflow_dispatch: {}` (no inputs) or a real
+// `inputs:` mapping, each entry decoded into a workflowDispatchInput.
+func decodeWorkflowDispatchTrigger(v interface{}) workflowDispatchTrigger {
+	m, ok := asMap(v)
+	if !ok {
+		return workflowDispatchTrigger{}
+	}
+	trigger := workflowDispatchTrigger{Keys: sortedKeys(m)}
+	inputsMap, ok := asMap(m["inputs"])
+	if !ok {
+		return trigger
+	}
+	trigger.Inputs = make(map[string]workflowDispatchInput, len(inputsMap))
+	for id, iv := range inputsMap {
+		im, ok := asMap(iv)
+		if !ok {
+			continue
+		}
+		var input workflowDispatchInput
+		if req, ok := im["required"].(bool); ok {
+			input.Required = req
+		}
+		if typ, ok := asStringVal(im["type"]); ok {
+			input.Type = typ
+		}
+		if desc, ok := asStringVal(im["description"]); ok {
+			input.Description = desc
+		}
+		trigger.Inputs[id] = input
+	}
+	return trigger
 }
 
 // decodeTriggerFilter handles all three shapes a trigger body can take: a
@@ -313,9 +390,10 @@ func decodeTriggerFilter(v interface{}) triggerFilter {
 		return triggerFilter{}
 	}
 	return triggerFilter{
-		Branches: asStringSlice(m["branches"]),
-		Paths:    asStringSlice(m["paths"]),
-		Keys:     sortedKeys(m),
+		Branches:       asStringSlice(m["branches"]),
+		BranchesIgnore: asStringSlice(m["branches-ignore"]),
+		Paths:          asStringSlice(m["paths"]),
+		Keys:           sortedKeys(m),
 	}
 }
 
@@ -340,6 +418,26 @@ func decodeJob(v interface{}) workflowJob {
 	job.Keys = sortedKeys(m)
 	if name, ok := asStringVal(m["name"]); ok {
 		job.Name = name
+	}
+	if uses, ok := asStringVal(m["uses"]); ok {
+		job.Uses = uses
+	}
+	// environment: takes either the bare-string form (`environment: close`)
+	// or the `{name, url}` mapping form — both name the SAME environment.
+	if env, ok := asStringVal(m["environment"]); ok {
+		job.Environment = env
+	} else if envMap, ok := asMap(m["environment"]); ok {
+		if name, ok := asStringVal(envMap["name"]); ok {
+			job.Environment = name
+		}
+	}
+	if permMap, ok := asMap(m["permissions"]); ok {
+		job.Permissions = make(map[string]string, len(permMap))
+		for k, pv := range permMap {
+			if s, ok := asStringVal(pv); ok {
+				job.Permissions[k] = s
+			}
+		}
 	}
 	if steps, ok := asSlice(m["steps"]); ok {
 		job.Steps = make([]workflowStep, 0, len(steps))
