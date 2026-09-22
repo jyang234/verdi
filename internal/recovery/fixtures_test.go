@@ -53,6 +53,13 @@ acceptance_criteria:
 // test gathers facts against.
 func fixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 	t.Helper()
+	// Pinned empty (mirrors internal/branchbase's own buildRepo, 2A-I1):
+	// several tests below rely on the default branch NOT resolving via
+	// this env var, and it leaks from CI/e2e-invoking environments (this
+	// repo's own e2e helpers, and GitLab CI's predefined variable, both
+	// set it). A test that needs it set calls t.Setenv again afterward,
+	// which wins.
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -77,6 +84,7 @@ func fixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 // can leave every location empty.
 func fixtureStoreNoSpec(t *testing.T) (*fixturegit.Repo, *store.Config) {
 	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "") // see fixtureStore's own comment
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n"}, Message: "scaffold"},
 	})
