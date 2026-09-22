@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -164,29 +165,121 @@ func TestRecoverE2E_ApplyUnwindHappyPath(t *testing.T) {
 		t.Fatalf("empty-branch-cut still recognized after a successful unwind: %+v", proj.States)
 	}
 
-	// The whole run's log spans three internal Gathers plus the post-
-	// execution journey re-derivation, so branchcut.Unwind's own
-	// checkout-then-branch--d pair is a SUBSEQUENCE of the log, not
-	// necessarily its literal tail (dispatch note (e): "contain the
-	// expected argv sequence"); rev-parse reads precede it (the branch's
-	// own tip and the return branch's own resolution).
+	// Review M2: the whole run's log spans three internal Gathers plus
+	// the post-execution journey re-derivation, so reads are interleaved
+	// freely — but the run's WRITES are exactly branchcut.Unwind's own
+	// two commands, in that order and nothing else (dc-4/ac-9: "no new
+	// git primitive"). An extra checkout, a second `branch -d <other>`,
+	// or any unrecognized subcommand fails here rather than passing as an
+	// unnoticed subsequence.
 	argvs := gitlogArgvs(t, logPath)
 	if len(argvs) == 0 {
 		t.Fatal("no commands recorded")
 	}
-	sawRevParse, sawCheckout, sawBranchDelete := false, false, false
-	for _, argv := range argvs {
-		switch {
-		case argv[0] == "rev-parse":
-			sawRevParse = true
-		case argv[0] == "checkout" && sawRevParse:
-			sawCheckout = true
-		case argv[0] == "branch" && len(argv) > 1 && argv[1] == "-d" && sawCheckout:
-			sawBranchDelete = true
+	wantWrites := [][]string{{"checkout", "main"}, {"branch", "-d", "close/checkout"}}
+	if got := gitWriteArgvs(argvs); !reflect.DeepEqual(got, wantWrites) {
+		t.Fatalf("the run's write commands were %v, want exactly %v (whole log: %v)", got, wantWrites, argvs)
+	}
+	firstWrite := -1
+	for i, argv := range argvs {
+		if len(gitWriteArgvs([][]string{argv})) == 1 {
+			firstWrite = i
+			break
 		}
 	}
-	if !sawRevParse || !sawCheckout || !sawBranchDelete {
-		t.Fatalf("gitlog does not contain the expected rev-parse -> checkout -> branch -d subsequence: %v", argvs)
+	// Nothing is written before the executor: the discovery Gather, the
+	// re-prove Gather and branchcut.Unwind's own tip re-read all precede
+	// the first write.
+	if firstWrite <= 0 {
+		t.Fatalf("the first recorded command is a write (%v): reads must precede any write; whole log: %v", argvs[0], argvs)
+	}
+}
+
+// gitReadOnlyVerbs is the closed set of git subcommands a `verdi recover`
+// run may issue WITHOUT writing anything — every gitx read this
+// projection's three Gathers and the journey re-derivation reach for.
+// Anything outside it counts as a write for gitWriteArgvs, so an
+// unrecognized subcommand fails the assertion (closed, not open).
+var gitReadOnlyVerbs = map[string]bool{
+	"rev-parse": true, "status": true, "diff": true, "diff-index": true,
+	"for-each-ref": true, "show-ref": true, "symbolic-ref": true,
+	"merge-base": true, "ls-tree": true, "ls-files": true, "show": true,
+	"cat-file": true, "config": true, "log": true, "rev-list": true,
+	"name-rev": true, "describe": true, "var": true, "check-ignore": true,
+}
+
+// gitWriteArgvs returns, in call order, every recorded argv whose
+// subcommand is not on gitReadOnlyVerbs — the run's own write surface.
+func gitWriteArgvs(argvs [][]string) [][]string {
+	var writes [][]string
+	for _, argv := range argvs {
+		if len(argv) == 0 || gitReadOnlyVerbs[argv[0]] {
+			continue
+		}
+		// Subcommands that read only in one exact shape: bare `git
+		// remote` lists remotes (`git remote add|set-url|…` does not),
+		// `git worktree list` lists worktrees.
+		if argv[0] == "remote" && len(argv) == 1 {
+			continue
+		}
+		if argv[0] == "worktree" && len(argv) == 2 && argv[1] == "list" {
+			continue
+		}
+		writes = append(writes, argv)
+	}
+	return writes
+}
+
+// TestRecoverE2E_ApplyUnwindReturnBranchAhead is C1/R-RR3-19's own
+// built-binary case: main advanced past close/checkout's cut point before
+// the recovery ran, so a correct unwind leaves HEAD at main's tip — NOT
+// at the cut. Exit 0, every postcondition held.
+func TestRecoverE2E_ApplyUnwindReturnBranchAhead(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := recoverE2ERepo(t)
+	ctx := context.Background()
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "close/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "ahead.txt"), []byte("ahead\n"), 0o644); err != nil {
+		t.Fatalf("writing ahead.txt: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, "ahead.txt"); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "advance main past the cut"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "close/checkout"); err != nil {
+		t.Fatalf("CheckoutExisting(close/checkout): %v", err)
+	}
+	mainTip, err := gitx.RevParse(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatalf("RevParse(main): %v", err)
+	}
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, nil, "recover", "spec/checkout", "--apply", "unwind-branch-cut:close/checkout")
+	if code != 0 {
+		t.Fatalf("verdi recover --apply: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	for _, ln := range lines[:len(lines)-1] {
+		if !strings.HasPrefix(ln, "postcondition: ") || !strings.Contains(ln, ": held (") {
+			t.Fatalf("postcondition line %q not held", ln)
+		}
+	}
+	if !strings.Contains(stdout, "postcondition: HEAD is the tip of main: held") {
+		t.Fatalf("stdout %q, want the return-branch-tip postcondition (R-RR3-19)", stdout)
+	}
+	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse(HEAD): %v", err)
+	}
+	if head != mainTip {
+		t.Fatalf("HEAD = %s, want main's tip %s", head, mainTip)
 	}
 }
 

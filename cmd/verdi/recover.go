@@ -176,7 +176,17 @@ func applyAndReport(ctx context.Context, cfg *store.Config, ref, choiceID string
 		}
 		return 2
 	}
+	return reportApplyOutcome(out, stdout, stderr)
+}
 
+// reportApplyOutcome renders a completed apply run (the executor already
+// ran) and maps it to R-RR3-9's own exit code. Split out of
+// applyAndReport (review I2) so the two branches that mapping owns —
+// "VIOLATED (<observed>)" ⇒ exit 1, and a failed journey re-derivation ⇒
+// exit 2 with the projection still printed — are provable directly over a
+// constructed Outcome, independent of whichever repository states happen
+// to reach them.
+func reportApplyOutcome(out recovery.Outcome, stdout, stderr io.Writer) int {
 	allHeld := true
 	for _, pc := range out.Postconditions {
 		status := "held"
