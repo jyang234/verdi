@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -39,18 +40,30 @@ func TestDecodeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDecodeRejectsTamperedDigest tampers a byte that keeps the document
+// structurally VALID (2A-I2): the original tamper ("close/checkout" ->
+// "close/checkoutX") broke the confirmation/id consistency Validate
+// itself checks, so Decode failed there and the digest comparison below
+// it was never reached — a mutation-tested overlay that neutered the
+// digest check entirely still passed the whole suite. "index is empty"
+// is a free-text InvariantsHeld string Validate does not cross-check
+// against anything, so tampering it changes only the digest.
 func TestDecodeRejectsTamperedDigest(t *testing.T) {
 	p := validProjection(t)
 	data, err := Canonical(p)
 	if err != nil {
 		t.Fatalf("Canonical: %v", err)
 	}
-	tampered := bytes.Replace(data, []byte("close/checkout"), []byte("close/checkoutX"), 1)
+	tampered := bytes.Replace(data, []byte("index is empty"), []byte("index is EMPTY"), 1)
 	if bytes.Equal(tampered, data) {
 		t.Fatal("tamper did not change the bytes")
 	}
-	if _, err := Decode(tampered); err == nil {
+	_, err = Decode(tampered)
+	if err == nil {
 		t.Fatal("Decode(tampered) = nil error, want digest mismatch")
+	}
+	if !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("Decode(tampered) error = %v, want it to name a digest mismatch (not some other Validate rule)", err)
 	}
 }
 
