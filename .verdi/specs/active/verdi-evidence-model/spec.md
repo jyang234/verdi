@@ -57,9 +57,13 @@ spec levels:
   binding-free: the toolchain presents evidence and findings, verdi owns the
   join (upstream strict-decodes its own config, so foreign keys there are
   impossible). Bindings are few, declared, and cheap to keep accurate.
-- The registry **joins** them. Unit tests deliberately stay coarse — suite
-  pass/fail and the flowmap coverage delta — because per-test AC mapping
-  would rot and poison the matrix's credibility.
+- The registry **joins** them. Unit tests stay coarse by default — suite
+  pass/fail and the flowmap coverage delta — because unmanaged per-test AC
+  mapping would rot and poison the matrix's credibility. The one sanctioned
+  exception is an elaborated evidence obligation that names a single test as
+  its producer (`go-test:<package>:<TestName>`): that obligation is matched
+  per test, and a renamed or removed test surfaces as a missing producer, a
+  closure blocker, never as a silent pass.
 - **Dangling bindings are errors, not empty cells.** `verdi lint` validates
   discovered binding declarations against the named spec's ACs — story or
   feature (VL-003 extended scope) — and `verdi matrix`/the fold fails loudly
@@ -278,7 +282,7 @@ Schema `verdi.evidence/v1`; materialized under
   "verdict": "pass | fail | abstain",
   "witness": "retryWorker -> charge.Post",
   "producer": "audit-before-publish",
-  "provenance": { "source": "ci | local", "pipeline": "913", "job": "verdi-evidence", "commit": "7f3c2a1" },
+  "provenance": { "source": "ci | local", "pipeline": "913", "job": "verdi-evidence", "job_name": "verify", "commit": "7f3c2a1" },
   "digest": "sha256:..." }
 ```
 
@@ -289,12 +293,20 @@ this field or is hand-authored, the fold falls back to grouping by
 `(kind, witness)`. `provenance.job` refines the fold's `(pipeline id, job
 id)` ordering within a single pipeline; an absent `job` sorts before any
 present `job` in the same pipeline rather than being ambiguous.
+`provenance.job_name` is optional: the CI job's declared name.
+Authoritative-source matching compares an obligation's CI-job reference with
+`job_name`; `job` stays the ordering id.
 
 **Bundle assembly.** `verdicts.json` is verdi-assembled, never
 upstream-native: a graph's `obligations[]` joined against a service's
 `verdi.bindings.yaml` sidecar produces the static-kind records above; a
 `go test -json` suite run produces coarse behavioral records (suite
-pass/fail, no per-test AC mapping — see §Declarations). `tests.json` is a
+pass/fail, no per-test AC mapping — see §Declarations); for each elaborated
+obligation naming a test producer, the same job also emits one record for
+that obligation, carrying its own kind and acceptance criterion — `pass` on
+the named test's terminal pass, `fail` on its failure, `abstain` when
+skipped, and no record, with a disclosure, when the test did not run; a
+malformed or truncated result stream is an operational error. `tests.json` is a
 small, verdi-owned summary of that same `go test -json` run (pass/fail
 counts, not a per-AC join). `review.json` is the upstream `groundwork
 review --json` record(s), stored verbatim — every field preserved

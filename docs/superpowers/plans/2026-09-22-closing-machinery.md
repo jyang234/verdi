@@ -116,6 +116,12 @@ before any workaround.
 
 ## 03 ratification text (applied to origin and mirror together, after review)
 
+Applied 2026-09-22 after the Codex closure check passed at dd388148: origin
+`docs/design/specs/03-evidence-model.md` and mirror `spec/verdi-evidence-model`
+edited together (fidelity PASS through a transient symlink), with an 08 entry
+"Closing machinery — named-test producers and the CI job name". The owner's merge
+of this pull request ratifies it.
+
 §Declarations and binding, replace "Unit tests deliberately stay coarse —
 suite pass/fail and the flowmap coverage delta — because per-test AC mapping
 would rot and poison the matrix's credibility." with:
