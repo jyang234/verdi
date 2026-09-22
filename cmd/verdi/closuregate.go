@@ -25,6 +25,18 @@
 // freeze step would NOT take the safe freeze-in-place path — the identical
 // precondition align.go's own fork checks — turning the silent archive
 // into a named, exit-1 verdict instead.
+//
+// SI-231 (ledger; owner decision D4, 2026-09-22) adds a SECOND accepted
+// shape alongside the living-report one above: a CI checkout carries only
+// committed state, so it can never produce the living, uncommitted report
+// the original rule requires — 03 §Gates already names this exact
+// committed shape for the merge gate's own fresh report ("the committed
+// record's `covers` names the content-final head it audited, one-behind by
+// construction"). checkDispositionCompleteCondition now also accepts HEAD
+// itself carrying a committed one-behind report — evaluateOneBehindReport
+// (onebehind.go), the ONE predicate this condition and align.go's freeze
+// fork both decide from, so the two can never drift apart. Condition 4 now
+// refuses only when NEITHER shape holds, naming whichever clause(s) failed.
 package main
 
 import (
@@ -88,7 +100,7 @@ func runClosureGateOutcome(ctx context.Context, root string, spec *artifact.Spec
 	if err != nil {
 		return closureGateOutcome{}, err
 	}
-	cond4, err := checkDispositionCompleteCondition(root, spec, head)
+	cond4, err := checkDispositionCompleteCondition(ctx, root, spec, head)
 	if err != nil {
 		return closureGateOutcome{}, err
 	}
@@ -333,27 +345,43 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 // working-tree edit (never a commit — X-16: committing first moves HEAD,
 // so close's own freeze-align sees stale covers and regenerates over the
 // dispositions), then close freezes the now-current, fully-dispositioned
-// report in place.
+// report in place — OR, under SI-231 (ledger, owner D4), disposition and
+// commit deviation-report.md as its own single-parent commit (03 §Closure
+// ritual step 1's "a manually triggered CI job" shape) and close freezes
+// that committed report in place instead.
 // vocab:identity — CLI invocation grammar: names `verdi align`/`verdi close` by their bare ids (identity)
-const dispositionRitual = "the closure ritual is align (`verdi align`) -> disposition every finding as a working-tree edit (never commit it) -> close (`verdi close`)"
+const dispositionRitual = "the closure ritual is align (`verdi align`) -> disposition every finding as a working-tree edit (never commit it) -> close (`verdi close`); or, under SI-231, commit the dispositioned deviation-report.md as HEAD's own single-parent commit and close (`verdi close`) freezes it in place"
 
 // checkDispositionCompleteCondition is the closure gate's condition 4
-// (X-13/X-16/X-17, see this file's top doc comment): a living, unfrozen
-// deviation-report.md must be present in the spec's directory, cover head,
-// and carry no undispositioned finding — precisely the precondition
-// runAlignForSpec's freeze-in-place fork (align.go) requires before it
-// will stamp the report Frozen VERBATIM rather than regenerating it fresh.
-// Checked here, BEFORE close ever attempts to freeze anything, using
-// loadExistingReport (align.go) — the exact same reader the freeze step
-// itself uses, so what this condition inspects can never drift from what
-// close would actually freeze.
+// (X-13/X-16/X-17, see this file's top doc comment): PASSES when EITHER of
+// two accepted shapes holds, and refuses, naming every failed clause,
+// otherwise.
+//
+// Shape one (today's original rule): a living, unfrozen deviation-report.md
+// is present in the spec's directory, covers head, and carries no
+// undispositioned finding — precisely the precondition runAlignForSpec's
+// freeze-in-place fork (align.go) requires before it will stamp the report
+// Frozen VERBATIM rather than regenerating it fresh. Checked here, BEFORE
+// close ever attempts to freeze anything, using loadExistingReport
+// (align.go) — the exact same reader the freeze step itself uses, so what
+// this condition inspects can never drift from what close would actually
+// freeze.
+//
+// Shape two (SI-231, owner D4): HEAD itself carries a COMMITTED one-behind
+// report — the shape a CI close checkout produces, since it holds only
+// committed state and can never have shape one's living, uncommitted
+// report. evaluateOneBehindReport (onebehind.go) is the ONE predicate this
+// shape is decided from, shared unchanged with align.go's runAlignForSpec
+// freeze fork, so the two can never drift apart. Evaluated only once shape
+// one has already been ruled out, so the ordinary local-operator run (shape
+// one, ubiquitous) never pays for the extra git reads shape two needs.
 //
 // D6-24 is preserved by construction: a report that already covers head
-// with every finding dispositioned (the fresh-covers-dispositioned case)
-// passes this condition and then genuinely takes the freeze-in-place path
-// — this condition never causes a regenerate that would discard
+// with every finding dispositioned (shape one's fresh-covers-dispositioned
+// case) passes this condition and then genuinely takes the freeze-in-place
+// path — this condition never causes a regenerate that would discard
 // dispositions; it only ever refuses BEFORE a regenerate would happen.
-func checkDispositionCompleteCondition(root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
+func checkDispositionCompleteCondition(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
 	name := "4. deviation report ready to freeze (no undispositioned findings)"
 
 	specRef, err := artifact.ParseRef(spec.ID)
@@ -365,13 +393,34 @@ func checkDispositionCompleteCondition(root string, spec *artifact.SpecFrontmatt
 	if err != nil {
 		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
 	}
-	if report == nil {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("no deviation-report.md found at %s; %s", path, dispositionRitual)}, nil
-	}
-	if report.Covers != head {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("%s covers %s, not head %s; %s", path, report.Covers, head, dispositionRitual)}, nil
+
+	livingReason := livingReportRefusalReason(report, path, head)
+	if livingReason == "" {
+		return gateCondition{Name: name, OK: true}, nil
 	}
 
+	oneBehind, err := evaluateOneBehindReport(ctx, root, specRef.Name, head)
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
+	}
+	if oneBehind.Accepted {
+		return gateCondition{Name: name, OK: true}, nil
+	}
+	return gateCondition{Name: name, Reason: fmt.Sprintf("%s; %s. Also not a committed one-behind report under SI-231: %s", livingReason, dispositionRitual, oneBehind.Reason)}, nil
+}
+
+// livingReportRefusalReason is checkDispositionCompleteCondition's shape-one
+// check in isolation: "" when the living report already covers head with
+// every finding dispositioned (shape one accepts); otherwise the exact
+// refusal text shape one has always printed (no report at all / stale
+// covers / an undispositioned finding), unchanged.
+func livingReportRefusalReason(report *artifact.DeviationFrontmatter, path, head string) string {
+	if report == nil {
+		return fmt.Sprintf("no deviation-report.md found at %s", path)
+	}
+	if report.Covers != head {
+		return fmt.Sprintf("%s covers %s, not head %s", path, report.Covers, head)
+	}
 	var undispositioned []string
 	for _, f := range report.Findings {
 		if !f.Dispositioned() {
@@ -380,7 +429,7 @@ func checkDispositionCompleteCondition(root string, spec *artifact.SpecFrontmatt
 	}
 	if len(undispositioned) > 0 {
 		sort.Strings(undispositioned)
-		return gateCondition{Name: name, Reason: fmt.Sprintf("undispositioned finding(s) %v; %s", undispositioned, dispositionRitual)}, nil
+		return fmt.Sprintf("undispositioned finding(s) %v", undispositioned)
 	}
-	return gateCondition{Name: name, OK: true}, nil
+	return ""
 }

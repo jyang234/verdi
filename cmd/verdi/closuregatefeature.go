@@ -120,7 +120,7 @@ func runFeatureClosureGateOutcome(ctx context.Context, root string, spec *artifa
 	// own build head — see this file's top doc comment for why that reuse
 	// is honest (runCloseFeature freezes THIS exact report via the same
 	// freeze step the story path uses).
-	cond6raw, err := checkDispositionCompleteCondition(root, spec, head)
+	cond6raw, err := checkDispositionCompleteCondition(ctx, root, spec, head)
 	if err != nil {
 		return closureGateOutcome{}, err
 	}
