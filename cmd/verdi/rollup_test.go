@@ -72,7 +72,7 @@ func evidenceRecordJSON(verdict, commit string) string {
     "verdict": %q,
     "witness": "obligation @ site",
     "producer": "rollup-check",
-    "provenance": {"source": "ci", "pipeline": "p1", "job": "verify", "commit": %q},
+    "provenance": {"source": "ci", "pipeline": "p1", "job": "verify", "job_name": "verify", "commit": %q},
     "digest": "sha256:%s"
   }
 ]

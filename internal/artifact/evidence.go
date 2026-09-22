@@ -47,10 +47,25 @@ var validProvenanceSources = map[ProvenanceSource]bool{
 // an absent Job as sorting before any present Job within the same
 // Pipeline, so same-pipeline retry ordering degrades gracefully rather
 // than becoming ambiguous.
+//
+// JobName is an SI-229 addition (ledger SI-229, plan R-CM-3): SI-71's
+// authoritative-source match compares an obligation's CI-job reference
+// against a record's provenance, but Job carries I-25's ordering-id meaning
+// (GitHub's GITHUB_RUN_ATTEMPT, GitLab's monotonic CI_JOB_ID) — one field
+// cannot carry both a retry ordinal and a stable declared job name. JobName
+// is the CI job's declared name (GitHub GITHUB_JOB, GitLab CI_JOB_NAME),
+// optional and never inferred from a display label; 03 §Evidence records:
+// "provenance.job_name is optional: the CI job's declared name.
+// Authoritative-source matching compares an obligation's CI-job reference
+// with job_name; job stays the ordering id." JobName never joins the fold's
+// (pipeline id, job id) ordering (internal/evidence's groupKey/
+// laterProvenance/recordSortKey stay Job-only) — amends SI-71's matching
+// operand only, not I-25's ordering.
 type EvidenceProvenance struct {
 	Source   ProvenanceSource `json:"source"`
 	Pipeline string           `json:"pipeline"`
 	Job      string           `json:"job,omitempty"`
+	JobName  string           `json:"job_name,omitempty"`
 	Commit   string           `json:"commit"`
 }
 

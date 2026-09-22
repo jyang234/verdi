@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -756,5 +757,35 @@ func TestQuarantinedRecords_UndecodableUnderCommitDir_NotDoubleSurfaced(t *testi
 	}
 	if len(undecodable) != 1 || undecodable[0].Path != repo.Head+"/verdicts.json" {
 		t.Fatalf("undecodable = %+v, want exactly one entry %q (never double-surfaced)", undecodable, repo.Head+"/verdicts.json")
+	}
+}
+
+// TestRecordSortKey_JobNameNeverJoins proves SI-229's job_name never joins
+// LoadRecords's deterministic output order (records.go's recordSortKey stays
+// exactly as it was): two records differing only in job_name share one sort
+// key, so the stable sort keeps their input order, while a difference in a
+// field the key does carry (the job ordering id, the producer) still
+// separates them — the equality is not vacuous.
+func TestRecordSortKey_JobNameNeverJoins(t *testing.T) {
+	base := testEvidence(artifact.EvidenceStatic, artifact.VerdictPass, "ac-1",
+		withProducer("retryWorker"), withPipeline("913"), withJob("1"), withJobName("alpha"), withCommit("7f3c2a1"))
+	tests := []struct {
+		name     string
+		edit     func(*artifact.Evidence)
+		wantSame bool
+	}{
+		{"job_name alone differs", func(e *artifact.Evidence) { e.Provenance.JobName = "zulu" }, true},
+		{"job_name absent", func(e *artifact.Evidence) { e.Provenance.JobName = "" }, true},
+		{"job ordering id differs", func(e *artifact.Evidence) { e.Provenance.Job = "2" }, false},
+		{"producer differs", func(e *artifact.Evidence) { e.Producer = "otherWorker" }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			other := base
+			tt.edit(&other)
+			if same := recordSortKey(base) == recordSortKey(other); same != tt.wantSame {
+				t.Errorf("recordSortKey(%+v) == recordSortKey(%+v) is %v, want %v", base.Provenance, other.Provenance, same, tt.wantSame)
+			}
+		})
 	}
 }

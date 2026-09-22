@@ -73,6 +73,14 @@ type CIInfo struct {
 	// treats an absent Job as sorting before any present Job in the same
 	// Pipeline.
 	Job string
+	// JobName is the CI job's declared name (GitLab: CI_JOB_NAME; GitHub
+	// Actions: GITHUB_JOB, the constant job-key string from the workflow
+	// YAML), "" outside CI — SI-229 (plan R-CM-3): distinct from Job, which
+	// keeps I-25's retry-ordering meaning. `verdi sync --produce`'s CI-
+	// provenance producer stamps this into `provenance.job_name` (03
+	// §Evidence records), and SI-71's authoritative-source match compares
+	// an obligation's CI-job reference against it, never against Job.
+	JobName string
 }
 
 // Forge is the I-22 port.

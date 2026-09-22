@@ -17,6 +17,10 @@ func TestDecodeEvidence_Happy(t *testing.T) {
 			"witness":"retryWorker -> charge.Post","producer":"retryWorker",
 			"provenance":{"source":"ci","pipeline":"913","job":"42","commit":"7f3c2a1"},
 			"digest":"sha256:` + hex64 + `"}`,
+		"static pass ci with job_name (SI-229)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass",
+			"witness":"retryWorker -> charge.Post","producer":"retryWorker",
+			"provenance":{"source":"ci","pipeline":"913","job":"42","job_name":"verify","commit":"7f3c2a1"},
+			"digest":"sha256:` + hex64 + `"}`,
 		"quarantined record (spec/evidence-resilience ac-1)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass",
 			"witness":"retryWorker -> charge.Post",
 			"provenance":{"source":"ci","pipeline":"913","commit":"7f3c2a1"},
@@ -80,6 +84,39 @@ func TestDecodeEvidence_Quarantine_Negative(t *testing.T) {
 	}
 }
 
+// TestDecodeEvidence_JobName_RoundTrips proves the SI-229 schema addition
+// end to end: a record carrying provenance.job_name decodes with it
+// accessible on the Go struct, and a record with no job_name at all
+// decodes with an empty JobName — the ordinary, pre-SI-229 case, unaffected
+// (schema-additive, omitempty; 03 §Evidence records: "provenance.job_name
+// is optional").
+func TestDecodeEvidence_JobName_RoundTrips(t *testing.T) {
+	withJobName := `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass",
+		"witness":"w","provenance":{"source":"ci","pipeline":"913","job":"42","job_name":"verify","commit":"7f3c2a1"},
+		"digest":"sha256:` + hex64 + `"}`
+	rec, err := DecodeEvidence([]byte(withJobName))
+	if err != nil {
+		t.Fatalf("DecodeEvidence(job_name): %v", err)
+	}
+	if rec.Provenance.JobName != "verify" {
+		t.Errorf("rec.Provenance.JobName = %q, want %q", rec.Provenance.JobName, "verify")
+	}
+	if rec.Provenance.Job != "42" {
+		t.Errorf("rec.Provenance.Job = %q, want %q (job_name must never alias job)", rec.Provenance.Job, "42")
+	}
+
+	withoutJobName := `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass",
+		"witness":"w","provenance":{"source":"ci","pipeline":"913","job":"42","commit":"7f3c2a1"},
+		"digest":"sha256:` + hex64 + `"}`
+	rec2, err := DecodeEvidence([]byte(withoutJobName))
+	if err != nil {
+		t.Fatalf("DecodeEvidence(no job_name): %v", err)
+	}
+	if rec2.Provenance.JobName != "" {
+		t.Errorf("rec2.Provenance.JobName = %q, want empty (no job_name block present)", rec2.Provenance.JobName)
+	}
+}
+
 func TestDecodeEvidence_Negative(t *testing.T) {
 	cases := map[string]string{
 		"wrong schema":       `{"schema":"bogus","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `"}`,
@@ -91,7 +128,8 @@ func TestDecodeEvidence_Negative(t *testing.T) {
 		"bad commit":         `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"xyz"},"digest":"sha256:` + hex64 + `"}`,
 		"bad digest":         `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"7f3c2a1"},"digest":"not-sha256"}`,
 		"unknown field":      `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `","bogus":true}`,
-		"unknown field in provenance (I-25 job typo)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","jobb":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `"}`,
+		"unknown field in provenance (I-25 job typo)":        `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","jobb":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `"}`,
+		"unknown field in provenance (SI-229 job_name typo)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","job_namee":"verify","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `"}`,
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {

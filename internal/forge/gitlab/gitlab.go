@@ -508,7 +508,10 @@ func (a *Adapter) GeneratedAttribute() string { return "gitlab-generated" }
 // CI_PIPELINE_ID and CI_JOB_ID (both numeric and both increase
 // monotonically — a retried job gets a fresh, higher CI_JOB_ID within the
 // same CI_PIPELINE_ID, which is exactly the (pipeline id, job id)
-// ordering 03 §The fold's "current" selection wants, I-25).
+// ordering 03 §The fold's "current" selection wants, I-25). JobName reads
+// CI_JOB_NAME (SI-229, plan R-CM-3): GitLab's own stable declared job name
+// (e.g. "verify"), distinct from CI_JOB_ID's per-retry ordinal — the field
+// SI-71's authoritative-source match compares against.
 func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.CIInfo{}, err
@@ -517,6 +520,7 @@ func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 		DefaultBranch: a.cfg.Getenv("CI_DEFAULT_BRANCH"),
 		Pipeline:      a.cfg.Getenv("CI_PIPELINE_ID"),
 		Job:           a.cfg.Getenv("CI_JOB_ID"),
+		JobName:       a.cfg.Getenv("CI_JOB_NAME"),
 	}
 	if mrIID := a.cfg.Getenv("CI_MERGE_REQUEST_IID"); mrIID != "" {
 		info.IsMergeRequest = true

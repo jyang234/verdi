@@ -191,7 +191,14 @@ func publish(root string, report releaseReport, d declarations) error {
 		if e = os.WriteFile(filepath.Join(dir, name), body, 0600); e != nil {
 			return e
 		}
-		record := artifact.Evidence{Schema: "verdi.evidence/v1", EvidenceFor: []string{r.AC}, Kind: r.Kind, Verdict: artifact.VerdictPass, Producer: r.Producer, Witness: name + " sha256:" + sha, Digest: "sha256:" + sha, Provenance: artifact.EvidenceProvenance{Source: report.Workflow.Source, Pipeline: report.Workflow.Run, Job: Job, Commit: report.Inputs.Verdi.Commit}}
+		// JobName carries the same constant Job already does (SI-229): this
+		// package's existing obligations (authoritative_source ref
+		// public-execution-contract-release) match against a record's
+		// declared job name, not its I-25 ordering id, so JobName is what
+		// must equal that ref. Job itself keeps its current value/meaning
+		// unchanged in this lane (a pre-existing I-25 oddity, disclosed —
+		// not a retry ordinal here, but left alone rather than widened).
+		record := artifact.Evidence{Schema: "verdi.evidence/v1", EvidenceFor: []string{r.AC}, Kind: r.Kind, Verdict: artifact.VerdictPass, Producer: r.Producer, Witness: name + " sha256:" + sha, Digest: "sha256:" + sha, Provenance: artifact.EvidenceProvenance{Source: report.Workflow.Source, Pipeline: report.Workflow.Run, Job: Job, JobName: Job, Commit: report.Inputs.Verdi.Commit}}
 		if e = record.Validate(); e != nil {
 			return e
 		}

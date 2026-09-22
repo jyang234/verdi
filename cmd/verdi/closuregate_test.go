@@ -105,7 +105,7 @@ func writeClosureGateDerivedRecord(t *testing.T, root, specID, commitDir, record
 // spec/quarantine-story's ac-1, at provenance.commit commit.
 func closureGateQuarantineRecordJSON(commit string) string {
 	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
-		`"witness":"someFunc @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},` +
+		`"witness":"someFunc @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","job_name":"1","commit":"` + commit + `"},` +
 		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
 }
 
@@ -156,7 +156,7 @@ func TestRunClosureGate_UnreachableCommitRecord_NeverOperational(t *testing.T) {
 // disclosure naming it is unambiguous).
 func closureGateQuarantineFailRecordJSON(commit string) string {
 	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail",` +
-		`"witness":"adverseFailWitness @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},` +
+		`"witness":"adverseFailWitness @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","job_name":"1","commit":"` + commit + `"},` +
 		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
 }
 

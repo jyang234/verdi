@@ -83,6 +83,31 @@ func TestCurrent_WitnessFallback(t *testing.T) {
 	})
 }
 
+// TestCurrent_JobNameNeverJoinsOrdering proves SI-229's field addition
+// leaves I-25's (pipeline id, job id) ordering untouched: two records
+// sharing pipeline and job but differing only in job_name are, under
+// laterProvenance, neither strictly later than the other, so the
+// FIRST-SEEN record wins the tie — exactly today's outcome for two
+// records whose Provenance is otherwise identical. Reversing the input
+// order flips which record is "first-seen" and therefore which one wins,
+// proving the result tracks input order, never job_name.
+func TestCurrent_JobNameNeverJoinsOrdering(t *testing.T) {
+	alpha := testEvidence(artifact.EvidenceStatic, artifact.VerdictFail, "ac-1",
+		withProducer("retryWorker"), withPipeline("913"), withJob("1"), withJobName("alpha"), withCommit("7f3c2a1"))
+	zulu := testEvidence(artifact.EvidenceStatic, artifact.VerdictPass, "ac-1",
+		withProducer("retryWorker"), withPipeline("913"), withJob("1"), withJobName("zulu"), withCommit("7f3c2a1"))
+
+	got := Current([]artifact.Evidence{alpha, zulu})
+	if len(got) != 1 || got[0].Provenance.JobName != "alpha" {
+		t.Fatalf("Current = %+v, want the first-seen record (job_name=alpha) to win the (pipeline, job) tie", got)
+	}
+
+	got = Current([]artifact.Evidence{zulu, alpha})
+	if len(got) != 1 || got[0].Provenance.JobName != "zulu" {
+		t.Fatalf("Current (reversed input) = %+v, want the first-seen record (job_name=zulu) to win the (pipeline, job) tie", got)
+	}
+}
+
 // TestCurrent_EmptyInput is Current's negative/degenerate case: no records
 // in, no records out, no panic.
 func TestCurrent_EmptyInput(t *testing.T) {

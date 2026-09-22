@@ -203,7 +203,7 @@ func preflightDerivedRoot() string {
 func preflightEvidenceJSON(ac, kind, verdict, source, producer, commit string) string {
 	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind +
 		`","verdict":"` + verdict + `","witness":"` + producer + ` witness","producer":"` + producer +
-		`","provenance":{"source":"` + source + `","pipeline":"1","job":"1","commit":"` + commit +
+		`","provenance":{"source":"` + source + `","pipeline":"1","job":"1","job_name":"1","commit":"` + commit +
 		`"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
 }
 
@@ -961,7 +961,7 @@ func clearCIEnv(t *testing.T) {
 func readyCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := buildCloseFixtureRepo(t)
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}

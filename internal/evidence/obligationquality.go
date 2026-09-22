@@ -228,11 +228,15 @@ func matchElaborated(ctx context.Context, in ObligationAssessmentInput, result O
 		result.Reason = ObligationReasonSourceMismatch
 		return result, nil
 	}
-	if in.Record.Provenance.Job == "" {
+	// SI-229 (plan R-CM-3): the authoritative-source match compares against
+	// JobName — the CI job's declared name — never Job, which keeps I-25's
+	// retry-ordering-id meaning. A record whose Job happens to equal the
+	// ref is not a match; only JobName decides.
+	if in.Record.Provenance.JobName == "" {
 		result.Reason = ObligationReasonSourceRefMissing
 		return result, nil
 	}
-	if in.Record.Provenance.Job != q.AuthoritativeSource.Ref {
+	if in.Record.Provenance.JobName != q.AuthoritativeSource.Ref {
 		result.Reason = ObligationReasonSourceRefMismatch
 		return result, nil
 	}

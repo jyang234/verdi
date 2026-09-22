@@ -49,12 +49,15 @@ type ProbeInput struct {
 	// Commit is the commit this probe run is evidence for
 	// (provenance.commit).
 	Commit string
-	// Pipeline/Job are the running CI pipeline/job identifiers, "" outside
-	// CI — forge.CIInfo's own fields, mirrored here rather than imported so
-	// this package stays free of a forge dependency (Keep it small and
-	// pure: Emit is a pure function of its input, not a forge client).
+	// Pipeline/Job/JobName are the running CI pipeline/job identifiers, ""
+	// outside CI — forge.CIInfo's own fields, mirrored here rather than
+	// imported so this package stays free of a forge dependency (Keep it
+	// small and pure: Emit is a pure function of its input, not a forge
+	// client). JobName is SI-229's addition: the CI job's declared name,
+	// distinct from Job's I-25 ordering-id meaning.
 	Pipeline string
 	Job      string
+	JobName  string
 	// InCI reports whether this run is executing inside a genuine, detected
 	// CI environment (internal/lint.ReadCIEnv().InCI).
 	InCI bool
@@ -98,6 +101,7 @@ func Emit(in ProbeInput) (artifact.Evidence, error) {
 			Commit:   in.Commit,
 			Pipeline: in.Pipeline,
 			Job:      in.Job,
+			JobName:  in.JobName,
 		},
 	}
 	d, err := recordDigest(rec)

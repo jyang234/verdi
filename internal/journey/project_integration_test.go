@@ -450,7 +450,7 @@ func writeJourneyEvidenceRecordWithVerdict(t *testing.T, root, commit, producer,
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"` + verdict + `","witness":"` + witness + `","producer":"` + producer + `","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
+	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"` + verdict + `","witness":"` + witness + `","producer":"` + producer + `","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","job_name":"verify","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
 	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
 		t.Fatal(err)
 	}

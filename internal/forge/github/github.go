@@ -729,6 +729,12 @@ func (a *Adapter) GeneratedAttribute() string { return "linguist-generated" }
 // analogue of GitLab's monotonically-increasing per-retry CI_JOB_ID (03
 // §The fold's (pipeline id, job id) ordering, I-25) — a disclosed choice,
 // since GitHub exposes no job-scoped numeric id as an env var at all.
+//
+// JobName reads GITHUB_JOB itself (SI-229, plan R-CM-3): the constant
+// job-key string I-25 explicitly rejected as an ordering id is exactly the
+// stable declared job name SI-71's authoritative-source match needs —
+// Job and JobName read two different GitHub env vars on purpose, one
+// field cannot carry both meanings.
 func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.CIInfo{}, err
@@ -737,6 +743,7 @@ func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 		DefaultBranch: a.cfg.Getenv("VERDI_GITHUB_DEFAULT_BRANCH"),
 		Pipeline:      a.cfg.Getenv("GITHUB_RUN_ID"),
 		Job:           a.cfg.Getenv("GITHUB_RUN_ATTEMPT"),
+		JobName:       a.cfg.Getenv("GITHUB_JOB"),
 	}
 	if a.cfg.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
 		info.IsMergeRequest = true
