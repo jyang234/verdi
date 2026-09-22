@@ -412,7 +412,7 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 	if authoritative {
 		source = artifact.SourceCI
 	}
-	prov := artifact.EvidenceProvenance{Source: source, Commit: commit, Pipeline: ciInfo.Pipeline, Job: ciInfo.Job}
+	prov := artifact.EvidenceProvenance{Source: source, Commit: commit, Pipeline: ciInfo.Pipeline, Job: ciInfo.Job, JobName: ciInfo.JobName}
 
 	if regenErr := regenerate(ctx, root, commit, derivedDir, prov, deps); regenErr != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", regenErr)

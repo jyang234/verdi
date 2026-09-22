@@ -217,13 +217,13 @@ func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
 
 // buildProduceDeps assembles a produce-ready syncDeps against a fresh
 // buildTestStore root: seeded upstream runner, canned go test output, and
-// a fake forge whose CIContext reports pipeline "913" / job "7" — no
-// network, no exec (CLAUDE.md).
+// a fake forge whose CIContext reports pipeline "913" / job "7" / job_name
+// "verify" — no network, no exec (CLAUDE.md).
 func buildProduceDeps(t *testing.T) (root string, deps syncDeps) {
 	t.Helper()
 	root = buildTestStore(t)
 	f := fake.New()
-	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7"})
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "verify"})
 	var stdout, stderr bytes.Buffer
 	deps = syncDeps{
 		Runner: seedRunner(t, root),
@@ -250,8 +250,8 @@ func readProducedVerdicts(t *testing.T, root string) []artifact.Evidence {
 // assembles the same evidence internal/bundle would assemble for
 // --or-regen (identical schema/evidence_for/kind/verdict/witness/producer/
 // digest — verified against the committed local-regen golden) but stamps
-// provenance.source: ci and pulls pipeline/job from the forge's CIContext,
-// never provenance.source: local.
+// provenance.source: ci and pulls pipeline/job/job_name from the forge's
+// CIContext (SI-229), never provenance.source: local.
 func TestRunSync_Produce_StampsSourceCI_AndPipelineJob(t *testing.T) {
 	t.Setenv("CI", "true")
 	root, deps := buildProduceDeps(t)
@@ -280,6 +280,9 @@ func TestRunSync_Produce_StampsSourceCI_AndPipelineJob(t *testing.T) {
 		}
 		if got[i].Provenance.Job != "7" {
 			t.Errorf("record %d provenance.job = %q, want 7", i, got[i].Provenance.Job)
+		}
+		if got[i].Provenance.JobName != "verify" {
+			t.Errorf("record %d provenance.job_name = %q, want verify (SI-229)", i, got[i].Provenance.JobName)
 		}
 		if got[i].Provenance.Commit != testCommit {
 			t.Errorf("record %d provenance.commit = %q, want %s", i, got[i].Provenance.Commit, testCommit)
