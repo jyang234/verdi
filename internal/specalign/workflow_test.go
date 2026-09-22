@@ -66,11 +66,19 @@ import (
 // (on.workflow_call's body is `inputs:`/`outputs:`/`secrets:`, never
 // branches/paths — those two fields are simply unused for this trigger,
 // left zero).
+//
+// Keys is the `on:` mapping's COMPLETE raw key set, sorted: the whitelist
+// net one level above triggerFilter.Keys. The four modeled fields can only
+// prove a trigger present or absent; a trigger this struct does not model
+// (`schedule:`, `pull_request_target:`, `workflow_run:`, ...) decodes to
+// nothing at all, so "workflow_dispatch is the ONLY trigger" is provable only
+// by asserting the key set itself.
 type workflowTriggers struct {
 	PullRequest      *triggerFilter
 	Push             *triggerFilter
 	WorkflowDispatch *workflowDispatchTrigger
 	WorkflowCall     *triggerFilter
+	Keys             []string
 }
 
 // workflowDispatchInput models one on.workflow_dispatch.inputs.<id> entry:
@@ -106,6 +114,7 @@ type workflowDispatchTrigger struct {
 type triggerFilter struct {
 	Branches       []string
 	BranchesIgnore []string
+	Tags           []string
 	Paths          []string
 	Keys           []string
 }
@@ -154,10 +163,15 @@ type workflowJob struct {
 // a subset of a tiny per-shape whitelist — {uses, with, name} for an action
 // step, {run, name} for a command step — closes all of those and every future
 // sibling at once, exactly as the job-level net does.
+//
+// Env is the step's own `env:` mapping (name -> raw value text), decoded for
+// the close workflow, which passes its dispatch input and its committer
+// identity to exactly the steps that need them (R-CM-4 fix pass, m-4, I-2).
 type workflowStep struct {
 	Name string
 	Uses string
 	With map[string]string
+	Env  map[string]string
 	Run  string
 	Keys []string
 }
@@ -184,11 +198,26 @@ type workflowStep struct {
 // existence mid-run, and `permissions:` widens the token every step holds.
 // Asserting the top-level key set is exactly {jobs, name, on} closes all of
 // those and every future sibling in one assertion.
+//
+// Concurrency is the document-level `concurrency:` block, nil when absent.
 type workflowDoc struct {
-	Name string
-	On   workflowTriggers
-	Jobs map[string]workflowJob
-	Keys []string
+	Name        string
+	On          workflowTriggers
+	Jobs        map[string]workflowJob
+	Concurrency *workflowConcurrency
+	Keys        []string
+}
+
+// workflowConcurrency models a `concurrency:` block in either of its two
+// forms: the bare group string (`concurrency: some-group`) or the mapping
+// form with `group:` and `cancel-in-progress:`. CancelInProgress is nil when
+// the key is absent (GitHub then keeps an in-progress run), and otherwise
+// points at the decoded boolean; a non-boolean value (an expression) leaves
+// it nil and is visible in Keys.
+type workflowConcurrency struct {
+	Group            string
+	CancelInProgress *bool
+	Keys             []string
 }
 
 // asMap normalizes a decoded YAML mapping value (from
@@ -314,7 +343,31 @@ func decodeWorkflow(t *testing.T, path string) workflowDoc {
 	}
 	doc.On = decodeTriggers(top["on"])
 	doc.Jobs = decodeJobs(top["jobs"])
+	if c, present := top["concurrency"]; present {
+		conc := decodeConcurrency(c)
+		doc.Concurrency = &conc
+	}
 	return doc
+}
+
+// decodeConcurrency handles both `concurrency:` forms (see
+// workflowConcurrency).
+func decodeConcurrency(v interface{}) workflowConcurrency {
+	if group, ok := v.(string); ok {
+		return workflowConcurrency{Group: group}
+	}
+	m, ok := asMap(v)
+	if !ok {
+		return workflowConcurrency{}
+	}
+	conc := workflowConcurrency{Keys: sortedKeys(m)}
+	if group, ok := asStringVal(m["group"]); ok {
+		conc.Group = group
+	}
+	if cancel, ok := m["cancel-in-progress"].(bool); ok {
+		conc.CancelInProgress = &cancel
+	}
+	return conc
 }
 
 func decodeTriggers(v interface{}) workflowTriggers {
@@ -322,7 +375,7 @@ func decodeTriggers(v interface{}) workflowTriggers {
 	if !ok {
 		return workflowTriggers{}
 	}
-	var triggers workflowTriggers
+	triggers := workflowTriggers{Keys: sortedKeys(m)}
 	if pr, present := m["pull_request"]; present {
 		tf := decodeTriggerFilter(pr)
 		triggers.PullRequest = &tf
@@ -392,6 +445,7 @@ func decodeTriggerFilter(v interface{}) triggerFilter {
 	return triggerFilter{
 		Branches:       asStringSlice(m["branches"]),
 		BranchesIgnore: asStringSlice(m["branches-ignore"]),
+		Tags:           asStringSlice(m["tags"]),
 		Paths:          asStringSlice(m["paths"]),
 		Keys:           sortedKeys(m),
 	}
@@ -464,15 +518,26 @@ func decodeStep(v interface{}) workflowStep {
 	if run, ok := asStringVal(m["run"]); ok {
 		step.Run = run
 	}
-	if withMap, ok := asMap(m["with"]); ok {
-		step.With = make(map[string]string, len(withMap))
-		for k, wv := range withMap {
-			if s, ok := asStringVal(wv); ok {
-				step.With[k] = s
-			}
+	step.With = decodeStringMap(m["with"])
+	step.Env = decodeStringMap(m["env"])
+	return step
+}
+
+// decodeStringMap renders a decoded YAML mapping of scalars (a step's
+// `with:` or `env:`) as name -> raw value text, or nil when v is not a
+// mapping (the key was absent).
+func decodeStringMap(v interface{}) map[string]string {
+	raw, ok := asMap(v)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, val := range raw {
+		if s, ok := asStringVal(val); ok {
+			out[k] = s
 		}
 	}
-	return step
+	return out
 }
 
 // findStep returns the first step in steps whose Uses has usesPrefix as a
@@ -765,11 +830,14 @@ func TestMergeGateSingleUnnamedJob(t *testing.T) {
 	}
 }
 
+// jobKeys returns the job ids of jobs, sorted so comparisons and failure
+// messages are deterministic.
 func jobKeys(jobs map[string]workflowJob) []string {
 	keys := make([]string, 0, len(jobs))
 	for k := range jobs {
 		keys = append(keys, k)
 	}
+	slices.Sort(keys)
 	return keys
 }
 
