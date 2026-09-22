@@ -53,17 +53,49 @@ import (
 )
 
 // workflowTriggers is the subset of a GitHub Actions workflow's `on:` block
-// this file cares about. Only pull_request and push are modeled — anything
-// else in a real workflow's `on:` block is simply not extracted, which is
-// fine: this package asserts presence/absence and filter shape, not an
-// exhaustive schema of every trigger GitHub supports. A nil field means
-// the trigger was absent from the document; a non-nil *triggerFilter with
-// empty Branches/Paths means the trigger fired with no filter narrowing it
-// (a bare `pull_request:` or the explicit empty-mapping `pull_request: {}`
-// form).
+// this file cares about. pull_request, push, workflow_dispatch, and
+// workflow_call are modeled — anything else in a real workflow's `on:`
+// block is simply not extracted, which is fine: this package asserts
+// presence/absence and filter shape, not an exhaustive schema of every
+// trigger GitHub supports. A nil field means the trigger was absent from
+// the document; a non-nil *triggerFilter with empty Branches/Paths means
+// the trigger fired with no filter narrowing it (a bare `pull_request:` or
+// the explicit empty-mapping `pull_request: {}` form).
+//
+// WorkflowCall reuses triggerFilter purely for its Keys whitelist net
+// (on.workflow_call's body is `inputs:`/`outputs:`/`secrets:`, never
+// branches/paths — those two fields are simply unused for this trigger,
+// left zero).
+//
+// Keys is the `on:` mapping's COMPLETE raw key set, sorted: the whitelist
+// net one level above triggerFilter.Keys. The four modeled fields can only
+// prove a trigger present or absent; a trigger this struct does not model
+// (`schedule:`, `pull_request_target:`, `workflow_run:`, ...) decodes to
+// nothing at all, so "workflow_dispatch is the ONLY trigger" is provable only
+// by asserting the key set itself.
 type workflowTriggers struct {
-	PullRequest *triggerFilter
-	Push        *triggerFilter
+	PullRequest      *triggerFilter
+	Push             *triggerFilter
+	WorkflowDispatch *workflowDispatchTrigger
+	WorkflowCall     *triggerFilter
+	Keys             []string
+}
+
+// workflowDispatchInput models one on.workflow_dispatch.inputs.<id> entry:
+// the fields the close workflow's own input-validation contract cares
+// about (required, type, description).
+type workflowDispatchInput struct {
+	Required    bool
+	Type        string
+	Description string
+}
+
+// workflowDispatchTrigger models on.workflow_dispatch, plus Keys: the
+// trigger body's COMPLETE raw key set (same whitelist-net rationale as
+// triggerFilter.Keys).
+type workflowDispatchTrigger struct {
+	Inputs map[string]workflowDispatchInput
+	Keys   []string
 }
 
 // triggerFilter models the branches/paths narrowing a single trigger can
@@ -80,9 +112,11 @@ type workflowTriggers struct {
 // (no body at all) and empty for the explicit `pull_request: {}` form; both
 // mean "the trigger fires, nothing narrows it".
 type triggerFilter struct {
-	Branches []string
-	Paths    []string
-	Keys     []string
+	Branches       []string
+	BranchesIgnore []string
+	Tags           []string
+	Paths          []string
+	Keys           []string
 }
 
 // workflowJob is the subset of a job's fields this file asserts on: whether
@@ -99,10 +133,20 @@ type triggerFilter struct {
 // context reports green over a failing gate). Asserting the key set is
 // exactly {"runs-on", "steps"} closes all of those, and every future
 // sibling of them, at once.
+//
+// Uses, Environment, and Permissions are additive fields for the
+// close/close-evidence workflows (R-CM-4): a caller job that calls a
+// reusable workflow (`uses:`), the close job's protected `environment:`
+// declaration, and a job's own `permissions:` map (scope -> "read"/
+// "write"/"none"). Environment is decoded from either the bare-string
+// form (`environment: close`) or the `{name, url}` mapping form.
 type workflowJob struct {
-	Name  string
-	Steps []workflowStep
-	Keys  []string
+	Name        string
+	Steps       []workflowStep
+	Uses        string
+	Environment string
+	Permissions map[string]string
+	Keys        []string
 }
 
 // workflowStep models one step of a job: either an `uses:` action reference
@@ -119,10 +163,15 @@ type workflowJob struct {
 // a subset of a tiny per-shape whitelist — {uses, with, name} for an action
 // step, {run, name} for a command step — closes all of those and every future
 // sibling at once, exactly as the job-level net does.
+//
+// Env is the step's own `env:` mapping (name -> raw value text), decoded for
+// the close workflow, which passes its dispatch input and its committer
+// identity to exactly the steps that need them (R-CM-4 fix pass, m-4, I-2).
 type workflowStep struct {
 	Name string
 	Uses string
 	With map[string]string
+	Env  map[string]string
 	Run  string
 	Keys []string
 }
@@ -149,11 +198,26 @@ type workflowStep struct {
 // existence mid-run, and `permissions:` widens the token every step holds.
 // Asserting the top-level key set is exactly {jobs, name, on} closes all of
 // those and every future sibling in one assertion.
+//
+// Concurrency is the document-level `concurrency:` block, nil when absent.
 type workflowDoc struct {
-	Name string
-	On   workflowTriggers
-	Jobs map[string]workflowJob
-	Keys []string
+	Name        string
+	On          workflowTriggers
+	Jobs        map[string]workflowJob
+	Concurrency *workflowConcurrency
+	Keys        []string
+}
+
+// workflowConcurrency models a `concurrency:` block in either of its two
+// forms: the bare group string (`concurrency: some-group`) or the mapping
+// form with `group:` and `cancel-in-progress:`. CancelInProgress is nil when
+// the key is absent (GitHub then keeps an in-progress run), and otherwise
+// points at the decoded boolean; a non-boolean value (an expression) leaves
+// it nil and is visible in Keys.
+type workflowConcurrency struct {
+	Group            string
+	CancelInProgress *bool
+	Keys             []string
 }
 
 // asMap normalizes a decoded YAML mapping value (from
@@ -279,7 +343,31 @@ func decodeWorkflow(t *testing.T, path string) workflowDoc {
 	}
 	doc.On = decodeTriggers(top["on"])
 	doc.Jobs = decodeJobs(top["jobs"])
+	if c, present := top["concurrency"]; present {
+		conc := decodeConcurrency(c)
+		doc.Concurrency = &conc
+	}
 	return doc
+}
+
+// decodeConcurrency handles both `concurrency:` forms (see
+// workflowConcurrency).
+func decodeConcurrency(v interface{}) workflowConcurrency {
+	if group, ok := v.(string); ok {
+		return workflowConcurrency{Group: group}
+	}
+	m, ok := asMap(v)
+	if !ok {
+		return workflowConcurrency{}
+	}
+	conc := workflowConcurrency{Keys: sortedKeys(m)}
+	if group, ok := asStringVal(m["group"]); ok {
+		conc.Group = group
+	}
+	if cancel, ok := m["cancel-in-progress"].(bool); ok {
+		conc.CancelInProgress = &cancel
+	}
+	return conc
 }
 
 func decodeTriggers(v interface{}) workflowTriggers {
@@ -287,7 +375,7 @@ func decodeTriggers(v interface{}) workflowTriggers {
 	if !ok {
 		return workflowTriggers{}
 	}
-	var triggers workflowTriggers
+	triggers := workflowTriggers{Keys: sortedKeys(m)}
 	if pr, present := m["pull_request"]; present {
 		tf := decodeTriggerFilter(pr)
 		triggers.PullRequest = &tf
@@ -296,7 +384,49 @@ func decodeTriggers(v interface{}) workflowTriggers {
 		tf := decodeTriggerFilter(push)
 		triggers.Push = &tf
 	}
+	if wd, present := m["workflow_dispatch"]; present {
+		t := decodeWorkflowDispatchTrigger(wd)
+		triggers.WorkflowDispatch = &t
+	}
+	if wc, present := m["workflow_call"]; present {
+		tf := decodeTriggerFilter(wc)
+		triggers.WorkflowCall = &tf
+	}
 	return triggers
+}
+
+// decodeWorkflowDispatchTrigger handles on.workflow_dispatch's shape: a
+// bare `workflow_dispatch:`/`workflow_dispatch: {}` (no inputs) or a real
+// `inputs:` mapping, each entry decoded into a workflowDispatchInput.
+func decodeWorkflowDispatchTrigger(v interface{}) workflowDispatchTrigger {
+	m, ok := asMap(v)
+	if !ok {
+		return workflowDispatchTrigger{}
+	}
+	trigger := workflowDispatchTrigger{Keys: sortedKeys(m)}
+	inputsMap, ok := asMap(m["inputs"])
+	if !ok {
+		return trigger
+	}
+	trigger.Inputs = make(map[string]workflowDispatchInput, len(inputsMap))
+	for id, iv := range inputsMap {
+		im, ok := asMap(iv)
+		if !ok {
+			continue
+		}
+		var input workflowDispatchInput
+		if req, ok := im["required"].(bool); ok {
+			input.Required = req
+		}
+		if typ, ok := asStringVal(im["type"]); ok {
+			input.Type = typ
+		}
+		if desc, ok := asStringVal(im["description"]); ok {
+			input.Description = desc
+		}
+		trigger.Inputs[id] = input
+	}
+	return trigger
 }
 
 // decodeTriggerFilter handles all three shapes a trigger body can take: a
@@ -313,9 +443,11 @@ func decodeTriggerFilter(v interface{}) triggerFilter {
 		return triggerFilter{}
 	}
 	return triggerFilter{
-		Branches: asStringSlice(m["branches"]),
-		Paths:    asStringSlice(m["paths"]),
-		Keys:     sortedKeys(m),
+		Branches:       asStringSlice(m["branches"]),
+		BranchesIgnore: asStringSlice(m["branches-ignore"]),
+		Tags:           asStringSlice(m["tags"]),
+		Paths:          asStringSlice(m["paths"]),
+		Keys:           sortedKeys(m),
 	}
 }
 
@@ -340,6 +472,26 @@ func decodeJob(v interface{}) workflowJob {
 	job.Keys = sortedKeys(m)
 	if name, ok := asStringVal(m["name"]); ok {
 		job.Name = name
+	}
+	if uses, ok := asStringVal(m["uses"]); ok {
+		job.Uses = uses
+	}
+	// environment: takes either the bare-string form (`environment: close`)
+	// or the `{name, url}` mapping form — both name the SAME environment.
+	if env, ok := asStringVal(m["environment"]); ok {
+		job.Environment = env
+	} else if envMap, ok := asMap(m["environment"]); ok {
+		if name, ok := asStringVal(envMap["name"]); ok {
+			job.Environment = name
+		}
+	}
+	if permMap, ok := asMap(m["permissions"]); ok {
+		job.Permissions = make(map[string]string, len(permMap))
+		for k, pv := range permMap {
+			if s, ok := asStringVal(pv); ok {
+				job.Permissions[k] = s
+			}
+		}
 	}
 	if steps, ok := asSlice(m["steps"]); ok {
 		job.Steps = make([]workflowStep, 0, len(steps))
@@ -366,15 +518,26 @@ func decodeStep(v interface{}) workflowStep {
 	if run, ok := asStringVal(m["run"]); ok {
 		step.Run = run
 	}
-	if withMap, ok := asMap(m["with"]); ok {
-		step.With = make(map[string]string, len(withMap))
-		for k, wv := range withMap {
-			if s, ok := asStringVal(wv); ok {
-				step.With[k] = s
-			}
+	step.With = decodeStringMap(m["with"])
+	step.Env = decodeStringMap(m["env"])
+	return step
+}
+
+// decodeStringMap renders a decoded YAML mapping of scalars (a step's
+// `with:` or `env:`) as name -> raw value text, or nil when v is not a
+// mapping (the key was absent).
+func decodeStringMap(v interface{}) map[string]string {
+	raw, ok := asMap(v)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, val := range raw {
+		if s, ok := asStringVal(val); ok {
+			out[k] = s
 		}
 	}
-	return step
+	return out
 }
 
 // findStep returns the first step in steps whose Uses has usesPrefix as a
@@ -667,11 +830,14 @@ func TestMergeGateSingleUnnamedJob(t *testing.T) {
 	}
 }
 
+// jobKeys returns the job ids of jobs, sorted so comparisons and failure
+// messages are deterministic.
 func jobKeys(jobs map[string]workflowJob) []string {
 	keys := make([]string, 0, len(jobs))
 	for k := range jobs {
 		keys = append(keys, k)
 	}
+	slices.Sort(keys)
 	return keys
 }
 

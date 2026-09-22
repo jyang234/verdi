@@ -1,0 +1,246 @@
+# close (R-CM-4, docs/superpowers/plans/2026-09-22-closing-machinery.md;
+# 03 §Closure ritual step 1: "Author (or a manually triggered CI job) runs
+# `verdi close <story>`"): the dispatch-only CI job that actually runs the
+# closure ritual. `workflow_dispatch` only — never `push`, never
+# `pull_request` — because this job commits an archive-move to a branch and
+# publishes a rollup to the tracker (04 §Semantics: "PublishRollup runs in
+# CI only"), an act that must be a deliberate, named, human-triggered
+# event, never an automatic reaction to a push.
+#
+# PREREQUISITES STILL LANDING. This workflow cannot complete a close until
+# two other lanes of the closing-machinery program land:
+#
+#   - Lane L3b: closure condition 4 (SI-231, owner decision D4). Today
+#     condition 4 of the closure gate (condition 6 for a feature,
+#     cmd/verdi/closuregate.go) accepts only a living, uncommitted
+#     deviation-report.md whose `covers` equals HEAD. A CI checkout carries
+#     only committed state, so until L3b lands every run of this job that
+#     reaches the closure gate fails that condition ("closure: 4. deviation
+#     report ready to freeze", exit 1) before the branch cut, with nothing
+#     committed, published, or pushed. SI-231 adds one accepted shape: HEAD
+#     has exactly one parent, HEAD's commit changes nothing but that spec's
+#     deviation-report.md, the report's `covers` is HEAD's parent, it is
+#     not frozen, and every finding is dispositioned. Close then freezes
+#     that report in place.
+#   - Lane L2: the countersign (SI-230). `verdi close` resolves the
+#     countersign at HEAD before it cuts its branch (cmd/verdi/close.go),
+#     and the resolver takes the pull request's source branch from
+#     gitx.CurrentBranch. This job's checkout is detached (see the checkout
+#     step), so the current branch is empty and the resolver reports the
+#     source branch unproven. L2 must take the source branch from the
+#     dispatching ref, GITHUB_REF_NAME (close/<name> when the operator
+#     dispatches from that branch), when running in CI. This lane does not
+#     implement that. L2 also reads this run's `close` environment review
+#     as the solo approval (SI-230); this file reads no approval itself.
+#
+# THE OPERATOR SEQUENCE. <name> is the spec being closed. H is the
+# candidate commit: the commit being closed, where the spec is still active
+# and accepted-pending-build.
+#
+#   1. Prepare the report on the close branch, locally. Create close/<name>
+#      at H (`git checkout -b close/<name> H`). <name> must be exactly the
+#      spec's name, because `verdi close` cuts a branch of that name itself.
+#      Bring the living deviation-report.md up to date for H: on this branch
+#      that is `verdi close --prepare spec/<name>`, which takes the spec as
+#      an argument and writes the report through the same align engine;
+#      bare `verdi align` infers its spec only from a feature/<name> branch
+#      and refuses close/<name> with exit 2. Disposition every finding in
+#      deviation-report.md. Then commit deviation-report.md as the ONLY
+#      change. That commit, R, has H as its only parent. The dispositions
+#      reach the CI runner only as R's committed content. After R is
+#      committed, do not run `--prepare` again on this branch: at this
+#      lane's base it treats a report covering HEAD's parent as stale and
+#      regenerates it, which can discard dispositions.
+#   2. Push the close branch (`git push -u origin close/<name>`). The push
+#      triggers close-evidence.yml, which runs verify.yml's `verify` job
+#      with no path filter: `make verify`, then `verdi sync --produce`, then
+#      the upload of the `verdi-evidence` artifact for R.
+#   3. Open the closure pull request from close/<name> to the default
+#      branch, with R as its head. The countersign reads this pull request
+#      (lane L2 above), so it must be open before the dispatch.
+#   4. After the close-evidence.yml run for R has completed successfully,
+#      dispatch this workflow from close/<name>: `gh workflow run close.yml
+#      --ref close/<name> -f spec_ref=spec/<name>`, or "Run workflow" on
+#      that branch in the Actions UI. Dispatching from that branch is what
+#      makes github.sha equal R. The job's `verdi sync` lists only
+#      completed, successful runs, so an earlier dispatch finds no bundle
+#      for R and falls back to the nearest ancestor's bundle, if any,
+#      instead of R's exact-commit evidence.
+#   5. Approve the run in the `close` environment. The close job declares
+#      `environment: close`, a protected environment the owner configures
+#      with required reviewers; GitHub holds the job before its first step
+#      until a reviewer approves. The job then validates the input, checks
+#      out R detached, pulls R's evidence with `verdi sync`, runs `verdi
+#      close` (the gate, the freeze in place, the archive move, the archive
+#      commit on a local close/<name>, and the publication), and pushes
+#      close/<name> to origin. The push fast-forwards close/<name> from R to
+#      the archive commit, which updates the pull request.
+#   6. Merge the closure pull request (03 §Closure ritual step 4: "merging
+#      it *is* closure"). The archive commit was pushed with the job's
+#      GITHUB_TOKEN, and GitHub creates no push-triggered run for such a
+#      push, so close-evidence.yml does not run on it. For the updated pull
+#      request GitHub creates the merge-gate run in an approval-required
+#      state: a user with write access selects "Approve workflows to run"
+#      so merge-gate reports on the archive commit before the merge.
+#
+# WHY `verdi sync` (not `--produce`) here: this job only ever PULLS the
+# bundle close-evidence.yml already produced and uploaded for the exact
+# commit on close/<name> (internal/forge's fetch-by-(ref,commit) path,
+# cmd/verdi/sync.go's runSync) — it never re-produces evidence itself, which
+# would be a second, independent, non-CI-gated claim about the same commit
+# and exactly the "never trust records produced earlier in the same run"
+# violation the brief warns against.
+#
+# WHY checkout pins `ref: ${{ github.sha }}`: see that step's own comment.
+# In short, the DEFAULT (ref: omitted) checkout of a branch-name ref
+# creates a LOCAL branch of that same name, which collides with `verdi
+# close`'s own `git checkout -b close/<name>` branch cut (git refuses `-b`
+# on an existing branch name); pinning to the commit SHA checks out
+# detached instead, avoiding the collision entirely. The detached HEAD has
+# no current branch, which is why lane L2 must read the countersign's
+# source branch from GITHUB_REF_NAME (PREREQUISITES above).
+#
+# permissions: is the least-privilege set this exact sequence needs, and
+# nothing else (unlisted scopes default to "none" once permissions: is
+# specified at all):
+#   - contents: write   — actions/checkout, and this job's own final `git
+#     push` of the close/<name> branch (verdi close never pushes itself).
+#   - actions: read     — `verdi sync`'s forge round trip: GitHub's Actions
+#     API to list workflow runs for the commit, list that run's artifacts,
+#     and download the "verdi-evidence" artifact
+#     (internal/forge/github/github.go: GET .../actions/runs,
+#     .../actions/runs/{id}/artifacts, .../actions/artifacts/{id}/zip).
+#   - pull-requests: read — cmd/verdi/closuregate.go's
+#     checkPendingSupersessionCondition, called unconditionally inside
+#     `verdi close`'s closure gate, discovers the spec's open MR via
+#     forge.FindOpenMR (GET .../pulls); without this scope that call
+#     degrades to a disclosed-unproven condition rather than a proven one.
+#     Lane L2's countersign reading (SI-230) also discovers the closure
+#     pull request and reads this run's environment review; L2 states any
+#     scope it needs beyond these three.
+# No other GITHUB_TOKEN scope is used by this sequence. The tracker
+# PublishRollup step (the round-6 hermetic fake provider by default, per
+# .verdi/verdi.yaml's providers.jira.mode: fake) is not a GitHub API call
+# and needs no scope here.
+#
+# THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs only in step 1's
+# local report refresh. This job never calls it: once L3b lands, `verdi
+# close` freezes the committed report in place, and the freeze-in-place
+# path (cmd/verdi/align.go, runAlignForSpec) returns before any judge
+# call. Until then the job stops at condition 4, before any freeze. The
+# runner therefore needs no judge binary or credentials.
+#
+# PUBLICATION PRECEDES THE PUSH. `verdi close` publishes the rollup to
+# the tracker (cmd/verdi/close.go, PublishRollup) before this job's final
+# `git push`. If that push is rejected, because close/<name> moved on
+# origin after the dispatch (for example an operator push during the
+# approval wait), the job fails with the rollup already published for the
+# closed commit, and the archive commit exists only on the runner, which
+# discards it. Origin is unchanged: the spec is still active there, and
+# the closure pull request shows whatever close/<name> now holds. The
+# operator then does NOT merge that pull request. They put close/<name>
+# back into the shape step 1 describes (one commit whose only change is
+# the dispositioned deviation-report.md, on top of the candidate), wait
+# for that commit's evidence run, and dispatch and approve again. The new
+# run publishes again; PublishRollup is idempotent on (story, commit)
+# (internal/provider/port.go), so republishing the same commit updates the
+# earlier publication rather than duplicating it.
+name: close
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec_ref:
+        description: >-
+          The exact ref to close: spec/<name>, or a scheme-prefixed story
+          ref such as jira:LOAN-1482 (the two forms
+          internal/storyresolve.Resolve accepts, I-30). Anything else is
+          rejected before any verdi verb runs. Dispatch this workflow FROM
+          the close/<name> branch the operator already pushed and waited
+          for evidence on (see this file's header comment).
+        required: true
+        type: string
+
+# One close run per spec ref at a time. GitHub's documented concurrency
+# behaviour: a run queued while another run in the same group is in
+# progress waits as `pending`, and a newer queued run cancels an older
+# pending one. cancel-in-progress: false means a running close is never
+# cancelled, because it may already have published and not yet pushed
+# (see PUBLICATION PRECEDES THE PUSH above). The group is keyed on the
+# input text, so a spec/<name> dispatch and a tracker-ref dispatch naming
+# the same spec do not share a group; the approval step is where an
+# approver refuses such a duplicate.
+concurrency:
+  group: close-${{ inputs.spec_ref }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    environment: close
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    steps:
+      # The input reaches the shell only as the env value SPEC_REF, never
+      # as `${{ inputs.spec_ref }}` inside run: text: the runner substitutes
+      # an expression into the script before the shell starts, so an
+      # interpolated input would run as code before this check. printf %q
+      # prints a rejected value with any newline escaped, so it cannot
+      # start a workflow command of its own.
+      - name: Validate spec_ref before running any verdi verb
+        env:
+          SPEC_REF: ${{ inputs.spec_ref }}
+        run: |
+          spec_re='^spec/[a-z0-9]+(-[a-z0-9]+)*$'
+          story_re='^[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*$'
+          if [[ "$SPEC_REF" =~ $spec_re ]] || [[ "$SPEC_REF" =~ $story_re ]]; then
+            exit 0
+          fi
+          printf '::error::spec_ref %q is neither a spec ref (spec/<name>) nor a scheme-prefixed story ref (scheme:key, e.g. jira:LOAN-1482); refusing before running any verdi verb\n' "$SPEC_REF"
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          # Pinned to the exact commit SHA, not the branch name, so the
+          # checkout lands DETACHED rather than on a local branch named
+          # close/<name>: actions/checkout's input-helper.ts routes a
+          # 40/64-hex `ref:` value into `settings.commit` with
+          # `settings.ref` cleared, and its git-command-manager.ts
+          # `checkout()` then runs a plain `git checkout --progress
+          # --force <sha>` — no local branch created. The DEFAULT (ref:
+          # omitted) instead resolves `github.ref` =
+          # "refs/heads/close/<name>" and runs `git checkout --progress
+          # --force -B close/<name> refs/remotes/origin/close/<name>",
+          # which DOES create a local branch named close/<name> — and
+          # `verdi close`'s own branch cut (gitx.CheckoutNewBranch, `git
+          # checkout -b close/<name>`) uses `-b`, which refuses outright
+          # if a branch of that name already exists. Pinning to
+          # github.sha is what makes the ritual's own branch cut succeed.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go build -o .build/verdi ./cmd/verdi
+      - name: Pull evidence for the exact commit being closed (verdi sync — never --produce; the forge artifact-store round trip DC-1 requires)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./.build/verdi sync
+      # `verdi close` commits the archive move with a bare `git commit`
+      # (internal/gitx.CreateCommit), and a runner has no global git
+      # identity, so this step gives git the GitHub Actions bot identity
+      # (the values actions/checkout's README uses for pushing with the
+      # built-in token) for both author and committer. They live in this
+      # step's environment only.
+      - name: Run the close ritual (gate, freeze, archive move, commit, publish) — never --force-local
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPEC_REF: ${{ inputs.spec_ref }}
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        run: ./.build/verdi close "$SPEC_REF"
+      - name: "Push the close/<name> branch verdi close committed to (dc-3: the verb stops at the branch; this job's own push is what makes the closure MR possible)"
+        run: git push origin HEAD
