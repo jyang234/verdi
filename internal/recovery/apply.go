@@ -602,7 +602,12 @@ func executeReclaim(ctx context.Context, root string, state RecognizedState, fre
 
 	rows := reclaim.Apply(ctx, root, reclaim.Plan{Items: []reclaim.PlanItem{item}})
 	for _, row := range rows {
-		fmt.Fprintln(stderr, row.Line())
+		// Wave-review m4: the row text is reclaim's own, verbatim, but the
+		// LINE belongs to this verb's error stream — carrying the same
+		// "recover: " prefix executeUnwind's own lines above (and every
+		// line cmd/verdi's recoverErr writes) carry, so no line on that
+		// stream is unattributed.
+		fmt.Fprintln(stderr, "recover: "+row.Line())
 	}
 	return rows, nil
 }

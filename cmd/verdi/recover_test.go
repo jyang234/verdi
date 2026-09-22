@@ -480,3 +480,73 @@ func TestReportApplyOutcome_ExitMapping(t *testing.T) {
 		})
 	}
 }
+
+// recoverCutMergedRitualWorktree mirrors internal/recovery/
+// fixtures_test.go's own cutMergedRitualWorktree: it cuts branch with its
+// own commit, merges it --no-ff into main, and gives it an UNMANAGED
+// worktree (outside .verdi/data/worktrees), the merged-clean-unmanaged
+// unit internal/reclaim classifies eligible. Leaves repo on main and
+// returns the worktree's path.
+func recoverCutMergedRitualWorktree(t *testing.T, repo *fixturegit.Repo, branch string) string {
+	t.Helper()
+	ctx := context.Background()
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, branch); err != nil {
+		t.Fatalf("CheckoutNewBranch(%s): %v", branch, err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "unit.txt"), []byte(branch+"\n"), 0o644); err != nil {
+		t.Fatalf("writing unit.txt: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, "unit.txt"); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "cut "+branch); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	merge := exec.Command("git", "merge", "--quiet", "--no-ff", "-m", "merge "+branch, branch)
+	merge.Dir = repo.Dir
+	if out, err := merge.CombinedOutput(); err != nil {
+		t.Fatalf("git merge %s: %v\n%s", branch, err, out)
+	}
+	path := filepath.Join(t.TempDir(), "unit-wt")
+	if err := gitx.WorktreeAdd(ctx, repo.Dir, path, branch); err != nil {
+		t.Fatalf("WorktreeAdd(%s): %v", branch, err)
+	}
+	return path
+}
+
+// TestRecover_ApplyReclaimRowsCarryTheVerbPrefix is wave-review m4: the
+// reclaim delegation's own rows are the only lines this verb writes to
+// stderr without going through recoverErr, and they were printed bare.
+// Every line on the verb's error stream carries the "recover: " prefix.
+func TestRecover_ApplyReclaimRowsCarryTheVerbPrefix(t *testing.T) {
+	repo, _ := recoverFixtureStore(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	recoverCutMergedRitualWorktree(t, repo, "feature/checkout")
+
+	var stdout, stderr bytes.Buffer
+	code := recoverRunInDir(t, repo.Dir, func() int {
+		return cmdRecover([]string{"spec/checkout", "--apply", "reclaim:feature/checkout"}, &stdout, &stderr)
+	})
+	if code != 0 {
+		t.Fatalf("exit %d, want 0; stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	sawRow := false
+	for _, ln := range lines {
+		if ln == "" {
+			continue
+		}
+		if !strings.HasPrefix(ln, "recover: ") {
+			t.Fatalf("stderr line %q does not carry the verb prefix; full stderr %q", ln, stderr.String())
+		}
+		if strings.Contains(ln, "reclaimed:") && strings.Contains(ln, "feature/checkout") {
+			sawRow = true
+		}
+	}
+	if !sawRow {
+		t.Fatalf("stderr = %q, want reclaim's own row for feature/checkout", stderr.String())
+	}
+}

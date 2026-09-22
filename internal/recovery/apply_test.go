@@ -150,6 +150,13 @@ func TestApply_ReclaimDelegation(t *testing.T) {
 	if !strings.Contains(stderr.String(), "reclaimed:") || !strings.Contains(stderr.String(), "feature/checkout") {
 		t.Fatalf("stderr = %q, want reclaim's own Row line verbatim", stderr.String())
 	}
+	// Wave-review m4: every line this verb writes to the error stream is
+	// attributed, the row's own text unchanged after the prefix.
+	for _, ln := range strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n") {
+		if !strings.HasPrefix(ln, "recover: ") {
+			t.Fatalf("stderr line %q does not carry the verb prefix", ln)
+		}
+	}
 }
 
 func TestApply_ReclaimRefusalSurfacesVerbatim(t *testing.T) {
