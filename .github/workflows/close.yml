@@ -7,65 +7,79 @@
 # CI only"), an act that must be a deliberate, named, human-triggered
 # event, never an automatic reaction to a push.
 #
-# THE OPERATOR SEQUENCE (prepare, push the close branch, wait for evidence,
-# dispatch, approve, merge), stated in plain sentences:
+# PREREQUISITES STILL LANDING. This workflow cannot complete a close until
+# two other lanes of the closing-machinery program land:
 #
-#   1. Prepare, locally. The operator runs `verdi close --prepare
-#      spec/<name>` (or the jira:<key> story-ref form) on their own
-#      checkout of the already-merged, AcceptedPendingBuild spec. --prepare
-#      is dispatched before cmd/verdi/close.go's CI-only publish guard and
-#      never freezes, archives, commits, or publishes (closeprepare.go's
-#      own doc comment); it only refreshes the living alignment report and
-#      stops for the operator to disposition every finding
-#      (`accepted-deviation`, with a note) until the readiness summary
-#      reads READY or READY WITH DISCLOSURES. This step needs no CI
-#      environment and touches no branch.
-#   2. Push the close branch. Once ready, the operator cuts a branch named
-#      EXACTLY `close/<name>` (the same `<name>` `verdi close` itself will
-#      derive from the spec ref — internal/storyresolve.Resolve's
-#      resolved spec id) at the commit being closed, with no new commits of
-#      its own, and pushes it: `git checkout -b close/<name> && git push -u
-#      origin close/<name>`. This is what triggers close-evidence.yml
-#      (push, close/**, no path filter): `make verify` + `verdi sync
-#      --produce` run for that EXACT commit and the `verdi-evidence`
-#      artifact is uploaded for it — DC-1's "authoritative solely because
-#      it is fetched from the forge artifact store by (ref, commit)"
-#      boundary, satisfied for the commit about to be closed regardless of
-#      what it changed.
-#   3. Wait for evidence. The operator waits for that close-evidence.yml
-#      run to reach a COMPLETED, successful conclusion (its own GitHub
-#      Actions run status) before dispatching this workflow — dispatching
-#      early would have this job's `verdi sync` (step 5 below) find no
-#      bundle yet, or fall back to an ancestor's, staler evidence.
-#   4. Dispatch. The operator runs this workflow FROM that same close/<name>
-#      branch (`gh workflow run close.yml --ref close/<name> -f
-#      spec_ref=spec/<name>`, or the equivalent "Run workflow from branch"
-#      UI action) — selecting that branch is what makes `github.sha`/
-#      `github.ref` below resolve to the exact evidenced commit.
-#   5. Approve. The close job declares `environment: close`, a protected
-#      environment the OWNER configures with required reviewers (not this
-#      file's job); GitHub pauses the whole job — before its first step
-#      runs — until a reviewer approves the run. This is the ONE gated job
-#      in the whole ritual, by design (R-W1-4): a separate lane reads this
-#      run's environment review as the solo approval signal. This file
-#      implements no approval-reading logic of its own.
-#   6. (The job runs.) Once approved, the steps below validate the input,
-#      check out the exact commit (detached — see the checkout step's own
-#      comment for why), pull the just-produced evidence bundle through
-#      `verdi sync` (the forge artifact-store round trip, by (ref, commit)
-#      — never trusting anything this run itself might have produced), run
-#      `verdi close` for real (the gate, the freeze, the archive move, the
-#      commit, and PublishRollup — the same steps 03 §Closure ritual names,
-#      now genuinely running inside CI so 04 §Semantics' publish guard
-#      passes with no --force-local), and push the resulting close/<name>
-#      branch (now carrying the archive-move commit) back to origin —
-#      verdi close itself never pushes (dc-3: "this verb stops at the
-#      branch"), so this job's own `git push` is what makes a closure MR
-#      possible at all.
-#   7. Merge. The operator opens the closure MR from close/<name> (verdi
-#      close prints the exact branch name; dc-3 leaves opening the MR to a
-#      human, or `gh`/`glab`, on purpose) and merges it — 03 §Closure
-#      ritual step 4: "merging it *is* closure."
+#   - Lane L3b: closure condition 4 (SI-231, owner decision D4). Today
+#     condition 4 of the closure gate (condition 6 for a feature,
+#     cmd/verdi/closuregate.go) accepts only a living, uncommitted
+#     deviation-report.md whose `covers` equals HEAD. A CI checkout carries
+#     only committed state, so until L3b lands every run of this job that
+#     reaches the closure gate fails that condition ("closure: 4. deviation
+#     report ready to freeze", exit 1) before the branch cut, with nothing
+#     committed, published, or pushed. SI-231
+#     adds one accepted shape: HEAD has exactly one parent, HEAD's commit
+#     changes nothing but that spec's deviation-report.md, the report's
+#     `covers` is HEAD's parent, it is not frozen, and every finding is
+#     dispositioned. Close then freezes that report in place.
+#   - Lane L2: the countersign (SI-230). `verdi close` resolves the
+#     countersign at HEAD before it cuts its branch (cmd/verdi/close.go),
+#     and the resolver takes the pull request's source branch from
+#     gitx.CurrentBranch. This job's checkout is detached (see the checkout
+#     step), so the current branch is empty and the resolver reports the
+#     source branch unproven. L2 must take the source branch from the
+#     dispatching ref, GITHUB_REF_NAME (close/<name> when the operator
+#     dispatches from that branch), when running in CI. This lane does not
+#     implement that. L2 also reads this run's `close` environment review
+#     as the solo approval (SI-230); this file reads no approval itself.
+#
+# THE OPERATOR SEQUENCE. <name> is the spec being closed. H is the
+# candidate commit: the commit being closed, where the spec is still active
+# and accepted-pending-build.
+#
+#   1. Prepare the report on the close branch, locally. Create close/<name>
+#      at H (`git checkout -b close/<name> H`). <name> must be exactly the
+#      spec's name, because `verdi close` cuts a branch of that name itself.
+#      Bring the living deviation-report.md up to date for H: on this branch
+#      that is `verdi close --prepare spec/<name>`, which takes the spec as
+#      an argument and writes the report through the same align engine;
+#      bare `verdi align` infers its spec only from a feature/<name> branch
+#      and refuses close/<name> with exit 2. Disposition every finding in
+#      deviation-report.md. Then commit deviation-report.md as the ONLY
+#      change. That commit, R, has H as its only parent. The dispositions
+#      reach the CI runner only as R's committed content. After R is
+#      committed, do not run `--prepare` again on this branch: at this
+#      lane's base it treats a report covering HEAD's parent as stale and
+#      regenerates it, which can discard dispositions.
+#   2. Push the close branch (`git push -u origin close/<name>`). The push
+#      triggers close-evidence.yml, which runs verify.yml's `verify` job
+#      with no path filter: `make verify`, then `verdi sync --produce`, then
+#      the upload of the `verdi-evidence` artifact for R.
+#   3. Open the closure pull request from close/<name> to the default
+#      branch, with R as its head. The countersign reads this pull request
+#      (lane L2 above), so it must be open before the dispatch.
+#   4. After the close-evidence.yml run for R has completed successfully,
+#      dispatch this workflow from close/<name>: `gh workflow run close.yml
+#      --ref close/<name> -f spec_ref=spec/<name>`, or "Run workflow" on
+#      that branch in the Actions UI. Dispatching from that branch is what
+#      makes github.sha equal R. The job's `verdi sync` lists only
+#      successful runs for R, so an earlier dispatch finds no bundle for R.
+#   5. Approve the run in the `close` environment. The close job declares
+#      `environment: close`, a protected environment the owner configures
+#      with required reviewers; GitHub holds the job before its first step
+#      until a reviewer approves. The job then validates the input, checks
+#      out R detached, pulls R's evidence with `verdi sync`, runs `verdi
+#      close` (the gate, the freeze in place, the archive move, the archive
+#      commit on a local close/<name>, and the publication), and pushes
+#      close/<name> to origin. The push fast-forwards close/<name> from R to
+#      the archive commit, which updates the pull request.
+#   6. Merge the closure pull request (03 §Closure ritual step 4: "merging
+#      it *is* closure"). The archive commit was pushed with the job's
+#      GITHUB_TOKEN, and GitHub creates no push-triggered run for such a
+#      push, so close-evidence.yml does not run on it. For the pull request
+#      it creates the merge-gate run in an approval-required state: a user
+#      with write access selects "Approve workflows to run" so merge-gate
+#      reports on the archive commit before the merge.
 #
 # WHY `verdi sync` (not `--produce`) here: this job only ever PULLS the
 # bundle close-evidence.yml already produced and uploaded for the exact
@@ -80,7 +94,9 @@
 # creates a LOCAL branch of that same name, which collides with `verdi
 # close`'s own `git checkout -b close/<name>` branch cut (git refuses `-b`
 # on an existing branch name); pinning to the commit SHA checks out
-# detached instead, avoiding the collision entirely.
+# detached instead, avoiding the collision entirely. The detached HEAD has
+# no current branch, which is why lane L2 must read the countersign's
+# source branch from GITHUB_REF_NAME (PREREQUISITES above).
 #
 # permissions: is the least-privilege set this exact sequence needs, and
 # nothing else (unlisted scopes default to "none" once permissions: is
@@ -97,23 +113,21 @@
 #     `verdi close`'s closure gate, discovers the spec's open MR via
 #     forge.FindOpenMR (GET .../pulls); without this scope that call
 #     degrades to a disclosed-unproven condition rather than a proven one.
-#     (If/when a future `countersign:` block is adopted (R-CM-5, out of
-#     this lane's scope), cmd/verdi/close.go's existing, unconditional
-#     lifecycleCountersign resolution also reads open-MR approvals through
-#     this same scope — no permissions change would be needed for that.)
+#     Lane L2's countersign reading (SI-230) also discovers the closure
+#     pull request and reads this run's environment review; L2 states any
+#     scope it needs beyond these three.
 # No other GITHUB_TOKEN scope is used by this sequence. The tracker
 # PublishRollup step (the round-6 hermetic fake provider by default, per
 # .verdi/verdi.yaml's providers.jira.mode: fake) is not a GitHub API call
 # and needs no scope here.
 #
-# DISCLOSED, OUT OF THIS LANE'S REACH: `verdi close`'s freeze-align step
-# (runAlignForSpec) invokes .verdi/verdi.yaml's configured
-# `align.judge_cmd` (currently `[claude, -p, ...]`) as a subprocess. This
-# workflow provisions no judge credentials/binary — whether that step
-# degrades to the synthetic "judged coverage absent" finding (already
-# dispositioned by the operator's own --prepare rehearsal, step 1 above) or
-# needs a real judge available on the runner is unproven by this lane and
-# is left for the pilot run to prove or refute.
+# THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs only in step 1's
+# local report refresh. This job never calls it: once L3b lands, `verdi
+# close` freezes the committed report in place, and the freeze-in-place
+# path (cmd/verdi/align.go, runAlignForSpec) returns before any judge
+# call. Until then the job stops at condition 4, before any freeze. The
+# runner therefore needs no judge binary or credentials.
+#
 # PUBLICATION PRECEDES THE PUSH. `verdi close` publishes the rollup to
 # the tracker (cmd/verdi/close.go, PublishRollup) before this job's final
 # `git push`. If that push is rejected, because close/<name> moved on
@@ -123,9 +137,8 @@
 # discards it. Origin is unchanged: the spec is still active there, and
 # the closure pull request shows whatever close/<name> now holds. The
 # operator then does NOT merge that pull request. They put close/<name>
-# back into the shape step 1 of the operator sequence above describes (one
-# commit whose only change is the dispositioned deviation-report.md, on
-# top of the candidate), wait
+# back into the shape step 1 describes (one commit whose only change is
+# the dispositioned deviation-report.md, on top of the candidate), wait
 # for that commit's evidence run, and dispatch and approve again. The new
 # run publishes again; PublishRollup is idempotent on (story, commit)
 # (internal/provider/port.go), so republishing the same commit updates the
