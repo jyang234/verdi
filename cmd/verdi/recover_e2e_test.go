@@ -34,8 +34,14 @@ import (
 // tests below.
 func recoverE2ERepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "")
-	const checkoutSpecMD = `---
+	return recoverE2ERepoSpec(t, recoverE2ESpecMD)
+}
+
+// recoverE2ESpecMD is the fixture spec every built-binary case below
+// reads, and recoverE2ERepoSpec builds the same repository over any
+// spec.md body (R-RR3-22's own built-binary regression needs one whose
+// BODY is not YAML).
+const recoverE2ESpecMD = `---
 id: spec/checkout
 kind: spec
 class: feature
@@ -46,15 +52,61 @@ acceptance_criteria:
 ---
 # body
 `
+
+// recoverE2ESpecHostileBodyMD mirrors internal/recovery/fixtures_test.go's
+// own hostileBodySpecMD: identical front matter, a Markdown body the YAML
+// scanner refuses (a prose paragraph whose continuation line carries a
+// ": ", plus a fenced code block). 4 of this repository's own 20 active
+// feature specs have exactly this shape.
+const recoverE2ESpecHostileBodyMD = recoverE2ESpecMD + `
+An interrupted ritual left this note, wrapped the way every spec in this
+corpus wraps its prose: the colon on this continuation line is what the
+YAML scanner refuses.
+
+` + "```yaml\nkey: value: extra\n```\n"
+
+func recoverE2ERepoSpec(t *testing.T, specMD string) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                    "schema: verdi.layout/v1\nforge: gitlab\n",
-				".verdi/specs/active/checkout/spec.md": checkoutSpecMD,
+				".verdi/specs/active/checkout/spec.md": specMD,
 			},
 			Message: "scaffold",
 		},
 	})
+}
+
+// TestRecoverE2E_SpecBodyIsNotYAML is R-RR3-22 through the REAL binary:
+// a healthy feature spec whose Markdown body the YAML scanner refuses is
+// read, not refused. Exit 0 (nothing recognized) or 1 (a state
+// recognized) are both projections; exit 2 is the fabricated operational
+// error this case exists to forbid, and stdout must still carry exactly
+// one canonical, strict-decodable projection line.
+func TestRecoverE2E_SpecBodyIsNotYAML(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := recoverE2ERepoSpec(t, recoverE2ESpecHostileBodyMD)
+	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, nil, "recover", "--json", "spec/checkout")
+	if code == 2 {
+		t.Fatalf("verdi recover: exit 2 on a spec whose front matter is fine and whose body is not YAML\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if code != 0 && code != 1 {
+		t.Fatalf("verdi recover: exit %d, want 0 or 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	line := strings.TrimRight(stdout, "\n")
+	proj, err := recovery.Decode([]byte(line))
+	if err != nil {
+		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, stdout)
+	}
+	if proj.Ref != "spec/checkout" {
+		t.Fatalf("projection Ref = %q, want spec/checkout", proj.Ref)
+	}
 }
 
 func TestRecoverE2E_EmptyBranchCut(t *testing.T) {

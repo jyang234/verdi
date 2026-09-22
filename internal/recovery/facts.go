@@ -352,11 +352,27 @@ func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (arti
 		"close/" + name,
 	}
 	var lastDecodeErr error
+	// tryDecode reads the class out of ONE candidate document's FRONT
+	// MATTER (R-RR3-22). The split is not optional: a spec's Markdown body
+	// is prose, not YAML — an 80-column paragraph whose continuation line
+	// carries a ": ", or a fenced code block, is refused by the YAML
+	// scanner — so handing the whole document to the strict decoder turns
+	// ordinary authoring into a fabricated operational error about the
+	// artifact (ac-8's exit 2 is reserved for a genuine operational
+	// failure; co-6 forbids blaming the artifact for the reader's
+	// defect). This is the shape every other caller of artifact.DecodeSpec
+	// in the repository uses — internal/journey/facts.go's
+	// decodeTargetSpec is the one copied here.
 	tryDecode := func(data []byte, readErr error) (artifact.SpecClass, bool) {
 		if readErr != nil {
 			return "", false
 		}
-		fm, ferr := artifact.DecodeSpec(data)
+		frontmatter, _, serr := artifact.SplitFrontmatter(data)
+		if serr != nil {
+			lastDecodeErr = serr
+			return "", false
+		}
+		fm, ferr := artifact.DecodeSpec(frontmatter)
 		if ferr != nil {
 			lastDecodeErr = ferr
 			return "", false

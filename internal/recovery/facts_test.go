@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/branchbase"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -758,4 +759,75 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// TestSpecClassAt_DecodesFrontmatterOnly is R-RR3-22's own regression
+// proof for the on-disk leg: spec/checkout's front matter is ordinary
+// and its Markdown BODY is not YAML at all. specClassAt must split the
+// front matter off and decode only that (the shape internal/journey/
+// facts.go's decodeTargetSpec uses), so the class reads "feature" and
+// Gather succeeds. Feeding the whole document to the strict decoder
+// instead fabricates an operational error out of prose — the verb's own
+// exit 2 on a healthy, lint-clean spec.
+func TestSpecClassAt_DecodesFrontmatterOnly(t *testing.T) {
+	// The fixture must actually bite: if the whole document ever became
+	// decodable as YAML, every assertion below would pass vacuously.
+	if _, err := artifact.DecodeSpec([]byte(hostileBodySpecMD)); err == nil {
+		t.Fatal("fixture is toothless: the whole spec.md decodes as YAML, so nothing here discriminates")
+	}
+
+	_, cfg := fixtureStoreSpec(t, hostileBodySpecMD)
+	class, err := specClassAt(context.Background(), cfg.Root, "checkout", "")
+	if err != nil {
+		t.Fatalf("specClassAt: %v, want the class read from the front matter alone", err)
+	}
+	if class != artifact.ClassFeature {
+		t.Fatalf("class = %q, want feature", class)
+	}
+	f := gather(t, cfg, "spec/checkout")
+	if f.Name != "checkout" {
+		t.Fatalf("Name = %q, want checkout", f.Name)
+	}
+}
+
+// TestSpecClassAt_DecodesFrontmatterOnly_FromRitualBranch is R-RR3-22's
+// same proof for the gitx.Show legs (R-RR3-15's fallback chain): the
+// hostile-bodied spec exists only in design/checkout's own tree, so the
+// class must still be read there and Gather must still succeed.
+func TestSpecClassAt_DecodesFrontmatterOnly_FromRitualBranch(t *testing.T) {
+	repo, cfg := fixtureStoreNoSpec(t)
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "design/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch(design/checkout): %v", err)
+	}
+	if err := os.MkdirAll(store.ActiveSpecDir(repo.Dir, "checkout"), 0o755); err != nil {
+		t.Fatalf("creating spec dir: %v", err)
+	}
+	if err := os.WriteFile(store.ActiveSpecPath(repo.Dir, "checkout"), []byte(hostileBodySpecMD), 0o644); err != nil {
+		t.Fatalf("writing spec.md: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, store.SpecDirRelPath(store.ZoneActive, "checkout")); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "design: scaffold spec/checkout"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if pathExists(store.ActiveSpecPath(repo.Dir, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout is visible on disk on main")
+	}
+
+	class, err := specClassAt(ctx, cfg.Root, "checkout", "")
+	if err != nil {
+		t.Fatalf("specClassAt: %v, want the class read from design/checkout's own tree", err)
+	}
+	if class != artifact.ClassFeature {
+		t.Fatalf("class = %q, want feature", class)
+	}
+	if f := gather(t, cfg, "spec/checkout"); !f.Design.Exists {
+		t.Fatal("Design.Exists = false, want true")
+	}
 }

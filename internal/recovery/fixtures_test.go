@@ -129,12 +129,39 @@ acceptance_criteria:
 # body
 `
 
+// hostileBodySpecMD is checkoutSpecMD with a Markdown BODY the YAML
+// scanner refuses (R-RR3-22). Two ordinary authoring shapes, both taken
+// from this repository's own active corpus (9 of its 41 active specs
+// carry one or the other): a prose paragraph wrapped at 80 columns whose
+// CONTINUATION line carries a ": " — a multi-line plain scalar followed
+// by a mapping value, "yaml: mapping values are not allowed in this
+// context", the exact error 4 of this store's 20 active feature specs
+// produce — and a fenced code block, whose leading backtick is a
+// reserved YAML indicator. Every reader that splits the front matter off
+// first reads the class without noticing either. A reader that hands the
+// WHOLE document to the strict YAML decoder fails on both, which is the
+// defect this fixture exists to catch.
+const hostileBodySpecMD = checkoutSpecMD + `
+An interrupted ritual left this note, wrapped the way every spec in this
+corpus wraps its prose: the colon on this continuation line is what the
+YAML scanner refuses.
+
+` + "```yaml\nkey: value: extra\n```\n"
+
 // fixtureStore builds a minimal fixturegit repository (the same
 // .verdi/verdi.yaml manifest internal/journey/facts_integration_test.go's
 // buildFactsRepo uses) carrying one active feature spec, spec/checkout,
 // and returns it alongside the resolved store.Config every recognizer
 // test gathers facts against.
 func fixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
+	t.Helper()
+	return fixtureStoreSpec(t, checkoutSpecMD)
+}
+
+// fixtureStoreSpec is fixtureStore over an arbitrary spec.md body for
+// spec/checkout — the seam R-RR3-22's own regression fixture needs (a
+// spec whose front matter is identical and whose BODY is not YAML).
+func fixtureStoreSpec(t *testing.T, specMD string) (*fixturegit.Repo, *store.Config) {
 	t.Helper()
 	// Pinned empty (mirrors internal/branchbase's own buildRepo, 2A-I1):
 	// several tests below rely on the default branch NOT resolving via
@@ -147,7 +174,7 @@ func fixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                    "schema: verdi.layout/v1\nforge: gitlab\n",
-				".verdi/specs/active/checkout/spec.md": checkoutSpecMD,
+				".verdi/specs/active/checkout/spec.md": specMD,
 			},
 			Message: "scaffold",
 		},
