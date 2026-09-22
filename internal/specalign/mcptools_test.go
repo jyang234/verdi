@@ -109,10 +109,16 @@ func TestMCPToolInventory(t *testing.T) {
 	// `import_preview`/`import_apply`: the MCP wrapper over the frozen
 	// spec-import contract (docs/superpowers/specs/2026-09-14-spec-import-
 	// contract.md), using the same delegated-agent actor mutate_draft uses.
+	// Readiness-recovery wave 3 Task 3 (spec/readiness-recovery-v2 ac-8,
+	// ac-10's MCP half) adds `get_recovery`: the read-only readiness-
+	// recovery projection, registered in the same commit as its
+	// tooldefs.go row. It carries no apply/choice argument at all (co-3):
+	// nothing this tool call can express ever reaches either executor.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
 		"get_document",
+		"get_recovery",
 		"get_links",
 		"get_matrix",
 		"get_context_bundle",

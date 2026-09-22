@@ -4,7 +4,7 @@
 // verdi-go's own hand-rolled server (cmd/groundwork/mcp.go) and on the
 // wave-4 S4 spike's prototype (read-only references, not imported).
 //
-// It hosts 21 tools over the checkout's unix socket (01 §D3), guarded by
+// It hosts 22 tools over the checkout's unix socket (01 §D3), guarded by
 // the single-writer lock (I-12): 05 §MCP server's original nine
 // (search_artifacts, get_artifact, get_links, get_matrix,
 // get_context_bundle, list_annotations, list_tasks, get_board,
@@ -12,10 +12,13 @@
 // `experiment` (CSE Wave 5B, SI-145), five ASD tools (Wave 6 Task 1,
 // AC-8 — including the second write, mutate_draft), `get_document`
 // (spec-documents Wave 2 Task 3, ac-5), three constitution tools (Wave 6
-// Task 3, spec/context-integrity-v2 AC-1/AC-2/AC-3), and
+// Task 3, spec/context-integrity-v2 AC-1/AC-2/AC-3),
 // `import_preview`/`import_apply` (spec-documents Wave 3 Task 3, ac-9 —
 // the third spec-object write tool, over the frozen spec-import
-// contract). That ordinal counts co-3's closed spec-object write surface
+// contract), and `get_recovery` (spec/readiness-recovery-v2 ac-8, ac-10's
+// MCP half, wave 3 Task 3 — the read-only readiness-recovery projection,
+// structurally excluding both of its CLI-only executors). That ordinal
+// counts co-3's closed spec-object write surface
 // (mutate_draft, add_annotation, import_apply), not every tool that
 // persists a byte: `experiment` publishes a capsule manifest of its own
 // under the same writer lock (internal/experimentapp/release.go).

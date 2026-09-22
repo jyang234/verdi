@@ -25,6 +25,7 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/recovery"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
@@ -396,8 +397,9 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 
 	srv := mcpserve.NewServer(root)
-	srv.Backend.ReadinessLoader = readinessLoader // spec/readiness-recovery ac-4: get_document's readiness section, the SAME loader the board renders through (workbench.Deps{ReadinessLoader: readinessLoader} above)
-	srv.ErrLog = os.Stderr                        // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
+	srv.Backend.ReadinessLoader = readinessLoader            // spec/readiness-recovery ac-4: get_document's readiness section, the SAME loader the board renders through (workbench.Deps{ReadinessLoader: readinessLoader} above)
+	srv.Backend.RecoveryLoader = recovery.Loader{Root: root} // spec/readiness-recovery-v2 ac-8, ac-10's MCP half: get_recovery, the same production loader mcp.go's standalone path wires
+	srv.ErrLog = os.Stderr                                   // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
 	// Best-effort (V1-P7): see mcp.go's identical comment — a
 	// missing/unreachable forge never blocks `verdi serve` from starting;
 	// list_annotations' review-sticky mirrored population (05 §MCP

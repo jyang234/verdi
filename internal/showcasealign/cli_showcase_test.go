@@ -147,6 +147,7 @@ import (
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/recovery"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
@@ -1173,6 +1174,41 @@ func TestCLIShowcaseJourney(t *testing.T) {
 			t.Fatalf("stderr = %q, want a \"journey: \"-prefixed line", stderr)
 		}
 	})
+}
+
+// TestCLIShowcaseRecover (cli:recover, spec/readiness-recovery-v2
+// ac-8..ac-10, wave 3 Task 3) drives `verdi recover` against the real,
+// already-landed spec/stale-decline feature from examples/showcase,
+// proving the read-only readiness-recovery projection emits exactly one
+// canonical verdi.recovery-projection/v1 line that strict-decodes via
+// recovery.Decode — the same real-showcase-content discipline
+// TestCLIShowcaseJourney above uses. Exit 0 or 1 are both accepted:
+// whether the real corpus happens to carry a recognized interrupted-
+// ritual state for this ref (an entirely healthy, long-closed feature) is
+// itself a fact about its committed shape, not something this test
+// manufactures either way.
+func TestCLIShowcaseRecover(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+
+	stdout, stderr, code := runBinary(t, root, "recover", "spec/stale-decline")
+	if code != 0 && code != 1 {
+		t.Fatalf("verdi recover against the real showcase store: exit %d, want 0 or 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"schema":"`+recovery.SchemaID+`"`) {
+		t.Fatalf("stdout = %q, want the %s schema tag", stdout, recovery.SchemaID)
+	}
+	line := strings.TrimRight(stdout, "\n")
+	if strings.Contains(line, "\n") {
+		t.Fatalf("stdout = %q, want exactly one canonical JSON line", stdout)
+	}
+	proj, err := recovery.Decode([]byte(line))
+	if err != nil {
+		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, stdout)
+	}
+	if proj.Ref != "spec/stale-decline" {
+		t.Fatalf("decoded projection Ref = %q, want spec/stale-decline", proj.Ref)
+	}
 }
 
 // TestCLIShowcaseContextCompile (cli:context, Context Integrity Wave-3,
