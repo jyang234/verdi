@@ -41,8 +41,16 @@ var readOnlyGitxCalls = map[string]bool{
 	// chain (facts.go) needs it to resolve a spec's class from a ritual
 	// branch's or the default branch's own tree when it is not visible
 	// on disk in the current checkout.
+	// RepoPrefix and StoreRelativePaths join the read half per the owner
+	// risk review's F3 ruling: `git rev-parse --show-prefix` is read-only
+	// plumbing, and StoreRelativePaths issues no command at all (a pure
+	// function over a prefix and a path list). Together they are the one
+	// bridge between git's repository-relative listings and the store-
+	// relative zone prefixes the ownership recognizers compare against.
+	"RepoPrefix":           true,
 	"Show":                 true,
 	"StagedPaths":          true,
+	"StoreRelativePaths":   true,
 	"StatusDirty":          true,
 	"WorktreeChangedPaths": true,
 }

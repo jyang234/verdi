@@ -122,6 +122,17 @@ type Facts struct {
 	WorktreeChangedPaths []string
 	Dirty                bool
 
+	// RepoPrefix is the STORE root's own path inside the repository
+	// (gitx.RepoPrefix: "" when they coincide, "product/" when the store
+	// sits below the git root), resolved ONCE here because every
+	// recognizer that compares a git listing against a store-relative
+	// zone prefix needs the same answer. RepoPrefixObserved is false when
+	// the read itself failed — the two vocabularies are then unrelatable,
+	// which every consumer treats as "withhold", never as "they
+	// coincide".
+	RepoPrefix         string
+	RepoPrefixObserved bool
+
 	ActiveSpecOnDisk  bool
 	ArchiveSpecOnDisk bool
 	ActiveSpecAtHead  bool
@@ -246,6 +257,12 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 		disclosures = append(disclosures, fmt.Sprintf("could not determine working-tree cleanliness: %v", err))
 	} else {
 		f.Dirty = dirty
+	}
+	if prefix, err := gitx.RepoPrefix(ctx, root); err != nil {
+		disclosures = append(disclosures, fmt.Sprintf("could not resolve the store root's own path inside the repository: %v", err))
+	} else {
+		f.RepoPrefix = prefix
+		f.RepoPrefixObserved = true
 	}
 
 	f.ActiveSpecOnDisk = pathExists(store.ActiveSpecPath(root, ref.Name))

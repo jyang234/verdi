@@ -34,10 +34,16 @@ func baseFacts() Facts {
 		// below relies on for hasOtherLocalBranch (2B-F9) to read true —
 		// the zero-other-branches case has its own dedicated test.
 		LocalBranches: []BranchTip{{Name: "main", Tip: "deadbeef"}},
-		Design:        RitualBranch{Name: "design/checkout"},
-		Feature:       RitualBranch{Name: "feature/checkout"},
-		Close:         RitualBranch{Name: "close/checkout"},
-		PolicyAdopt:   RitualBranch{Name: "policy/adopt"},
+		// The identity layout (store root IS the git root), OBSERVED: a
+		// successful Gather always answers this question, and the
+		// recognizers that bridge git's coordinates to the store's
+		// withhold without it. The nested layout and the unobserved
+		// prefix each have their own cases (storecoords_test.go).
+		RepoPrefixObserved: true,
+		Design:             RitualBranch{Name: "design/checkout"},
+		Feature:            RitualBranch{Name: "feature/checkout"},
+		Close:              RitualBranch{Name: "close/checkout"},
+		PolicyAdopt:        RitualBranch{Name: "policy/adopt"},
 	}
 }
 

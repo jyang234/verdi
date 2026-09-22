@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/filelock"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/reclaim"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -119,7 +120,7 @@ func closeRitualAmbiguous(f Facts) (other StateCode, ambiguous bool) {
 	if !f.Close.Exists || !f.Close.Empty() {
 		return "", false
 	}
-	if closureStagedSpecName(f.StagedPaths) == f.Name {
+	if stagedClosureSpecName(f) == f.Name {
 		return StateArtifactsStagedUncommitted, true
 	}
 	if f.ArchiveSpecOnDisk && !f.ActiveSpecOnDisk && f.ActiveSpecAtHead && !f.ArchiveSpecAtHead {
@@ -361,7 +362,19 @@ func recognizeScaffoldUnstaged(f Facts) []RecognizedState {
 	if !f.Design.Exists || f.CurrentBranch != f.Design.Name {
 		return nil
 	}
-	activePrefix := store.SpecDirRelPath(store.ZoneActive, f.Name) + "/"
+	// Ownership is decided in the STORE's own coordinates and every path
+	// this state EMITS stays in git's (owner risk review F3). The two
+	// differ exactly when the store root sits below the git root, and the
+	// bridge between them is the store root's own repository prefix: with
+	// it, the active zone's repository-relative prefix is the one thing
+	// both the comparison and the emitted `git add` pathspec need, since
+	// that pathspec is run from the repository root. Without it the two
+	// vocabularies are unrelatable, so this recognizer withholds rather
+	// than guessing that they coincide.
+	if !f.RepoPrefixObserved {
+		return nil
+	}
+	activePrefix := f.RepoPrefix + store.SpecDirRelPath(store.ZoneActive, f.Name) + "/"
 
 	var changed []string
 	for _, p := range f.WorktreeChangedPaths {
@@ -446,6 +459,35 @@ func closureStagedSpecName(paths []string) string {
 	return name
 }
 
+// stagedClosureSpecName answers closureStagedSpecName's question about f's
+// OWN index, in the coordinates that predicate is written in (owner risk
+// review F3): git lists staged paths relative to the REPOSITORY root, the
+// zone prefixes are relative to the STORE root, and gitx.RepoPrefix is the
+// only thing that relates them. Its all-or-nothing re-basing is the same
+// refusal posture closureStagedSpecName itself takes for a foreign path: a
+// staged path outside the store root collapses the answer to "", so verdi
+// never claims an index it cannot prove it owns. An unresolved prefix
+// answers "" for the same reason — the question cannot be asked, so it is
+// not guessed at.
+func stagedClosureSpecName(f Facts) string {
+	if !f.RepoPrefixObserved {
+		return ""
+	}
+	storeRelative, inStore := gitx.StoreRelativePaths(f.RepoPrefix, f.StagedPaths)
+	if !inStore {
+		return ""
+	}
+	return closureStagedSpecName(storeRelative)
+}
+
+// repoRelative renders a STORE-relative path (store.SpecDirRelPath's own
+// vocabulary) as the REPOSITORY-relative path git itself would name, which
+// is the only form a projection ever emits: every manual command it carries
+// is run from the repository root.
+func repoRelative(f Facts, storeRel string) string {
+	return f.RepoPrefix + storeRel
+}
+
 // close.go:1059 (closureResidueRefusal) and close.go:1123
 // (reportUncommittedArchiveMove)'s own advice commands, copied here
 // verbatim as templates — recovery cannot import cmd/verdi (package
@@ -469,11 +511,11 @@ func closureResidueManualCommands(active, archive string) []string {
 }
 
 func recognizeArtifactsStagedUncommitted(f Facts) []RecognizedState {
-	if closureStagedSpecName(f.StagedPaths) != f.Name || f.Name == "" {
+	if stagedClosureSpecName(f) != f.Name || f.Name == "" {
 		return nil
 	}
-	active := store.SpecDirRelPath(store.ZoneActive, f.Name)
-	archive := store.SpecDirRelPath(store.ZoneArchive, f.Name)
+	active := repoRelative(f, store.SpecDirRelPath(store.ZoneActive, f.Name))
+	archive := repoRelative(f, store.SpecDirRelPath(store.ZoneArchive, f.Name))
 	target := "close/" + f.Name
 	id := "resolve-staged-closure:" + target
 
@@ -511,11 +553,19 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 	if !f.ArchiveSpecOnDisk || f.ActiveSpecOnDisk || !f.ActiveSpecAtHead || f.ArchiveSpecAtHead {
 		return nil
 	}
-	if closureStagedSpecName(f.StagedPaths) == f.Name {
+	if stagedClosureSpecName(f) == f.Name {
 		return nil // classified as artifacts-staged-uncommitted instead
 	}
-	active := store.SpecDirRelPath(store.ZoneActive, f.Name)
-	archive := store.SpecDirRelPath(store.ZoneArchive, f.Name)
+	// The STATE here is read off the disk and HEAD alone, which needs no
+	// coordinate bridge — but every command it emits is run from the
+	// repository root, so the paths it names do (owner risk review F3).
+	// Without the prefix they cannot be named correctly, and advice that
+	// does not resolve is worse than none.
+	if !f.RepoPrefixObserved {
+		return nil
+	}
+	active := repoRelative(f, store.SpecDirRelPath(store.ZoneActive, f.Name))
+	archive := repoRelative(f, store.SpecDirRelPath(store.ZoneArchive, f.Name))
 	target := "close/" + f.Name
 	id := "restore-uncommitted-archive-move:" + target
 
