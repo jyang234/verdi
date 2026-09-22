@@ -520,11 +520,13 @@ fixture's claim.
 
 // slotWallVerdicts is the derived-tree record set filling exactly ONE of
 // decline-slot-wall ac-1's three declared kinds (static): a verdi.
-// evidence/v1 CI record at commit (the harness store's main sha). The
-// behavioral kind deliberately has no record — the empty slot under test.
+// evidence/v1 CI record at commit (the harness store's main sha), whose
+// job_name names the static obligation's authoritative source (SI-229), so
+// only freshness keeps it pending. The behavioral kind deliberately has no
+// record — the empty slot under test.
 func slotWallVerdicts(commit string) string {
 	return `[
-  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-1"], "kind": "static", "verdict": "pass", "witness": "slotRenderer -> obligationRow", "producer": "slot-static-check", "provenance": { "source": "ci", "pipeline": "914", "job": "static-verify", "commit": "` + commit + `" }, "digest": "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988" }
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-1"], "kind": "static", "verdict": "pass", "witness": "slotRenderer -> obligationRow", "producer": "slot-static-check", "provenance": { "source": "ci", "pipeline": "914", "job": "static-verify", "job_name": "static-verify", "commit": "` + commit + `" }, "digest": "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988" }
 ]
 `
 }
