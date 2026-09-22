@@ -202,35 +202,41 @@ func TestDerive_NestedStore_ForeignStagedPathIsNeverClaimed(t *testing.T) {
 	}
 }
 
-// TestDerive_UnresolvedRepoPrefix_WithholdsOwnershipStates is the
-// negative half of the coordinate bridge: when the store root's own
-// repository prefix could not be read at all (Gather discloses it), the
-// two vocabularies are unrelatable. Every recognizer that would have to
-// compare or emit across them withholds instead of assuming they
-// coincide — the assumption that produced F3 in the nested layout.
-func TestDerive_UnresolvedRepoPrefix_WithholdsOwnershipStates(t *testing.T) {
+// TestDerive_UnresolvedRepoPrefix_OwnershipStates is the negative half
+// of the coordinate bridge: when the store root's own repository prefix
+// could not be read at all (Gather discloses it), the two vocabularies
+// are unrelatable and nothing assumes they coincide — the assumption
+// that produced F3 in the nested layout.
+//
+// R-RR3-26 splits what "not assuming" means by what the prefix is FOR.
+// Where it answers the recognition question itself (which paths under
+// the store the index or the working tree carries), there is no state to
+// describe and the recognizer withholds. Where the state is already
+// proved off disk and HEAD and the prefix only names its paths the way
+// git would, the state is emitted with no choice and an uncertainty
+// carrying `git rev-parse --show-prefix`. No single git failure reaches
+// the prefix guard alone — `rev-parse --show-prefix` fails only where
+// `git status` fails with it — so this case is built through the
+// package's own fact-construction seam, Derive over a hand-built Facts.
+func TestDerive_UnresolvedRepoPrefix_OwnershipStates(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(f *Facts)
 		code  StateCode
+		// diagnosisOnly is R-RR3-26's split: true when the prefix is
+		// needed only to DESCRIBE the state, false when it is needed to
+		// RECOGNIZE it.
+		diagnosisOnly bool
 	}{
 		{
-			name: "artifacts-staged-uncommitted",
+			name: "artifacts-staged-uncommitted is withheld: the prefix decides whose index this is",
 			setup: func(f *Facts) {
 				f.StagedPaths = []string{".verdi/specs/active/checkout/spec.md", ".verdi/specs/archive/checkout/spec.md"}
 			},
 			code: StateArtifactsStagedUncommitted,
 		},
 		{
-			name: "archive-move-uncommitted",
-			setup: func(f *Facts) {
-				f.ArchiveSpecOnDisk = true
-				f.ActiveSpecAtHead = true
-			},
-			code: StateArchiveMoveUncommitted,
-		},
-		{
-			name: "scaffold-unstaged",
+			name: "scaffold-unstaged is withheld: the prefix decides which changed paths are the scaffold",
 			setup: func(f *Facts) {
 				f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1"}
 				f.CurrentBranch = "design/checkout"
@@ -238,12 +244,21 @@ func TestDerive_UnresolvedRepoPrefix_WithholdsOwnershipStates(t *testing.T) {
 			},
 			code: StateScaffoldUnstaged,
 		},
+		{
+			name: "archive-move-uncommitted is diagnosed: disk and HEAD already prove it",
+			setup: func(f *Facts) {
+				f.ArchiveSpecOnDisk = true
+				f.ActiveSpecAtHead = true
+			},
+			code:          StateArchiveMoveUncommitted,
+			diagnosisOnly: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			observed := baseFacts()
 			tc.setup(&observed)
 			if !hasState(Derive(observed), tc.code) {
-				t.Fatalf("fixture does not produce %s with the prefix observed; the withholding case below would pass for the wrong reason", tc.code)
+				t.Fatalf("fixture does not produce %s with the prefix observed; the case below would pass for the wrong reason", tc.code)
 			}
 
 			unobserved := observed
@@ -251,8 +266,25 @@ func TestDerive_UnresolvedRepoPrefix_WithholdsOwnershipStates(t *testing.T) {
 			unobserved.RepoPrefixObserved = false
 			p := Derive(unobserved)
 			mustValidate(t, p)
-			if hasState(p, tc.code) {
-				t.Fatalf("%s claimed with no way to relate git's paths to the store's: %+v", tc.code, p.States)
+
+			if !tc.diagnosisOnly {
+				if hasState(p, tc.code) {
+					t.Fatalf("%s claimed with no way to relate git's paths to the store's: %+v", tc.code, p.States)
+				}
+				return
+			}
+			s := stateByCode(t, p, tc.code)
+			if len(s.Choices) != 0 {
+				t.Fatalf("Choices = %+v, want none: no command can be named in git's coordinates without the prefix", s.Choices)
+			}
+			u := uncertaintyNaming(t, s, "path inside the repository could not be observed")
+			if u.Witness != repoPrefixWitness {
+				t.Fatalf("witness = %q, want %q", u.Witness, repoPrefixWitness)
+			}
+			for _, fact := range s.Facts {
+				if !strings.HasPrefix(fact, ".verdi/specs/") {
+					t.Fatalf("fact %q does not name the path in the one vocabulary this run can prove, the store's", fact)
+				}
 			}
 		})
 	}

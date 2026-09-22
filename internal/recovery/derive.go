@@ -615,6 +615,43 @@ func recognizeArtifactsStagedUncommitted(f Facts) []RecognizedState {
 	}}
 }
 
+// stagedPathsWitness and repoPrefixWitness are the two commands that
+// settle the facts R-RR3-26's diagnosis-only states name as unavailable.
+// Each is the exact command the gatherer itself ran (gitx.StagedPaths,
+// gitx.RepoPrefix), so an operator running it sees what the projection
+// could not — a witness, never an approximation of one.
+const (
+	stagedPathsWitness = "git status --porcelain -z --untracked-files=no"
+	repoPrefixWitness  = "git rev-parse --show-prefix"
+)
+
+// archiveMoveIndexUncertainty is R-RR3-26's disambiguation disclosure:
+// archive-move-uncommitted and artifacts-staged-uncommitted share the
+// same on-disk and at-HEAD shape, and the index is the ONLY thing
+// separating them. With the index unobserved the state is still fully
+// recognized off disk and HEAD — it just cannot be told apart from its
+// partner, which is an ambiguity ac-8 requires be diagnosed with the
+// witness that would decide it, not answered with silence.
+func archiveMoveIndexUncertainty() Uncertainty {
+	return Uncertainty{
+		Text:    fmt.Sprintf("the index's own staged-path listing could not be observed, so this cannot be told apart from %s — the two share this disk and HEAD shape and only the index separates them; no command is offered, because which one is correct is exactly what is unknown", StateArtifactsStagedUncommitted),
+		Witness: stagedPathsWitness,
+	}
+}
+
+// archiveMovePrefixUncertainty is R-RR3-26's coordinate disclosure: the
+// state is read off disk and HEAD, which need no coordinate bridge, but
+// every command it would emit is run from the REPOSITORY root. Without
+// the store root's own repository prefix those commands cannot be named
+// correctly, so the state is emitted with its paths in the store's own
+// vocabulary, said so, and no command at all.
+func archiveMovePrefixUncertainty() Uncertainty {
+	return Uncertainty{
+		Text:    "the store root's own path inside the repository could not be observed, so the paths above are named relative to the STORE root and no manual command is offered: one written in these coordinates would not resolve from the repository root",
+		Witness: repoPrefixWitness,
+	}
+}
+
 func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 	if !f.ArchiveSpecOnDisk || f.ActiveSpecOnDisk || !f.ActiveSpecAtHead || f.ArchiveSpecAtHead {
 		return nil
@@ -622,32 +659,33 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 	if stagedClosureSpecName(f) == f.Name {
 		return nil // classified as artifacts-staged-uncommitted instead
 	}
-	// That exclusion is the only thing separating this state from
-	// artifacts-staged-uncommitted, and it is read off the index. With
-	// the index unobserved the two are indistinguishable, so neither is
-	// guessed at (owner risk review F2).
-	if !f.StagedPathsObserved {
-		return nil
-	}
-	// The STATE here is read off the disk and HEAD alone, which needs no
-	// coordinate bridge — but every command it emits is run from the
-	// repository root, so the paths it names do (owner risk review F3).
-	// Without the prefix they cannot be named correctly, and advice that
-	// does not resolve is worse than none.
-	if !f.RepoPrefixObserved {
-		return nil
-	}
-	active := repoRelative(f, store.SpecDirRelPath(store.ZoneActive, f.Name))
-	archive := repoRelative(f, store.SpecDirRelPath(store.ZoneArchive, f.Name))
+	// R-RR3-26: the four facts above — two off disk, two out of HEAD's
+	// own zone trees (`git ls-tree`, which reads no index) — RECOGNIZE
+	// this state on their own. The index and the store prefix are needed
+	// only to DISAMBIGUATE it from artifacts-staged-uncommitted and to
+	// DESCRIBE it in git's coordinates, so an unobserved one costs the
+	// advice, never the diagnosis (ac-8, co-6, DC-13: diagnosis only, not
+	// nothing). The earlier reading of the owner risk review's F2 dropped
+	// the whole state here, which reported a real interrupted close as
+	// exit 0, nothing recognized.
 	target := "close/" + f.Name
-	id := "restore-uncommitted-archive-move:" + target
+	active := store.SpecDirRelPath(store.ZoneActive, f.Name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, f.Name)
 
 	uncertainties := []Uncertainty{}
 	if f.Close.Exists && f.Close.Empty() {
 		uncertainties = append(uncertainties, ambiguousClosureUncertainty(target, StateEmptyBranchCut))
 	}
+	if !f.StagedPathsObserved {
+		uncertainties = append(uncertainties, archiveMoveIndexUncertainty())
+	}
+	if f.RepoPrefixObserved {
+		active, archive = repoRelative(f, active), repoRelative(f, archive)
+	} else {
+		uncertainties = append(uncertainties, archiveMovePrefixUncertainty())
+	}
 
-	return []RecognizedState{{
+	state := RecognizedState{
 		Code:   StateArchiveMoveUncommitted,
 		Scope:  ScopeRef,
 		Target: target,
@@ -659,21 +697,30 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 		// vocab:identity — "close" names the git verb/branch-prefix identity, never the renameable lifecycle status
 		StepsCompleted: []string{"close moved the spec directory on disk"},
 		InvariantsHeld: []string{headInvariant(f)},
-		Choices: []Choice{{
-			ID:             id,
-			Summary:        "restore the uncommitted archive move for spec/" + f.Name,
-			Preconditions:  []string{fmt.Sprintf("%s is still absent on disk", active)},
-			Effects:        []string{"restore the checkout to HEAD's shape"},
-			Reversibility:  ReversibilityReversible,
-			Confirmation:   "none: no executor",
-			Postconditions: []string{fmt.Sprintf("%s exists on disk again", active)},
-			Executor:       "none",
-			ManualCommands: []string{
-				fmt.Sprintf(closureResidueRestoreActiveTmpl, active),
-				fmt.Sprintf(closureResidueDeleteArchiveTmpl, archive),
-			},
-		}},
-	}}
+		// The withholding shape recognizeEmptyBranchCut already uses and
+		// schema.go's Validate already permits: a state with no choice at
+		// all (only a MANUAL choice with no commands is refused).
+		Choices: []Choice{},
+	}
+	if !f.StagedPathsObserved || !f.RepoPrefixObserved {
+		return []RecognizedState{state}
+	}
+
+	state.Choices = append(state.Choices, Choice{
+		ID:             "restore-uncommitted-archive-move:" + target,
+		Summary:        "restore the uncommitted archive move for spec/" + f.Name,
+		Preconditions:  []string{fmt.Sprintf("%s is still absent on disk", active)},
+		Effects:        []string{"restore the checkout to HEAD's shape"},
+		Reversibility:  ReversibilityReversible,
+		Confirmation:   "none: no executor",
+		Postconditions: []string{fmt.Sprintf("%s exists on disk again", active)},
+		Executor:       "none",
+		ManualCommands: []string{
+			fmt.Sprintf(closureResidueRestoreActiveTmpl, active),
+			fmt.Sprintf(closureResidueDeleteArchiveTmpl, archive),
+		},
+	})
+	return []RecognizedState{state}
 }
 
 // --- closure-unpublished / board-push-failed (R-RR3-12, R-RR3-13) ------

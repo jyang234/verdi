@@ -513,3 +513,59 @@ func TestRecoverE2E_ApplyNoExecutor(t *testing.T) {
 		t.Fatalf("lock removed by a choice with no executor: %v", statErr)
 	}
 }
+
+// TestRecoverE2E_ArchiveMoveWithUnreadableIndexIsDiagnosed is R-RR3-26
+// through the REAL binary, over the owner risk review's own F2 fixture:
+// an interrupted close that moved spec/checkout's directory into the
+// archive zone on disk and never staged it, in a repository whose index
+// git cannot read, with NO close/checkout branch to carry the diagnosis
+// instead. Every fact the state is recognized from is available, so the
+// operator must be TOLD (exit 1, the state on stdout, the index named as
+// the unavailable fact and no command guessed) rather than handed
+// exit 0, nothing recognized.
+func TestRecoverE2E_ArchiveMoveWithUnreadableIndexIsDiagnosed(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := recoverE2ERepo(t)
+
+	activeDir := store.ActiveSpecDir(repo.Dir, "checkout")
+	archiveDir := store.ArchiveSpecDir(repo.Dir, "checkout")
+	if err := os.MkdirAll(filepath.Dir(archiveDir), 0o755); err != nil {
+		t.Fatalf("creating the archive zone: %v", err)
+	}
+	if err := os.Rename(activeDir, archiveDir); err != nil {
+		t.Fatalf("moving %s to %s: %v", activeDir, archiveDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".git", "index"), []byte("broken index\n"), 0o644); err != nil {
+		t.Fatalf("truncating .git/index: %v", err)
+	}
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, nil, "recover", "--json", "spec/checkout")
+	if code != 1 {
+		t.Fatalf("verdi recover over a fully observed archive-move residue: exit %d, want 1 (a state recognized)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	proj, err := recovery.Decode([]byte(strings.TrimRight(stdout, "\n")))
+	if err != nil {
+		t.Fatalf("recovery.Decode(stdout): %v\nstdout: %s", err, stdout)
+	}
+	var states []recovery.RecognizedState
+	for _, s := range proj.States {
+		if s.Code == recovery.StateArchiveMoveUncommitted {
+			states = append(states, s)
+		}
+	}
+	if len(states) != 1 {
+		t.Fatalf("%d archive-move-uncommitted states, want exactly one: %+v", len(states), proj.States)
+	}
+	if len(states[0].Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the index is exactly what would say which command is right", states[0].Choices)
+	}
+	var named bool
+	for _, u := range states[0].Uncertainties {
+		if strings.Contains(u.Text, "staged-path listing could not be observed") && u.Witness != "" {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("Uncertainties = %+v, want the unobserved index named with the witness that would settle it", states[0].Uncertainties)
+	}
+}
