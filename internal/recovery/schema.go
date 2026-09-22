@@ -46,7 +46,17 @@ const (
 	StateStaleLock                  StateCode = "stale-lock"
 	StateGovernedActionInterrupted  StateCode = "governed-action-interrupted"
 	StateStrandedResidue            StateCode = "stranded-residue"
-	StateUnrecognized               StateCode = "unrecognized"
+	// StateUnrecognized (R-RR3-16) names an observation that contradicts
+	// the closed ritual inventory (dc-7) — never a ritual branch that
+	// merely carries commits of its own, which is ordinary in-progress
+	// work and produces no state at all. Its own recognizer
+	// (derive.go's recognizeUnrecognized) fires only for: a lock whose
+	// body filelock.Inspect could not parse; a draft-mutation journal
+	// present but undecoded, or decoded to a phase outside the known
+	// set; an execution-workspace entry ClassifyEntry does not
+	// recognize (grammar-external); or a spec present on disk in both
+	// the active and archive zones at once.
+	StateUnrecognized StateCode = "unrecognized"
 )
 
 // validStateCodes is StateCode's closed set (Validate fails closed on any

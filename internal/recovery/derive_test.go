@@ -423,7 +423,7 @@ func TestDerive_StaleLock_UndecidableBecomesDisclosureNotState(t *testing.T) {
 
 func TestDerive_GovernedActionInterrupted_Journal(t *testing.T) {
 	f := baseFacts()
-	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Schema: "verdi.draftmutation-journal/v1", Spec: "spec/checkout", Phase: "prepared", Steps: []string{"journal.json"}}
+	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Decoded: true, Schema: "verdi.draftmutation-journal/v1", Spec: "spec/checkout", Phase: "prepared", Steps: []string{"journal.json"}}
 	p := Derive(f)
 	mustValidate(t, p)
 
@@ -522,35 +522,108 @@ func TestDerive_StrandedResidue_Cleared(t *testing.T) {
 	}
 }
 
-// --- unrecognized ----------------------------------------------------
+// --- unrecognized (R-RR3-16) ---------------------------------------------
 
-func TestDerive_Unrecognized(t *testing.T) {
+// TestDerive_Unrecognized_InProgressBranchProducesNoState is R-RR3-16's
+// own withdrawal of Step 13's literal reading: a ritual branch that
+// merely carries commits of its own (not empty, matching no other
+// recognizer) is ordinary in-progress work, not a recovery state at all.
+func TestDerive_Unrecognized_InProgressBranchProducesNoState(t *testing.T) {
 	f := baseFacts()
-	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1"} // not empty, matches nothing else
+	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1"}
 	p := Derive(f)
 	mustValidate(t, p)
-
-	s, ok := stateFor(p.States, StateUnrecognized, "feature/checkout")
-	if !ok {
-		t.Fatalf("no unrecognized state: %+v", p.States)
-	}
-	if len(s.Uncertainties) != 1 || s.Uncertainties[0].Text == "" {
-		t.Fatalf("Uncertainties = %+v", s.Uncertainties)
+	if len(p.States) != 0 {
+		t.Fatalf("States = %+v, want none: an in-progress ritual branch is not a recovery state", p.States)
 	}
 }
 
-func TestDerive_Unrecognized_ClearedWhenClaimed(t *testing.T) {
+func TestDerive_Unrecognized_MalformedLock(t *testing.T) {
 	f := baseFacts()
-	// Not empty and would otherwise be "unrecognized", but board-push-failed
-	// already claims design/checkout.
-	f.Design = RitualBranch{Name: "design/checkout", Exists: true, Tip: "d1"}
+	f.WriterLock = LockFact{Path: "/root/.verdi/data/writer.lock", ReadError: "filelock: lock ... exists but is malformed"}
 	p := Derive(f)
 	mustValidate(t, p)
-	if _, ok := stateFor(p.States, StateUnrecognized, "design/checkout"); ok {
-		t.Fatal("unrecognized present for a branch already claimed by board-push-failed")
+
+	s, ok := stateFor(p.States, StateUnrecognized, "/root/.verdi/data/writer.lock")
+	if !ok {
+		t.Fatalf("no unrecognized state for the malformed lock: %+v", p.States)
 	}
-	if _, ok := stateFor(p.States, StateBoardPushFailed, "design/checkout"); !ok {
-		t.Fatal("expected board-push-failed to claim design/checkout")
+	if len(s.Uncertainties) != 1 || s.Uncertainties[0].Witness == "" {
+		t.Fatalf("Uncertainties = %+v", s.Uncertainties)
+	}
+	// A malformed lock (ReadError set) never also reads as stale (Status
+	// is the zero value, not LockStale).
+	if _, ok := stateFor(p.States, StateStaleLock, "/root/.verdi/data/writer.lock"); ok {
+		t.Fatal("a malformed lock must not also produce a stale-lock state")
+	}
+}
+
+func TestDerive_Unrecognized_MalformedLock_RitualScoped(t *testing.T) {
+	f := baseFacts()
+	f.RitualLocks = []LockFact{{Path: "/root/.verdi/data/worktrees/checkout.lock", ReadError: "malformed"}}
+	p := Derive(f)
+	mustValidate(t, p)
+	s, ok := stateFor(p.States, StateUnrecognized, "/root/.verdi/data/worktrees/checkout.lock")
+	if !ok {
+		t.Fatal("no unrecognized state for the malformed ritual lock")
+	}
+	if s.Scope != ScopeRef {
+		t.Fatalf("Scope = %q, want ref", s.Scope)
+	}
+}
+
+func TestDerive_Unrecognized_UndecodableJournal(t *testing.T) {
+	f := baseFacts()
+	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Decoded: false, DecodeError: "unexpected end of JSON input"}
+	p := Derive(f)
+	mustValidate(t, p)
+	if _, ok := stateFor(p.States, StateUnrecognized, f.Journal.Path); !ok {
+		t.Fatalf("no unrecognized state for the undecodable journal: %+v", p.States)
+	}
+	if _, ok := stateFor(p.States, StateGovernedActionInterrupted, f.Journal.Path); ok {
+		t.Fatal("an undecodable journal must not also produce a governed-action-interrupted state")
+	}
+}
+
+func TestDerive_Unrecognized_UnknownJournalPhase(t *testing.T) {
+	f := baseFacts()
+	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Decoded: true, Phase: "committing", Spec: "spec/checkout"}
+	p := Derive(f)
+	mustValidate(t, p)
+	if _, ok := stateFor(p.States, StateUnrecognized, f.Journal.Path); !ok {
+		t.Fatalf("no unrecognized state for the unknown journal phase: %+v", p.States)
+	}
+}
+
+func TestDerive_Unrecognized_GrammarExternalWorkspaceEntry(t *testing.T) {
+	f := baseFacts()
+	f.WorkspaceUnclassified = []string{".DS_Store"}
+	p := Derive(f)
+	mustValidate(t, p)
+	if _, ok := stateFor(p.States, StateUnrecognized, ".DS_Store"); !ok {
+		t.Fatalf("no unrecognized state for the grammar-external entry: %+v", p.States)
+	}
+}
+
+func TestDerive_Unrecognized_SpecInBothZones(t *testing.T) {
+	f := baseFacts()
+	f.ActiveSpecOnDisk = true
+	f.ArchiveSpecOnDisk = true
+	p := Derive(f)
+	mustValidate(t, p)
+	if _, ok := stateFor(p.States, StateUnrecognized, "spec/checkout"); !ok {
+		t.Fatalf("no unrecognized state for the spec present in both zones: %+v", p.States)
+	}
+}
+
+func TestDerive_Unrecognized_Cleared(t *testing.T) {
+	f := baseFacts() // no lock errors, no journal, no unclassified entries, spec in neither zone
+	p := Derive(f)
+	mustValidate(t, p)
+	for _, s := range p.States {
+		if s.Code == StateUnrecognized {
+			t.Fatalf("unexpected unrecognized state: %+v", s)
+		}
 	}
 }
 
@@ -560,7 +633,7 @@ func TestDerive_OrderingAndValidity(t *testing.T) {
 	f := baseFacts()
 	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
 	f.WriterLock = LockFact{Path: "/root/.verdi/data/writer.lock", Inspection: filelock.Inspection{Status: filelock.LockStale, Info: filelock.Info{PID: 1}, Reason: "pid 1 is not alive"}}
-	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Phase: "prepared", Spec: "spec/checkout"}
+	f.Journal = JournalFact{Path: "/root/.verdi/data/draft-mutation/checkout/journal.json", Present: true, Decoded: true, Phase: "prepared", Spec: "spec/checkout"}
 
 	p := Derive(f)
 	mustValidate(t, p)

@@ -28,6 +28,13 @@ var readOnlyGitxCalls = map[string]bool{
 	"HasRemoteTrackingBranch": true,
 	"AheadBehind":             true,
 	"WorktreeList":            true,
+	// Show joins the read half's allow-list per R-RR3-15 (plan amendment):
+	// read-only blob-content-at-a-ref plumbing, already on
+	// internal/residue's own allow-list — specClassAt's own fallback
+	// chain (facts.go) needs it to resolve a spec's class from a ritual
+	// branch's or the default branch's own tree when it is not visible
+	// on disk in the current checkout.
+	"Show": true,
 }
 
 // TestCommandSurface_OnlyReadOnlyGitxCallsInProductionSource mirrors

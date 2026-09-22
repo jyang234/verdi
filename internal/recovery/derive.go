@@ -26,12 +26,7 @@ func Derive(f Facts) Projection {
 	states = append(states, recognizeStaleLock(f)...)
 	states = append(states, recognizeGovernedActionInterrupted(f)...)
 	states = append(states, recognizeStrandedResidue(f)...)
-
-	claimed := make(map[string]bool, len(states))
-	for _, s := range states {
-		claimed[s.Target] = true
-	}
-	states = append(states, recognizeUnrecognized(f, claimed)...)
+	states = append(states, recognizeUnrecognized(f)...)
 	if states == nil {
 		states = []RecognizedState{}
 	}
@@ -556,7 +551,7 @@ func lockUndecidableDisclosures(f Facts) []string {
 func recognizeGovernedActionInterrupted(f Facts) []RecognizedState {
 	var states []RecognizedState
 
-	if f.Journal.Present && f.Journal.Phase == "prepared" {
+	if f.Journal.Present && f.Journal.Decoded && knownJournalPhases[f.Journal.Phase] {
 		steps := f.Journal.Steps
 		if steps == nil {
 			steps = []string{}
@@ -665,32 +660,99 @@ func recognizeStrandedResidue(f Facts) []RecognizedState {
 	return states
 }
 
-// --- unrecognized --------------------------------------------------------
+// --- unrecognized (R-RR3-16) ---------------------------------------------
 
-// recognizeUnrecognized fires for a ritual branch that exists with
-// commits beyond its cut (never empty) and whose name was not already
-// claimed as another recognized state's own Target (dc-7: the closed
-// inventory's own catch-all — "state is outside the ritual inventory").
-func recognizeUnrecognized(f Facts, claimed map[string]bool) []RecognizedState {
-	var states []RecognizedState
-	for _, c := range ritualCandidates(f) {
-		rb := c.rb
-		if !rb.Exists || rb.Empty() || claimed[rb.Name] {
-			continue
-		}
-		states = append(states, RecognizedState{
-			Code:   StateUnrecognized,
-			Scope:  c.scope,
-			Target: rb.Name,
-			Facts:  []string{fmt.Sprintf("%s exists at tip %s with commits beyond its cut, and matches no recognized ritual state", rb.Name, rb.Tip)},
-			Uncertainties: []Uncertainty{{
-				Text:    "state is outside the ritual inventory (dc-7)",
-				Witness: "manual inspection of " + rb.Name,
-			}},
-			StepsCompleted: []string{},
-			InvariantsHeld: []string{},
-			Choices:        []Choice{},
-		})
+// knownJournalPhases is the draft-mutation journal's own closed phase
+// vocabulary this projection understands — today just "prepared"
+// (internal/draftmutation.LockedWriter never lands any other phase in
+// the journal document; a value outside this set is not a state a
+// governed action recovery reasons about).
+var knownJournalPhases = map[string]bool{"prepared": true}
+
+// unrecognizedWitness is every unrecognized state's shared uncertainty:
+// dc-7's own closed inventory names nothing else this could be.
+func unrecognizedWitness(witness string) []Uncertainty {
+	return []Uncertainty{{Text: "state is outside the ritual inventory (dc-7)", Witness: witness}}
+}
+
+func newUnrecognizedState(scope Scope, target string, facts []string, witness string) RecognizedState {
+	return RecognizedState{
+		Code:           StateUnrecognized,
+		Scope:          scope,
+		Target:         target,
+		Facts:          facts,
+		Uncertainties:  unrecognizedWitness(witness),
+		StepsCompleted: []string{},
+		InvariantsHeld: []string{},
+		Choices:        []Choice{},
 	}
+}
+
+// recognizeUnrecognized (R-RR3-16, amending Step 13's withdrawn literal
+// reading) fires only for an observation that contradicts the closed
+// ritual inventory (dc-7), never for a ritual branch that merely carries
+// commits of its own — that is ordinary in-progress work, not a
+// recovery state:
+//
+//   - a lock (writer, ritual, or execution-workspace) whose body
+//     filelock.Inspect could not even parse (a malformed, complete-but-
+//     garbled body — distinct from stale/held/undecidable, all of which
+//     Inspect itself resolves);
+//   - a draft-mutation journal that is present but did not decode, or
+//     decoded to a phase outside knownJournalPhases;
+//   - an execution-workspace directory entry ClassifyEntry does not
+//     recognize (grammar-external);
+//   - the target spec present on disk in BOTH the active and archive
+//     zones at once (an on-disk shape no ritual ever produces).
+func recognizeUnrecognized(f Facts) []RecognizedState {
+	var states []RecognizedState
+
+	states = append(states, unrecognizedLockStates(f.WriterLock, ScopeStore)...)
+	for _, lf := range f.RitualLocks {
+		states = append(states, unrecognizedLockStates(lf, ScopeRef)...)
+	}
+	for _, lf := range f.WorkspaceLocks {
+		states = append(states, unrecognizedLockStates(lf, ScopeStore)...)
+	}
+
+	if f.Journal.Present && (!f.Journal.Decoded || !knownJournalPhases[f.Journal.Phase]) {
+		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
+		fact := fmt.Sprintf("draft-mutation journal %s is present but could not be decoded: %s", f.Journal.Path, f.Journal.DecodeError)
+		if f.Journal.Decoded {
+			// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
+			fact = fmt.Sprintf("draft-mutation journal %s decoded with phase %q, outside the known set", f.Journal.Path, f.Journal.Phase)
+		}
+		states = append(states, newUnrecognizedState(ScopeRef, f.Journal.Path, []string{fact}, f.Journal.Path))
+	}
+
+	for _, name := range f.WorkspaceUnclassified {
+		states = append(states, newUnrecognizedState(
+			ScopeStore, name,
+			[]string{fmt.Sprintf("execution-workspace entry %q does not match the workspace-unit grammar", name)},
+			name,
+		))
+	}
+
+	if f.ActiveSpecOnDisk && f.ArchiveSpecOnDisk && f.Name != "" {
+		target := f.Ref.String()
+		states = append(states, newUnrecognizedState(
+			ScopeRef, target,
+			[]string{fmt.Sprintf("%s exists on disk in both the active and archive zones", target)},
+			target,
+		))
+	}
+
+	sort.Slice(states, func(i, j int) bool { return states[i].Target < states[j].Target })
 	return states
+}
+
+func unrecognizedLockStates(lf LockFact, scope Scope) []RecognizedState {
+	if lf.ReadError == "" {
+		return nil
+	}
+	return []RecognizedState{newUnrecognizedState(
+		scope, lf.Path,
+		[]string{fmt.Sprintf("%s could not be inspected: %s", lf.Path, lf.ReadError)},
+		lf.Path,
+	)}
 }

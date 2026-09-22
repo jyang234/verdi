@@ -51,18 +51,31 @@ func (b RitualBranch) Empty() bool { return b.Exists && len(b.EmptyWitnesses) > 
 type LockFact struct {
 	Path       string
 	Inspection filelock.Inspection
+	// ReadError is filelock.Inspect's own error text (a malformed,
+	// complete-but-garbled lock body — R-RR3-16), "" when Inspect
+	// succeeded. Inspection is the zero value whenever this is non-empty.
+	ReadError string
 }
 
 // JournalFact is the draft-mutation journal's own read-only peek
 // (R-RR3-11): only {schema, spec, phase} are decoded, permissively — the
 // journal carries more fields than this projection needs.
 type JournalFact struct {
-	Path    string
+	Path string
+	// Present is true whenever a non-symlink journal file exists at Path,
+	// regardless of whether its body decoded (R-RR3-16: "present but
+	// undecodable" is itself a recognized fact, not silence).
 	Present bool
-	Schema  string
-	Spec    string
-	Phase   string
-	Steps   []string // DraftMutationDir's own directory listing, sorted
+	// Decoded is true only when the body strict-permissively decoded as
+	// {schema, spec, phase}; Schema/Spec/Phase are meaningful only then.
+	Decoded bool
+	// DecodeError is the decode failure text, set only when Present &&
+	// !Decoded.
+	DecodeError string
+	Schema      string
+	Spec        string
+	Phase       string
+	Steps       []string // DraftMutationDir's own directory listing, sorted
 }
 
 // journalPeek is the permissive (non-strict) decode target for
@@ -121,6 +134,10 @@ type Facts struct {
 
 	WorkspaceUnits []WorkspaceUnit // sorted by id
 	WorkspaceLocks []LockFact      // sorted by path
+	// WorkspaceUnclassified names every execution-workspace directory
+	// entry ClassifyEntry did not recognize (grammar-external, R-RR3-16),
+	// sorted.
+	WorkspaceUnclassified []string
 
 	ResidueScanned bool
 	Residue        *residue.Result
@@ -154,7 +171,32 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	}
 
 	root := cfg.Root
-	class, err := specClassAt(root, ref.Name)
+
+	// The default-branch base is resolved up front (R-RR3-15): specClassAt's
+	// own fallback chain needs it, and Facts needs it regardless, so it is
+	// computed exactly once.
+	f := Facts{Root: root, Name: ref.Name, Ref: ref}
+	var disclosures []string
+
+	res, defaultBranchErr := branchbase.Resolve(ctx, root)
+	if defaultBranchErr != nil {
+		disclosures = append(disclosures, fmt.Sprintf("could not resolve the default-branch base: %v", defaultBranchErr))
+	} else {
+		f.DefaultBranch = res
+		f.DefaultBranchResolved = res.Kind == branchbase.ResolvedDefault
+		switch res.Kind {
+		case branchbase.HeadFallback:
+			disclosures = append(disclosures, "the default branch is unresolved (no origin remote); facts about it are based on the current HEAD, disclosed, not a default-branch base")
+		case branchbase.Unresolvable:
+			disclosures = append(disclosures, "the default branch could not be resolved (origin is configured but no default branch resolves)")
+		}
+	}
+
+	defaultBranchRefForClass := ""
+	if f.DefaultBranchResolved {
+		defaultBranchRefForClass = f.DefaultBranch.Ref
+	}
+	class, err := specClassAt(ctx, root, ref.Name, defaultBranchRefForClass)
 	if err != nil {
 		return Facts{}, fmt.Errorf("recovery: gather: %w", err)
 	}
@@ -162,9 +204,6 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 		classWord := cfg.Model.DisplayClass(string(class))
 		return Facts{}, fmt.Errorf("recovery: gather: %s is %s; recovery only inspects a feature spec's own ritual branches", refStr, model.Indefinite(classWord))
 	}
-
-	f := Facts{Root: root, Name: ref.Name, Ref: ref}
-	var disclosures []string
 
 	branch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
@@ -182,20 +221,6 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	tips, tipDisclosures := gatherLocalBranchTips(ctx, root)
 	f.LocalBranches = tips
 	disclosures = append(disclosures, tipDisclosures...)
-
-	res, err := branchbase.Resolve(ctx, root)
-	if err != nil {
-		disclosures = append(disclosures, fmt.Sprintf("could not resolve the default-branch base: %v", err))
-	} else {
-		f.DefaultBranch = res
-		f.DefaultBranchResolved = res.Kind == branchbase.ResolvedDefault
-		switch res.Kind {
-		case branchbase.HeadFallback:
-			disclosures = append(disclosures, "the default branch is unresolved (no origin remote); facts about it are based on the current HEAD, disclosed, not a default-branch base")
-		case branchbase.Unresolvable:
-			disclosures = append(disclosures, "the default branch could not be resolved (origin is configured but no default branch resolves)")
-		}
-	}
 
 	var branchDisclosures []string
 	f.Design, branchDisclosures = gatherRitualBranch(ctx, root, "design/"+ref.Name, tips)
@@ -239,6 +264,7 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	f.WriterLock = LockFact{Path: store.WriterLockPath(root)}
 	if insp, err := filelock.Inspect(f.WriterLock.Path); err != nil {
 		disclosures = append(disclosures, fmt.Sprintf("could not inspect the writer lock %s: %v", f.WriterLock.Path, err))
+		f.WriterLock.ReadError = err.Error()
 	} else {
 		f.WriterLock.Inspection = insp
 	}
@@ -251,6 +277,7 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 		lf := LockFact{Path: path}
 		if insp, err := filelock.Inspect(path); err != nil {
 			disclosures = append(disclosures, fmt.Sprintf("could not inspect lock %s: %v", path, err))
+			lf.ReadError = err.Error()
 		} else {
 			lf.Inspection = insp
 		}
@@ -262,9 +289,10 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	f.Journal = journal
 	disclosures = append(disclosures, journalDisclosures...)
 
-	units, workspaceLocks, workspaceDisclosures := gatherWorkspace(root)
+	units, workspaceLocks, workspaceUnclassified, workspaceDisclosures := gatherWorkspace(root)
 	f.WorkspaceUnits = units
 	f.WorkspaceLocks = workspaceLocks
+	f.WorkspaceUnclassified = workspaceUnclassified
 	disclosures = append(disclosures, workspaceDisclosures...)
 
 	if f.DefaultBranchResolved {
@@ -301,38 +329,69 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 // imported, since cmd/verdi is package main.
 const gcUnprovenSpecsRefusal = "gc: --reclaim-unmanaged: one or more active-zone specs have an unproven effective lifecycle state; refusing to compute or apply a reclamation plan over an incomplete scan"
 
-// specClassAt resolves name's spec class from the CURRENT on-disk
-// checkout only: the active zone, then the archive zone. Reading a
-// spec's class from a ritual branch's own tree without checking it out
-// would need gitx.Show (blob content at an arbitrary ref), which is
-// outside this package's own read-only command-surface allow-list
-// (commandsurface_test.go, Step 15's enumerated list — os.ReadFile is not
-// a gitx call, so it carries no such restriction). This is a real,
-// disclosed narrowing: `verdi recover <ref>` needs its target spec.md
-// visible in the checkout it is run from (its active zone, or its
-// archive zone once closed) to resolve which class-gated inventory
-// applies, and reports an operational error naming that otherwise —
-// never a guess.
-func specClassAt(root, name string) (artifact.SpecClass, error) {
+// specClassAt resolves name's spec class (R-RR3-15), tried in order: the
+// on-disk active zone, the on-disk archive zone, `design/<name>`'s own
+// tree (gitx.Show, active-zone path — the ritual's own scaffold commit),
+// `close/<name>`'s own tree (same path — a close ritual that has not yet
+// committed its archive move still shows the active-zone path there),
+// and finally the resolved default-branch base's own tree (both zones,
+// for a spec already closed and merged). gitx.Show simply errors when a
+// branch does not exist or the path is absent from its tree — exactly
+// the "not found here, try the next location" signal every step already
+// tolerates, so no separate existence pre-check is needed. Only when
+// every location fails is Gather an operational error naming each one
+// tried (never a guess).
+func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (artifact.SpecClass, error) {
+	activeRel := store.ActiveSpecRelPath(name)
+	archiveRel := store.SpecRelPath(store.ZoneArchive, name)
+
+	locations := []string{
+		"the on-disk active zone",
+		"the on-disk archive zone",
+		"design/" + name,
+		"close/" + name,
+	}
 	var lastDecodeErr error
-	if data, err := os.ReadFile(store.ActiveSpecPath(root, name)); err == nil {
-		fm, ferr := artifact.DecodeSpec(data)
-		if ferr == nil {
-			return fm.Class, nil
+	tryDecode := func(data []byte, readErr error) (artifact.SpecClass, bool) {
+		if readErr != nil {
+			return "", false
 		}
-		lastDecodeErr = ferr
-	}
-	if data, err := os.ReadFile(store.ArchiveSpecPath(root, name)); err == nil {
 		fm, ferr := artifact.DecodeSpec(data)
-		if ferr == nil {
-			return fm.Class, nil
+		if ferr != nil {
+			lastDecodeErr = ferr
+			return "", false
 		}
-		lastDecodeErr = ferr
+		return fm.Class, true
 	}
+
+	data, err := os.ReadFile(store.ActiveSpecPath(root, name))
+	if class, ok := tryDecode(data, err); ok {
+		return class, nil
+	}
+	data, err = os.ReadFile(store.ArchiveSpecPath(root, name))
+	if class, ok := tryDecode(data, err); ok {
+		return class, nil
+	}
+	for _, ritualBranch := range []string{"design/" + name, "close/" + name} {
+		data, err := gitx.Show(ctx, root, ritualBranch, activeRel)
+		if class, ok := tryDecode(data, err); ok {
+			return class, nil
+		}
+	}
+	if defaultBranchRef != "" {
+		locations = append(locations, "the resolved default-branch base ("+defaultBranchRef+")")
+		for _, rel := range []string{activeRel, archiveRel} {
+			data, err := gitx.Show(ctx, root, defaultBranchRef, rel)
+			if class, ok := tryDecode(data, err); ok {
+				return class, nil
+			}
+		}
+	}
+
 	if lastDecodeErr != nil {
 		return "", fmt.Errorf("spec/%s's spec.md could not be decoded (last attempt: %w)", name, lastDecodeErr)
 	}
-	return "", fmt.Errorf("could not find spec/%s's spec.md in the current checkout (active or archive zone)", name)
+	return "", fmt.Errorf("could not find spec/%s's spec.md at any of: %s", name, strings.Join(locations, "; "))
 }
 
 func pathExists(path string) bool {
@@ -439,18 +498,23 @@ func gatherJournal(root, name string) (JournalFact, []string) {
 		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("draft-mutation journal %s is a symlink; not followed", path)}
 	}
+	// Present from here on regardless of whether the body itself decodes
+	// (R-RR3-16): "present but undecodable" is itself a recognized fact.
+	jf.Present = true
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		jf.DecodeError = err.Error()
 		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("could not read draft-mutation journal %s: %v", path, err)}
 	}
 	var peek journalPeek
 	if err := json.Unmarshal(data, &peek); err != nil {
+		jf.DecodeError = err.Error()
 		// vocab:identity — "draft-mutation" names the internal/draftmutation package/artifact identity, not a lifecycle status
 		return jf, []string{fmt.Sprintf("could not decode draft-mutation journal %s: %v", path, err)}
 	}
-	jf.Present = true
+	jf.Decoded = true
 	jf.Schema, jf.Spec, jf.Phase = peek.Schema, peek.Spec, peek.Phase
 
 	if entries, err := os.ReadDir(store.DraftMutationDir(root, name)); err == nil {
@@ -466,14 +530,14 @@ func gatherJournal(root, name string) (JournalFact, []string) {
 // into its owning workspace id's sibling presence, plus the lock siblings'
 // own Inspect results (R-RR3-11). A missing execution root is normal (no
 // execution-workspace history at all), not a disclosure.
-func gatherWorkspace(root string) ([]WorkspaceUnit, []LockFact, []string) {
+func gatherWorkspace(root string) (units []WorkspaceUnit, locks []LockFact, unclassified []string, disclosures []string) {
 	dir := execworkspace.ExecutionRoot(root)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
-		return nil, nil, []string{fmt.Sprintf("could not list %s: %v", dir, err)}
+		return nil, nil, nil, []string{fmt.Sprintf("could not list %s: %v", dir, err)}
 	}
 
 	byID := map[string]*WorkspaceUnit{}
@@ -488,12 +552,13 @@ func gatherWorkspace(root string) ([]WorkspaceUnit, []LockFact, []string) {
 		return u
 	}
 
-	var locks []LockFact
-	var disclosures []string
 	for _, e := range entries {
 		classified, ok := execworkspace.ClassifyEntry(e.Name())
 		if !ok {
-			continue // grammar-external: not this package's concern
+			// grammar-external (R-RR3-16): not silently dropped — it is
+			// itself a recognized "outside the inventory" observation.
+			unclassified = append(unclassified, e.Name())
+			continue
 		}
 		u := unit(classified.WorkspaceID)
 		switch classified.Form {
@@ -508,22 +573,25 @@ func gatherWorkspace(root string) ([]WorkspaceUnit, []LockFact, []string) {
 		case execworkspace.FormLock:
 			u.HasLock = true
 			u.LockPath = execworkspace.LockPath(root, classified.WorkspaceID)
-			insp, err := filelock.Inspect(u.LockPath)
-			if err != nil {
+			lf := LockFact{Path: u.LockPath}
+			if insp, err := filelock.Inspect(u.LockPath); err != nil {
 				disclosures = append(disclosures, fmt.Sprintf("could not inspect lock %s: %v", u.LockPath, err))
+				lf.ReadError = err.Error()
 			} else {
-				locks = append(locks, LockFact{Path: u.LockPath, Inspection: insp})
+				lf.Inspection = insp
 			}
+			locks = append(locks, lf)
 		}
 	}
 
 	sort.Strings(order)
-	units := make([]WorkspaceUnit, 0, len(order))
+	units = make([]WorkspaceUnit, 0, len(order))
 	for _, id := range order {
 		units = append(units, *byID[id])
 	}
+	sort.Strings(unclassified)
 	sort.Slice(locks, func(i, j int) bool { return locks[i].Path < locks[j].Path })
-	return units, locks, disclosures
+	return units, locks, unclassified, disclosures
 }
 
 // filterReclaimRowsForRef keeps only rows whose unit branch is one of

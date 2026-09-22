@@ -476,3 +476,61 @@ func TestGather_RejectsNonSpecRef(t *testing.T) {
 	}
 	_ = repo
 }
+
+// TestGather_SpecClassFromDesignBranch is R-RR3-15's own positive case:
+// the checkout is on "main", spec/checkout does not exist there at all,
+// but design/checkout carries its own committed scaffold — Gather must
+// still succeed, reading the class from that branch's own tree via
+// gitx.Show.
+func TestGather_SpecClassFromDesignBranch(t *testing.T) {
+	repo, cfg := fixtureStoreNoSpec(t)
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "design/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch(design/checkout): %v", err)
+	}
+	specDir := store.ActiveSpecDir(repo.Dir, "checkout")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", specDir, err)
+	}
+	if err := os.WriteFile(store.ActiveSpecPath(repo.Dir, "checkout"), []byte(checkoutSpecMD), 0o644); err != nil {
+		t.Fatalf("writing spec.md: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, store.SpecDirRelPath(store.ZoneActive, "checkout")); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "design: scaffold spec/checkout"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if pathExists(store.ActiveSpecPath(repo.Dir, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout is visible on disk on main")
+	}
+
+	f := gather(t, cfg, "spec/checkout")
+	if f.CurrentBranch != "main" {
+		t.Fatalf("CurrentBranch = %q, want main", f.CurrentBranch)
+	}
+	if !f.Design.Exists {
+		t.Fatal("Design.Exists = false, want true")
+	}
+}
+
+// TestGather_SpecClassNotFoundAnywhere is R-RR3-15's own negative case:
+// no on-disk zone, no design/<name> or close/<name> branch, and no
+// resolvable default branch carries the spec — Gather must refuse with
+// an operational error naming every location it tried.
+func TestGather_SpecClassNotFoundAnywhere(t *testing.T) {
+	_, cfg := fixtureStoreNoSpec(t)
+	_, err := NewGatherer().Gather(context.Background(), cfg, "spec/checkout")
+	if err == nil {
+		t.Fatal("Gather = nil error, want an operational error naming every location tried")
+	}
+	for _, want := range []string{"on-disk active zone", "on-disk archive zone", "design/checkout", "close/checkout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %v does not name location %q", err, want)
+		}
+	}
+}

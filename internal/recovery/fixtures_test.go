@@ -70,6 +70,24 @@ func fixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 	return repo, cfg
 }
 
+// fixtureStoreNoSpec is fixtureStore without spec/checkout at all — for
+// R-RR3-15's own fallback-chain tests, which need a checkout where the
+// target is absent from disk (and from main's own tree) so a positive
+// case can plant it on exactly one fallback location and a negative case
+// can leave every location empty.
+func fixtureStoreNoSpec(t *testing.T) (*fixturegit.Repo, *store.Config) {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n"}, Message: "scaffold"},
+	})
+	cfg, err := store.Open(repo.Dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	cfg.Root = repo.Dir
+	return repo, cfg
+}
+
 // cutEmptyBranch cuts name from repo's current checkout (gitx.
 // CheckoutNewBranch — the cut-from-current mechanism build start and
 // close both use) and stays checked out on it, mirroring an interrupted
