@@ -14,6 +14,7 @@
 package specalign
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -543,6 +544,39 @@ func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *tes
 			if strings.Contains(value, "inputs.") {
 				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through with %s=%q; only the validation and close steps may", i, step.Name, name, value)
 			}
+		}
+	}
+}
+
+// TestCloseDispatchCloseStepHasACommitterIdentity proves the step that runs
+// `verdi close` gives git the GitHub Actions bot identity for both author
+// and committer (review I-2). `verdi close` commits the archive move with a
+// bare `git commit` (gitx.CreateCommit), and a runner has no global git
+// identity (internal/gitx/commitidentity.go records the resulting "empty
+// ident name ... not allowed" failure), so without these the job would die
+// at the commit, after the freeze and the archive move. The values are the
+// ones actions/checkout's README gives for pushing with the built-in token;
+// they are scoped to this one step's environment.
+func TestCloseDispatchCloseStepHasACommitterIdentity(t *testing.T) {
+	job := closeJob(t)
+	matches := findExactRunSteps(job.Steps, `./.build/verdi close "$SPEC_REF"`)
+	if len(matches) != 1 {
+		t.Fatalf("close.yml: expected exactly one `verdi close` step, found %d; decoded run steps: %v", len(matches), runCommands(job.Steps))
+	}
+	env := job.Steps[matches[0]].Env
+	const (
+		botName  = "github-actions[bot]"
+		botEmail = "41898282+github-actions[bot]@users.noreply.github.com"
+	)
+	want := map[string]string{
+		"GIT_AUTHOR_NAME":     botName,
+		"GIT_AUTHOR_EMAIL":    botEmail,
+		"GIT_COMMITTER_NAME":  botName,
+		"GIT_COMMITTER_EMAIL": botEmail,
+	}
+	for _, name := range slices.Sorted(maps.Keys(want)) {
+		if got := env[name]; got != want[name] {
+			t.Errorf("close.yml: the verdi close step must set env %s=%q (git needs an identity for close's archive commit on a runner that has none), got %q", name, want[name], got)
 		}
 	}
 }

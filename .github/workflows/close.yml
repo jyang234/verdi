@@ -183,10 +183,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./.build/verdi sync
+      # `verdi close` commits the archive move with a bare `git commit`
+      # (internal/gitx.CreateCommit), and a runner has no global git
+      # identity, so this step gives git the GitHub Actions bot identity
+      # (the values actions/checkout's README uses for pushing with the
+      # built-in token) for both author and committer. They live in this
+      # step's environment only.
       - name: Run the close ritual (gate, freeze, archive move, commit, publish) — never --force-local
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPEC_REF: ${{ inputs.spec_ref }}
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
         run: ./.build/verdi close "$SPEC_REF"
       - name: "Push the close/<name> branch verdi close committed to (dc-3: the verb stops at the branch; this job's own push is what makes the closure MR possible)"
         run: git push origin HEAD
