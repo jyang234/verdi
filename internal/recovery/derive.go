@@ -141,35 +141,92 @@ func pathsPhrase(label string, paths []string) string {
 	return fmt.Sprintf("%d %s: %s, and %d more", len(paths), label, strings.Join(paths[:shown], ", "), len(paths)-shown)
 }
 
-// uncleanTreeUncertainty implements R-RR3-21: the unwind's own "index is
-// empty" and "working tree is clean" preconditions are evaluated at
-// DERIVE time, from the same Facts the choice would be built from. When
-// either is already false the choice cannot prove where it starts, so
-// parent DC-13 leaves diagnosis only: the state is still emitted, no
-// executable choice is offered, and this uncertainty names the staged OR
-// CHANGED paths — both groups are gathered (Facts.StagedPaths,
-// Facts.WorktreeChangedPaths) — with the witness that settles both. A
-// group whose listing failed is disclosed by Gather and simply leaves
-// its own sentence unqualified here. Reports false when the tree is
-// clean, in which case no uncertainty is added at all.
+// cleanTreeWitness is the one command that settles every clause of the
+// clean-tree proof below. --untracked-files=all is not decoration: plain
+// `git status --porcelain` honors status.showUntrackedFiles, so an
+// operator whose repository sets it to "no" would run the witness,
+// see nothing, and be told something the projection can see is false
+// (owner risk review F1).
+const cleanTreeWitness = "git status --porcelain --untracked-files=all"
+
+// cleanTreeProof is the unwind's own "index is empty" and "working tree
+// is clean" preconditions, evaluated ONCE over Facts' two explicit
+// listings — the SAME function derive uses to decide whether to offer
+// the choice at all (uncleanTreeUncertainty) and apply uses to re-prove
+// it immediately before execution (cleanTreeRefusal). One predicate, two
+// call sites: the derive-time guard and the execution re-proof cannot
+// drift apart into different notions of clean.
+//
+// Unobserved names a listing whose READ FAILED, kept separate from
+// Reasons on purpose (DC-13, owner risk review F2): "I looked and found
+// nothing" and "I could not look" are different facts, and only the
+// first can ever prove a precondition. Both block the executor, and each
+// is stated in its own words.
+type cleanTreeProof struct {
+	Unobserved []string
+	Reasons    []string
+}
+
+// Proven reports whether the unwind's starting point is proved: both
+// listings successfully observed, and both empty.
+func (p cleanTreeProof) Proven() bool { return len(p.Unobserved) == 0 && len(p.Reasons) == 0 }
+
+// Clauses is every blocking clause, unobserved facts first (they are why
+// the rest cannot be trusted), in a deterministic order.
+func (p cleanTreeProof) Clauses() []string {
+	out := make([]string, 0, len(p.Unobserved)+len(p.Reasons))
+	out = append(out, p.Unobserved...)
+	out = append(out, p.Reasons...)
+	return out
+}
+
+func proveCleanTree(f Facts) cleanTreeProof {
+	var proof cleanTreeProof
+	if !f.StagedPathsObserved {
+		proof.Unobserved = append(proof.Unobserved, "the index's own staged-path listing could not be observed, so an empty index cannot be proved")
+	} else if len(f.StagedPaths) != 0 {
+		proof.Reasons = append(proof.Reasons, fmt.Sprintf("the index is not empty (%s)", pathsPhrase("staged", f.StagedPaths)))
+	}
+	if !f.WorktreeChangedObserved {
+		proof.Unobserved = append(proof.Unobserved, "the working tree's own changed-path listing could not be observed, so a clean working tree cannot be proved")
+	} else if len(f.WorktreeChangedPaths) != 0 {
+		proof.Reasons = append(proof.Reasons, fmt.Sprintf("the working tree is not clean (%s)", pathsPhrase("changed", f.WorktreeChangedPaths)))
+	}
+	return proof
+}
+
+// cleanTreeRefusal renders proveCleanTree's blocking clauses as one
+// refusal sentence for the execution re-proof, or "" when the starting
+// point is proved. It states what it OBSERVED and never a transition
+// ("no longer clean") it has no observation of.
+func cleanTreeRefusal(f Facts) string {
+	proof := proveCleanTree(f)
+	if proof.Proven() {
+		return ""
+	}
+	return strings.Join(proof.Clauses(), "; ")
+}
+
+// uncleanTreeUncertainty implements R-RR3-21, as amended by the owner
+// risk review (F1/F2): the unwind's own "index is empty" and "working
+// tree is clean" preconditions are evaluated at DERIVE time, from the
+// same Facts the choice would be built from, through the one shared
+// predicate above. When the starting point is not PROVED — the listings
+// are non-empty, or one of them could not be read at all — the choice
+// cannot prove where it starts, so parent DC-13 leaves diagnosis only:
+// the state is still emitted, no executable choice is offered, and this
+// uncertainty names the staged OR CHANGED paths, or the observation that
+// was unavailable, with the witness that settles it. Reports false only
+// when the tree is proved clean, in which case no uncertainty is added
+// at all.
 func uncleanTreeUncertainty(f Facts, branch string) (Uncertainty, bool) {
-	var reasons []string
-	if len(f.StagedPaths) != 0 {
-		reasons = append(reasons, fmt.Sprintf("the index is not empty (%s)", pathsPhrase("staged", f.StagedPaths)))
-	}
-	if f.Dirty {
-		dirtyReason := "the working tree is not clean"
-		if len(f.WorktreeChangedPaths) != 0 {
-			dirtyReason += fmt.Sprintf(" (%s)", pathsPhrase("changed", f.WorktreeChangedPaths))
-		}
-		reasons = append(reasons, dirtyReason)
-	}
-	if len(reasons) == 0 {
+	proof := proveCleanTree(f)
+	if proof.Proven() {
 		return Uncertainty{}, false
 	}
 	return Uncertainty{
-		Text:    fmt.Sprintf("no unwind of %s is offered: %s — a branch cut is only unwound from an empty index and a clean working tree, and this run cannot prove that starting point", branch, strings.Join(reasons, "; ")),
-		Witness: "git status --porcelain",
+		Text:    fmt.Sprintf("no unwind of %s is offered: %s — a branch cut is only unwound from an empty index and a clean working tree, and this run cannot prove that starting point", branch, strings.Join(proof.Clauses(), "; ")),
+		Witness: cleanTreeWitness,
 	}, true
 }
 
@@ -218,8 +275,8 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 		// for the executor to refuse. The uncertainty is recorded before
 		// the return-branch resolution below so a state that is both
 		// unclean AND undecidable carries both diagnoses.
-		treeUncertainty, treeUnclean := uncleanTreeUncertainty(f, rb.Name)
-		if treeUnclean {
+		treeUncertainty, treeUnproven := uncleanTreeUncertainty(f, rb.Name)
+		if treeUnproven {
 			state.Uncertainties = append(state.Uncertainties, treeUncertainty)
 		}
 
@@ -229,7 +286,7 @@ func recognizeEmptyBranchCut(f Facts) []RecognizedState {
 			states = append(states, state)
 			continue
 		}
-		if treeUnclean {
+		if treeUnproven {
 			states = append(states, state)
 			continue
 		}
@@ -374,6 +431,13 @@ func recognizeScaffoldUnstaged(f Facts) []RecognizedState {
 	if !f.RepoPrefixObserved {
 		return nil
 	}
+	// Both listings are consumed as PROOF here — the changed one as the
+	// evidence itself, the staged one to rule out "already staged" — so
+	// an unobserved listing withholds the state rather than reading as an
+	// empty one (owner risk review F2, DC-13).
+	if !f.WorktreeChangedObserved || !f.StagedPathsObserved {
+		return nil
+	}
 	activePrefix := f.RepoPrefix + store.SpecDirRelPath(store.ZoneActive, f.Name) + "/"
 
 	var changed []string
@@ -470,7 +534,9 @@ func closureStagedSpecName(paths []string) string {
 // answers "" for the same reason — the question cannot be asked, so it is
 // not guessed at.
 func stagedClosureSpecName(f Facts) string {
-	if !f.RepoPrefixObserved {
+	if !f.StagedPathsObserved || !f.RepoPrefixObserved {
+		// An unobserved index is not an index of any shape (owner risk
+		// review F2): the question is unanswerable, so it is not answered.
 		return ""
 	}
 	storeRelative, inStore := gitx.StoreRelativePaths(f.RepoPrefix, f.StagedPaths)
@@ -555,6 +621,13 @@ func recognizeArchiveMoveUncommitted(f Facts) []RecognizedState {
 	}
 	if stagedClosureSpecName(f) == f.Name {
 		return nil // classified as artifacts-staged-uncommitted instead
+	}
+	// That exclusion is the only thing separating this state from
+	// artifacts-staged-uncommitted, and it is read off the index. With
+	// the index unobserved the two are indistinguishable, so neither is
+	// guessed at (owner risk review F2).
+	if !f.StagedPathsObserved {
+		return nil
 	}
 	// The STATE here is read off the disk and HEAD alone, which needs no
 	// coordinate bridge — but every command it emits is run from the

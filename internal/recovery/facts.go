@@ -118,9 +118,17 @@ type Facts struct {
 	Close       RitualBranch
 	PolicyAdopt RitualBranch
 
-	StagedPaths          []string
-	WorktreeChangedPaths []string
-	Dirty                bool
+	// StagedPaths and WorktreeChangedPaths are the two explicit listings
+	// every clean-tree question in this package is answered from, and
+	// their *Observed flags are the answer's own validity (DC-13): a
+	// listing whose read FAILED leaves the slice nil and its flag false,
+	// which is not the same fact as "the listing was empty". Nothing
+	// consuming these as proof may read one for the other. The failure's
+	// own text is not duplicated here — Disclosures already carries it.
+	StagedPaths             []string
+	StagedPathsObserved     bool
+	WorktreeChangedPaths    []string
+	WorktreeChangedObserved bool
 
 	// RepoPrefix is the STORE root's own path inside the repository
 	// (gitx.RepoPrefix: "" when they coincide, "product/" when the store
@@ -243,20 +251,27 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 	f.PolicyAdopt, branchDisclosures = gatherRitualBranch(ctx, root, "policy/adopt", tips)
 	disclosures = append(disclosures, branchDisclosures...)
 
+	// The two listings below are the whole of this projection's
+	// working-tree evidence. gitx.StatusDirty's single bool is
+	// deliberately NOT gathered beside them: it runs a plain `git status
+	// --porcelain`, which honors status.showUntrackedFiles, so an
+	// ordinary display setting makes it answer "clean" over untracked
+	// work that WorktreeChangedPaths (--untracked-files=all, which
+	// overrides the setting) names outright. One configuration-
+	// independent answer, read from the explicit listings, is the only
+	// one anything here proves a precondition from (owner risk review
+	// F1).
 	if staged, err := gitx.StagedPaths(ctx, root); err != nil {
 		disclosures = append(disclosures, fmt.Sprintf("could not list staged paths: %v", err))
 	} else {
 		f.StagedPaths = staged
+		f.StagedPathsObserved = true
 	}
 	if changed, err := gitx.WorktreeChangedPaths(ctx, root); err != nil {
 		disclosures = append(disclosures, fmt.Sprintf("could not list working-tree changed paths: %v", err))
 	} else {
 		f.WorktreeChangedPaths = changed
-	}
-	if dirty, err := gitx.StatusDirty(ctx, root); err != nil {
-		disclosures = append(disclosures, fmt.Sprintf("could not determine working-tree cleanliness: %v", err))
-	} else {
-		f.Dirty = dirty
+		f.WorktreeChangedObserved = true
 	}
 	if prefix, err := gitx.RepoPrefix(ctx, root); err != nil {
 		disclosures = append(disclosures, fmt.Sprintf("could not resolve the store root's own path inside the repository: %v", err))

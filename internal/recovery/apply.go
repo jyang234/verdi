@@ -304,15 +304,17 @@ func reproveUnwind(facts Facts, choice Choice, fresh Facts) string {
 	if !freshRB.Empty() {
 		return fmt.Sprintf("%s now carries commit(s) of its own: no other local branch reaches its tip %s any more", name, freshRB.Tip)
 	}
-	// R-RR3-21: state the fact this check actually observed. "No longer"
-	// would assert a transition nothing here witnessed — the derive-time
-	// guard now withholds the choice outright when either is already
-	// false, so this path only ever sees the tree as it is right now.
-	if len(fresh.StagedPaths) != 0 {
-		return "the index is not empty"
-	}
-	if fresh.Dirty {
-		return "the working tree is not clean"
+	// R-RR3-21, as amended by the owner risk review (F1/F2): the index
+	// and working-tree preconditions are re-proved through the SAME
+	// predicate derive.go withheld the choice on — over the explicit
+	// listings, never a configuration-sensitive summary bool, and never
+	// over a listing whose read failed. It states the fact this check
+	// actually observed; "no longer" would assert a transition nothing
+	// here witnessed, since the derive-time guard withholds the choice
+	// outright when the starting point is already unproved, so this path
+	// only ever sees the tree as it is right now.
+	if refusal := cleanTreeRefusal(fresh); refusal != "" {
+		return refusal
 	}
 
 	origCand, ok := candidateFor(facts, name)

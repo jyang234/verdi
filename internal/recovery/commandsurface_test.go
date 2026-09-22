@@ -35,23 +35,27 @@ var readOnlyGitxCalls = map[string]bool{
 	"LsTree":                  true,
 	"MergeBase":               true,
 	"RevParse":                true,
+	// RepoPrefix and StoreRelativePaths join the read half per the owner
+	// risk review's F3 ruling: `git rev-parse --show-prefix` is read-only
+	// plumbing, and StoreRelativePaths issues no git command at all (a
+	// pure function over a prefix and a path list). Together they are the
+	// one bridge between git's repository-relative listings and the
+	// store-relative zone prefixes the ownership recognizers compare
+	// against.
+	"RepoPrefix": true,
 	// Show joins the read half's allow-list per R-RR3-15 (plan amendment):
 	// read-only blob-content-at-a-ref plumbing, already on
 	// internal/residue's own allow-list — specClassAt's own fallback
 	// chain (facts.go) needs it to resolve a spec's class from a ritual
 	// branch's or the default branch's own tree when it is not visible
 	// on disk in the current checkout.
-	// RepoPrefix and StoreRelativePaths join the read half per the owner
-	// risk review's F3 ruling: `git rev-parse --show-prefix` is read-only
-	// plumbing, and StoreRelativePaths issues no command at all (a pure
-	// function over a prefix and a path list). Together they are the one
-	// bridge between git's repository-relative listings and the store-
-	// relative zone prefixes the ownership recognizers compare against.
-	"RepoPrefix":           true,
-	"Show":                 true,
-	"StagedPaths":          true,
+	"Show":        true,
+	"StagedPaths": true,
+	// StatusDirty is deliberately ABSENT (owner risk review F1): its plain
+	// `git status --porcelain` honors status.showUntrackedFiles, so it
+	// cannot carry a configuration-independent clean-tree proof, and the
+	// two explicit listings answer the same question without it.
 	"StoreRelativePaths":   true,
-	"StatusDirty":          true,
 	"WorktreeChangedPaths": true,
 }
 

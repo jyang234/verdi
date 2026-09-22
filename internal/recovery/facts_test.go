@@ -277,8 +277,9 @@ func TestGather_ScaffoldUnstaged(t *testing.T) {
 	if !containsString(f.WorktreeChangedPaths, wantPath) {
 		t.Fatalf("WorktreeChangedPaths = %v, want to contain %s", f.WorktreeChangedPaths, wantPath)
 	}
-	if !f.Dirty {
-		t.Fatal("Dirty = false, want true")
+	if !f.WorktreeChangedObserved || !f.StagedPathsObserved {
+		t.Fatalf("StagedPathsObserved = %v, WorktreeChangedObserved = %v: both listings were read successfully here",
+			f.StagedPathsObserved, f.WorktreeChangedObserved)
 	}
 }
 

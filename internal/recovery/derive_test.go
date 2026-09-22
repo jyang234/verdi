@@ -34,6 +34,12 @@ func baseFacts() Facts {
 		// below relies on for hasOtherLocalBranch (2B-F9) to read true —
 		// the zero-other-branches case has its own dedicated test.
 		LocalBranches: []BranchTip{{Name: "main", Tip: "deadbeef"}},
+		// A successful Gather: both working-tree listings were read, and
+		// both are empty. The failed-observation cases set these false
+		// explicitly (cleantree_test.go), because an unobserved listing
+		// is never the same fact as an empty one.
+		StagedPathsObserved:     true,
+		WorktreeChangedObserved: true,
 		// The identity layout (store root IS the git root), OBSERVED: a
 		// successful Gather always answers this question, and the
 		// recognizers that bridge git's coordinates to the store's
@@ -327,7 +333,7 @@ func TestDerive_EmptyBranchCut_WithheldByArchiveMove(t *testing.T) {
 // --porcelain` witness), and whether it is present at all.
 func uncleanTreeUncertaintyOf(s RecognizedState) (Uncertainty, bool) {
 	for _, u := range s.Uncertainties {
-		if u.Witness == "git status --porcelain" {
+		if u.Witness == cleanTreeWitness {
 			return u, true
 		}
 	}
@@ -356,7 +362,7 @@ func TestDerive_EmptyBranchCut_WithheldByStagedIndex(t *testing.T) {
 	}
 	u, ok := uncleanTreeUncertaintyOf(s)
 	if !ok {
-		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+		t.Fatalf("Uncertainties = %+v, want one with the clean-tree witness", s.Uncertainties)
 	}
 	for _, want := range []string{"notes/one.md", "notes/two.md"} {
 		if !strings.Contains(u.Text, want) {
@@ -366,13 +372,13 @@ func TestDerive_EmptyBranchCut_WithheldByStagedIndex(t *testing.T) {
 }
 
 // TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree is R-RR3-21's
-// other half: Facts.Dirty alone (nothing staged) withholds the choice
-// too — the carried 2B-R2 residual (Dirty gathered, never surfaced),
-// which this composition turns from cosmetic into operative.
+// other half: a changed working-tree path alone (nothing staged)
+// withholds the choice too. Since the owner risk review's F1 ruling the
+// changed-path LISTING is the whole working-tree evidence — there is no
+// separate summary bool to disagree with it.
 func TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree(t *testing.T) {
 	f := baseFacts()
 	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
-	f.Dirty = true
 	f.WorktreeChangedPaths = []string{".verdi/specs/active/checkout/plan.md"}
 	p := Derive(f)
 	mustValidate(t, p)
@@ -386,7 +392,7 @@ func TestDerive_EmptyBranchCut_WithheldByDirtyWorkingTree(t *testing.T) {
 	}
 	u, ok := uncleanTreeUncertaintyOf(s)
 	if !ok {
-		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+		t.Fatalf("Uncertainties = %+v, want one with the clean-tree witness", s.Uncertainties)
 	}
 	if !strings.Contains(u.Text, "the working tree is not clean") {
 		t.Fatalf("uncertainty %q does not state the working tree fact", u.Text)
@@ -406,7 +412,6 @@ func TestDerive_EmptyBranchCut_WithheldUncertaintyNamesBothGroups(t *testing.T) 
 	f := baseFacts()
 	f.Close = RitualBranch{Name: "close/checkout", Exists: true, Tip: "c1", EmptyWitnesses: []string{"main"}}
 	f.StagedPaths = []string{"staged-one.md"}
-	f.Dirty = true
 	f.WorktreeChangedPaths = []string{"c1.md", "c2.md", "c3.md", "c4.md"}
 	p := Derive(f)
 	mustValidate(t, p)
@@ -482,13 +487,13 @@ func TestDerive_InterruptedDesignStart_WithholdsUnwind(t *testing.T) {
 		t.Fatalf("Choices = %+v, want none: the scaffold edit is uncommitted, so the unwind cannot prove where it starts", s.Choices)
 	}
 	if _, ok := uncleanTreeUncertaintyOf(s); !ok {
-		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+		t.Fatalf("Uncertainties = %+v, want one with the clean-tree witness", s.Uncertainties)
 	}
 }
 
 // TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind is the whole-wave
 // review's own live witness, over a real repository: one untracked file
-// next to an empty cut is enough (Dirty=true, StagedPaths empty).
+// next to an empty cut is enough (one changed path, StagedPaths empty).
 func TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind(t *testing.T) {
 	repo, cfg := fixtureStore(t)
 	cutEmptyBranch(t, repo, "close/checkout")
@@ -508,7 +513,7 @@ func TestDerive_EmptyBranchCut_UntrackedFileWithholdsUnwind(t *testing.T) {
 	}
 	u, ok := uncleanTreeUncertaintyOf(s)
 	if !ok {
-		t.Fatalf("Uncertainties = %+v, want one with the `git status --porcelain` witness", s.Uncertainties)
+		t.Fatalf("Uncertainties = %+v, want one with the clean-tree witness", s.Uncertainties)
 	}
 	if !strings.Contains(u.Text, "leftover.txt") {
 		t.Fatalf("uncertainty %q does not name the one file that made the tree unclean", u.Text)
