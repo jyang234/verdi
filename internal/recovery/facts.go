@@ -211,11 +211,23 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 		}
 	}
 
+	// The store root's own repository prefix is resolved BEFORE
+	// specClassAt (R-RR3-27): that chain's `git show <rev>:<path>` legs
+	// resolve their path against the REPOSITORY root, so in a nested
+	// store they need the bridge just as much as the recognizers below
+	// do. Every later consumer reads the same answer.
+	if prefix, err := gitx.RepoPrefix(ctx, root); err != nil {
+		disclosures = append(disclosures, fmt.Sprintf("could not resolve the store root's own path inside the repository: %v", err))
+	} else {
+		f.RepoPrefix = prefix
+		f.RepoPrefixObserved = true
+	}
+
 	defaultBranchRefForClass := ""
 	if f.DefaultBranchResolved {
 		defaultBranchRefForClass = f.DefaultBranch.Ref
 	}
-	class, err := specClassAt(ctx, root, ref.Name, defaultBranchRefForClass)
+	class, err := specClassAt(ctx, root, ref.Name, defaultBranchRefForClass, f.RepoPrefix, f.RepoPrefixObserved)
 	if err != nil {
 		return Facts{}, fmt.Errorf("recovery: gather: %w", err)
 	}
@@ -273,13 +285,6 @@ func (g Gatherer) Gather(ctx context.Context, cfg *store.Config, refStr string) 
 		f.WorktreeChangedPaths = changed
 		f.WorktreeChangedObserved = true
 	}
-	if prefix, err := gitx.RepoPrefix(ctx, root); err != nil {
-		disclosures = append(disclosures, fmt.Sprintf("could not resolve the store root's own path inside the repository: %v", err))
-	} else {
-		f.RepoPrefix = prefix
-		f.RepoPrefixObserved = true
-	}
-
 	f.ActiveSpecOnDisk = pathExists(store.ActiveSpecPath(root, ref.Name))
 	f.ArchiveSpecOnDisk = pathExists(store.ArchiveSpecPath(root, ref.Name))
 	if entries, err := gitx.LsTree(ctx, root, "HEAD", store.SpecDirRelPath(store.ZoneActive, ref.Name)); err != nil {
@@ -373,15 +378,13 @@ const gcUnprovenSpecsRefusal = "gc: --reclaim-unmanaged: one or more active-zone
 // tolerates, so no separate existence pre-check is needed. Only when
 // every location fails is Gather an operational error naming each one
 // tried (never a guess).
-func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (artifact.SpecClass, error) {
+func specClassAt(ctx context.Context, root, name, defaultBranchRef, repoPrefix string, repoPrefixObserved bool) (artifact.SpecClass, error) {
 	activeRel := store.ActiveSpecRelPath(name)
 	archiveRel := store.SpecRelPath(store.ZoneArchive, name)
 
 	locations := []string{
 		"the on-disk active zone",
 		"the on-disk archive zone",
-		"design/" + name,
-		"close/" + name,
 	}
 	var lastDecodeErr error
 	// tryDecode reads the class out of ONE candidate document's FRONT
@@ -420,8 +423,28 @@ func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (arti
 	if class, ok := tryDecode(data, err); ok {
 		return class, nil
 	}
+	// Every remaining location is a git TREE, read with
+	// `git show <rev>:<path>`, whose path git resolves against the
+	// REPOSITORY root — unlike `git ls-tree`'s pathspec, which is
+	// relative to the process's own directory and so already correct
+	// when git is driven from the store root. The zone paths above are
+	// STORE-relative, so in a nested store (product/.verdi) they name
+	// nothing and every fallback fails, which turned a diagnosable
+	// interrupted ritual into Gather's own operational error
+	// (R-RR3-27). The store root's repository prefix is the bridge; with
+	// it unobserved the path cannot be named at all, so these locations
+	// are SKIPPED and said to be, never asked in the wrong coordinates
+	// (a question in the wrong vocabulary answers "absent" for a spec
+	// that is present).
+	if !repoPrefixObserved {
+		if lastDecodeErr != nil {
+			return "", fmt.Errorf("spec/%s's spec.md could not be decoded (last attempt: %w)", name, lastDecodeErr)
+		}
+		return "", fmt.Errorf("could not find spec/%s's spec.md at any of: %s%s", name, strings.Join(locations, "; "), specClassPrefixSkipped)
+	}
 	for _, ritualBranch := range []string{"design/" + name, "close/" + name} {
-		data, err := gitx.Show(ctx, root, ritualBranch, activeRel)
+		locations = append(locations, ritualBranch)
+		data, err := gitx.Show(ctx, root, ritualBranch, repoPrefix+activeRel)
 		if class, ok := tryDecode(data, err); ok {
 			return class, nil
 		}
@@ -429,7 +452,7 @@ func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (arti
 	if defaultBranchRef != "" {
 		locations = append(locations, "the resolved default-branch base ("+defaultBranchRef+")")
 		for _, rel := range []string{activeRel, archiveRel} {
-			data, err := gitx.Show(ctx, root, defaultBranchRef, rel)
+			data, err := gitx.Show(ctx, root, defaultBranchRef, repoPrefix+rel)
 			if class, ok := tryDecode(data, err); ok {
 				return class, nil
 			}
@@ -441,6 +464,14 @@ func specClassAt(ctx context.Context, root, name, defaultBranchRef string) (arti
 	}
 	return "", fmt.Errorf("could not find spec/%s's spec.md at any of: %s", name, strings.Join(locations, "; "))
 }
+
+// specClassPrefixSkipped is the clause specClassAt's refusal carries when
+// its git-tree fallbacks were never asked: `git show <rev>:<path>`
+// resolves path against the repository root, and without the store
+// root's own prefix inside the repository there is no such path to name
+// (R-RR3-27). Gather discloses the prefix failure itself; this keeps the
+// consequence visible on the one error that survives an early return.
+const specClassPrefixSkipped = "; the ritual-branch and default-branch tree fallbacks were skipped: the store root's own path inside the repository could not be resolved, and `git show <rev>:<path>` resolves its path against the repository root"
 
 func pathExists(path string) bool {
 	_, err := os.Stat(path)

@@ -778,7 +778,7 @@ func TestSpecClassAt_DecodesFrontmatterOnly(t *testing.T) {
 	}
 
 	_, cfg := fixtureStoreSpec(t, hostileBodySpecMD)
-	class, err := specClassAt(context.Background(), cfg.Root, "checkout", "")
+	class, err := specClassAt(context.Background(), cfg.Root, "checkout", "", "", true)
 	if err != nil {
 		t.Fatalf("specClassAt: %v, want the class read from the front matter alone", err)
 	}
@@ -821,7 +821,7 @@ func TestSpecClassAt_DecodesFrontmatterOnly_FromRitualBranch(t *testing.T) {
 		t.Fatal("test setup bug: spec/checkout is visible on disk on main")
 	}
 
-	class, err := specClassAt(ctx, cfg.Root, "checkout", "")
+	class, err := specClassAt(ctx, cfg.Root, "checkout", "", "", true)
 	if err != nil {
 		t.Fatalf("specClassAt: %v, want the class read from design/checkout's own tree", err)
 	}

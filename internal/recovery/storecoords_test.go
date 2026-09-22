@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
@@ -329,5 +330,106 @@ func writeNestedUnstagedScaffold(t *testing.T, root string) {
 	data = append(data, []byte("\n<!-- scaffold in progress -->\n")...)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("writing %s: %v", path, err)
+	}
+}
+
+// fixtureNestedStoreNoSpec is fixtureNestedStore without spec/checkout
+// at all — the nested twin of fixtureStoreNoSpec, so a fallback-chain
+// case can plant the spec at exactly one location that is not the
+// current checkout.
+func fixtureNestedStoreNoSpec(t *testing.T) (*fixturegit.Repo, *store.Config, string) {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "") // see fixtureStore's own comment
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				"above.txt":                 "above the store root\n",
+				"product/.verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n",
+			},
+			Message: "scaffold a store root one level below the git root",
+		},
+	})
+	root := filepath.Join(repo.Dir, "product")
+	cfg, err := store.Open(root)
+	if err != nil {
+		t.Fatalf("store.Open(%s): %v", root, err)
+	}
+	cfg.Root = root
+	return repo, cfg, "product/"
+}
+
+// plantSpecOnDesignBranch commits spec/checkout's active-zone spec.md on
+// design/checkout and returns to main, leaving the spec visible in NO
+// on-disk zone of the current checkout — specClassAt's own gitx.Show
+// fallback is then the only thing that can resolve its class.
+func plantSpecOnDesignBranch(t *testing.T, root string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := gitx.CheckoutNewBranch(ctx, root, "design/checkout"); err != nil {
+		t.Fatalf("CheckoutNewBranch(design/checkout): %v", err)
+	}
+	if err := os.MkdirAll(store.ActiveSpecDir(root, "checkout"), 0o755); err != nil {
+		t.Fatalf("creating the active spec dir: %v", err)
+	}
+	if err := os.WriteFile(store.ActiveSpecPath(root, "checkout"), []byte(checkoutSpecMD), 0o644); err != nil {
+		t.Fatalf("writing spec.md: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, root, store.SpecDirRelPath(store.ZoneActive, "checkout")); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, root, "design: scaffold spec/checkout"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, root, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if pathExists(store.ActiveSpecPath(root, "checkout")) {
+		t.Fatal("test setup bug: spec/checkout is visible on disk on main")
+	}
+}
+
+// TestSpecClassAt_NestedStore_ResolvesFromRitualBranchTree is R-RR3-27:
+// `git show <rev>:<path>` resolves its path against the REPOSITORY root
+// (unlike `git ls-tree`'s pathspec, which is cwd-relative and so already
+// correct here), so specClassAt's own fallback chain must ask for the
+// store-relative path rebased through the store root's repository
+// prefix. Without it, a nested store whose spec lives only in a ritual
+// branch's tree makes Gather an operational error — exit 2 where the
+// operator is owed a diagnosis (ac-8).
+func TestSpecClassAt_NestedStore_ResolvesFromRitualBranchTree(t *testing.T) {
+	_, cfg, prefix := fixtureNestedStoreNoSpec(t)
+	plantSpecOnDesignBranch(t, cfg.Root)
+
+	class, err := specClassAt(context.Background(), cfg.Root, "checkout", "", prefix, true)
+	if err != nil {
+		t.Fatalf("specClassAt: %v, want the class read from design/checkout's own tree in the nested layout", err)
+	}
+	if class != artifact.ClassFeature {
+		t.Fatalf("class = %q, want feature", class)
+	}
+	if f := mustGather(t, cfg, "spec/checkout"); !f.Design.Exists {
+		t.Fatal("Design.Exists = false, want true")
+	}
+}
+
+// TestSpecClassAt_UnobservedPrefix_SkipsTheGitTreeFallbacks is the
+// negative half: with the store root's own repository prefix unobserved,
+// the path `git show` would resolve cannot be named at all, so the tree
+// fallbacks are skipped rather than asked a question in the wrong
+// coordinates. The refusal names only the locations actually tried and
+// says why the rest were not.
+func TestSpecClassAt_UnobservedPrefix_SkipsTheGitTreeFallbacks(t *testing.T) {
+	_, cfg, _ := fixtureNestedStoreNoSpec(t)
+	plantSpecOnDesignBranch(t, cfg.Root)
+
+	_, err := specClassAt(context.Background(), cfg.Root, "checkout", "main", "", false)
+	if err == nil {
+		t.Fatal("specClassAt resolved a class through a path it had no way to name in git's coordinates")
+	}
+	if strings.Contains(err.Error(), "design/checkout") {
+		t.Fatalf("refusal %q lists a location that was never tried", err)
+	}
+	if !strings.Contains(err.Error(), specClassPrefixSkipped) {
+		t.Fatalf("refusal %q does not say the tree fallbacks were skipped, and why", err)
 	}
 }
