@@ -22,6 +22,7 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/recovery"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
@@ -124,6 +125,10 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 	// context/verdict area stays the fixed unproven witness, exactly the
 	// same posture `verdi spec doc`'s own default loader has.
 	srv.Backend.ReadinessLoader = readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: workbench.BranchBoardHref}}
+	// get_recovery's read-only readiness-recovery projection
+	// (spec/readiness-recovery-v2 ac-8, ac-10's MCP half): the same
+	// production Loader `verdi recover`'s own read path wires.
+	srv.Backend.RecoveryLoader = recovery.Loader{Root: root}
 	// Best-effort (V1-P7): list_annotations' review-sticky mirrored
 	// population (05 §MCP server) needs a live forge; nil is a fully
 	// valid Backend.Forge zero value (review.go degrades to "no review
