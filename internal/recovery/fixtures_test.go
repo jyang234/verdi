@@ -16,6 +16,89 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
+// mustGather is Gather's own test-only "must succeed" wrapper, mirroring
+// this file's other must-style helpers.
+func mustGather(t *testing.T, cfg *store.Config, ref string) Facts {
+	t.Helper()
+	f, err := NewGatherer().Gather(context.Background(), cfg, ref)
+	if err != nil {
+		t.Fatalf("Gather(%s): %v", ref, err)
+	}
+	return f
+}
+
+// hasState reports whether p carries at least one recognized state of
+// code, regardless of target.
+func hasState(p Projection, code StateCode) bool {
+	for _, s := range p.States {
+		if s.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// gitOutput runs a plain git command against dir and returns its
+// combined output, failing the test on a non-zero exit — apply_test.go's
+// own witness for a branch ref's raw tip value, independent of gitx.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
+
+// runGit runs a plain git command against dir, failing the test on a
+// non-zero exit and discarding output — apply_test.go's own fixture
+// mutator for operations (merge) internal/gitx does not expose.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// cutMergedRitualWorktree cuts branch (one of this ref's own ritual
+// branches) from repo's current checkout with its own commit, merges it
+// (--no-ff) into main, and gives it an UNMANAGED worktree (outside
+// .verdi/data/worktrees, so internal/reclaim's own managed-worktree
+// exclusion never fires) — the merged, clean, unmanaged worktree+branch
+// unit internal/reclaim's own AC-1 predicate classifies eligible.
+// Returns the worktree's own path. Leaves repo checked out on main.
+func cutMergedRitualWorktree(t *testing.T, repo *fixturegit.Repo, branch string) (worktreePath string) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, branch); err != nil {
+		t.Fatalf("CheckoutNewBranch(%s): %v", branch, err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "unit.txt"), []byte(branch+"\n"), 0o644); err != nil {
+		t.Fatalf("writing unit.txt: %v", err)
+	}
+	if err := gitx.AddPaths(ctx, repo.Dir, "unit.txt"); err != nil {
+		t.Fatalf("AddPaths: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "cut "+branch); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	runGit(t, repo.Dir, "merge", "--quiet", "--no-ff", "-m", "merge "+branch, branch)
+
+	path := filepath.Join(t.TempDir(), "unit-wt")
+	if err := gitx.WorktreeAdd(ctx, repo.Dir, path, branch); err != nil {
+		t.Fatalf("WorktreeAdd(%s): %v", branch, err)
+	}
+	return path
+}
+
 // deadPID starts and waits a `true` subprocess and returns its pid,
 // guaranteed reaped and never confusable with a live process (mirrors
 // internal/filelock/inspect_test.go's own helper of the same name;

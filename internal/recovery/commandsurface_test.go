@@ -14,9 +14,10 @@ import (
 // trimmed (2B-F11) to EXACTLY the gitx names facts.go, derive.go,
 // schema.go, codec.go, and commandlog.go actually call — not Step 15's
 // own superset (which additionally named DefaultBranch and WorktreeList,
-// both read-only but unused here). Task 4's apply.go additionally
-// allow-lists branchcut.Unwind and reclaim.Apply only — not this test's
-// concern (a different file, added by a later task).
+// both read-only but unused here). apply.go itself calls no gitx
+// function directly at all (its own two executors, branchcut.Unwind and
+// reclaim.Apply, do the git work) — TestCommandSurface_ApplyExecutorAllowList
+// below is apply.go's own, separate, dc-4-scoped gate.
 //
 // Limitation (noted, not fixed): the walker below keys on the bare
 // identifier "gitx", so `import gx "github.com/jyang234/verdi/internal/
@@ -150,6 +151,75 @@ func TestCommandSurface_NoDirectExecInProductionSource(t *testing.T) {
 				t.Fatalf("%s imports os/exec directly; every git invocation must go through internal/gitx", name)
 			}
 		}
+	}
+}
+
+// applyExecutorAllowList is apply.go's own, separate, dc-4-scoped
+// command-surface gate: the only calls apply.go's production source may
+// make into a package capable of issuing a git command beyond a plain
+// read (dc-4/ac-9: "the executors call only branchcut.Unwind and
+// reclaim.Apply; no new git primitive"). branchcut.Unwind and
+// reclaim.Apply are the two — and only two — MUTATING entry points; a
+// fresh residue.Scan and a fresh reclaim.Compute (dispatch note (c): "the
+// re-prove and the execution ... recompute reclaim.Compute over a fresh
+// residue.Scan") are both read-only recomputations of the SAME two
+// primitives internal/recovery's own Gather already calls in its
+// ordinary read path (facts.go) — never a new git primitive of their
+// own, and each already gated by its OWN package's command-surface test
+// (internal/reclaim, internal/residue).
+var applyExecutorAllowList = map[string]map[string]bool{
+	"branchcut": {"Unwind": true},
+	"reclaim":   {"Apply": true, "Compute": true},
+	"residue":   {"Scan": true},
+}
+
+// TestCommandSurface_ApplyExecutorAllowList walks ONLY apply.go (Task 4's
+// own file) and fails if it calls any function, on any of
+// applyExecutorAllowList's own package identifiers, outside that map —
+// so a future edit that reaches for a THIRD git-capable entry point (or
+// widens beyond Unwind/Apply/Compute/Scan) fails this test by
+// construction, not by hoping a reviewer notices.
+func TestCommandSurface_ApplyExecutorAllowList(t *testing.T) {
+	const file = "apply.go"
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", file, err)
+	}
+
+	found := map[string]bool{}
+	var offenders []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkgIdent, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		allowed, gated := applyExecutorAllowList[pkgIdent.Name]
+		if !gated {
+			return true
+		}
+		found[pkgIdent.Name] = true
+		fn := sel.Sel.Name
+		if !allowed[fn] {
+			offenders = append(offenders, pkgIdent.Name+"."+fn)
+		}
+		return true
+	})
+
+	if len(offenders) > 0 {
+		sort.Strings(offenders)
+		t.Fatalf("apply.go calls function(s) outside its own dc-4 executor allow-list %v:\n%s", applyExecutorAllowList, strings.Join(offenders, "\n"))
+	}
+	if !found["branchcut"] || !found["reclaim"] {
+		t.Fatal("apply.go calls neither branchcut.* nor reclaim.* at all — this guard would pass vacuously")
 	}
 }
 
