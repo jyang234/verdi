@@ -224,24 +224,38 @@ func TestSelectObligationQualityAssessmentViolationPrecedesPassRegardlessOfOrder
 		Witness:  "passing witness",
 		Producer: "verify:behavioral",
 		Provenance: artifact.EvidenceProvenance{
-			Source: artifact.SourceCI,
-			Job:    "verify",
-			Commit: commit,
+			Source:  artifact.SourceCI,
+			Job:     "verify",
+			JobName: "verify",
+			Commit:  commit,
 		},
 	}
 	fail := pass
 	fail.Verdict = artifact.VerdictFail
 	fail.Witness = "failing witness"
 	fail.Producer = "failing:behavioral"
+	in := evidence.ObligationAssessmentInput{
+		StoreRoot:        t.TempDir(),
+		SpecName:         "quality-story",
+		ACID:             "ac-1",
+		Kind:             artifact.EvidenceBehavioral,
+		EvaluationCommit: commit,
+	}
+
+	// The precedence claim is only meaningful against a MATCHED pass: a
+	// pass the matcher leaves unproven (for instance one without the
+	// job_name SI-229 matches on) would let a first-matched-wins selection
+	// pass this test unnoticed.
+	alone, err := selectObligationQualityAssessment(context.Background(), base, in, []artifact.Evidence{pass})
+	if err != nil {
+		t.Fatalf("selectObligationQualityAssessment(pass): %v", err)
+	}
+	if alone.MatchState != evidence.ObligationMatched {
+		t.Fatalf("pass alone = %s/%s, want matched: the fixture must be a matched pass", alone.MatchState, alone.Reason)
+	}
 
 	for _, records := range [][]artifact.Evidence{{pass, fail}, {fail, pass}} {
-		got, err := selectObligationQualityAssessment(context.Background(), base, evidence.ObligationAssessmentInput{
-			StoreRoot:        t.TempDir(),
-			SpecName:         "quality-story",
-			ACID:             "ac-1",
-			Kind:             artifact.EvidenceBehavioral,
-			EvaluationCommit: commit,
-		}, records)
+		got, err := selectObligationQualityAssessment(context.Background(), base, in, records)
 		if err != nil {
 			t.Fatalf("selectObligationQualityAssessment: %v", err)
 		}
