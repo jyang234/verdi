@@ -534,3 +534,48 @@ func TestGather_SpecClassNotFoundAnywhere(t *testing.T) {
 		}
 	}
 }
+
+// TestGather_UnprovenResidue_SkipsReclaimAndDiscloses is R-RR3-14's own
+// guard, previously disclosed as untested (2B-F7): a malformed spec
+// anywhere in the active-zone corpus poisons the successor-corpus scan's
+// completeness proof for every OTHER active-zone spec too (the exact
+// shape internal/residue/scan_test.go's own TestScan_UnprovenSpec_
+// NamedInResult documents), so residue.Scan reports at least one
+// UnprovenSpec; Gather must then skip reclaim.Compute entirely and
+// disclose gc's own refusal sentence, mirroring gc's own behavior.
+func TestGather_UnprovenResidue_SkipsReclaimAndDiscloses(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	malformedDir := repo.Dir + "/.verdi/specs/active/malformed"
+	if err := os.MkdirAll(malformedDir, 0o755); err != nil {
+		t.Fatalf("creating malformed spec dir: %v", err)
+	}
+	malformed := "---\nid: spec/malformed\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n"
+	if err := os.WriteFile(malformedDir+"/spec.md", []byte(malformed), 0o644); err != nil {
+		t.Fatalf("writing malformed spec: %v", err)
+	}
+	// specstate's own successor-corpus scan reads via git (LsTree/Show at
+	// the default branch ref), never the working tree — the malformed
+	// spec must be committed to poison anything.
+	ctx := context.Background()
+	if err := gitx.AddPaths(ctx, repo.Dir, ".verdi/specs/active/malformed"); err != nil {
+		t.Fatalf("staging malformed spec: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "seed a malformed spec"); err != nil {
+		t.Fatalf("committing malformed spec: %v", err)
+	}
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	f := gather(t, cfg, "spec/checkout")
+	if !f.ResidueScanned {
+		t.Fatal("ResidueScanned = false, want true")
+	}
+	if len(f.Residue.UnprovenSpecs) == 0 {
+		t.Fatal("Residue.UnprovenSpecs is empty, want at least one (the malformed spec poisons the corpus)")
+	}
+	if f.ReclaimRows != nil {
+		t.Fatalf("ReclaimRows = %v, want nil: R-RR3-14 refuses to compute a plan over an incomplete scan", f.ReclaimRows)
+	}
+	if !containsSubstring(f.Disclosures, gcUnprovenSpecsRefusal) {
+		t.Fatalf("Disclosures = %v, want gc's own refusal sentence", f.Disclosures)
+	}
+}

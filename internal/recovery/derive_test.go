@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -826,23 +827,40 @@ func TestDerive_OrderingAndValidity(t *testing.T) {
 	}
 }
 
-// TestClosureAdviceCommandsPinned pins this package's own copy of
-// close.go:1059 (closureResidueRefusal) and close.go:1123
-// (reportUncommittedArchiveMove)'s advice commands: recovery cannot
-// import cmd/verdi (package main) to compare against the real functions,
-// so this test is the tripwire against an unnoticed drift the next time
-// someone reads and re-copies that text.
+// TestClosureAdviceCommandsPinned (2B-F6) pins this package's own copy of
+// close.go's closureResidueRefusal/reportUncommittedArchiveMove advice
+// commands and closureResidueName's own zone-prefix constants against
+// cmd/verdi/close.go itself, read as a file at test time (recovery
+// cannot import cmd/verdi, package main): a real tripwire against
+// drift, not a constant compared against a literal copy of itself.
 func TestClosureAdviceCommandsPinned(t *testing.T) {
-	if closureResidueCompleteCommand != "git commit" {
-		t.Fatalf("closureResidueCompleteCommand = %q", closureResidueCompleteCommand)
+	data, err := os.ReadFile("../../cmd/verdi/close.go")
+	if err != nil {
+		t.Fatalf("reading cmd/verdi/close.go: %v", err)
 	}
-	if closureResidueRestoreActiveTmpl != "git restore --source=HEAD --staged --worktree -- %s" {
-		t.Fatalf("closureResidueRestoreActiveTmpl = %q", closureResidueRestoreActiveTmpl)
+	src := string(data)
+	for _, want := range []string{
+		closureResidueCompleteCommand,
+		"git restore --source=HEAD --staged --worktree -- %s", // closureResidueRestoreActiveTmpl's own text
+		"git restore --staged -- %s",                          // closureResidueUnstageArchiveTmpl's own text
+		"deleting the leftover %s directory",                  // what closureResidueDeleteArchiveTmpl's rm -rf renders
+		".verdi/specs/active/",                                // closureStagedSpecName's activeRoot
+		".verdi/specs/archive/",                               // closureStagedSpecName's archiveRoot
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("cmd/verdi/close.go no longer contains %q; recovery's copied advice text/zone prefixes have drifted", want)
+		}
 	}
-	if closureResidueUnstageArchiveTmpl != "git restore --staged -- %s" {
-		t.Fatalf("closureResidueUnstageArchiveTmpl = %q", closureResidueUnstageArchiveTmpl)
+}
+
+// TestGCRefusalSentencePinned (2B-F7) pins gcUnprovenSpecsRefusal against
+// cmd/verdi/gc.go itself, read as a file at test time.
+func TestGCRefusalSentencePinned(t *testing.T) {
+	data, err := os.ReadFile("../../cmd/verdi/gc.go")
+	if err != nil {
+		t.Fatalf("reading cmd/verdi/gc.go: %v", err)
 	}
-	if closureResidueDeleteArchiveTmpl != "rm -rf %s" {
-		t.Fatalf("closureResidueDeleteArchiveTmpl = %q", closureResidueDeleteArchiveTmpl)
+	if !strings.Contains(string(data), gcUnprovenSpecsRefusal) {
+		t.Fatalf("cmd/verdi/gc.go no longer contains %q; recovery's copied refusal sentence has drifted", gcUnprovenSpecsRefusal)
 	}
 }
