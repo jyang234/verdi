@@ -186,6 +186,68 @@ func TestApply_ReclaimRefusalSurfacesVerbatim(t *testing.T) {
 	}
 }
 
+// TestApply_ReclaimWithholdsOnUntrackedHiddenByStatusConfig is the owner
+// closure check's C1 at the recovery-delegation layer (R-RR3-28/29,
+// ledger SI-226). readiness-recovery-v2 ac-9 delegates reclaim to the
+// EXISTING eligibility contract, and spec/verdi-store-layout §gc-reclaim
+// keeps a dirty worktree and names git's own refusal a second,
+// INDEPENDENT guard — but both were answered through a query honoring
+// status.showUntrackedFiles, so the operator's ordinary display setting
+// switched both off at once: with the two argv edits reverted this exact
+// fixture returns err=nil, BOTH declared postconditions "held", and the
+// worktree, the operator's untracked file and the branch all deleted.
+//
+// With the keep-dirty fact configuration-independent the row is kept, so
+// no executable choice is offered at all — the refusal lands one step
+// EARLIER than ErrPreconditionFailed (which covers the narrower
+// dirtied-inside-the-reprove-window race, TestApply_ReclaimRefusalSurfaces
+// Verbatim above). Asking for the withheld choice anyway is an error with
+// nothing executed.
+func TestApply_ReclaimWithholdsOnUntrackedHiddenByStatusConfig(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	wtPath := cutMergedRitualWorktree(t, repo, "feature/checkout")
+
+	runGit(t, repo.Dir, "config", "status.showUntrackedFiles", "no")
+	protected := filepath.Join(wtPath, "unfinished.txt")
+	if err := os.WriteFile(protected, []byte("uncommitted operator work\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", protected, err)
+	}
+
+	// The projection's own reclaim row reads keep-dirty, and the state
+	// carries no choice: reclaim's Row.Line() is surfaced verbatim as the
+	// fact, never a generic message.
+	state, ok := stateFor(Derive(mustGather(t, cfg, "spec/checkout")).States, StateStrandedResidue, "feature/checkout")
+	if !ok {
+		t.Fatal("no stranded-residue state for feature/checkout")
+	}
+	if len(state.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the worktree holds the operator's untracked work", state.Choices)
+	}
+	if len(state.Facts) != 1 || !strings.Contains(state.Facts[0], "kept:") || !strings.Contains(state.Facts[0], "dirty") {
+		t.Fatalf("Facts = %q, want reclaim's own kept:dirty Row.Line() verbatim", state.Facts)
+	}
+
+	out, err := Apply(context.Background(), cfg, "spec/checkout", "reclaim:feature/checkout", io.Discard)
+	if err == nil {
+		t.Fatalf("Apply executed a withheld reclaim: postconditions = %+v", out.Postconditions)
+	}
+	for _, pc := range out.Postconditions {
+		if pc.Held {
+			t.Fatalf("a refused reclaim reported a held postcondition: %+v", pc)
+		}
+	}
+	if _, statErr := os.Stat(protected); statErr != nil {
+		t.Fatalf("the operator's own untracked file was deleted: %v", statErr)
+	}
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Fatalf("worktree %s removed by a refused reclaim: %v", wtPath, statErr)
+	}
+	if hasBranch, hasErr := gitx.HasLocalBranch(context.Background(), repo.Dir, "feature/checkout"); hasErr != nil || !hasBranch {
+		t.Fatalf("HasLocalBranch(feature/checkout) = %v, err = %v: the branch was deleted by a refused reclaim", hasBranch, hasErr)
+	}
+}
+
 func TestApply_AmbiguityWithholdsUnwind(t *testing.T) {
 	repo, cfg := fixtureStore(t)
 	cutEmptyBranch(t, repo, "close/checkout")
