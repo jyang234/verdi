@@ -389,3 +389,69 @@ func realOrSelfSurvey(path string) string {
 	}
 	return path
 }
+
+// TestScanWorktrees_UntrackedHiddenByStatusConfigIsDirty is R-RR3-28's
+// survey-level witness. The survey's keep-dirty fact for an unmanaged
+// worktree is gitx.StatusDirty's answer, and reclaim's own predicate
+// reads nothing else: before that query became configuration-independent
+// an operator's ordinary `status.showUntrackedFiles=no` made the survey
+// report a worktree holding their untracked, unignored work as CLEAN, and
+// the reclaim plan then classified it eligible for deletion. The setting
+// must move neither bit: Dirty is true and DirtyUnresolved is false (an
+// answered question, not an unresolvable one).
+func TestScanWorktrees_UntrackedHiddenByStatusConfigIsDirty(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/.gitignore": "data/\n"},
+		Message: "root",
+	}})
+	root := repo.Dir
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, root, "merged-elsewhere"); err != nil {
+		t.Fatalf("CheckoutNewBranch(merged-elsewhere): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "m.txt"), []byte("m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "--quiet", "-m", "merged-elsewhere work")
+	checkoutMain(t, root)
+	runGit(t, root, "merge", "--quiet", "--no-ff", "-m", "merge merged-elsewhere", "merged-elsewhere")
+
+	wtPath := filepath.Join(t.TempDir(), "merged-wt")
+	if err := gitx.WorktreeAdd(ctx, root, wtPath, "merged-elsewhere"); err != nil {
+		t.Fatalf("WorktreeAdd(merged-elsewhere): %v", err)
+	}
+
+	// The operator's ordinary display preference, and their own
+	// unignored, uncommitted work beside it.
+	runGit(t, root, "config", "status.showUntrackedFiles", "no")
+	if err := os.WriteFile(filepath.Join(wtPath, "unfinished.txt"), []byte("operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	defaultTip, err := gitx.RevParse(ctx, root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanWorktrees(ctx, root, defaultTip)
+	if err != nil {
+		t.Fatalf("scanWorktrees: %v", err)
+	}
+
+	var entry *Worktree
+	for i := range got {
+		if got[i].Branch == "merged-elsewhere" {
+			entry = &got[i]
+		}
+	}
+	if entry == nil {
+		t.Fatalf("scanWorktrees = %+v, want an entry for merged-elsewhere", got)
+	}
+	if entry.DirtyUnresolved {
+		t.Fatalf("merged-elsewhere DirtyUnresolved = true (%s); the clean state IS resolvable here", entry.Reason)
+	}
+	if !entry.Dirty {
+		t.Fatal("merged-elsewhere Dirty = false: a display setting hid the operator's untracked work from the survey's keep-dirty fact")
+	}
+}

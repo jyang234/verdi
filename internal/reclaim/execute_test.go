@@ -353,3 +353,78 @@ func TestApply_BranchOnlyEligible_ReclaimsWithoutAnyWorktreeCall(t *testing.T) {
 		t.Fatal("worktreeRemove was called for a branch-only unit; it must be skipped entirely")
 	}
 }
+
+// TestCompute_UntrackedHiddenByStatusConfigIsKeptDirty is R-RR3-28's
+// predicate-level witness, and TestApply's companion below is the
+// primitive's own (R-RR3-29). spec/verdi-store-layout §gc-reclaim admits
+// an unmanaged worktree only when it carries "no uncommitted changes",
+// keeps a dirty worktree, and names git's own refusal a second,
+// INDEPENDENT guard. Both facts used to flow through a query honoring
+// status.showUntrackedFiles, so an operator's ordinary display setting
+// turned both guards off at once and the sweep deleted their untracked
+// work. Here the unit must be kept with reason `dirty`, and nothing may
+// be removed even if a caller applied the plan anyway.
+func TestCompute_UntrackedHiddenByStatusConfigIsKeptDirty(t *testing.T) {
+	root := newReclaimTestRepo(t)
+	pair := cutEligiblePair(t, root, "hidden")
+	ctx := context.Background()
+
+	runGit(t, root, "config", "status.showUntrackedFiles", "no")
+	if err := os.WriteFile(filepath.Join(pair.path, "unfinished.txt"), []byte("operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := residue.Scan(ctx, root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := planItemFor(t, Compute(res, root, "main", "main"), pair.branch)
+	if item.Eligible {
+		t.Fatalf("item = %+v, want kept: a display setting hid the operator's untracked work from the eligibility predicate", item)
+	}
+	if item.Reason != KeptDirty {
+		t.Fatalf("Reason = %v, want KeptDirty", item.Reason)
+	}
+}
+
+// TestApply_UntrackedHiddenByStatusConfigIsRefusedByGit proves the second
+// guard alone (R-RR3-29), with the first deliberately bypassed: the plan
+// is computed while the worktree is genuinely clean, the setting and the
+// untracked file appear only afterwards, and `git worktree remove` — still
+// without --force — must refuse anyway, leaving the worktree, the file and
+// the branch in place.
+func TestApply_UntrackedHiddenByStatusConfigIsRefusedByGit(t *testing.T) {
+	root := newReclaimTestRepo(t)
+	pair := cutEligiblePair(t, root, "hidden")
+	ctx := context.Background()
+
+	res, err := residue.Scan(ctx, root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := Compute(res, root, "main", "main")
+	if item := planItemFor(t, plan, pair.branch); !item.Eligible {
+		t.Fatalf("precondition: item = %+v, want Eligible at plan time", item)
+	}
+
+	runGit(t, root, "config", "status.showUntrackedFiles", "no")
+	protected := filepath.Join(pair.path, "unfinished.txt")
+	if err := os.WriteFile(protected, []byte("operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	row := rowFor(t, Apply(ctx, root, plan), pair.branch)
+	if row.Kind != KindRefused {
+		t.Fatalf("row = %+v, want KindRefused from git's own second guard", row)
+	}
+	if _, err := os.Stat(protected); err != nil {
+		t.Fatalf("the operator's untracked file was deleted: %v", err)
+	}
+	has, err := gitx.HasLocalBranch(ctx, root, pair.branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatalf("branch %s deleted despite the worktree-remove refusal", pair.branch)
+	}
+}
