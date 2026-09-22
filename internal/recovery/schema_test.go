@@ -43,7 +43,7 @@ func validProjection(t *testing.T) Projection {
 				Facts:          []string{"pid 4242 is not alive"},
 				Uncertainties:  []Uncertainty{},
 				StepsCompleted: []string{},
-				InvariantsHeld: []string{},
+				InvariantsHeld: []string{"HEAD is abc123 and no ritual branch was modified by this run"},
 				Choices: []Choice{
 					{
 						ID:             "remove-stale-lock:/root/.verdi/data/writer.lock",
@@ -140,6 +140,36 @@ func TestProjectionValidateNegative(t *testing.T) {
 		{
 			name:   "code outside the closed set",
 			mutate: func(p *Projection) { p.States[0].Code = StateCode("something-else") },
+		},
+		{
+			name:   "empty facts",
+			mutate: func(p *Projection) { p.States[0].Facts = []string{} },
+		},
+		{
+			name:   "empty invariants_held",
+			mutate: func(p *Projection) { p.States[0].InvariantsHeld = []string{} },
+		},
+		{
+			name: "duplicate executable choice id across different states",
+			mutate: func(p *Projection) {
+				// Same target, different code (never colliding on
+				// (code,target) or ordering) but an identical executable
+				// choice id — R-RR3-3 makes that id the byte-for-byte
+				// --apply key, so two states sharing one is ambiguous.
+				p.States[1].Code = StateStrandedResidue
+				p.States[1].Target = "close/checkout"
+				p.States[1].Choices[0] = Choice{
+					ID:             "unwind-branch-cut:close/checkout",
+					Summary:        "duplicate id collision",
+					Preconditions:  []string{"x"},
+					Effects:        []string{"y"},
+					Reversibility:  ReversibilityIrreversible,
+					Confirmation:   "--apply unwind-branch-cut:close/checkout",
+					Postconditions: []string{"z"},
+					Executor:       "branchcut.Unwind",
+					ManualCommands: []string{},
+				}
+			},
 		},
 	}
 	for _, tc := range tests {

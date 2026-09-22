@@ -200,6 +200,7 @@ func (p Projection) Validate() error {
 		return fmt.Errorf("recovery: projection: states must be non-nil (an explicitly empty set is [])")
 	}
 	seen := make(map[string]bool, len(p.States))
+	seenExecutableChoiceIDs := make(map[string]bool)
 	for i, s := range p.States {
 		field := fmt.Sprintf("states[%d]", i)
 		if err := s.validate(field); err != nil {
@@ -212,6 +213,18 @@ func (p Projection) Validate() error {
 		seen[key] = true
 		if i > 0 && stateTargetKey(p.States[i-1]) >= key {
 			return fmt.Errorf("recovery: projection: states must be strictly ascending by (code, target)")
+		}
+		// 2A-M7: an executable choice's id is the byte-for-byte `--apply
+		// <id>` key (R-RR3-3); two states sharing one would make --apply
+		// ambiguous.
+		for _, c := range s.Choices {
+			if c.Executor == executorNone {
+				continue
+			}
+			if seenExecutableChoiceIDs[c.ID] {
+				return fmt.Errorf("recovery: projection: duplicate executable choice id %q across states", c.ID)
+			}
+			seenExecutableChoiceIDs[c.ID] = true
 		}
 	}
 	if p.Disclosures == nil {
@@ -247,6 +260,12 @@ func (s RecognizedState) validate(field string) error {
 	if err := validateStrings(field+".facts", s.Facts); err != nil {
 		return err
 	}
+	if len(s.Facts) == 0 {
+		// 2A-M7: ac-8 requires every recognized state to carry its own
+		// identifying evidence; a state with no facts at all is a
+		// placeholder, not a diagnosis.
+		return fmt.Errorf("recovery: %s.facts: must be non-empty", field)
+	}
 	if s.Uncertainties == nil {
 		return fmt.Errorf("recovery: %s.uncertainties: must be non-nil (an explicitly empty set is [])", field)
 	}
@@ -266,6 +285,12 @@ func (s RecognizedState) validate(field string) error {
 	}
 	if err := validateStrings(field+".invariants_held", s.InvariantsHeld); err != nil {
 		return err
+	}
+	if len(s.InvariantsHeld) == 0 {
+		// 2B-F4: ac-8 requires every recognized state to name at least
+		// one invariant that still holds; an empty list is an
+		// undischarged schema placeholder.
+		return fmt.Errorf("recovery: %s.invariants_held: must be non-empty", field)
 	}
 	if s.Choices == nil {
 		return fmt.Errorf("recovery: %s.choices: must be non-nil (an explicitly empty set is [])", field)
