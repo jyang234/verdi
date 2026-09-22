@@ -1,6 +1,6 @@
 # Readiness-recovery wave 3 report: recovery projection, two executors, get_recovery (ac-8, ac-9, ac-10)
 
-Status: COMPLETE — READY_FOR_OWNER_RISK_GATE (wave gate `verify OK` at c0e471d9; not pushed; branch `agent/readiness-recovery-wave-3` on origin/main d307821d).
+Status: COMPLETE — owner risk gate at 98132200 REQUEST CHANGES → fix wave closed at c1467391 (`verify OK`), READY_FOR_OWNER_CLOSURE_CHECK on `agent/readiness-recovery-w3-fix`; not pushed. Wave gate `verify OK` at c0e471d9 stands for the wave itself. See the fix-wave section at the end.
 Risk tier: Tier 3 for Task 4 (the executors; owner risk gate per dc-6), Tier 2 for Tasks 1-3, controller for Tasks 5-6.
 Base..Head: d307821d (main after PRs #342/#343) → plan and ledger 5a4a9c0f → Task 1 merge f140e500 → Task 2 merge dd1a7f29 → Task 3 merge 2120198a → Task 4 merge 8ccb3434 → Task 5 e1b465d3 → whole-wave fix 10804789 / c0e471d9 → this docs-only close commit.
 Plan: `docs/superpowers/plans/2026-09-21-readiness-recovery-wave-3.md` (rulings R-RR3-1..22; amendments recorded in place). Spike: `.superpowers/sdd/2026-09-21-readiness-recovery-wave-3/spike-emptycut-findings.md` (throwaway; rewrote R-RR3-5).
@@ -42,3 +42,27 @@ Pre-review gates: every lane's full GREEN list was re-run by the controller; fro
 ## Next authorized action
 
 READY_FOR_OWNER_RISK_GATE — the owner reviews Task 4's range (2120198a..1bd58d6f plus the whole-wave fix 18c7edf3..c0e471d9) and the built-binary apply evidence, then pushes/merges `agent/readiness-recovery-wave-3` to main. Not pushed by the controller. Lane worktrees `verdi-wt/readiness-recovery-w3-t1..t4` remain attached (merged); removal not authorized. The post-design Fable lane owns recovery presentation (co-4).
+
+## Owner risk-gate fix wave (2026-09-22): three findings at 98132200, all closed at c1467391
+
+The owner's independent reviewer held the merge at 98132200 with three reproducible findings (review filed as `owner-risk-review.md` in the lane ledger). The controller re-ran every probe and accepted all three; no spec ambiguity was resolved silently — the clean-tree definition is SI-225.
+
+| Finding | Authority | Ruling | Fix | Pinned by |
+|---|---|---|---|---|
+| F1 P1 — `status.showUntrackedFiles=no` bypassed the clean-tree gate (`Facts.Dirty` from plain `git status --porcelain`); the built binary deleted the cut and exited 0 | ac-9, ac-10 | R-RR3-23: one predicate over the two explicit listings (index via `--untracked-files=no`, tree via `--untracked-files=all`) serves derive and the execution re-proof; `Facts.Dirty` and the `StatusDirty` gather removed from recovery; witness text now `git status --porcelain --untracked-files=all` | 0cda88e3, 04e785aa | `TestProveCleanTree`, `TestUnwind_UntrackedFileHiddenByStatusConfig`, built-binary `TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind` (exit 1, no checkout/branch in the command log) |
+| F2 P1 — failed status/index reads kept success-shaped zero values; the unwind was offered and `reproveUnwind` returned "" | DC-13, co-6, ac-10 | R-RR3-24: `StagedPathsObserved` / `WorktreeChangedObserved` set only on success; derive withholds and names the unavailable fact with its witness; re-proof refuses (exit 1, nothing changed); every recognizer that reads the listings as proof is flag-guarded | 0cda88e3 | `TestUnwind_UnreadableIndexIsNotProofOfCleanliness` (truncated `.git/index`) |
+| F3 P2 — nested `product/.verdi`: repository-relative staged paths fed to store-relative recognizers; a staged closure became `archive-move-uncommitted` with advice that left the archive file staged | ac-8, ac-9 | R-RR3-25: `gitx.StoreRelativePaths` (pure, all-or-nothing) hoisted beside `RepoPrefix`; `close.go` calls it; Gather resolves the prefix once; ownership compared in store coordinates, every emitted path stays as git named it; scaffold and archive-move recognizers were the same defect | 2109aed3, a62a1d74 | four nested-store tests that execute the emitted commands verbatim from the repository root; gitx negative-path tables; `TestRequireCleanIndex` unchanged |
+
+Fresh Opus re-review of 98132200..04e785aa: F1/F2/F3 CLOSED; REQUEST CHANGES on one regression the fix introduced and one adjacent defect, corrected by a second fresh Opus fixer:
+
+- N1 Important (regression from R-RR3-25's wording): `recognizeArchiveMoveUncommitted` withheld the whole state when the index or prefix was unobserved — an interrupted close read as exit 0, nothing recognized. R-RR3-26: withhold only where the missing fact is needed to RECOGNIZE a state (scaffold-unstaged, staged-closure); where it only describes or disambiguates one that disk and HEAD prove, emit the state with a witnessed uncertainty and zero choices (387cc3c9; `diagnosisonly_test.go`, built-binary `TestRecoverE2E_ArchiveMoveWithUnreadableIndexIsDiagnosed`).
+- N2 Important (pre-existing, made a tested claim by F3): `specClassAt`'s `git show <rev>:<path>` legs passed store-relative paths; a nested store exited 2 instead of diagnosing. R-RR3-27: prefix gathered before `specClassAt`, paths repository-rooted, fallbacks skipped and said so when the prefix is unobserved (8427e9b7). The two `LsTree` calls are cwd-relative and correct — confirmed by the reviewer with a decoy-`.verdi` probe.
+- N4 Minor: allow-list comment placement (c1467391). N3 (the reclaim survey's own `StatusDirty` sensitivity) REJECTED for this lane: reclaim removes worktrees without `--force`, so git refuses on untracked content; carried to the owner below.
+
+Closure check by the same reviewer at c1467391: CLOSED N1/N1a/N2/N4; no new finding above Minor.
+
+Gate at c1467391 (`VERDI_E2E_PORT_BASE=4590 make verify`, serial): `verify OK`, exit 0 (09:44–10:20); 118 Go packages ok under `-race`; e2e 330 passed, 0 failed (13.0m); tree clean at c1467391. Disclosure: `TestSelfHostedSpecFidelity` SKIPS in the `verdi-wt/` layout; no specification file changed in this wave, so no fidelity claim is made.
+
+Residuals carried to the owner (new): `internal/residue/survey.go` decides worktree cleanliness from `gitx.StatusDirty` (reclaim eligibility can misjudge untracked-only worktrees; apply is protected by git); about twenty `gitx.Show` callers outside recovery pass store-relative paths (A1, already noted at `cmd/verdi/close.go`); `close.go`'s operator prose emits store-relative commands (R2); `specClassAt` still exits 2 when the prefix is unobserved and the spec is in neither on-disk zone (A2, not reachable by a single git failure); the `lastDecodeErr` branch of that early return omits the prefix-skipped clause (C1); the read-cost residual (m2) is unchanged.
+
+Status: READY_FOR_OWNER_CLOSURE_CHECK at c1467391 on `agent/readiness-recovery-w3-fix` (base 98132200). Not pushed. The owner's reviewer performs the single closure check; then push/merge is the owner's call.
