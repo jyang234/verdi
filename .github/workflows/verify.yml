@@ -95,7 +95,8 @@
 # `on: push:` block's `branches`/`paths` filters apply uniformly to every
 # ref they match. So this job's OWN push trigger below now EXCLUDES
 # close/** via `branches-ignore` (every other branch keeps today's exact
-# path-filtered behaviour, byte-for-byte), and a second, tiny workflow —
+# path-filtered behaviour, and `tags: ["**"]` keeps every tag push running
+# this workflow as before), and a second, tiny workflow —
 # close-evidence.yml, push-triggered on close/** ONLY, with no paths:
 # filter at all — calls this job through `workflow_call` (the
 # `workflow_call:` trigger added to `on:` below) instead of duplicating its
@@ -103,15 +104,32 @@
 # a second file, keeps the self-hosted evidence producer
 # (cmd/verdi/selfevidence.go) bound to the SAME make-verify run that
 # produced it, in the SAME job — exactly the "never a second, independent
-# run" invariant three paragraphs up already established — and makes it
-# structurally impossible for this workflow and close-evidence.yml to BOTH
-# upload a "verdi-evidence" artifact for the same commit (the exact
-# ambiguity named two paragraphs up, now excluded by construction rather
-# than by convention). GITHUB_JOB inside a job invoked through
-# `workflow_call` reports the CALLED workflow's own job id — "verify" here
-# — never the caller's, so `provenance.job` (03 §Evidence records: "the
-# pilot obligations name CI job `verify`, so the per-test records come from
-# that job") is unaffected by being invoked this way.
+# run" invariant three paragraphs up already established.
+#
+# What the carve-out prevents, and what it does not: one push to a close/**
+# branch runs this job once, through close-evidence.yml, never also through
+# this file's own push trigger. It does not make two "verdi-evidence"
+# bundles for one commit impossible. The same commit can also be pushed to
+# another branch or a tag where this workflow runs, and each such run
+# uploads its own bundle. internal/forge/github's FetchEvidenceBundle finds
+# runs by head_sha alone and takes the first successful run, in API order,
+# that carries the artifact (the ambiguity named two paragraphs up). Every
+# such bundle comes from this same job definition over the same commit and
+# is source: ci, so whichever one it takes carries the same authority; which
+# one it takes is not defined. In close.yml's sequence the commit being
+# closed is a new commit pushed only to its close branch, so it normally
+# has one bundle.
+#
+# GITHUB_JOB: the construction relies on GITHUB_JOB being `verify` inside
+# the called job. GITHUB_JOB feeds the evidence records'
+# `provenance.job_name` (SI-229, lane L1a), which the obligation match
+# compares with the CI job the obligations name, `verify` (plan R-CM-4).
+# For a reusable workflow GitHub documents that "the github context is
+# always associated with the caller workflow", which would make GITHUB_JOB
+# the caller's job id; community reports show the called job's id instead.
+# close-evidence.yml's caller job and this file's job are both `verify`, so
+# GITHUB_JOB is `verify` under either reading; internal/specalign pins both
+# ids.
 name: verify
 
 on:

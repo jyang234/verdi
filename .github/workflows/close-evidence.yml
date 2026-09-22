@@ -25,20 +25,27 @@
 #     comment) — never a second, independent run that could disagree with
 #     the first.
 #   - verify.yml's OWN push trigger now excludes close/** via
-#     `branches-ignore` (see its head comment), which makes it structurally
-#     impossible for this workflow and verify.yml to BOTH upload a
-#     "verdi-evidence" artifact for the same commit — two candidates would
-#     otherwise be ambiguous (internal/forge/github's FetchEvidenceBundle
-#     walks successful runs for a commit in API order and accepts
-#     whichever carries that artifact name first).
+#     `branches-ignore` (see its head comment), so one push to a close/**
+#     branch runs the evidence job once, through this workflow, never also
+#     through verify.yml's own push trigger. That does not make two
+#     "verdi-evidence" bundles for one commit impossible: the same commit
+#     can also be pushed to another branch or a tag where verify.yml runs.
+#     internal/forge/github's FetchEvidenceBundle finds runs by head_sha
+#     alone and takes the first successful run, in API order, that carries
+#     the artifact. Every such bundle comes from the same job definition
+#     over the same commit and is source: ci, so which one it takes changes
+#     no authority, though which one it takes is not defined.
 #
-# GITHUB_JOB inside a job invoked through `workflow_call` reports the
-# CALLED workflow's own job id — "verify" — never this file's caller job
-# id, so `provenance.job` (03 §Evidence records: "the pilot obligations
-# name CI job `verify`, so the per-test records come from that job") is
-# unaffected by being invoked this way (verified against GitHub's own
-# reusable-workflows documentation and community-confirmed runtime
-# behavior; see this lane's report for the exact citations).
+# GITHUB_JOB: the construction relies on GITHUB_JOB being `verify` inside
+# the called job. GITHUB_JOB feeds the evidence records'
+# `provenance.job_name` (SI-229, lane L1a), which the obligation match
+# compares with the CI job the obligations name, `verify` (plan R-CM-4).
+# For a reusable workflow GitHub documents that "the github context is
+# always associated with the caller workflow", which would make GITHUB_JOB
+# this file's caller job id; community reports show the called job's id
+# instead. The caller job below and verify.yml's job are both `verify`, so
+# GITHUB_JOB is `verify` under either reading; internal/specalign pins both
+# ids.
 #
 # The caller job below declares only `uses:` and `permissions:`. GitHub's
 # documented keyword whitelist for a job that calls a reusable workflow is
