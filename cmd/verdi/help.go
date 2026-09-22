@@ -79,6 +79,7 @@ verbs:
   experiment       run a comparative experiment operation
   harness          render or drift-check the verdi skills for Claude Code and Codex
   policy           adopt a starter constitution on a policy/adopt branch
+  recover          diagnose an interrupted lifecycle state and offer its safe choices
   version          print the build identification line
   help             print this message
 
@@ -164,6 +165,7 @@ var verbUsage = map[string]string{
 	"experiment": experimentUsage,
 	"harness":    harnessUsage,
 	"policy":     policyUsage,
+	"recover":    recoverUsage,
 }
 
 // verbUsageOrFallback returns the registered usage for verb, or a bare

@@ -109,47 +109,67 @@ func parseLstart(s string) (time.Time, error) {
 
 // alive reports whether pid names a live process that is plausibly the
 // SAME process that wrote recordedStart, closing S4's documented
-// PID-reuse gap. First a classic kill(pid,0) liveness probe (no signal
-// delivered, existence/permission only); a dead pid short-circuits to
-// false. For a live pid, cross-check its actual start time against
-// recordedStart within lockStartTolerance — a live pid whose actual start
-// time drifts far from the lock's recorded start is a DIFFERENT process
-// that reused the pid, so it is reported not-alive (the lock is stale,
-// eligible for takeover). When ps's output cannot be obtained or parsed,
-// the documented fallback is kill-probe-only: report alive (the narrow,
-// disclosed limitation S4 and PLAN.md's ledger both name).
+// PID-reuse gap. It delegates to probe and keeps probe's documented
+// kill-probe-only fallback: when probe cannot decide (the ps cross-check
+// failed or its output was unparseable), alive reports true rather than
+// guessing stale (the narrow, disclosed limitation S4 and PLAN.md's
+// ledger both name). Inspect (inspect.go, R-RR3-6) calls probe directly
+// so it can report that same undecided case as LockUndecidable instead —
+// this function's own contract, and Peek's built on it, are unchanged.
 func alive(pid int, recordedStart int64) bool {
+	isAlive, decided, _ := probe(pid, recordedStart)
+	if !decided {
+		return true // documented fallback: kill-probe-only
+	}
+	return isAlive
+}
+
+// probe is alive's split-out decision core (R-RR3-6): a classic
+// kill(pid,0) liveness probe (no signal delivered, existence/permission
+// only) first, then, for a live pid, a cross-check of its actual start
+// time against recordedStart within lockStartTolerance. decided is false
+// in exactly one case — the ps cross-check itself could not be completed
+// (its output could not be obtained or parsed) — with reason carrying the
+// ps error text; every other outcome (pid absent/not signalable, pid
+// alive and start time within tolerance, pid alive but start time
+// drifted far enough that a different process must have reused it) is
+// decided, with reason set only for the not-alive decided cases (empty
+// for a decided-alive result).
+func probe(pid int, recordedStart int64) (isAlive, decided bool, reason string) {
 	if pid <= 0 {
-		return false
+		return false, true, fmt.Sprintf("pid %d is not a valid process id", pid)
 	}
 	proc, err := os.FindProcess(pid) // always succeeds on Unix; not the real check
 	if err != nil {
-		return false
+		return false, true, fmt.Sprintf("pid %d: %v", pid, err)
 	}
 	sigErr := proc.Signal(syscall.Signal(0))
 	switch {
 	case sigErr == nil:
 		// Exists; fall through to the start-time cross-check.
 	case errors.Is(sigErr, os.ErrProcessDone):
-		return false
+		return false, true, fmt.Sprintf("pid %d is not alive (process already reaped)", pid)
 	case errors.Is(sigErr, syscall.ESRCH):
-		return false
+		return false, true, fmt.Sprintf("pid %d is not alive (no such process)", pid)
 	case errors.Is(sigErr, syscall.EPERM):
 		// Exists, we just can't signal it — still alive. ps may also be
 		// permission-restricted for this pid; the fallback below covers it.
 	default:
-		return false
+		return false, true, fmt.Sprintf("pid %d: %v", pid, sigErr)
 	}
 
 	actual, perr := psLstart(pid)
 	if perr != nil {
-		return true // documented fallback: kill-probe-only
+		return true, false, perr.Error()
 	}
 	diff := actual.Unix() - recordedStart
 	if diff < 0 {
 		diff = -diff
 	}
-	return time.Duration(diff)*time.Second <= lockStartTolerance
+	if time.Duration(diff)*time.Second <= lockStartTolerance {
+		return true, true, ""
+	}
+	return false, true, fmt.Sprintf("pid %d start time drifted %s from the lock's recorded start: a different process reused this pid", pid, time.Duration(diff)*time.Second)
 }
 
 // registryMu/registry are SI-177's synchronized process-local ownership

@@ -916,6 +916,21 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("starting verdi mcp: %v", err)
 	}
+	// Mirrors serveCmd's own t.Cleanup above: without this, a t.Fatalf
+	// anywhere below (e.g. the tools/list count assertion) skips the
+	// happy-path stdin.Close()/mcpCmd.Wait() at the end of this function
+	// via runtime.Goexit, leaking this child process for the rest of the
+	// whole-package test binary's run — under `go test -race ./...` that
+	// stranded `verdi mcp` process holds its stdout pipe open until the
+	// ENTIRE test binary exits, turning one assertion failure into a
+	// ~10-minute hang instead of a fast, clean failure. Safe to run
+	// unconditionally: after the happy-path Wait() below already
+	// succeeded, signaling an exited process and calling Wait() a second
+	// time both just return an (ignored) error.
+	t.Cleanup(func() {
+		_ = mcpCmd.Process.Signal(syscall.SIGTERM)
+		_ = mcpCmd.Wait()
+	})
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 1<<16), 1<<24)
@@ -934,18 +949,19 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 	// `experiment` (CSE Wave 5B, ledger SI-145), Wave 6 Task 1's five new
 	// ASD tools (AC-8), Wave 6 Task 3's three new constitution tools
 	// (spec/context-integrity-v2 AC-1/AC-2/AC-3), `get_document`
-	// (spec-documents Wave 2 Task 3, ac-5's Markdown renderer), and
-	// `import_preview`/`import_apply` (spec-documents Wave 3 Task 3, ac-9)
-	// — the same twenty-one mcpserve/server_test.go and specalign's
-	// TestMCPToolInventory pin.
+	// (spec-documents Wave 2 Task 3, ac-5's Markdown renderer),
+	// `import_preview`/`import_apply` (spec-documents Wave 3 Task 3, ac-9),
+	// and `get_recovery` (spec/readiness-recovery-v2 ac-8, ac-10's MCP
+	// half, wave 3 Task 3) — the same twenty-two mcpserve/server_test.go
+	// and specalign's TestMCPToolInventory pin.
 	toolsResp := ndjsonRPC(t, stdin, sc, 2, "tools/list", nil)
 	toolsResult, ok := toolsResp["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("verdi mcp tools/list: no result: %#v", toolsResp)
 	}
 	tools, _ := toolsResult["tools"].([]any)
-	if len(tools) != 21 {
-		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 21", len(tools))
+	if len(tools) != 22 {
+		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 22", len(tools))
 	}
 
 	// Clean up process B: closing stdin signals EOF on the stdin->socket

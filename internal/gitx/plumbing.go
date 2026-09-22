@@ -23,8 +23,10 @@ import (
 // optional extra environment variables (appended to the ambient
 // environment, e.g. GIT_INDEX_FILE), returning stdout. Only the plumbing
 // operations in this file need stdin/env beyond what run (exec.go)
-// already covers.
+// already covers. It is gitx's third exec site (R-RR3-2 amended after
+// Task 1 review) and, like run and ConfigValue, calls observe first.
 func runStdin(ctx context.Context, dir string, env []string, stdin []byte, args ...string) ([]byte, error) {
+	observe(ctx, dir, args)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if len(env) > 0 {

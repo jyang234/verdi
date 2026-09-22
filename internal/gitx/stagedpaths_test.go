@@ -379,3 +379,86 @@ func TestStagedPaths_NamesBothSidesOfAStagedRename(t *testing.T) {
 		t.Fatalf("StagedPaths(staged rename) = %#v, want both sides %#v", got, want)
 	}
 }
+
+// TestStoreRelativePaths is the pure half of the RepoPrefix relation
+// TestRepoPrefix pins against real git: the table covers the identity
+// layout (no prefix at all), the nested layout every path of which is
+// inside the prefix, and the two shapes that must answer "not mine" —
+// one foreign path anywhere in the list, and an empty list.
+func TestStoreRelativePaths(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prefix string
+		paths  []string
+		want   []string
+		wantOK bool
+	}{
+		{
+			name:   "no prefix leaves repository-relative paths untouched",
+			prefix: "",
+			paths:  []string{".verdi/specs/active/checkout/spec.md", "README.md"},
+			want:   []string{".verdi/specs/active/checkout/spec.md", "README.md"},
+			wantOK: true,
+		},
+		{
+			name:   "a nested store rebases every path onto the store root",
+			prefix: "product/",
+			paths:  []string{"product/.verdi/specs/active/checkout/spec.md", "product/.verdi/specs/archive/checkout/spec.md"},
+			want:   []string{".verdi/specs/active/checkout/spec.md", ".verdi/specs/archive/checkout/spec.md"},
+			wantOK: true,
+		},
+		{
+			name:   "one path outside the prefix collapses the whole answer",
+			prefix: "product/",
+			paths:  []string{"product/.verdi/specs/active/checkout/spec.md", "README.md"},
+			want:   nil,
+			wantOK: false,
+		},
+		{
+			name:   "a path that only shares the prefix's own name is outside it",
+			prefix: "product/",
+			paths:  []string{"product-two/.verdi/specs/active/checkout/spec.md"},
+			want:   nil,
+			wantOK: false,
+		},
+		{
+			name:   "an empty list under a prefix is vacuously inside it",
+			prefix: "product/",
+			paths:  nil,
+			want:   []string{},
+			wantOK: true,
+		},
+		{
+			name:   "an empty list with no prefix stays the same empty list",
+			prefix: "",
+			paths:  nil,
+			want:   nil,
+			wantOK: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := StoreRelativePaths(tc.prefix, tc.paths)
+			if ok != tc.wantOK {
+				t.Fatalf("StoreRelativePaths(%q, %#v) ok = %v, want %v", tc.prefix, tc.paths, ok, tc.wantOK)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("StoreRelativePaths(%q, %#v) = %#v, want %#v", tc.prefix, tc.paths, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStoreRelativePaths_DoesNotAliasItsInput proves the helper never
+// writes through to the caller's own slice: a recognizer that compares in
+// store coordinates must still emit the paths exactly as git named them.
+func TestStoreRelativePaths_DoesNotAliasItsInput(t *testing.T) {
+	paths := []string{"product/.verdi/specs/active/checkout/spec.md"}
+	got, ok := StoreRelativePaths("product/", paths)
+	if !ok {
+		t.Fatalf("StoreRelativePaths: ok = false, want true")
+	}
+	got[0] = "clobbered"
+	if paths[0] != "product/.verdi/specs/active/checkout/spec.md" {
+		t.Fatalf("input path = %q: the helper aliased the caller's slice", paths[0])
+	}
+}

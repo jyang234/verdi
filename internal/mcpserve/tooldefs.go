@@ -106,6 +106,13 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "ref"),
 		},
 		{
+			"name":        "get_recovery",
+			"description": "The read-only readiness-recovery projection (spec/readiness-recovery-v2 ac-8): which interrupted-ritual states, if any, are currently recognized for a spec ref's own ritual branches and store facts, each with its evidence, uncertainties, and — when one exists — its exact resolving choice. This tool carries no apply/choice argument at all (ac-10): nothing a get_recovery call can express ever reaches an executor." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"ref": str("spec/<name> — the ref whose ritual branches and store facts to inspect"),
+			}, "ref"),
+		},
+		{
 			"name":        "get_links",
 			"description": "An artifact's typed outgoing links (02 §Link taxonomy) plus computed backlinks (the inverse edges)." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{

@@ -109,6 +109,44 @@ func RepoPrefix(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
+// StoreRelativePaths re-bases repository-root-relative paths (the vocabulary
+// StagedPaths and WorktreeChangedPaths both answer in) onto the directory
+// RepoPrefix resolved prefix for, returning the re-based paths and true — or
+// (nil, false) when ANY path lies outside that directory.
+//
+// It is RepoPrefix's pure companion: RepoPrefix asks git the one question
+// only git can answer (where does this directory sit inside the repository),
+// and this function does the stripping every caller that relates the two
+// vocabularies would otherwise copy. Two callers relate them today —
+// `close`'s own pre-ritual index guard and the recovery projection's
+// ownership recognizers — and both ask the same question of the same shape of
+// answer, which is why the logic lives here rather than in either of them.
+//
+// All-or-nothing is the load-bearing part, not a convenience: the callers ask
+// "is this whole listing the store's own?", and a partial answer would let a
+// guard claim an index it cannot prove it owns. A caller that instead wants to
+// FILTER a listing compares against prefix+<store-relative prefix> itself; it
+// never needs a partial re-basing here.
+//
+// The empty prefix (dir IS the repository root) is the identity case: the two
+// vocabularies are the same one, and the caller's own slice is returned
+// unchanged. Under a non-empty prefix the result is always a fresh slice, so
+// a caller that emits git's own paths alongside the re-based ones keeps both.
+func StoreRelativePaths(prefix string, paths []string) ([]string, bool) {
+	if prefix == "" {
+		return paths, true
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		rest, inStore := strings.CutPrefix(p, prefix)
+		if !inStore {
+			return nil, false
+		}
+		out[i] = rest
+	}
+	return out, true
+}
+
 // parseStagedStatus extracts the index-differs-from-HEAD paths from `git
 // status --porcelain -z` output.
 //

@@ -234,6 +234,18 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// ref negative case.
 	"cli:journey": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:recover (spec/readiness-recovery-v2 ac-8..ac-10, wave 3 Task 3):
+	// TestCLIShowcaseRecover (cli_showcase_test.go) drives `verdi recover`
+	// against the real, already-landed spec/stale-decline feature from
+	// examples/showcase, proving the read-only projection emits exactly
+	// one canonical verdi.recovery-projection/v1 line that strict-decodes
+	// via recovery.Decode — the same real-showcase-content discipline
+	// cli:journey's own mapping above uses, tolerating either exit (0 or
+	// 1: whether the real corpus happens to carry a recognized
+	// interrupted-ritual state for this ref is a fact about its committed
+	// shape, not something this test manufactures).
+	"cli:recover": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:context (Context Integrity Wave-3, docs/superpowers/specs/
 	// 2026-08-11-context-compiler-authority-design.md §2): added alongside
 	// the new verb itself — TestCLIShowcaseContextCompile
@@ -323,7 +335,15 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// genuinely populated ## Readiness section naming its own source line,
 	// and that kind: tasks narrows the section set against the same real
 	// content.
-	"mcp:get_document":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_document": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	// mcp:get_recovery (spec/readiness-recovery-v2 ac-8, ac-10's MCP half,
+	// wave 3 Task 3): TestMCPShowcaseGetRecovery (mcp_showcase_test.go)
+	// drives the live get_recovery tool, wired with a real
+	// internal/recovery.Loader (never nil), against the real,
+	// already-landed spec/stale-decline feature from examples/showcase,
+	// asserting the result strict-decodes via recovery.Decode and names
+	// the requested ref.
+	"mcp:get_recovery":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_links":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_matrix":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_context_bundle": {goE2E("internal/showcasealign/mcp_showcase_test.go")},

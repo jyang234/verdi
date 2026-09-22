@@ -55,7 +55,7 @@ here.
   that maps all source authority to its destination, names each transformation
   or intentional omission, and reports the coverage total.
 
-CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb), `gc` (round 6, spec/worktree-manager — managed-worktree reclamation), `journey` (GLG AC-1), and `harness` (spec/spec-documents ac-7 — rendered, drift-checked agent skills) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
+CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb), `gc` (round 6, spec/worktree-manager — managed-worktree reclamation), `journey` (GLG AC-1), `harness` (spec/spec-documents ac-7 — rendered, drift-checked agent skills), and `recover` (spec/readiness-recovery-v2 ac-8..ac-10) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
 
 ## Successor authorities
 

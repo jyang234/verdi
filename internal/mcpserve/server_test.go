@@ -132,15 +132,17 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	// ledger SI-145), Wave 6 Task 1's five new ASD tools (AC-8), Wave 6
 	// Task 3's three new constitution tools (spec/context-integrity-v2
 	// AC-1/AC-2/AC-3), `get_document` (spec-documents Wave 2 Task 3,
-	// ac-5's Markdown renderer), and `import_preview`/`import_apply`
+	// ac-5's Markdown renderer), `import_preview`/`import_apply`
 	// (spec-documents Wave 3 Task 3, ac-9: the MCP wrapper over the frozen
-	// spec-import contract) — registered in the same commit as their
+	// spec-import contract), and `get_recovery` (spec/readiness-recovery-v2
+	// ac-8, ac-10's MCP half, wave 3 Task 3: the read-only readiness-
+	// recovery projection) — registered in the same commit as their
 	// tooldefs.go rows.
-	if len(tools) != 21 {
-		t.Fatalf("tools/list returned %d tools, want 21: %#v", len(tools), tools)
+	if len(tools) != 22 {
+		t.Fatalf("tools/list returned %d tools, want 22: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
-		"search_artifacts": true, "get_artifact": true, "get_document": true, "get_links": true, "get_matrix": true,
+		"search_artifacts": true, "get_artifact": true, "get_document": true, "get_recovery": true, "get_links": true, "get_matrix": true,
 		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
 		"experiment":                 true,
 		"get_design_context":         true,

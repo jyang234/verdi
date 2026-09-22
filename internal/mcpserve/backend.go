@@ -10,6 +10,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/recovery"
 )
 
 // ReadinessLoader is the per-request readiness port (spec/readiness-
@@ -23,6 +24,16 @@ import (
 // rather than an error.
 type ReadinessLoader interface {
 	Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error)
+}
+
+// RecoveryLoader is the per-request readiness-recovery port
+// (spec/readiness-recovery-v2 ac-8, ac-10's MCP half, 04 §port pattern:
+// defined at this consumer). internal/recovery.Loader is the one
+// production implementation; nil means no loader is wired, which
+// get_recovery renders as an honest "recovery projection not supplied"
+// toolError rather than a fabricated empty projection.
+type RecoveryLoader interface {
+	Load(ctx context.Context, ref string) (recovery.Projection, error)
 }
 
 // Backend is the one real implementation behind every MCP tool: a store
@@ -59,6 +70,14 @@ type Backend struct {
 	// historical bytes (final-review F10). nil means no loader is wired:
 	// the document states the absence rather than erroring.
 	ReadinessLoader ReadinessLoader
+
+	// RecoveryLoader derives get_recovery's read-only readiness-recovery
+	// projection fresh, per request (spec/readiness-recovery-v2 ac-8,
+	// ac-10). This tool carries no apply/choice argument at all (co-3):
+	// nothing this tool call can express ever reaches either executor,
+	// structurally, not merely by convention. nil means no loader is
+	// wired: the tool states the absence rather than erroring.
+	RecoveryLoader RecoveryLoader
 
 	// ReviewUnavailable, when non-empty, is the disclosed reason a
 	// CONFIGURED forge (named in verdi.yaml) could not be reached to build
