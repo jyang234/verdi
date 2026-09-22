@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -258,7 +259,72 @@ func TestWorktreeRemove_Happy(t *testing.T) {
 	}
 }
 
+// TestWorktreeRemove_Negative_DirtyRefusedWithoutForce table-drives
+// git's OWN dirty-tree refusal — the second, independent guard behind
+// every caller's gitx.StatusDirty check. The config row is R-RR3-29: git
+// resolves `worktree remove`'s cleanliness question through its own
+// `git status`, which honors status.showUntrackedFiles exactly as
+// StatusDirty's plain query did, so before this ruling BOTH guards failed
+// together on the same ordinary display setting and the operator's
+// untracked file was deleted. Passing -c status.showUntrackedFiles=all
+// before the subcommand makes the second guard independent too; it is a
+// git global option, never a force flag.
 func TestWorktreeRemove_Negative_DirtyRefusedWithoutForce(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, repoDir, wtPath string)
+	}{
+		{
+			name: "modified tracked file",
+			setup: func(t *testing.T, _, wtPath string) {
+				writeFixtureFile(t, filepath.Join(wtPath, "a.txt"), "dirty\n")
+			},
+		},
+		{
+			name: "untracked unignored file",
+			setup: func(t *testing.T, _, wtPath string) {
+				writeFixtureFile(t, filepath.Join(wtPath, "unfinished.txt"), "operator work\n")
+			},
+		},
+		{
+			name: "untracked file hidden by status.showUntrackedFiles=no",
+			setup: func(t *testing.T, repoDir, wtPath string) {
+				gitConfigure(t, repoDir, "config", "status.showUntrackedFiles", "no")
+				writeFixtureFile(t, filepath.Join(wtPath, "unfinished.txt"), "operator work\n")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildRepo(t)
+			if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+				t.Fatalf("CheckoutNewBranch: %v", err)
+			}
+			if err := Checkout(ctx, repo.Dir, "main"); err != nil {
+				t.Fatalf("Checkout(main): %v", err)
+			}
+			wtPath := filepath.Join(t.TempDir(), "x")
+			if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
+				t.Fatalf("WorktreeAdd: %v", err)
+			}
+			tc.setup(t, repo.Dir, wtPath)
+
+			if err := WorktreeRemove(ctx, repo.Dir, wtPath); err == nil {
+				t.Fatal("WorktreeRemove(dirty worktree, no --force): want error, got nil")
+			}
+			if _, err := os.Stat(wtPath); err != nil {
+				t.Fatalf("dirty worktree removed despite refusal: %v", err)
+			}
+		})
+	}
+}
+
+// TestWorktreeRemove_ArgvCarriesNoForceFlag pins R-RR3-29's exact argv
+// through the observer seam: the configuration override is passed as
+// git's global -c option BEFORE the subcommand, and the argv still
+// carries no --force / -f (SI-224's forbidden-token floor is unchanged).
+func TestWorktreeRemove_ArgvCarriesNoForceFlag(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()
 
@@ -272,15 +338,21 @@ func TestWorktreeRemove_Negative_DirtyRefusedWithoutForce(t *testing.T) {
 	if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
 		t.Fatalf("WorktreeAdd: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("dirty\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	if err := WorktreeRemove(ctx, repo.Dir, wtPath); err == nil {
-		t.Fatal("WorktreeRemove(dirty worktree, no --force): want error, got nil")
+	// recordingObserver (observer_test.go) records dir as calls[i][0], so
+	// the argv proper starts at index 1.
+	rec := &recordingObserver{}
+	if err := WorktreeRemove(WithObserver(ctx, rec), repo.Dir, wtPath); err != nil {
+		t.Fatalf("WorktreeRemove: %v", err)
 	}
-	if _, err := os.Stat(wtPath); err != nil {
-		t.Fatalf("dirty worktree removed despite refusal: %v", err)
+	want := [][]string{{repo.Dir, "-c", "status.showUntrackedFiles=all", "worktree", "remove", wtPath}}
+	if !reflect.DeepEqual(rec.calls, want) {
+		t.Fatalf("recorded calls = %v, want exactly %v", rec.calls, want)
+	}
+	for _, arg := range rec.calls[0][1:] {
+		if arg == "--force" || arg == "-f" {
+			t.Fatalf("WorktreeRemove argv %v carries a force flag", rec.calls[0][1:])
+		}
 	}
 }
 

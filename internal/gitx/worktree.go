@@ -123,14 +123,26 @@ func WorktreeAdd(ctx context.Context, dir, path, branch string) error {
 	return nil
 }
 
-// WorktreeRemove removes the linked worktree at path — `git worktree
-// remove <path>` against dir, deliberately WITHOUT --force
-// (spec/worktree-manager dc-4: git's own dirty-tree refusal is a second,
-// redundant guard behind the caller's own gitx.StatusDirty check, never
-// the only one relied on; a worktree git itself refuses to remove is
-// surfaced as an ordinary error, never silently forced through).
+// WorktreeRemove removes the linked worktree at path — `git -c
+// status.showUntrackedFiles=all worktree remove <path>` against dir,
+// deliberately WITHOUT --force (spec/worktree-manager dc-4: git's own
+// dirty-tree refusal is a second, redundant guard behind the caller's
+// own gitx.StatusDirty check, never the only one relied on; a worktree
+// git itself refuses to remove is surfaced as an ordinary error, never
+// silently forced through).
+//
+// That second guard is now INDEPENDENT of the repository's
+// configuration, not merely redundant (R-RR3-29). Git answers `worktree
+// remove`'s own cleanliness question through its own `git status`, which
+// honors status.showUntrackedFiles exactly as StatusDirty's plain query
+// did — so under `status.showUntrackedFiles=no` both guards failed
+// together and git deleted a worktree holding the operator's untracked
+// work. The global -c option, passed BEFORE the subcommand, pins that
+// query for this invocation alone. -c is git's ordinary configuration
+// override, not a force flag: the argv still carries none of SI-224's
+// forbidden tokens, and a dirty worktree is still kept, never forced.
 func WorktreeRemove(ctx context.Context, dir, path string) error {
-	if _, err := run(ctx, dir, "worktree", "remove", path); err != nil {
+	if _, err := run(ctx, dir, "-c", "status.showUntrackedFiles=all", "worktree", "remove", path); err != nil {
 		return fmt.Errorf("gitx: WorktreeRemove(%q): %w", path, err)
 	}
 	return nil
