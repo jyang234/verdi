@@ -46,6 +46,7 @@ var verbPhase = map[string]int{
 	"experiment":      24, // Comparative Spike Experiments Wave 5B — bounded CLI adapter over internal/experimentapp
 	"harness":         25, // spec/spec-documents ac-7 — generated, stamped, drift-checked skills for Claude Code and Codex
 	"policy":          26, // spec/spec-documents ac-10 (dc-6, SI-204) — verdi policy adopt --starter writes the starter constitution store on a policy/adopt branch; closes tracker UAT-018
+	"recover":         27, // spec/readiness-recovery-v2 ac-8..ac-10 — the readiness-recovery projection's read path; `verdi recover [--json] <spec-ref> [--apply <choice-id>]` diagnoses an interrupted lifecycle state and offers its safe choices
 }
 
 // vocab:identity — CLI verb names (identity)
@@ -54,7 +55,7 @@ const usage = `usage: verdi <verb> [args...]
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, disposition, waivers, verify-artifact, dex, gc, gate,
        board, audit, attest, model, init, obligation, waive, spec, journey,
-       context, experiment, harness, policy`
+       context, experiment, harness, policy, recover`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -221,6 +222,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "policy" {
 		return cmdPolicy(args[1:], os.Stdout, stderr)
+	}
+	if verb == "recover" {
+		return cmdRecover(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {
