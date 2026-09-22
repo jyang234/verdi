@@ -776,6 +776,70 @@ func TestDerive_StaleLock(t *testing.T) {
 	}
 }
 
+// TestDerive_StaleLock_EmptyBody is wave-review I2: filelock.Inspect's
+// old-empty-body branch returns LockStale with NO Info at all (a writer
+// that died between create and the body flush — precisely the
+// interrupted-ritual shape this verb exists for). The projection must
+// state what it observed, never format a zero Info into the fabricated
+// facts "pid 0"/"start 0" and a precondition ("still names pid 0") that
+// can never be true (ac-8 "identifying facts"; co-6; R-RR3-6/SI-218,
+// whose whole point is that stale is only reported with its liveness
+// evidence).
+func TestDerive_StaleLock_EmptyBody(t *testing.T) {
+	const path = "/root/.verdi/data/writer.lock"
+	f := baseFacts()
+	f.WriterLock = LockFact{Path: path, Inspection: filelock.Inspection{Status: filelock.LockStale, Reason: "empty lock body older than 2s"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateStaleLock, path)
+	if !ok {
+		t.Fatalf("no stale-lock state: %+v", p.States)
+	}
+	wantFacts := []string{"no holder recorded", "empty lock body older than 2s"}
+	if !reflect.DeepEqual(s.Facts, wantFacts) {
+		t.Fatalf("Facts = %v, want %v", s.Facts, wantFacts)
+	}
+	for _, text := range append(append([]string{}, s.Facts...), s.Choices[0].Preconditions...) {
+		for _, forbidden := range []string{"pid 0", "start 0"} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%q asserts %q, a fact this inspection does not carry", text, forbidden)
+			}
+		}
+	}
+	wantPre := []string{path + " still exists"}
+	if !reflect.DeepEqual(s.Choices[0].Preconditions, wantPre) {
+		t.Fatalf("Preconditions = %v, want %v (the path only)", s.Choices[0].Preconditions, wantPre)
+	}
+	if s.Choices[0].ManualCommands[0] != "rm "+path {
+		t.Fatalf("ManualCommands = %v", s.Choices[0].ManualCommands)
+	}
+}
+
+// TestDerive_StaleLock_EmptyBodyOverARealLockFile is the same case over a
+// REAL lock file inspected by filelock.Inspect itself (the composition
+// Task 2's split reviews never exercised: 2A owned Inspect, 2B owned the
+// recognizer).
+func TestDerive_StaleLock_EmptyBodyOverARealLockFile(t *testing.T) {
+	repo, cfg := fixtureStore(t)
+	path := writeOldEmptyWriterLock(t, repo)
+
+	p := Derive(mustGather(t, cfg, "spec/checkout"))
+	mustValidate(t, p)
+	s, ok := stateFor(p.States, StateStaleLock, path)
+	if !ok {
+		t.Fatalf("no stale-lock state for %s: %+v", path, p.States)
+	}
+	for _, text := range append(append([]string{}, s.Facts...), s.Choices[0].Preconditions...) {
+		if strings.Contains(text, "pid 0") || strings.Contains(text, "start 0") {
+			t.Fatalf("%q asserts a holder this empty lock body never recorded", text)
+		}
+	}
+	if !containsSubstring(s.Facts, "no holder recorded") {
+		t.Fatalf("Facts = %v, want the honest no-holder fact", s.Facts)
+	}
+}
+
 func TestDerive_StaleLock_RitualScoped(t *testing.T) {
 	f := baseFacts()
 	f.RitualLocks = []LockFact{{Path: "/root/.verdi/data/worktrees/checkout.lock", Inspection: filelock.Inspection{Status: filelock.LockStale, Info: filelock.Info{PID: 999}, Reason: "pid 999 is not alive"}}}

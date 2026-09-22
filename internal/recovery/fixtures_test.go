@@ -300,6 +300,27 @@ func writeStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 	return path
 }
 
+// writeOldEmptyWriterLock writes an EMPTY store.WriterLockPath(root) and
+// backdates its mtime past filelock's own 2s mid-flush window — the
+// writer that died between create and body flush (wave-review I2), the
+// only LockStale branch that records no holder at all. Returns the lock
+// path.
+func writeOldEmptyWriterLock(t *testing.T, repo *fixturegit.Repo) string {
+	t.Helper()
+	path := store.WriterLockPath(repo.Dir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("creating lock directory: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("backdating %s: %v", path, err)
+	}
+	return path
+}
+
 // writePreparedJournal writes store.DraftMutationJournalPath(root,
 // "checkout") with a minimal {schema, spec, phase} document — the exact
 // fields facts.go's permissive journalPeek decodes (internal/draftmutation/

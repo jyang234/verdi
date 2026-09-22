@@ -701,22 +701,34 @@ func staleLockState(f Facts, lf LockFact, scope Scope) []RecognizedState {
 		return nil
 	}
 	id := "remove-stale-lock:" + lf.Path
+	// Wave-review I2: filelock.Inspect's old-empty-body branch is the one
+	// LockStale path with NO holder in the body at all (a writer that died
+	// between create and the body flush), and it returns a zero Info.
+	// Formatting that into "pid 0"/"start 0" would state two facts that
+	// are false and declare a precondition that can never hold; ac-8 wants
+	// the identifying facts this inspection actually carries, which is its
+	// own liveness reason plus the absence itself.
+	holderFacts := []string{
+		fmt.Sprintf("pid %d", lf.Inspection.Info.PID),
+		fmt.Sprintf("start %d", lf.Inspection.Info.Start),
+	}
+	precondition := fmt.Sprintf("%s still names pid %d", lf.Path, lf.Inspection.Info.PID)
+	if lf.Inspection.Info.PID == 0 {
+		holderFacts = []string{"no holder recorded"}
+		precondition = lf.Path + " still exists"
+	}
 	return []RecognizedState{{
-		Code:   StateStaleLock,
-		Scope:  scope,
-		Target: lf.Path,
-		Facts: []string{
-			fmt.Sprintf("pid %d", lf.Inspection.Info.PID),
-			fmt.Sprintf("start %d", lf.Inspection.Info.Start),
-			lf.Inspection.Reason,
-		},
+		Code:           StateStaleLock,
+		Scope:          scope,
+		Target:         lf.Path,
+		Facts:          append(holderFacts, lf.Inspection.Reason),
 		Uncertainties:  []Uncertainty{},
 		StepsCompleted: []string{},
 		InvariantsHeld: []string{headInvariant(f)},
 		Choices: []Choice{{
 			ID:             id,
 			Summary:        "remove the stale lock " + lf.Path,
-			Preconditions:  []string{fmt.Sprintf("%s still names pid %d", lf.Path, lf.Inspection.Info.PID)},
+			Preconditions:  []string{precondition},
 			Effects:        []string{"delete " + lf.Path},
 			Reversibility:  ReversibilityIrreversible,
 			Confirmation:   "none: no executor",
