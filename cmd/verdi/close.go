@@ -882,48 +882,32 @@ func requireCleanIndex(ctx context.Context, root string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	if name := closureResidueName(storeRelativeStagedPaths(ctx, root, paths)); name != "" {
-		return closureResidueRefusal(ctx, root, name, paths)
+	// Ownership is asked in the STORE's own vocabulary, which gitx.StagedPaths
+	// does not answer in: it answers in REPOSITORY-root-relative paths on
+	// purpose (that is the property that makes it immune to diff.relative),
+	// and the two bases differ exactly when the store root sits below the git
+	// root (store.FindRoot walks up to the nearest .verdi). Without the
+	// re-basing an interrupted close's own index reads as foreign work in that
+	// layout and the operator is told to "commit or unstage" their
+	// half-finished archive: precisely the advice the residue refusal exists
+	// to replace.
+	//
+	// Either failure — an unresolvable prefix, or a staged path OUTSIDE the
+	// store root (gitx.StoreRelativePaths' own all-or-nothing answer) — falls
+	// through to the generic refusal below. Both are the safe direction: verdi
+	// never claims an index it cannot prove it owns, and the refusal itself is
+	// already decided either way (the same posture closureResidueRefusal takes
+	// with CurrentBranch's error). Only the ownership question is asked in the
+	// store's vocabulary; both refusals still name paths exactly as git named
+	// them.
+	if prefix, perr := gitx.RepoPrefix(ctx, root); perr == nil {
+		if storeRel, inStore := gitx.StoreRelativePaths(prefix, paths); inStore {
+			if name := closureResidueName(storeRel); name != "" {
+				return closureResidueRefusal(ctx, root, name, paths)
+			}
+		}
 	}
 	return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before running the ritual", paths)
-}
-
-// storeRelativeStagedPaths re-bases gitx.StagedPaths' answers onto the store
-// root, which is the base closureResidueName's zone prefixes are written in.
-//
-// The two bases differ exactly when the store root sits below the git root
-// (store.FindRoot walks up to the nearest .verdi), and StagedPaths answers in
-// REPOSITORY-root-relative paths on purpose — that is the property that makes
-// it immune to diff.relative. Without this, an interrupted close's own index
-// reads as foreign work in that layout and the operator is told to "commit or
-// unstage" their half-finished archive: precisely the advice the residue
-// refusal exists to replace.
-//
-// It returns nil — an index no name can be derived from, so the generic
-// refusal stands — when any staged path lies OUTSIDE the store root, or when
-// the prefix cannot be resolved at all. Both are the safe direction: verdi
-// never claims an index it cannot prove it owns, and the refusal itself is
-// already decided either way (the same posture closureResidueRefusal takes
-// with CurrentBranch's error). Only the ownership question is asked in the
-// store's vocabulary; both refusals still name paths exactly as git named
-// them.
-func storeRelativeStagedPaths(ctx context.Context, root string, paths []string) []string {
-	prefix, err := gitx.RepoPrefix(ctx, root)
-	if err != nil {
-		return nil
-	}
-	if prefix == "" {
-		return paths
-	}
-	out := make([]string, len(paths))
-	for i, p := range paths {
-		rest, inStore := strings.CutPrefix(p, prefix)
-		if !inStore {
-			return nil
-		}
-		out[i] = rest
-	}
-	return out
 }
 
 // closureResidueName returns the spec name an index full of closure residue
