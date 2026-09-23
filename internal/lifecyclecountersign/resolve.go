@@ -146,14 +146,15 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 	// SI-227's second finding: a local-operator identity is a bare
 	// self-assertion (2026-09-05 local-operator disposition design §2.1)
 	// and can never itself prove a close countersign, which needs a
-	// forge-witnessed approval fact. Checked before any principal is
-	// resolved, using only the kernel's own exported trust-source-kind
-	// query — never internal/governanceprincipal edits.
-	if localOnly, err := gp.HasTrustSourceKind(profile, config.TrustSource, gp.TrustSourceLocalOperator); err != nil {
+	// forge-witnessed approval fact. The configured source's own kind
+	// decides, whatever other sources the profile declares. Checked before
+	// any principal is resolved, using only the kernel's own exported
+	// trust-source-kind query — never internal/governanceprincipal edits.
+	if localOperator, err := gp.HasTrustSourceKind(profile, config.TrustSource, gp.TrustSourceLocalOperator); err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: configured trust source kind: %w", err)
-	} else if localOnly {
+	} else if localOperator {
 		// vocab:identity — operating-model transition verb, not display prose.
-		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is local-operator only: a close countersign needs a forge-witnessed approval, never a bare self-assertion (SI-227)", config.TrustSource)), nil
+		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is a local-operator source: a close countersign needs a forge-witnessed approval, never a bare self-assertion (SI-227)", config.TrustSource)), nil
 	}
 	facts := providerFacts{snapshot: snapshot}
 	principalResolver := gp.NewResolver(facts)

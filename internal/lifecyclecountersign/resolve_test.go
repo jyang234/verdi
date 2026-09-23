@@ -1261,3 +1261,43 @@ func TestKernelSeparationRuleKernelErrorFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveLocalOperatorTrustSourceRefusalNamesItsKind pins the
+// local-operator refusal's witness (L2a review m-5, probe P7): the guard
+// refuses because the CONFIGURED trust source is of kind local-operator,
+// so the witness says exactly that, whether the profile's only source is
+// local-operator or it also declares a forge source.
+func TestResolveLocalOperatorTrustSourceRefusalNamesItsKind(t *testing.T) {
+	besideForge := strings.Replace(lifecycleLocalOperatorProfile,
+		"identity_trust_sources:\n  - {id: local-op, kind: local-operator}\nrole_mappings:\n  - {role: story-review, trust_source: local-op, subjects: [\"900\"]}",
+		"identity_trust_sources:\n  - {id: forge-live, kind: forge}\n  - {id: local-op, kind: local-operator}\nrole_mappings:\n  - {role: story-review, trust_source: forge-live, subjects: [\"900\"]}\n  - {role: story-review, trust_source: local-op, subjects: [\"900\"]}", 1)
+	if besideForge == lifecycleLocalOperatorProfile {
+		t.Fatal("fixture: the forge source was not added to the local-operator profile")
+	}
+	const want = `lifecycle-countersign:principal-authentication:unproven:configured trust source "local-op" is a local-operator source: a close countersign needs a forge-witnessed approval, never a bare self-assertion (SI-227)`
+	for _, tc := range []struct {
+		name    string
+		profile string
+	}{
+		{"the profile's only source", lifecycleLocalOperatorProfile},
+		{"beside a forge source", besideForge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver, request := lifecycleLocalOperatorFixture(t)
+			request.AcceptedProfileSource = fstest.MapFS{
+				".verdi/policy/constitution.md":             &fstest.MapFile{Data: []byte(lifecycleLocalOperatorConstitution), Mode: 0o444},
+				".verdi/policy/profiles/lifecycle-local.md": &fstest.MapFile{Data: []byte(tc.profile), Mode: 0o444},
+			}
+			result, err := resolver.Resolve(context.Background(), request)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if result.Verdict != countersign.VerdictUnproven || result.Record != nil {
+				t.Fatalf("result = %+v, want an unproven local-operator refusal", result)
+			}
+			if len(result.Witnesses) != 1 || result.Witnesses[0] != want {
+				t.Fatalf("witnesses = %v, want exactly [%s]", result.Witnesses, want)
+			}
+		})
+	}
+}
