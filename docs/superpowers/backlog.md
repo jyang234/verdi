@@ -54,6 +54,9 @@ interface still needs its own invention-ledger entry before any implementation. 
 | BL-23 | Recovery presentation in the workbench | The recovery projection has no UI | The post-design Fable lane (readiness-recovery-v2 co-4) | open | readiness-recovery wave 3 |
 | BL-24 | Closing-machinery wave 1 carried minors | Guards and wording gaps accepted as non-blocking | See the wave 1 report when it lands | open | wave 1 lane reviews |
 | BL-33 | `verdi lint` only strict-decodes obligations (VL-001) and never runs `Validate` or the quality-union check | Nine malformed obligation shapes (blank claim, non-normalized ref, missing freshness, unknown invalidator, unknown producer kind, unknown state, missing frozen stamp, and others) pass lint silently; they fail later, and only for their own spec | A lint rule that validates obligations fully | open | wave 1 L1b review m-1 |
+| BL-34 | SI-231's one-behind check refuses a genuine one-behind report in a nested store when the repository sets `diff.relative=true` | Fails closed, never wrongly accepts; an operator in that layout cannot use the committed-report path | Pass `--no-relative` inside `gitx.DiffNameStatus` | open | wave 1 L3b fix pass |
+| BL-35 | SI-231's byte-identity clause compares the working-tree report with the git blob, so line-ending or smudge filters that rewrite the file cause a refusal | Fails closed; surprising on checkouts with those filters | Decide whether to compare normalized content | open | wave 1 L3b fix pass |
+| BL-36 | `verdi close --prepare` over a working-tree report that diverges from a committed one-behind report regenerates it with a disclosure, as before this wave | Uncommitted disposition edits can be regenerated over, with a warning rather than a refusal | Decide whether `--prepare` should refuse there | open | wave 1 L3b fix pass |
 
 ## Specs awaiting decisions or plans
 
