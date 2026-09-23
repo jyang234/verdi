@@ -1,21 +1,16 @@
 package publicrelease
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/jyang234/verdi/internal/gotestjson"
 )
 
-type testEvent struct {
-	Time        string
-	Action      string
-	Package     string
-	Test        string
-	Elapsed     float64
-	Output      string
-	FailedBuild string
-}
+// testEvent is the one `go test -json` event shape (internal/gotestjson);
+// this package's other stream readers decode it under their own posture.
+type testEvent = gotestjson.Event
 
 // testResults contains identities, not output text: private source printed by a
 // test failure must never enter the publishable report.
@@ -24,73 +19,43 @@ type testResults struct {
 	Passed  []string `json:"passed"`
 }
 
+// readTestEvents applies the release policy to one package's stream, read by
+// the shared reader: the process exited 0, nothing was built or failed to
+// build, the package and every test in it passed, and every required test
+// is among them.
 func readTestEvents(r io.Reader, exit int, pkg string, required []string) (testResults, error) {
 	result := testResults{Package: pkg, Passed: []string{}}
 	if exit != 0 {
 		return result, fmt.Errorf("test process exited %d", exit)
 	}
-	d := json.NewDecoder(r)
-	d.DisallowUnknownFields()
-	started, finished := false, false
-	running := map[string]bool{}
-	passed := map[string]bool{}
-	for {
-		var e testEvent
-		if err := d.Decode(&e); err == io.EOF {
-			break
-		} else if err != nil {
-			return result, fmt.Errorf("test event: %w", err)
-		}
-		if e.Package != pkg {
-			return result, fmt.Errorf("unexpected package %q", e.Package)
-		}
-		switch e.Action {
-		case "start":
-			if started || finished {
-				return result, fmt.Errorf("duplicate package start")
-			}
-			started = true
-		case "run":
-			if !started || finished || e.Test == "" || running[e.Test] || passed[e.Test] {
-				return result, fmt.Errorf("invalid run %q", e.Test)
-			}
-			running[e.Test] = true
-		case "pass":
-			if e.Test == "" {
-				if !started || finished || len(running) > 0 {
-					return result, fmt.Errorf("incomplete package")
-				}
-				finished = true
-				continue
-			}
-			if !running[e.Test] || finished {
-				return result, fmt.Errorf("pass without running %q", e.Test)
-			}
-			delete(running, e.Test)
-			passed[e.Test] = true
-		case "fail", "skip", "build-fail":
-			return result, fmt.Errorf("required execution %s: %s", e.Action, e.Test)
-		case "output", "pause", "cont":
-			if !started || finished {
-				return result, fmt.Errorf("event outside package execution")
-			}
-		case "build-output":
-			return result, fmt.Errorf("unexpected build output package")
-		default:
-			return result, fmt.Errorf("unknown test action %q", e.Action)
+	read, err := gotestjson.ReadPackage(r, gotestjson.Target{ImportPath: pkg})
+	if err != nil {
+		return result, fmt.Errorf("test event: %w", err)
+	}
+	if read.BuildOutput || read.BuildFailed || read.FailedBuild != "" {
+		return result, fmt.Errorf("unexpected build output package")
+	}
+	if read.Outcome != gotestjson.ActionPass {
+		return result, fmt.Errorf("required execution %s: package %s", read.Outcome, pkg)
+	}
+	names := make([]string, 0, len(read.Tests))
+	for name := range read.Tests {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if action := read.Tests[name]; action != gotestjson.ActionPass {
+			return result, fmt.Errorf("required execution %s: %s", action, name)
 		}
 	}
-	if !finished || len(required) == 0 {
+	if len(required) == 0 {
 		return result, fmt.Errorf("missing package completion or required test inventory")
 	}
 	for _, name := range required {
-		if !passed[name] {
+		if read.Tests[name] != gotestjson.ActionPass {
 			return result, fmt.Errorf("required test did not pass: %s", name)
 		}
 	}
-	for name := range passed {
-		result.Passed = append(result.Passed, name)
-	}
-	sort.Strings(result.Passed)
+	result.Passed = append(result.Passed, names...)
 	return result, nil
 }
