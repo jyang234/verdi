@@ -461,11 +461,13 @@ func environmentReviewRefusals(f EnvironmentReviewFacts) []string {
 	}
 	if f.RunEvent != WorkflowDispatchEvent {
 		out = append(out, fmt.Sprintf(
+			// vocab:identity — "close" names the GitHub workflow file close.yml, a provider resource, not a Verdi lifecycle class.
 			"environment-review:not-workflow-dispatch: %s event=%s: only a %s run of the close workflow is honored",
 			subject, f.RunEvent, WorkflowDispatchEvent))
 	}
 	if !IsCloseWorkflowPath(f.RunWorkflowPath) {
 		out = append(out, fmt.Sprintf(
+			// vocab:identity — "close" names the GitHub workflow file close.yml, a provider resource, not a Verdi lifecycle class.
 			"environment-review:not-close-workflow: %s workflow_path=%s: only the dispatch-only close workflow %s is honored",
 			subject, f.RunWorkflowPath, CloseWorkflowPath))
 	}
