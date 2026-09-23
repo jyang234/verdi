@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -15,63 +16,6 @@ import (
 	"github.com/jyang234/verdi/internal/forge/github"
 	"github.com/jyang234/verdi/internal/forge/gitlab"
 )
-
-// --- fixture bodies for a healthy GitHub environment-review call:
-// run 555, attempt 1, environment "close", gated job "close". ---
-
-const (
-	envReviewRunURL     = "https://github.com/acme/widgets/actions/runs/555"
-	envReviewRunHealthy = `{"id":555,"run_attempt":1,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `"}`
-	envReviewEnvHealthy = `{"id":9,"name":"close"}`
-)
-
-func envReviewJobsBody(jobs ...string) string {
-	return `{"total_count":` + strconv.Itoa(len(jobs)) + `,"jobs":[` + strings.Join(jobs, ",") + `]}`
-}
-
-func envReviewJobJSON(name, createdAt, startedAt string) string {
-	fields := []string{`"name":"` + name + `"`}
-	if createdAt != "" {
-		fields = append(fields, `"created_at":"`+createdAt+`"`)
-	}
-	if startedAt != "" {
-		fields = append(fields, `"started_at":"`+startedAt+`"`)
-	}
-	return "{" + strings.Join(fields, ",") + "}"
-}
-
-func envReviewHistoryEntryJSON(state string, userID int64, envID int64, envName string) string {
-	return fmt.Sprintf(`{"state":%q,"comment":"","environments":[{"id":%d,"name":%q}],"user":{"id":%d}}`, state, envID, envName, userID)
-}
-
-func envReviewQuery() forge.EnvironmentReviewQuery {
-	return forge.EnvironmentReviewQuery{RunID: "555", RunAttempt: 1, EnvironmentName: "close", GatedJobName: "close"}
-}
-
-// environmentReviewServer serves the 4 fixed routes an EnvironmentReview
-// call reads (run, attempt jobs, environment, review history), keyed by
-// run 555 attempt 1 / environment "close" — the healthy fixtures above use
-// these exact ids.
-func environmentReviewServer(t *testing.T, runBody, jobsBody, envBody, historyBody string) (*github.Adapter, func()) {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/repos/acme/widgets/actions/runs/555":
-			writeJSON(t, w, runBody)
-		case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
-			writeJSON(t, w, jobsBody)
-		case "/repos/acme/widgets/environments/close":
-			writeJSON(t, w, envBody)
-		case "/repos/acme/widgets/actions/runs/555/approvals":
-			writeJSON(t, w, historyBody)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-			http.NotFound(w, r)
-		}
-	}))
-	a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-	return a, server.Close
-}
 
 // normalizeEnvReview normalizes validated facts, failing the test on an
 // operational error.
@@ -84,33 +28,30 @@ func normalizeEnvReview(t *testing.T, facts forge.EnvironmentReviewFacts) ([]for
 	return rows, disclosures
 }
 
-// baseSupportedFacts is a valid supported facts draft with no reviews and no
-// gated job.
-func baseSupportedFacts() forge.EnvironmentReviewFacts {
-	return forge.EnvironmentReviewFacts{
-		Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
-		RunHeadSHA: candidateA, RunURL: envReviewRunURL,
-		EnvironmentID: "9", EnvironmentName: "close",
-		Reviews: []forge.EnvironmentReviewRow{},
+// reviewScenario runs the GitHub adapter against a scenario and normalizes
+// the result.
+func reviewScenario(t *testing.T, s *erScenario, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, []forge.Approval, []string) {
+	t.Helper()
+	facts, err := s.adapter().EnvironmentReview(context.Background(), query)
+	if err != nil {
+		t.Fatalf("EnvironmentReview: %v", err)
 	}
+	rows, disclosures := normalizeEnvReview(t, facts)
+	return facts, rows, disclosures
 }
 
-func hasWitness(witnesses []forge.ProviderWitness, name string) bool {
-	for _, w := range witnesses {
-		if w.Name == name {
-			return true
+// disclosureKinds lists each disclosure's kind, the token after
+// "environment-review:".
+func disclosureKinds(disclosures []string) []string {
+	kinds := make([]string, 0, len(disclosures))
+	for _, d := range disclosures {
+		kind := strings.TrimPrefix(d, "environment-review:")
+		if i := strings.Index(kind, ":"); i >= 0 {
+			kind = kind[:i]
 		}
+		kinds = append(kinds, kind)
 	}
-	return false
-}
-
-func witnessValue(witnesses []forge.ProviderWitness, name string) (string, bool) {
-	for _, w := range witnesses {
-		if w.Name == name {
-			return w.Value, true
-		}
-	}
-	return "", false
+	return kinds
 }
 
 func disclosuresContain(disclosures []string, substr string) bool {
@@ -122,9 +63,98 @@ func disclosuresContain(disclosures []string, substr string) bool {
 	return false
 }
 
-// TestEnvironmentReviewApprovalContract_Static is the exact v2 ac-4 static
-// obligation's producer: it proves NewEnvironmentReviewFacts and
-// NormalizeEnvironmentReview's pure mapping without any HTTP involved.
+func witnessMap(witnesses []forge.ProviderWitness) map[string]string {
+	out := make(map[string]string, len(witnesses))
+	for _, w := range witnesses {
+		out[w.Name] = w.Value
+	}
+	return out
+}
+
+func approvalIDs(rows []forge.Approval) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ApprovalID)
+	}
+	return ids
+}
+
+// scenarioApprovalID is the composite identity v2 ac-4 prescribes for the
+// published scenario's approval by reviewer.
+func scenarioApprovalID(reviewer string) string {
+	return "github-environment-review:" + erOwner + "/" + erRepo + ":" + erRunID + ":1:" + erEnvID + ":" + reviewer
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// validFactsDraft is the provider-neutral facts value the published scenario
+// produces, for tests of the facts contract itself.
+func validFactsDraft() forge.EnvironmentReviewFacts {
+	return forge.EnvironmentReviewFacts{
+		Supported: true, Repository: erOwner + "/" + erRepo, RunID: erRunID, RunAttempt: 1, LatestRunAttempt: 1,
+		RunHeadSHA: erHeadSHA, RunURL: erRunURL, RunEvent: "workflow_dispatch", RunWorkflowPath: erWorkflowPath,
+		RunStatus: "in_progress", EnvironmentID: erEnvID, EnvironmentName: "close",
+		EnvironmentPreventSelfReview: boolPtr(false),
+		GatedJobName:                 "close", GatedJobCount: 1, GatedJobID: erJobID, GatedJobStatus: "completed",
+		GatedJobConclusion: "success", GatedJobCreatedAt: erCreatedAt, GatedJobStartedAt: erStartedAt,
+		Reviews: []forge.EnvironmentReviewRow{approvedReviewRow(erReviewer)},
+	}
+}
+
+func approvedReviewRow(reviewer string) forge.EnvironmentReviewRow {
+	return forge.EnvironmentReviewRow{
+		ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: reviewer},
+		ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: erEnvID,
+	}
+}
+
+// The derived-field disclosures every environment-review row carries,
+// verbatim (v2 dc-5: "each derived field is disclosed in provider_witnesses").
+const (
+	wantApprovalIDDerivation = "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"
+	wantApprovedAtDerivation = "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"
+	wantStateDerivation      = "github's approved review state normalized to the shared active state"
+)
+
+// scenarioWitnesses is the exact provider-witness set of the published
+// scenario's row for reviewer "1": every operand and every derived-field
+// disclosure, and nothing GitHub does not supply (no review id, no review
+// time, no attempt of the review).
+func scenarioWitnesses() map[string]string {
+	return map[string]string{
+		"actor_user_id":                   erReviewer,
+		"approval_id_derivation":          wantApprovalIDDerivation,
+		"approved_at_derivation":          wantApprovedAtDerivation,
+		"environment_id":                  erEnvID,
+		"environment_name":                "close",
+		"environment_prevent_self_review": "false",
+		"gated_job_conclusion":            "success",
+		"gated_job_created_at":            erCreatedAt,
+		"gated_job_id":                    erJobID,
+		"gated_job_name":                  "close",
+		"gated_job_started_at":            erStartedAt,
+		"gated_job_status":                "completed",
+		"provider_state":                  "approved",
+		"run_attempt":                     "1",
+		"run_event":                       "workflow_dispatch",
+		"run_head_sha":                    erHeadSHA,
+		"run_id":                          erRunID,
+		"run_latest_attempt":              "1",
+		"run_status":                      "in_progress",
+		"run_url":                         erRunURL,
+		"run_workflow_path":               erWorkflowPath,
+		"state_derivation":                wantStateDerivation,
+	}
+}
+
+// TestEnvironmentReviewApprovalContract_Static is the exact producer of the
+// v2 ac-4 static obligation (go-test:internal/forge:
+// TestEnvironmentReviewApprovalContract_Static). Its scope is the shared
+// approval value, the GitHub environment-review decoder and normalizer, and
+// their decoding boundaries over responses shaped exactly as GitHub
+// publishes them, so it drives the real GitHub adapter through httptest over
+// GitHub's published examples (environment_review_fixtures_test.go) as well
+// as the facts contract and the pure mapping.
 func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 	t.Run("unknown provider state cannot decode", func(t *testing.T) {
 		var state forge.EnvironmentReviewState
@@ -145,31 +175,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 	})
 
-	t.Run("normalize refuses facts that break the facts contract (m-3)", func(t *testing.T) {
-		tests := []struct {
-			name  string
-			facts forge.EnvironmentReviewFacts
-		}{
-			{"hand-built value never validated", forge.EnvironmentReviewFacts{
-				Supported: true, RunAttempt: 1, GatedJobFound: true, GatedJobCreatedAt: "not-a-time",
-				Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}},
-			}},
-			{"zero value", forge.EnvironmentReviewFacts{}},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				rows, disclosures, err := forge.NormalizeEnvironmentReview(tt.facts)
-				if err == nil {
-					t.Fatalf("NormalizeEnvironmentReview(%s) = rows %+v disclosures %v, want an error", tt.name, rows, disclosures)
-				}
-				if len(rows) != 0 {
-					t.Fatalf("NormalizeEnvironmentReview(%s) produced rows %+v alongside its error", tt.name, rows)
-				}
-			})
-		}
-	})
-
-	t.Run("github decodes the published run jobs environment and review history examples", func(t *testing.T) {
+	t.Run("github decodes the verbatim published run jobs environment and review history examples", func(t *testing.T) {
 		run := string(publishedFixture(t, "github/workflow-run.json"))
 		jobs := string(publishedFixture(t, "github/job-paginated.json"))
 		env := string(publishedFixture(t, "github/environment.json"))
@@ -191,777 +197,757 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}))
 		defer server.Close()
 
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "octo-org", Repo: "octo-repo", HTTPClient: server.Client(), Clock: fixedClock})
-		facts, err := a.EnvironmentReview(context.Background(), forge.EnvironmentReviewQuery{RunID: "30433642", RunAttempt: 1, EnvironmentName: "staging", GatedJobName: "build"})
+		a := github.New(github.Config{BaseURL: server.URL, Owner: erOwner, Repo: erRepo, HTTPClient: server.Client(), Clock: fixedClock})
+		facts, err := a.EnvironmentReview(context.Background(), forge.EnvironmentReviewQuery{RunID: erRunID, RunAttempt: 1, EnvironmentName: "staging", GatedJobName: "build"})
 		if err != nil {
 			t.Fatalf("EnvironmentReview over the verbatim published examples: %v", err)
 		}
-		if !facts.Supported || facts.RunHeadSHA != "acb5820ced9479c074f688cc328bf03f341a511d" || facts.EnvironmentID != "161088068" {
-			t.Fatalf("facts = %+v", facts)
+		want := forge.EnvironmentReviewFacts{
+			Supported: true, Repository: erOwner + "/" + erRepo, RunID: erRunID, RunAttempt: 1, LatestRunAttempt: 1,
+			RunHeadSHA: erHeadSHA, RunURL: erRunURL, RunEvent: "push", RunWorkflowPath: ".github/workflows/build.yml@main",
+			RunStatus: "queued", EnvironmentID: erEnvID, EnvironmentName: "staging", EnvironmentPreventSelfReview: boolPtr(false),
+			GatedJobName: "build", GatedJobCount: 1, GatedJobID: erJobID, GatedJobStatus: "completed", GatedJobConclusion: "success",
+			GatedJobStartedAt: erStartedAt,
+			Reviews:           []forge.EnvironmentReviewRow{approvedReviewRow(erReviewer)},
+		}
+		got := facts
+		got.ObservedAt, got.ProviderSnapshotID = "", ""
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("facts from the published examples =\n%+v\nwant\n%+v", got, want)
+		}
+		rows, disclosures := normalizeEnvReview(t, facts)
+		if len(rows) != 0 {
+			t.Fatalf("rows = %+v, want none: the published run is a push run of another workflow and its job carries no creation stamp", rows)
+		}
+		if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != "not-workflow-dispatch,not-close-workflow,creation-stamp-unavailable" {
+			t.Fatalf("disclosure kinds = %v (%v)", kinds, disclosures)
 		}
 	})
 
-	baseSupported := func() forge.EnvironmentReviewFacts {
-		return forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
-			RunHeadSHA: candidateA, RunURL: envReviewRunURL,
-			EnvironmentID: "9", EnvironmentName: "close",
-			Reviews: []forge.EnvironmentReviewRow{},
+	t.Run("github ignores response members it does not model (open provider contract)", func(t *testing.T) {
+		want, _, _ := reviewScenario(t, newERScenario(t), erQuery())
+		extend := func(object map[string]any) map[string]any {
+			object["future_member"] = map[string]any{"nested": []any{1, "two"}}
+			return object
 		}
-	}
+		tests := []struct {
+			name  string
+			apply func(*erScenario)
+		}{
+			{"run", func(s *erScenario) { s.rawRun = encodeGeneric(t, extend(s.run)) }},
+			{"jobs page and job", func(s *erScenario) {
+				s.rawJobs = []string{encodeGeneric(t, extend(map[string]any{"total_count": 1, "jobs": []any{extend(s.jobPages[0][0])}}))}
+			}},
+			{"environment and protection rule", func(s *erScenario) {
+				extend(asObject(t, asArray(t, s.env["protection_rules"])[1]))
+				s.rawEnv = encodeGeneric(t, extend(s.env))
+			}},
+			{"review history entry and environment", func(s *erScenario) {
+				entry := s.historyPages[0][0]
+				extend(asObject(t, asArray(t, entry["environments"])[0]))
+				s.rawHistory = []string{encodeGeneric(t, []any{extend(entry)})}
+			}},
+			{"review history attempt member GitHub does not supply is never read", func(s *erScenario) {
+				entry := s.historyPages[0][0]
+				entry["attempt"] = 2
+				entry["run_attempt"] = 2
+				s.rawHistory = []string{encodeGeneric(t, []any{entry})}
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				got, _, _ := reviewScenario(t, s, erQuery())
+				if got.ProviderSnapshotID != want.ProviderSnapshotID {
+					t.Fatalf("members GitHub may add changed the facts:\ngot  %+v\nwant %+v", got, want)
+				}
+			})
+		}
+	})
 
-	t.Run("supported facts require every composite identity component", func(t *testing.T) {
+	t.Run("github rejects trailing data, mistyped members, and unknown vocabularies (co-1)", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			apply   func(*erScenario)
+			wantErr string
+		}{
+			{"run: trailing data", func(s *erScenario) { s.rawRun = encodeGeneric(t, s.run) + " true" }, "trailing data"},
+			{"jobs: trailing data", func(s *erScenario) {
+				s.rawJobs = []string{encodeGeneric(t, map[string]any{"total_count": 1, "jobs": []any{s.jobPages[0][0]}}) + " {}"}
+			}, "trailing data"},
+			{"environment: trailing data", func(s *erScenario) { s.rawEnv = encodeGeneric(t, s.env) + " []" }, "trailing data"},
+			{"history: trailing data", func(s *erScenario) {
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]}) + " null"}
+			}, "trailing data"},
+			{"run: id as a string", func(s *erScenario) {
+				s.run["id"] = erRunID
+				s.rawRun = encodeGeneric(t, s.run)
+			}, "decode approval response"},
+			{"history: unknown review state", func(s *erScenario) {
+				s.historyPages[0][0]["state"] = "commented"
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]})}
+			}, "unknown environment review state"},
+			{"history: missing review state", func(s *erScenario) {
+				delete(s.historyPages[0][0], "state")
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]})}
+			}, "unknown state"},
+			{"run: unknown status", func(s *erScenario) { s.run["status"] = "cancelling" }, "unknown workflow run status"},
+			{"run: unknown conclusion", func(s *erScenario) {
+				s.run["status"] = "completed"
+				s.run["conclusion"] = "exploded"
+			}, "unknown workflow run conclusion"},
+			{"gated job: unknown status", func(s *erScenario) { s.jobPages[0][0]["status"] = "blocked" }, "unknown workflow job status"},
+			{"gated job: unknown conclusion", func(s *erScenario) { s.jobPages[0][0]["conclusion"] = "exploded" }, "unknown workflow job conclusion"},
+			{"gated job: malformed creation stamp", func(s *erScenario) { s.jobPages[0][0]["created_at"] = "yesterday" }, "created_at"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				facts, err := s.adapter().EnvironmentReview(context.Background(), erQuery())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("EnvironmentReview = %+v, %v; want an error containing %q", facts, err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("github refuses missing provider ids (co-1)", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			apply   func(*erScenario)
+			wantErr string
+		}{
+			{"run id", func(s *erScenario) { delete(s.run, "id"); s.rawRun = encodeGeneric(t, s.run) }, "reported id 0"},
+			{"run attempt", func(s *erScenario) { delete(s.run, "run_attempt"); s.rawRun = encodeGeneric(t, s.run) }, "carries no run_attempt"},
+			{"environment id", func(s *erScenario) { delete(s.env, "id"); s.rawEnv = encodeGeneric(t, s.env) }, "carries no stable id"},
+			{"gated job id", func(s *erScenario) {
+				delete(s.jobPages[0][0], "id")
+				s.rawJobs = []string{encodeGeneric(t, map[string]any{"total_count": 1, "jobs": []any{s.jobPages[0][0]}})}
+			}, "carries no stable id"},
+			{"review entry environment id", func(s *erScenario) {
+				delete(asObject(t, asArray(t, s.historyPages[0][0]["environments"])[0]), "id")
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]})}
+			}, "environment with no stable id"},
+			{"review entry environments", func(s *erScenario) {
+				s.historyPages[0][0]["environments"] = []any{}
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]})}
+			}, "names no environment"},
+			{"reviewer id", func(s *erScenario) {
+				delete(asObject(t, s.historyPages[0][0]["user"]), "id")
+				s.rawHistory = []string{encodeGeneric(t, []any{s.historyPages[0][0]})}
+			}, "no stable reviewer id"},
+			{"run head sha", func(s *erScenario) { delete(s.run, "head_sha"); s.rawRun = encodeGeneric(t, s.run) }, "run_head_sha"},
+			{"run url", func(s *erScenario) { delete(s.run, "html_url"); s.rawRun = encodeGeneric(t, s.run) }, "run_url"},
+			{"run event", func(s *erScenario) { delete(s.run, "event"); s.rawRun = encodeGeneric(t, s.run) }, "run_event"},
+			{"run workflow path", func(s *erScenario) { delete(s.run, "path"); s.rawRun = encodeGeneric(t, s.run) }, "run_workflow_path"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				facts, err := s.adapter().EnvironmentReview(context.Background(), erQuery())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("EnvironmentReview = %+v, %v; want an error containing %q", facts, err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("github refuses null and inconsistent pages (m-8)", func(t *testing.T) {
+		job := func(t *testing.T) map[string]any { return scenarioJob(t, "close") }
+		tests := []struct {
+			name    string
+			apply   func(*erScenario)
+			wantErr string
+		}{
+			{"null jobs page", func(s *erScenario) { s.rawJobs = []string{`null`} }, "total_count and a non-null jobs array"},
+			{"null jobs member", func(s *erScenario) { s.rawJobs = []string{`{"total_count":0,"jobs":null}`} }, "total_count and a non-null jobs array"},
+			{"missing total_count", func(s *erScenario) {
+				s.rawJobs = []string{encodeGeneric(t, map[string]any{"jobs": []any{job(t)}})}
+			}, "total_count and a non-null jobs array"},
+			{"total_count larger than the jobs listed", func(s *erScenario) {
+				s.rawJobs = []string{encodeGeneric(t, map[string]any{"total_count": 5, "jobs": []any{job(t)}})}
+			}, "does not match"},
+			{"pages disagree on total_count", func(s *erScenario) {
+				s.rawJobs = []string{
+					encodeGeneric(t, map[string]any{"total_count": 2, "jobs": []any{job(t)}}),
+					encodeGeneric(t, map[string]any{"total_count": 3, "jobs": []any{scenarioJob(t, "build")}}),
+				}
+			}, "disagree on total_count"},
+			{"null review history page", func(s *erScenario) { s.rawHistory = []string{`null`} }, "non-null array"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				facts, err := s.adapter().EnvironmentReview(context.Background(), erQuery())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("EnvironmentReview = %+v, %v; want an error containing %q", facts, err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("github refuses ambiguous and cyclic pagination (co-1)", func(t *testing.T) {
+		scenario := newERScenario(t)
+		jobsBody := scenario.jobPageBodies()[0]
+		historyBody := scenario.historyPageBodies()[0]
+		tests := []struct {
+			name    string
+			link    func(server *httptest.Server, r *http.Request) (route, header string)
+			wantErr string
+		}{
+			{"two distinct next pages of jobs", func(server *httptest.Server, r *http.Request) (string, string) {
+				return "jobs", "<" + server.URL + r.URL.Path + "?page=2>; rel=\"next\", <" + server.URL + r.URL.Path + "?page=3>; rel=\"next\""
+			}, "multiple distinct"},
+			{"review history pages that cycle", func(server *httptest.Server, r *http.Request) (string, string) {
+				if r.URL.Query().Get("page") == "2" {
+					return "history", "<" + server.URL + r.URL.Path + "?per_page=100>; rel=\"next\""
+				}
+				return "history", "<" + server.URL + r.URL.Path + "?page=2>; rel=\"next\""
+			}, "pagination cycle detected"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var server *httptest.Server
+				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					route, header := tt.link(server, r)
+					switch r.URL.Path {
+					case "/repos/octo-org/octo-repo/actions/runs/30433642/attempts/1/jobs":
+						if route == "jobs" {
+							w.Header().Set("Link", header)
+						}
+						writeJSON(t, w, jobsBody)
+					case "/repos/octo-org/octo-repo/actions/runs/30433642/approvals":
+						if route == "history" {
+							w.Header().Set("Link", header)
+						}
+						writeJSON(t, w, historyBody)
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+				a := github.New(github.Config{BaseURL: server.URL, Owner: erOwner, Repo: erRepo, HTTPClient: server.Client(), Clock: fixedClock})
+				_, err := a.EnvironmentReview(context.Background(), erQuery())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("EnvironmentReview error = %v, want %q", err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("github refuses a non-canonical run id before any request (m-1)", func(t *testing.T) {
+		for _, id := range []string{"+30433642", "030433642", " 30433642", "30433642 ", "3.0433642e7", "0", "-30433642", ""} {
+			t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
+				a := github.New(github.Config{BaseURL: "http://unused.invalid", Owner: erOwner, Repo: erRepo, Clock: fixedClock})
+				query := erQuery()
+				query.RunID = id
+				if facts, err := a.EnvironmentReview(context.Background(), query); err == nil {
+					t.Fatalf("EnvironmentReview(run id %q) = %+v, want a refusal", id, facts)
+				}
+			})
+		}
+	})
+
+	t.Run("facts contract refuses incomplete, non-canonical, or unknown facts", func(t *testing.T) {
 		tests := []struct {
 			name   string
 			mutate func(*forge.EnvironmentReviewFacts)
 		}{
 			{"missing repository", func(f *forge.EnvironmentReviewFacts) { f.Repository = "" }},
 			{"missing run id", func(f *forge.EnvironmentReviewFacts) { f.RunID = "" }},
+			{"run id with a plus sign (m-1)", func(f *forge.EnvironmentReviewFacts) { f.RunID = "+" + erRunID }},
+			{"run id with a leading zero (m-1)", func(f *forge.EnvironmentReviewFacts) { f.RunID = "0" + erRunID }},
 			{"zero run attempt", func(f *forge.EnvironmentReviewFacts) { f.RunAttempt = 0 }},
-			{"negative run attempt", func(f *forge.EnvironmentReviewFacts) { f.RunAttempt = -1 }},
 			{"zero latest run attempt", func(f *forge.EnvironmentReviewFacts) { f.LatestRunAttempt = 0 }},
-			{"missing run head sha", func(f *forge.EnvironmentReviewFacts) { f.RunHeadSHA = "" }},
+			{"short run head sha", func(f *forge.EnvironmentReviewFacts) { f.RunHeadSHA = "acb5820" }},
 			{"missing run url", func(f *forge.EnvironmentReviewFacts) { f.RunURL = "" }},
+			{"missing run event", func(f *forge.EnvironmentReviewFacts) { f.RunEvent = "" }},
+			{"missing run workflow path", func(f *forge.EnvironmentReviewFacts) { f.RunWorkflowPath = "" }},
+			{"unknown run status", func(f *forge.EnvironmentReviewFacts) { f.RunStatus = "cancelling" }},
+			{"unknown run conclusion", func(f *forge.EnvironmentReviewFacts) { f.RunConclusion = "exploded" }},
 			{"missing environment id", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "" }},
+			{"environment id with a leading zero (m-1)", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "0" + erEnvID }},
 			{"missing environment name", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentName = "" }},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				draft := baseSupported()
-				tt.mutate(&draft)
-				if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-					t.Fatalf("NewEnvironmentReviewFacts(%s): want error, got nil", tt.name)
-				}
-			})
-		}
-	})
-
-	t.Run("facts carry canonical ids and rows from the observed environment only (m-1, m-2)", func(t *testing.T) {
-		tests := []struct {
-			name   string
-			mutate func(*forge.EnvironmentReviewFacts)
-		}{
-			{"run id with a plus sign", func(f *forge.EnvironmentReviewFacts) { f.RunID = "+555" }},
-			{"run id with a leading zero", func(f *forge.EnvironmentReviewFacts) { f.RunID = "0555" }},
-			{"run id not a number", func(f *forge.EnvironmentReviewFacts) { f.RunID = "run-555" }},
-			{"environment id with a leading zero", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "09" }},
-			{"environment id zero", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "0" }},
-			{"review row for another environment", func(f *forge.EnvironmentReviewFacts) {
-				f.Reviews = []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "8"}}
+			{"missing gated job name", func(f *forge.EnvironmentReviewFacts) { f.GatedJobName = "" }},
+			{"negative gated job count", func(f *forge.EnvironmentReviewFacts) { f.GatedJobCount = -1 }},
+			{"gated job stamps without exactly one gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobID, f.GatedJobStatus, f.GatedJobConclusion = 0, "", "", ""
+			}},
+			{"gated job details with two gated jobs", func(f *forge.EnvironmentReviewFacts) { f.GatedJobCount = 2 }},
+			{"missing gated job id", func(f *forge.EnvironmentReviewFacts) { f.GatedJobID = "" }},
+			{"unknown gated job status", func(f *forge.EnvironmentReviewFacts) { f.GatedJobStatus = "blocked" }},
+			{"unknown gated job conclusion", func(f *forge.EnvironmentReviewFacts) { f.GatedJobConclusion = "exploded" }},
+			{"non-UTC creation stamp", func(f *forge.EnvironmentReviewFacts) { f.GatedJobCreatedAt = "2020-01-20T09:30:00-08:00" }},
+			{"unknown review state", func(f *forge.EnvironmentReviewFacts) {
+				f.Reviews[0].ProviderState = forge.EnvironmentReviewState("commented")
+			}},
+			{"review row for another environment (m-2)", func(f *forge.EnvironmentReviewFacts) { f.Reviews[0].EnvironmentID = "8" }},
+			{"review row with a display-name reviewer", func(f *forge.EnvironmentReviewFacts) { f.Reviews[0].ReviewerActor.Subject = "octocat" }},
+			{"repeated decision while the latest attempt is the first (co-1)", func(f *forge.EnvironmentReviewFacts) {
+				f.Reviews = append(f.Reviews, f.Reviews[0])
 			}},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				draft := baseSupported()
+				draft := validFactsDraft()
 				tt.mutate(&draft)
-				if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
+				if facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
+					t.Fatalf("NewEnvironmentReviewFacts(%s) = %+v, want error", tt.name, facts)
+				}
+			})
+		}
+	})
+
+	t.Run("unsupported facts carry a reason and nothing else", func(t *testing.T) {
+		if _, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42"}, fixedClock()); err != nil {
+			t.Fatalf("NewEnvironmentReviewFacts unsupported: %v", err)
+		}
+		tests := []struct {
+			name  string
+			draft forge.EnvironmentReviewFacts
+		}{
+			{"no reason", forge.EnvironmentReviewFacts{Supported: false, Repository: "42"}},
+			{"run data", forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", RunID: "1"}},
+			{"gated job data", forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", GatedJobCount: 1}},
+			{"run conclusion", forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", RunConclusion: "success"}},
+			{"review rows", forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", Reviews: []forge.EnvironmentReviewRow{approvedReviewRow("1")}}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if _, err := forge.NewEnvironmentReviewFacts(tt.draft, fixedClock()); err == nil {
 					t.Fatalf("NewEnvironmentReviewFacts(%s): want error, got nil", tt.name)
 				}
 			})
 		}
 	})
 
-	t.Run("github refuses a non-canonical run id (m-1)", func(t *testing.T) {
-		for _, id := range []string{"+555", "0555", " 555", "555 ", "5.55e2", "0", "-555"} {
-			t.Run(id, func(t *testing.T) {
-				a := github.New(github.Config{BaseURL: "http://unused.invalid", Owner: "acme", Repo: "widgets", Clock: fixedClock})
-				query := envReviewQuery()
-				query.RunID = id
-				if facts, err := a.EnvironmentReview(context.Background(), query); err == nil {
-					t.Fatalf("EnvironmentReview(run id %q) = %+v, want a refusal before any request", id, facts)
-				}
-			})
-		}
-	})
-
-	t.Run("github binds review entries to the environment by id, not name (m-2)", func(t *testing.T) {
-		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z"))
-		tests := []struct {
-			name    string
-			env     string
-			history string
-			wantIDs []string
-			wantErr string
-		}{
-			{"an entry for another environment id sharing the name", envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 8, "close") + "]", nil, ""},
-			{"an entry for a renamed environment keeps its id", envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "Close-renamed") + "]", []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
-			{"an entry covering two environments", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":8,"name":"staging"},{"id":9,"name":"close"}],"user":{"id":901}}]`, []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
-			{"the environment reports its name in another case", `{"id":9,"name":"Close"}`, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "Close") + "]", []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
-			{"an entry naming an environment with no id", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"name":"close"}],"user":{"id":901}}]`, nil, "no stable id"},
-			{"an entry naming no environment", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[],"user":{"id":901}}]`, nil, "names no environment"},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				a, closeServer := environmentReviewServer(t, envReviewRunHealthy, healthyJobs, tt.env, tt.history)
-				defer closeServer()
-				facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-				if tt.wantErr != "" {
-					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-						t.Fatalf("EnvironmentReview error = %v, want %q", err, tt.wantErr)
-					}
-					return
-				}
-				if err != nil {
-					t.Fatalf("EnvironmentReview: %v", err)
-				}
-				rows, _ := normalizeEnvReview(t, facts)
-				var got []string
-				for _, row := range rows {
-					got = append(got, row.ApprovalID)
-				}
-				if strings.Join(got, ",") != strings.Join(tt.wantIDs, ",") {
-					t.Fatalf("approval ids = %v, want %v", got, tt.wantIDs)
-				}
-			})
-		}
-	})
-
-	t.Run("unsupported facts must carry no run job environment or review data", func(t *testing.T) {
-		draft := forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", RunID: "1"}
-		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-			t.Fatal("NewEnvironmentReviewFacts with unsupported facts carrying run data: want error, got nil")
-		}
-	})
-
-	t.Run("unsupported facts require a disclosed reason", func(t *testing.T) {
-		draft := forge.EnvironmentReviewFacts{Supported: false, Repository: "42"}
-		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-			t.Fatal("NewEnvironmentReviewFacts with no unsupported_reason: want error, got nil")
-		}
-	})
-
-	t.Run("direct validation cannot bypass the provider state contract", func(t *testing.T) {
-		draft := baseSupported()
-		draft.Reviews = []forge.EnvironmentReviewRow{{
-			ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"},
-			ProviderState: forge.EnvironmentReviewState("mystery"),
-			EnvironmentID: "9",
-		}}
-		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-			t.Fatal("NewEnvironmentReviewFacts with an out-of-vocabulary provider state: want error, got nil")
-		}
-	})
-
-	t.Run("duplicate reviewer state pair rejected", func(t *testing.T) {
-		draft := baseSupported()
-		row := forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
-		draft.Reviews = []forge.EnvironmentReviewRow{row, row}
-		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-			t.Fatal("NewEnvironmentReviewFacts with a duplicate (reviewer, state) pair: want error, got nil")
-		}
-	})
-
-	approvedRow := func(subject string) forge.EnvironmentReviewRow {
-		return forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: subject}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
-	}
-
-	t.Run("normalize: unsupported forge yields no rows with a disclosure", func(t *testing.T) {
-		facts, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42"}, fixedClock())
+	t.Run("normalize refuses facts that break the facts contract (m-3)", func(t *testing.T) {
+		valid, err := forge.NewEnvironmentReviewFacts(validFactsDraft(), fixedClock())
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		rows, disclosures := normalizeEnvReview(t, facts)
-		if len(rows) != 0 {
-			t.Fatalf("rows = %+v, want none", rows)
-		}
-		if !disclosuresContain(disclosures, "unsupported-forge") {
-			t.Fatalf("disclosures = %v, want an unsupported-forge witness", disclosures)
-		}
-	})
-
-	t.Run("normalize: any rerun yields no rows with a disclosure regardless of reviews", func(t *testing.T) {
-		draft := baseSupported()
-		draft.RunAttempt = 2
-		draft.Reviews = []forge.EnvironmentReviewRow{approvedRow("901")}
-		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-		if err != nil {
-			t.Fatalf("fixture: %v", err)
-		}
-		rows, disclosures := normalizeEnvReview(t, facts)
-		if len(rows) != 0 {
-			t.Fatalf("rows = %+v, want none for a rerun even with an approved review present", rows)
-		}
-		if !disclosuresContain(disclosures, "rerun-not-honored") {
-			t.Fatalf("disclosures = %v, want a rerun-not-honored witness", disclosures)
-		}
-	})
-
-	t.Run("normalize: rejected pending and absent reviews yield no rows", func(t *testing.T) {
+		tampered := valid
+		tampered.RunHeadSHA = candidateA
+		nullReviews := valid
+		nullReviews.Reviews = nil
 		tests := []struct {
-			name    string
-			reviews []forge.EnvironmentReviewRow
+			name  string
+			facts forge.EnvironmentReviewFacts
 		}{
-			{"rejected", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewRejected, EnvironmentID: "9"}}},
-			{"pending", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewPending, EnvironmentID: "9"}}},
-			{"absent", nil},
+			{"null reviews", nullReviews},
+			{"hand-built value never validated", forge.EnvironmentReviewFacts{
+				Supported: true, RunAttempt: 1, LatestRunAttempt: 1, GatedJobCount: 1, GatedJobCreatedAt: "not-a-time",
+				Reviews: []forge.EnvironmentReviewRow{approvedReviewRow("901")},
+			}},
+			{"zero value", forge.EnvironmentReviewFacts{}},
+			{"validated facts changed after their digest", tampered},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				draft := baseSupported()
-				draft.Reviews = tt.reviews
-				draft.GatedJobFound = true
-				draft.GatedJobCreatedAt = "2026-08-26T15:00:00Z"
-				facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-				if err != nil {
-					t.Fatalf("fixture: %v", err)
+				rows, disclosures, err := forge.NormalizeEnvironmentReview(tt.facts)
+				if err == nil {
+					t.Fatalf("NormalizeEnvironmentReview(%s) = rows %+v disclosures %v, want an error", tt.name, rows, disclosures)
 				}
-				rows, _ := normalizeEnvReview(t, facts)
 				if len(rows) != 0 {
-					t.Fatalf("rows = %+v, want none", rows)
+					t.Fatalf("NormalizeEnvironmentReview(%s) produced rows %+v alongside its error", tt.name, rows)
 				}
 			})
 		}
 	})
 
-	t.Run("normalize: missing creation stamp fails closed with a disclosure, never a row", func(t *testing.T) {
-		tests := []struct {
-			name          string
-			gatedJobFound bool
-			wantSubstr    string
-		}{
-			{"job found, no creation stamp", true, "gated job creation stamp unavailable"},
-			{"job not found", false, "gated job not found"},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				draft := baseSupported()
-				draft.Reviews = []forge.EnvironmentReviewRow{approvedRow("901")}
-				draft.GatedJobFound = tt.gatedJobFound
-				facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-				if err != nil {
-					t.Fatalf("fixture: %v", err)
-				}
-				rows, disclosures := normalizeEnvReview(t, facts)
-				if len(rows) != 0 {
-					t.Fatalf("rows = %+v, want none (fail closed)", rows)
-				}
-				if !disclosuresContain(disclosures, "creation-stamp-unavailable") || !disclosuresContain(disclosures, tt.wantSubstr) {
-					t.Fatalf("disclosures = %v, want creation-stamp-unavailable containing %q", disclosures, tt.wantSubstr)
-				}
-			})
-		}
-	})
-
-	t.Run("normalize: one approved review at attempt 1 with a creation stamp produces exactly one fully disclosed row", func(t *testing.T) {
-		selfReview := true
-		draft := baseSupported()
-		draft.Reviews = []forge.EnvironmentReviewRow{approvedRow("901")}
-		draft.GatedJobFound = true
-		draft.GatedJobCreatedAt = "2026-08-26T09:00:00Z"
-		draft.GatedJobStartedAt = "2026-08-26T15:00:00Z"
-		draft.EnvironmentPreventSelfReview = &selfReview
-		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-		if err != nil {
-			t.Fatalf("fixture: %v", err)
-		}
-
-		rows, disclosures := normalizeEnvReview(t, facts)
+	t.Run("github maps an approved review of an eligible close run to exactly one fully disclosed row", func(t *testing.T) {
+		s := newERScenario(t)
+		facts, rows, disclosures := reviewScenario(t, s, erQuery())
 		if disclosures != nil {
-			t.Fatalf("disclosures = %v, want nil for a clean approved row", disclosures)
+			t.Fatalf("disclosures = %v, want none for an eligible approved review", disclosures)
 		}
 		if len(rows) != 1 {
-			t.Fatalf("rows = %+v, want exactly 1", rows)
+			t.Fatalf("rows = %+v, want exactly one", rows)
 		}
 		row := rows[0]
-
-		wantID := "github-environment-review:acme/widgets:555:1:9:901"
-		if row.ApprovalID != wantID {
-			t.Fatalf("ApprovalID = %q, want %q", row.ApprovalID, wantID)
+		if row.ApprovalID != scenarioApprovalID(erReviewer) {
+			t.Fatalf("ApprovalID = %q, want the complete composite %q", row.ApprovalID, scenarioApprovalID(erReviewer))
 		}
-		if !strings.Contains(row.ApprovalRef, envReviewRunURL) || !strings.Contains(row.ApprovalRef, "close") {
-			t.Fatalf("ApprovalRef = %q, want it to name the run URL and environment", row.ApprovalRef)
+		if row.ApprovalRef != erRunURL+" environment=close" {
+			t.Fatalf("ApprovalRef = %q, want the run URL and environment name", row.ApprovalRef)
 		}
 		if row.State != forge.ApprovalActive {
-			t.Fatalf("State = %q, want active", row.State)
+			t.Fatalf("State = %q, want the shared active state", row.State)
 		}
-		if row.ApprovedAt != "2026-08-26T09:00:00Z" || row.UpdatedAt != row.ApprovedAt {
-			t.Fatalf("ApprovedAt/UpdatedAt = %q/%q, want the creation stamp for both", row.ApprovedAt, row.UpdatedAt)
+		if row.ApprovedAt != erCreatedAt || row.UpdatedAt != erCreatedAt {
+			t.Fatalf("ApprovedAt/UpdatedAt = %q/%q, want the gated job's creation stamp %q, never its start %q", row.ApprovedAt, row.UpdatedAt, erCreatedAt, erStartedAt)
 		}
-		if row.ApprovedAt == draft.GatedJobStartedAt {
-			t.Fatalf("ApprovedAt equals the job's start stamp, want the creation stamp (a conservative lower bound)")
+		if row.CandidateSHA != erHeadSHA || row.CandidateSHA == erJobHeadSHA {
+			t.Fatalf("CandidateSHA = %q, want the run's head commit %q", row.CandidateSHA, erHeadSHA)
 		}
-		if row.CandidateSHA != candidateA {
-			t.Fatalf("CandidateSHA = %q, want the run head %q", row.CandidateSHA, candidateA)
+		if row.Actor != (forge.ProviderActor{Scheme: "github-user-id", Subject: erReviewer}) {
+			t.Fatalf("Actor = %+v, want the reviewer's stable user id", row.Actor)
 		}
-		if row.Actor != (forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}) {
-			t.Fatalf("Actor = %+v", row.Actor)
+		if got := witnessMap(row.ProviderWitnesses); !reflect.DeepEqual(got, scenarioWitnesses()) {
+			t.Fatalf("provider witnesses =\n%v\nwant exactly\n%v", got, scenarioWitnesses())
 		}
-
-		for _, name := range []string{
-			"provider_state", "actor_user_id", "run_id", "run_attempt", "run_head_sha", "run_url",
-			"environment_id", "environment_name", "gated_job_created_at", "gated_job_started_at",
-			"approval_id_derivation", "approved_at_derivation", "state_derivation", "environment_prevent_self_review",
-		} {
-			if !hasWitness(row.ProviderWitnesses, name) {
-				t.Errorf("missing derived-field disclosure %q in %+v", name, row.ProviderWitnesses)
-			}
+		names := make([]string, 0, len(row.ProviderWitnesses))
+		for _, w := range row.ProviderWitnesses {
+			names = append(names, w.Name)
 		}
-		if v, _ := witnessValue(row.ProviderWitnesses, "provider_state"); v != "approved" {
-			t.Errorf("provider_state witness = %q, want %q", v, "approved")
+		if !sort.StringsAreSorted(names) {
+			t.Fatalf("provider witnesses are not sorted by name: %v", names)
 		}
-		if v, _ := witnessValue(row.ProviderWitnesses, "gated_job_started_at"); v != draft.GatedJobStartedAt {
-			t.Errorf("gated_job_started_at witness = %q, want %q", v, draft.GatedJobStartedAt)
+		if _, err := forge.NewApprovalSnapshot("github", facts.Repository, "1347", facts.RunHeadSHA, forge.ProviderActor{Scheme: "github-user-id", Subject: "2"}, fixedClock(), rows); err != nil {
+			t.Fatalf("the row does not satisfy the shared approval contract: %v", err)
 		}
-		if v, _ := witnessValue(row.ProviderWitnesses, "environment_prevent_self_review"); v != "true" {
-			t.Errorf("environment_prevent_self_review witness = %q, want %q", v, "true")
+		if log := strings.Join(s.requestLog(), ","); log != "history,jobs,environment,run" {
+			t.Fatalf("requests = %s, want the review history first, the queried attempt's jobs, the environment, and the run last", log)
 		}
 	})
 
-	t.Run("normalize: self-review setting absent when the provider does not report it", func(t *testing.T) {
-		draft := baseSupported()
-		draft.Reviews = []forge.EnvironmentReviewRow{approvedRow("901")}
-		draft.GatedJobFound = true
-		draft.GatedJobCreatedAt = "2026-08-26T09:00:00Z"
-		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-		if err != nil {
-			t.Fatalf("fixture: %v", err)
-		}
-		rows, _ := normalizeEnvReview(t, facts)
-		if len(rows) != 1 {
-			t.Fatalf("rows = %+v, want exactly 1", rows)
-		}
-		if hasWitness(rows[0].ProviderWitnesses, "environment_prevent_self_review") {
-			t.Fatalf("environment_prevent_self_review witness present, want absent when the provider never reported it: %+v", rows[0].ProviderWitnesses)
-		}
-	})
-
-	t.Run("normalize: deterministic across repeated calls", func(t *testing.T) {
-		draft := baseSupported()
-		draft.Reviews = []forge.EnvironmentReviewRow{approvedRow("901"), approvedRow("902")}
-		draft.GatedJobFound = true
-		draft.GatedJobCreatedAt = "2026-08-26T09:00:00Z"
-		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-		if err != nil {
-			t.Fatalf("fixture: %v", err)
-		}
-		first, _ := normalizeEnvReview(t, facts)
-		second, _ := normalizeEnvReview(t, facts)
-		if len(first) != 2 || len(second) != 2 {
-			t.Fatalf("rows = %+v / %+v, want 2 each", first, second)
-		}
-		if first[0].ApprovalID != second[0].ApprovalID || first[1].ApprovalID != second[1].ApprovalID {
-			t.Fatalf("normalization is not deterministic: %+v vs %+v", first, second)
-		}
-		if first[0].ApprovalID >= first[1].ApprovalID {
-			t.Fatalf("rows are not sorted by ApprovalID: %+v", first)
-		}
-	})
-}
-
-// TestEnvironmentReviewApprovalContract_Behavioral is the exact v2 ac-4
-// behavioral obligation's producer: github/gitlab/fake driven through
-// their real HTTP or in-memory surface.
-func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
-	t.Run("github happy path produces facts and one active row", func(t *testing.T) {
-		jobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z"))
-		history := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
-		a, closeServer := environmentReviewServer(t, envReviewRunHealthy, jobs, envReviewEnvHealthy, history)
-		defer closeServer()
-
-		facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-		if err != nil {
-			t.Fatalf("EnvironmentReview: %v", err)
-		}
-		if !facts.Supported {
-			t.Fatalf("Supported = false, want true")
-		}
-		if facts.Repository != "acme/widgets" || facts.RunID != "555" || facts.RunAttempt != 1 {
-			t.Fatalf("identity = %+v", facts)
-		}
-		if facts.RunHeadSHA != candidateA || facts.RunURL != envReviewRunURL {
-			t.Fatalf("run binding = %+v", facts)
-		}
-		if facts.EnvironmentID != "9" || facts.EnvironmentName != "close" {
-			t.Fatalf("environment = %+v", facts)
-		}
-		if !facts.GatedJobFound || facts.GatedJobCreatedAt != "2026-08-26T09:00:00Z" || facts.GatedJobStartedAt != "2026-08-26T15:00:00Z" {
-			t.Fatalf("gated job stamps = %+v", facts)
-		}
-		if len(facts.Reviews) != 1 || facts.Reviews[0].ProviderState != forge.EnvironmentReviewApproved {
-			t.Fatalf("reviews = %+v", facts.Reviews)
-		}
-		if facts.ProviderSnapshotID == "" || facts.ObservedAt == "" {
-			t.Fatalf("facts lack observation identity: %+v", facts)
-		}
-
-		rows, disclosures := normalizeEnvReview(t, facts)
-		if disclosures != nil {
-			t.Fatalf("disclosures = %v, want nil", disclosures)
-		}
-		if len(rows) != 1 || rows[0].ApprovalID != "github-environment-review:acme/widgets:555:1:9:901" {
-			t.Fatalf("rows = %+v", rows)
-		}
-	})
-
-	t.Run("github drains pages for jobs and review history", func(t *testing.T) {
-		var jobsCalls, historyCalls int
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555":
-				writeJSON(t, w, envReviewRunHealthy)
-			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
-				jobsCalls++
-				if r.URL.Query().Get("page") == "2" {
-					writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z")))
-					return
-				}
-				w.Header().Set("Link", `<`+urlForPage(r)+`?page=2>; rel="next"`)
-				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("other-job", "2026-08-26T08:00:00Z", "2026-08-26T08:01:00Z")))
-			case "/repos/acme/widgets/environments/close":
-				writeJSON(t, w, envReviewEnvHealthy)
-			case "/repos/acme/widgets/actions/runs/555/approvals":
-				historyCalls++
-				if r.URL.Query().Get("page") == "2" {
-					writeJSON(t, w, "["+envReviewHistoryEntryJSON("approved", 901, 9, "close")+"]")
-					return
-				}
-				w.Header().Set("Link", `<`+urlForPage(r)+`?page=2>; rel="next"`)
-				writeJSON(t, w, "["+envReviewHistoryEntryJSON("rejected", 700, 9, "close")+"]")
-			default:
-				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-				http.NotFound(w, r)
-			}
-		}))
-		defer server.Close()
-
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-		facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-		if err != nil {
-			t.Fatalf("EnvironmentReview: %v", err)
-		}
-		if jobsCalls < 2 || historyCalls < 2 {
-			t.Fatalf("jobsCalls=%d historyCalls=%d, want both drained across at least 2 pages", jobsCalls, historyCalls)
-		}
-		if !facts.GatedJobFound || facts.GatedJobCreatedAt != "2026-08-26T09:00:00Z" {
-			t.Fatalf("gated job (found on page 2) = %+v", facts)
-		}
-		if len(facts.Reviews) != 2 {
-			t.Fatalf("reviews (drained across 2 pages) = %+v", facts.Reviews)
-		}
-		rows, _ := normalizeEnvReview(t, facts)
-		if len(rows) != 1 {
-			t.Fatalf("rows = %+v, want exactly the one approved reviewer", rows)
-		}
-	})
-
-	t.Run("github adverse review states and cancellation", func(t *testing.T) {
+	t.Run("github discloses the self-review setting only when GitHub reports it", func(t *testing.T) {
 		tests := []struct {
-			name    string
-			jobs    string
-			history string
-			wantSub string
+			name  string
+			apply func(*erScenario)
+			want  string
 		}{
-			{"rejected review", envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "")), "[" + envReviewHistoryEntryJSON("rejected", 901, 9, "close") + "]", ""},
-			{"pending review", envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "")), "[" + envReviewHistoryEntryJSON("pending", 901, 9, "close") + "]", ""},
-			{"absent review", envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "")), "[]", ""},
-			{"cancelled run: gated job never created", envReviewJobsBody(), "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]", "gated job not found"},
-			{"missing creation stamp", envReviewJobsBody(envReviewJobJSON("close", "", "2026-08-26T15:00:00Z")), "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]", "gated job creation stamp unavailable"},
+			{"reported false (published)", func(*erScenario) {}, "false"},
+			{"reported true", func(s *erScenario) {
+				setMember(t, asObject(t, asArray(t, s.env["protection_rules"])[1]), "prevent_self_review", true)
+			}, "true"},
+			{"not reported", func(s *erScenario) {
+				delete(asObject(t, asArray(t, s.env["protection_rules"])[1]), "prevent_self_review")
+				s.envAllowRemoved = []string{".protection_rules[].prevent_self_review"}
+			}, ""},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				a, closeServer := environmentReviewServer(t, envReviewRunHealthy, tt.jobs, envReviewEnvHealthy, tt.history)
-				defer closeServer()
-				facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-				if err != nil {
-					t.Fatalf("EnvironmentReview: %v", err)
+				s := newERScenario(t)
+				tt.apply(s)
+				_, rows, _ := reviewScenario(t, s, erQuery())
+				if len(rows) != 1 {
+					t.Fatalf("rows = %+v, want one", rows)
 				}
-				rows, disclosures := normalizeEnvReview(t, facts)
-				if len(rows) != 0 {
-					t.Fatalf("rows = %+v, want none", rows)
+				got, ok := witnessMap(rows[0].ProviderWitnesses)["environment_prevent_self_review"]
+				if tt.want == "" && ok {
+					t.Fatalf("environment_prevent_self_review = %q, want no witness when GitHub does not report the setting", got)
 				}
-				if tt.wantSub != "" && !disclosuresContain(disclosures, tt.wantSub) {
-					t.Fatalf("disclosures = %v, want a witness containing %q", disclosures, tt.wantSub)
+				if tt.want != "" && got != tt.want {
+					t.Fatalf("environment_prevent_self_review = %q (present %v), want %q", got, ok, tt.want)
 				}
 			})
 		}
 	})
 
-	t.Run("github rerun (attempt 2) yields no rows even when the run's review history still shows an approval", func(t *testing.T) {
-		runBody := `{"id":555,"run_attempt":2,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `"}`
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555":
-				writeJSON(t, w, runBody)
-			case "/repos/acme/widgets/actions/runs/555/attempts/2/jobs":
-				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T09:05:00Z")))
-			case "/repos/acme/widgets/environments/close":
-				writeJSON(t, w, envReviewEnvHealthy)
-			case "/repos/acme/widgets/actions/runs/555/approvals":
-				writeJSON(t, w, "["+envReviewHistoryEntryJSON("approved", 901, 9, "close")+"]")
-			default:
-				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-				http.NotFound(w, r)
-			}
-		}))
-		defer server.Close()
-
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-		query := envReviewQuery()
-		query.RunAttempt = 2
-		facts, err := a.EnvironmentReview(context.Background(), query)
-		if err != nil {
-			t.Fatalf("EnvironmentReview: %v", err)
-		}
-		if facts.RunAttempt != 2 || facts.LatestRunAttempt != 2 || len(facts.Reviews) != 1 {
-			t.Fatalf("facts = %+v, want attempt 2 with the approval fact still present", facts)
-		}
-		rows, disclosures := normalizeEnvReview(t, facts)
-		if len(rows) != 0 {
-			t.Fatalf("rows = %+v, want none for a rerun", rows)
-		}
-		if !disclosuresContain(disclosures, "rerun-not-honored") {
-			t.Fatalf("disclosures = %v, want rerun-not-honored", disclosures)
-		}
-	})
-
-	t.Run("github attributes no rerun's review to attempt 1 (I-1, m-10)", func(t *testing.T) {
-		rerunRun := `{"id":555,"run_attempt":2,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `"}`
-		jobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z"))
+	t.Run("github honors only a run whose first attempt is its latest (I-1, m-10)", func(t *testing.T) {
 		tests := []struct {
 			name    string
-			history string
+			apply   func(*erScenario)
+			attempt int
 		}{
-			{"attempt 1 rejected, attempt 2 approved by the same reviewer", "[" + envReviewHistoryEntryJSON("rejected", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
-			{"the same owner approved attempts 1 and 2", "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
-			{"attempt 1 approved, rerun not yet reviewed", "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
+			{"approved attempt 1 after a rerun began", func(s *erScenario) { setMember(t, s.run, "run_attempt", 2) }, 1},
+			{"attempt 1 rejected, attempt 2 approved by the same reviewer", func(s *erScenario) {
+				setMember(t, s.run, "run_attempt", 2)
+				s.historyPages = [][]map[string]any{{historyEntry(t, "rejected", erEnvIDNum, "close", erReviewerNum), historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)}}
+			}, 1},
+			{"the same owner approved attempts 1 and 2", func(s *erScenario) {
+				setMember(t, s.run, "run_attempt", 2)
+				s.historyPages = [][]map[string]any{{historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum), historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)}}
+			}, 1},
+			{"the queried attempt is the rerun", func(s *erScenario) {
+				setMember(t, s.run, "run_attempt", 2)
+				s.attempt = 2
+			}, 2},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				a, closeServer := environmentReviewServer(t, rerunRun, jobs, envReviewEnvHealthy, tt.history)
-				defer closeServer()
-				facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-				if err != nil {
-					t.Fatalf("EnvironmentReview: %v, want a rerun disclosure, not an operational error", err)
+				s := newERScenario(t)
+				tt.apply(s)
+				query := erQuery()
+				query.RunAttempt = tt.attempt
+				facts, rows, disclosures := reviewScenario(t, s, query)
+				if facts.RunAttempt != tt.attempt || facts.LatestRunAttempt != 2 {
+					t.Fatalf("attempts = queried %d latest %d, want %d and 2", facts.RunAttempt, facts.LatestRunAttempt, tt.attempt)
 				}
-				if facts.RunAttempt != 1 || facts.LatestRunAttempt != 2 {
-					t.Fatalf("attempts = queried %d latest %d, want 1 and 2", facts.RunAttempt, facts.LatestRunAttempt)
-				}
-				rows, disclosures := normalizeEnvReview(t, facts)
 				if len(rows) != 0 {
-					t.Fatalf("rows = %+v, want none: a rerun's review cannot be attributed to attempt 1", rows)
+					t.Fatalf("rows = %+v, want none: a review cannot be tied to one attempt once the run is rerun", rows)
 				}
-				if !disclosuresContain(disclosures, "rerun-not-honored") || !disclosuresContain(disclosures, "latest_run_attempt=2") {
+				if !disclosuresContain(disclosures, "environment-review:rerun-not-honored:") || !disclosuresContain(disclosures, "latest_run_attempt=2") {
 					t.Fatalf("disclosures = %v, want rerun-not-honored naming latest attempt 2", disclosures)
 				}
 			})
 		}
 	})
 
-	t.Run("github reads the review history before the run's latest attempt (I-1)", func(t *testing.T) {
-		var order []string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555":
-				order = append(order, "run")
-				writeJSON(t, w, envReviewRunHealthy)
-			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
-				order = append(order, "jobs")
-				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z")))
-			case "/repos/acme/widgets/environments/close":
-				order = append(order, "environment")
-				writeJSON(t, w, envReviewEnvHealthy)
-			case "/repos/acme/widgets/actions/runs/555/approvals":
-				order = append(order, "history")
-				writeJSON(t, w, "["+envReviewHistoryEntryJSON("approved", 901, 9, "close")+"]")
-			default:
-				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-				http.NotFound(w, r)
-			}
-		}))
-		defer server.Close()
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-		if _, err := a.EnvironmentReview(context.Background(), envReviewQuery()); err != nil {
-			t.Fatalf("EnvironmentReview: %v", err)
-		}
-		if strings.Join(order, ",") != "history,jobs,environment,run" {
-			t.Fatalf("read order = %v, want the review history first and the run last", order)
-		}
-	})
-
-	t.Run("validate refuses a repeated decision only while the latest attempt is the first (m-10, co-1)", func(t *testing.T) {
-		row := forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
-		draft := baseSupportedFacts()
-		draft.Reviews = []forge.EnvironmentReviewRow{row, row}
-		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
-			t.Fatal("NewEnvironmentReviewFacts with a repeated decision at latest attempt 1: want error, got nil")
-		}
-		draft.LatestRunAttempt = 2
-		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
-		if err != nil {
-			t.Fatalf("NewEnvironmentReviewFacts with a repeated decision after a rerun: %v", err)
-		}
-		rows, disclosures := normalizeEnvReview(t, facts)
-		if len(rows) != 0 || !disclosuresContain(disclosures, "rerun-not-honored") {
-			t.Fatalf("rows = %+v disclosures = %v, want none with rerun-not-honored", rows, disclosures)
-		}
-	})
-
-	t.Run("github discloses self-review setting when present and omits it when absent", func(t *testing.T) {
-		history := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
-		jobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", ""))
-
-		t.Run("present true", func(t *testing.T) {
-			envBody := `{"id":9,"name":"close","protection_rules":[{"id":1,"node_id":"n1","type":"required_reviewers","prevent_self_review":true,"reviewers":[]}]}`
-			a, closeServer := environmentReviewServer(t, envReviewRunHealthy, jobs, envBody, history)
-			defer closeServer()
-			facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-			if err != nil {
-				t.Fatalf("EnvironmentReview: %v", err)
-			}
-			if facts.EnvironmentPreventSelfReview == nil || !*facts.EnvironmentPreventSelfReview {
-				t.Fatalf("EnvironmentPreventSelfReview = %v, want true", facts.EnvironmentPreventSelfReview)
-			}
-		})
-		t.Run("present false", func(t *testing.T) {
-			envBody := `{"id":9,"name":"close","protection_rules":[{"id":1,"node_id":"n1","type":"required_reviewers","prevent_self_review":false,"reviewers":[]}]}`
-			a, closeServer := environmentReviewServer(t, envReviewRunHealthy, jobs, envBody, history)
-			defer closeServer()
-			facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-			if err != nil {
-				t.Fatalf("EnvironmentReview: %v", err)
-			}
-			if facts.EnvironmentPreventSelfReview == nil || *facts.EnvironmentPreventSelfReview {
-				t.Fatalf("EnvironmentPreventSelfReview = %v, want false", facts.EnvironmentPreventSelfReview)
-			}
-		})
-		t.Run("absent", func(t *testing.T) {
-			a, closeServer := environmentReviewServer(t, envReviewRunHealthy, jobs, envReviewEnvHealthy, history)
-			defer closeServer()
-			facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-			if err != nil {
-				t.Fatalf("EnvironmentReview: %v", err)
-			}
-			if facts.EnvironmentPreventSelfReview != nil {
-				t.Fatalf("EnvironmentPreventSelfReview = %v, want nil (not reported)", facts.EnvironmentPreventSelfReview)
-			}
-		})
-	})
-
-	t.Run("github rejects duplicate trailing and unknown-state facts", func(t *testing.T) {
-		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", ""))
-		healthyHistory := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
-
+	t.Run("github honors only a workflow_dispatch run of the close workflow that is neither cancelled nor failed (I-3)", func(t *testing.T) {
 		tests := []struct {
-			name                                string
-			runBody, jobsBody, envBody, history string
+			name     string
+			apply    func(*erScenario)
+			wantKind string
 		}{
-			{"run: trailing data", envReviewRunHealthy + " true", healthyJobs, envReviewEnvHealthy, healthyHistory},
-			{"jobs: trailing data", envReviewRunHealthy, healthyJobs + " true", envReviewEnvHealthy, healthyHistory},
-			{"environment: trailing data", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy + " true", healthyHistory},
-			{"history: trailing data", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, healthyHistory + " true"},
-			{"history: unknown provider state", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"commented","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901}}]`},
-			{"history: duplicate reviewer", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
+			{"a bare close workflow path", func(s *erScenario) { setMember(t, s.run, "path", forge.CloseWorkflowPath) }, ""},
+			{"a close workflow path read from a close branch", func(s *erScenario) {
+				setMember(t, s.run, "path", forge.CloseWorkflowPath+"@refs/heads/close/spec-demo")
+			}, ""},
+			{"a run completed successfully", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "success")
+			}, ""},
+			{"a queued run", func(s *erScenario) { setMember(t, s.run, "status", "queued") }, ""},
+			{"a push run", func(s *erScenario) { setMember(t, s.run, "event", "push") }, "not-workflow-dispatch"},
+			{"a pull_request run", func(s *erScenario) { setMember(t, s.run, "event", "pull_request") }, "not-workflow-dispatch"},
+			{"another workflow", func(s *erScenario) { setMember(t, s.run, "path", ".github/workflows/verify.yml@main") }, "not-close-workflow"},
+			{"a reusable close workflow from another repository", func(s *erScenario) {
+				setMember(t, s.run, "path", "octo-org/other/.github/workflows/close.yml@main")
+			}, "not-close-workflow"},
+			{"a close workflow path with an empty ref", func(s *erScenario) { setMember(t, s.run, "path", forge.CloseWorkflowPath+"@") }, "not-close-workflow"},
+			{"a lookalike workflow file", func(s *erScenario) { setMember(t, s.run, "path", forge.CloseWorkflowPath+".bak") }, "not-close-workflow"},
+			{"a cancelled run", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "cancelled")
+			}, "run-not-eligible"},
+			{"a failed run", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "failure")
+			}, "run-not-eligible"},
+			{"a timed-out run", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "timed_out")
+			}, "run-not-eligible"},
+			{"a run that failed to start", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "startup_failure")
+			}, "run-not-eligible"},
+			{"a run concluded neutral", func(s *erScenario) {
+				setMember(t, s.run, "status", "completed")
+				setMember(t, s.run, "conclusion", "neutral")
+			}, "run-not-eligible"},
+			{"a completed run with no conclusion", func(s *erScenario) { setMember(t, s.run, "status", "completed") }, "run-not-eligible"},
+			{"a run with no status", func(s *erScenario) { setMember(t, s.run, "status", nil) }, "run-not-eligible"},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				a, closeServer := environmentReviewServer(t, tt.runBody, tt.jobsBody, tt.envBody, tt.history)
-				defer closeServer()
-				if _, err := a.EnvironmentReview(context.Background(), envReviewQuery()); err == nil {
-					t.Fatalf("EnvironmentReview(%s): want error, got nil", tt.name)
-				}
-			})
-		}
-	})
-
-	t.Run("github ignores response members it does not model (open provider contract)", func(t *testing.T) {
-		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", ""))
-		healthyHistory := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
-		a, closeHealthy := environmentReviewServer(t, envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, healthyHistory)
-		defer closeHealthy()
-		want, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-		if err != nil {
-			t.Fatalf("EnvironmentReview healthy: %v", err)
-		}
-		tests := []struct {
-			name                                string
-			runBody, jobsBody, envBody, history string
-		}{
-			{"run", `{"id":555,"run_attempt":1,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `","mystery":true}`, healthyJobs, envReviewEnvHealthy, healthyHistory},
-			{"jobs", envReviewRunHealthy, `{"total_count":1,"jobs":[{"name":"close","created_at":"2026-08-26T09:00:00Z","mystery":true}],"mystery":1}`, envReviewEnvHealthy, healthyHistory},
-			{"environment", envReviewRunHealthy, healthyJobs, `{"id":9,"name":"close","mystery":true}`, healthyHistory},
-			{"history", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close","mystery":1}],"user":{"id":901,"login":"x"},"mystery":true}]`},
-			{"history: an attempt member GitHub does not supply is never read", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901},"attempt":2}]`},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				a, closeServer := environmentReviewServer(t, tt.runBody, tt.jobsBody, tt.envBody, tt.history)
-				defer closeServer()
-				got, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-				if err != nil {
-					t.Fatalf("EnvironmentReview(%s) with additional provider members: %v", tt.name, err)
-				}
-				if got.ProviderSnapshotID != want.ProviderSnapshotID {
-					t.Fatalf("additional provider members changed the facts: got %+v want %+v", got, want)
-				}
-			})
-		}
-	})
-
-	t.Run("github rejects an ambiguous jobs pagination continuation", func(t *testing.T) {
-		var server *httptest.Server
-		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555":
-				writeJSON(t, w, envReviewRunHealthy)
-			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
-				if r.URL.Query().Get("page") == "" {
-					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?page=2>; rel=\"next\", <"+server.URL+r.URL.Path+"?page=3>; rel=\"next\"")
-				}
-				writeJSON(t, w, envReviewJobsBody())
-			case "/repos/acme/widgets/actions/runs/555/approvals":
-				writeJSON(t, w, "[]")
-			default:
-				http.NotFound(w, r)
-			}
-		}))
-		defer server.Close()
-
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-		_, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-		if err == nil || !strings.Contains(err.Error(), "multiple distinct") {
-			t.Fatalf("EnvironmentReview error = %v, want multiple-distinct-next error", err)
-		}
-	})
-
-	t.Run("github rejects a review history pagination cycle", func(t *testing.T) {
-		var calls int
-		var server *httptest.Server
-		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555":
-				writeJSON(t, w, envReviewRunHealthy)
-			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
-				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "")))
-			case "/repos/acme/widgets/environments/close":
-				writeJSON(t, w, envReviewEnvHealthy)
-			case "/repos/acme/widgets/actions/runs/555/approvals":
-				calls++
-				if calls > 2 {
-					http.Error(w, "unexpected pagination revisit", http.StatusInternalServerError)
+				s := newERScenario(t)
+				tt.apply(s)
+				_, rows, disclosures := reviewScenario(t, s, erQuery())
+				if tt.wantKind == "" {
+					if len(rows) != 1 || disclosures != nil {
+						t.Fatalf("rows = %v disclosures = %v, want one row and no disclosure", approvalIDs(rows), disclosures)
+					}
 					return
 				}
-				if r.URL.Query().Get("page") == "2" {
-					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?per_page=100>; rel=\"next\"")
-				} else {
-					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?page=2>; rel=\"next\"")
+				if len(rows) != 0 {
+					t.Fatalf("rows = %v, want none", approvalIDs(rows))
 				}
-				writeJSON(t, w, "[]")
-			default:
-				http.NotFound(w, r)
-			}
-		}))
-		defer server.Close()
-
-		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
-		_, err := a.EnvironmentReview(context.Background(), envReviewQuery())
-		if err == nil || !strings.Contains(err.Error(), "pagination cycle detected") {
-			t.Fatalf("EnvironmentReview error = %v, want pagination cycle error (calls=%d)", err, calls)
+				if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != tt.wantKind {
+					t.Fatalf("disclosure kinds = %v (%v), want exactly %s", kinds, disclosures, tt.wantKind)
+				}
+			})
 		}
 	})
 
+	t.Run("github honors only exactly one gated job in progress or completed successfully (I-3)", func(t *testing.T) {
+		withJob := func(status string, conclusion any) func(*erScenario) {
+			return func(s *erScenario) {
+				setMember(t, s.jobPages[0][0], "status", status)
+				setMember(t, s.jobPages[0][0], "conclusion", conclusion)
+			}
+		}
+		tests := []struct {
+			name     string
+			apply    func(*erScenario)
+			wantKind string
+		}{
+			{"in progress", withJob("in_progress", nil), ""},
+			{"alongside other jobs", func(s *erScenario) {
+				s.jobPages = [][]map[string]any{{scenarioJob(t, "verify"), s.jobPages[0][0], scenarioJob(t, "publish")}}
+			}, ""},
+			{"no job carries the name", func(s *erScenario) { s.jobPages = [][]map[string]any{{}} }, "gated-job-not-found"},
+			{"only a differently cased name", func(s *erScenario) { setMember(t, s.jobPages[0][0], "name", "Close") }, "gated-job-not-found"},
+			{"two jobs carry the name", func(s *erScenario) {
+				second := scenarioJob(t, "close")
+				setMember(t, second, "id", 399444497)
+				s.jobPages = [][]map[string]any{{s.jobPages[0][0], second}}
+			}, "gated-job-ambiguous"},
+			{"queued", withJob("queued", nil), "gated-job-not-eligible"},
+			{"waiting for review", withJob("waiting", nil), "gated-job-not-eligible"},
+			{"completed with failure", withJob("completed", "failure"), "gated-job-not-eligible"},
+			{"completed cancelled", withJob("completed", "cancelled"), "gated-job-not-eligible"},
+			{"completed skipped", withJob("completed", "skipped"), "gated-job-not-eligible"},
+			{"completed with no conclusion", withJob("completed", nil), "gated-job-not-eligible"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				_, rows, disclosures := reviewScenario(t, s, erQuery())
+				if tt.wantKind == "" {
+					if len(rows) != 1 || disclosures != nil {
+						t.Fatalf("rows = %v disclosures = %v, want one row and no disclosure", approvalIDs(rows), disclosures)
+					}
+					return
+				}
+				if len(rows) != 0 {
+					t.Fatalf("rows = %v, want none", approvalIDs(rows))
+				}
+				if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != tt.wantKind {
+					t.Fatalf("disclosure kinds = %v (%v), want exactly %s", kinds, disclosures, tt.wantKind)
+				}
+				if !disclosuresContain(disclosures, "gated_job=close") {
+					t.Fatalf("disclosures = %v, want the gated job named", disclosures)
+				}
+			})
+		}
+	})
+
+	t.Run("github yields no row, with the bypass disclosed, when no review approved the environment (I-3)", func(t *testing.T) {
+		tests := []struct {
+			name              string
+			entries           func(t *testing.T) []map[string]any
+			rejected, pending int
+		}{
+			{"rejected", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "rejected", erEnvIDNum, "close", erReviewerNum)}
+			}, 1, 0},
+			{"pending", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "pending", erEnvIDNum, "close", erReviewerNum)}
+			}, 0, 1},
+			{"absent, as after an administrator bypass", func(t *testing.T) []map[string]any { return []map[string]any{} }, 0, 0},
+			{"approved only for another environment", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "approved", 8, "staging", erReviewerNum)}
+			}, 0, 0},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				s.historyPages = [][]map[string]any{tt.entries(t)}
+				_, rows, disclosures := reviewScenario(t, s, erQuery())
+				if len(rows) != 0 {
+					t.Fatalf("rows = %v, want none", approvalIDs(rows))
+				}
+				want := fmt.Sprintf("rejected=%d pending=%d", tt.rejected, tt.pending)
+				if !disclosuresContain(disclosures, "environment-review:no-approved-review:") || !disclosuresContain(disclosures, want) || !disclosuresContain(disclosures, "bypassed") {
+					t.Fatalf("disclosures = %v, want no-approved-review with %s naming the bypass case", disclosures, want)
+				}
+			})
+		}
+	})
+
+	t.Run("github never counts a review of another environment (m-2)", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			entries func(t *testing.T) []map[string]any
+		}{
+			{"another environment approved by another reviewer", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "approved", 8, "staging", 2), historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)}
+			}},
+			{"another environment id sharing the close name", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "approved", 8, "close", 2), historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)}
+			}},
+			{"the close environment under a former name", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "approved", erEnvIDNum, "close-renamed", erReviewerNum)}
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				s.historyPages = [][]map[string]any{tt.entries(t)}
+				_, rows, _ := reviewScenario(t, s, erQuery())
+				if got := strings.Join(approvalIDs(rows), ","); got != scenarioApprovalID(erReviewer) {
+					t.Fatalf("approval ids = %s, want only %s", got, scenarioApprovalID(erReviewer))
+				}
+			})
+		}
+	})
+
+	t.Run("github cross-checks the run and environment it read", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			apply   func(*erScenario)
+			wantErr string
+		}{
+			{"the run reports another id", func(s *erScenario) { setMember(t, s.run, "id", 30433643) }, "reported id 30433643"},
+			{"the environment reports another name", func(s *erScenario) { setMember(t, s.env, "name", "staging") }, `reported name "staging"`},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				facts, err := s.adapter().EnvironmentReview(context.Background(), erQuery())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("EnvironmentReview = %+v, %v; want an error containing %q", facts, err, tt.wantErr)
+				}
+			})
+		}
+		t.Run("the environment reports its name in another case", func(t *testing.T) {
+			s := newERScenario(t)
+			setMember(t, s.env, "name", "Close")
+			facts, rows, _ := reviewScenario(t, s, erQuery())
+			if facts.EnvironmentName != "Close" || len(rows) != 1 {
+				t.Fatalf("facts = %+v rows = %v, want GitHub's case-insensitive name accepted", facts, approvalIDs(rows))
+			}
+		})
+	})
+
+	t.Run("github yields no row when the gated job's creation stamp is unavailable (SI-232)", func(t *testing.T) {
+		s := newERScenario(t)
+		s.jobPages = [][]map[string]any{{publishedJobObject(t)}}
+		setMember(t, s.jobPages[0][0], "name", "close")
+		facts, rows, disclosures := reviewScenario(t, s, erQuery())
+		if facts.GatedJobCreatedAt != "" || facts.GatedJobStartedAt != erStartedAt {
+			t.Fatalf("stamps = created %q started %q, want no creation stamp and the published start", facts.GatedJobCreatedAt, facts.GatedJobStartedAt)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("rows = %v, want none: an unavailable creation stamp never becomes an approval instant", approvalIDs(rows))
+		}
+		if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != "creation-stamp-unavailable" {
+			t.Fatalf("disclosure kinds = %v (%v)", kinds, disclosures)
+		}
+	})
+
+	t.Run("github drains every page of jobs and review history", func(t *testing.T) {
+		s := newERScenario(t)
+		s.jobPages = [][]map[string]any{{scenarioJob(t, "verify")}, {scenarioJob(t, "close")}}
+		s.historyPages = [][]map[string]any{
+			{historyEntry(t, "approved", 8, "staging", 7)},
+			{historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)},
+		}
+		facts, rows, _ := reviewScenario(t, s, erQuery())
+		if facts.GatedJobCount != 1 || facts.GatedJobCreatedAt != erCreatedAt {
+			t.Fatalf("gated job found on page 2 = %+v", facts)
+		}
+		if got := strings.Join(approvalIDs(rows), ","); got != scenarioApprovalID(erReviewer) {
+			t.Fatalf("approval ids = %s, want the approval found on history page 2", got)
+		}
+		if log := strings.Join(s.requestLog(), ","); log != "history,history,jobs,jobs,environment,run" {
+			t.Fatalf("requests = %s, want both pages of history and jobs", log)
+		}
+	})
+
+	t.Run("github rows are deterministic and sorted by approval id", func(t *testing.T) {
+		s := newERScenario(t)
+		s.historyPages = [][]map[string]any{{
+			historyEntry(t, "approved", erEnvIDNum, "close", 9),
+			historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum),
+		}}
+		facts, first, _ := reviewScenario(t, s, erQuery())
+		second, _ := normalizeEnvReview(t, facts)
+		want := []string{scenarioApprovalID(erReviewer), scenarioApprovalID("9")}
+		if !reflect.DeepEqual(approvalIDs(first), want) || !reflect.DeepEqual(first, second) {
+			t.Fatalf("rows = %v then %v, want %v both times", approvalIDs(first), approvalIDs(second), want)
+		}
+	})
+}
+
+// TestEnvironmentReviewApprovalContract_Behavioral covers the GitLab adapter
+// and the fake behind the same port. It is not an obligation producer: the
+// v2 ac-4 behavioral obligation's producer is
+// go-test:internal/lifecyclecountersign:TestSoloEnvironmentReviewCountersign_Behavioral
+// (lane L2c), which drives the resolver over these facts.
+func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 	t.Run("gitlab environment review is unsupported with a disclosure and never an error", func(t *testing.T) {
 		a := gitlab.New(gitlab.Config{BaseURL: "http://unused.invalid", ProjectID: "42", Clock: fixedClock})
-		facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
+		facts, err := a.EnvironmentReview(context.Background(), erQuery())
 		if err != nil {
 			t.Fatalf("EnvironmentReview: %v, want nil error (never breaks a close)", err)
 		}
@@ -975,66 +961,61 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if len(rows) != 0 {
 			t.Fatalf("rows = %+v, want none", rows)
 		}
-		if len(disclosures) == 0 {
-			t.Fatal("disclosures empty, want a witness naming the unsupported source")
+		if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != "unsupported-forge" {
+			t.Fatalf("disclosures = %v, want one unsupported-forge witness", disclosures)
 		}
 	})
 
 	t.Run("fake seeds and returns independent environment review facts", func(t *testing.T) {
-		draft := forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
-			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
-			GatedJobFound: true, GatedJobCreatedAt: "2026-08-26T09:00:00Z",
-			Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}},
-		}
-		seed, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
+		seed, err := forge.NewEnvironmentReviewFacts(validFactsDraft(), fixedClock())
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
 		f := fake.New()
-		query := envReviewQuery()
-		if err := f.SeedEnvironmentReviewFacts(query, seed); err != nil {
+		if err := f.SeedEnvironmentReviewFacts(erQuery(), seed); err != nil {
 			t.Fatalf("SeedEnvironmentReviewFacts: %v", err)
 		}
-
-		first, err := f.EnvironmentReview(context.Background(), query)
+		first, err := f.EnvironmentReview(context.Background(), erQuery())
 		if err != nil {
 			t.Fatalf("EnvironmentReview: %v", err)
 		}
+		if !reflect.DeepEqual(first, seed) {
+			t.Fatalf("fake returned %+v, want the seeded facts %+v", first, seed)
+		}
 		first.Reviews[0].ProviderState = forge.EnvironmentReviewRejected
-		second, err := f.EnvironmentReview(context.Background(), query)
+		*first.EnvironmentPreventSelfReview = true
+		second, err := f.EnvironmentReview(context.Background(), erQuery())
 		if err != nil {
 			t.Fatalf("EnvironmentReview second: %v", err)
 		}
-		if second.Reviews[0].ProviderState != forge.EnvironmentReviewApproved {
-			t.Fatalf("fake returned aliased facts: %+v", second.Reviews[0])
+		if second.Reviews[0].ProviderState != forge.EnvironmentReviewApproved || *second.EnvironmentPreventSelfReview {
+			t.Fatalf("fake returned aliased facts: %+v", second)
 		}
 	})
 
 	t.Run("fake refuses seeds a real adapter could not produce (m-3)", func(t *testing.T) {
-		valid, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
-			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
-			Reviews: []forge.EnvironmentReviewRow{},
-		}, fixedClock())
+		valid, err := forge.NewEnvironmentReviewFacts(validFactsDraft(), fixedClock())
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		otherRun := envReviewQuery()
-		otherRun.RunID = "556"
-		otherAttempt := envReviewQuery()
-		otherAttempt.RunAttempt = 2
-		otherEnvironment := envReviewQuery()
-		otherEnvironment.EnvironmentName = "staging"
+		tampered := valid
+		tampered.RunHeadSHA = candidateA
+		query := func(edit func(*forge.EnvironmentReviewQuery)) forge.EnvironmentReviewQuery {
+			q := erQuery()
+			edit(&q)
+			return q
+		}
 		tests := []struct {
 			name  string
 			query forge.EnvironmentReviewQuery
 			facts forge.EnvironmentReviewFacts
 		}{
-			{"unvalidated facts", envReviewQuery(), forge.EnvironmentReviewFacts{Supported: true, RunAttempt: 1}},
-			{"facts for another run", otherRun, valid},
-			{"facts for another attempt", otherAttempt, valid},
-			{"facts for another environment", otherEnvironment, valid},
+			{"unvalidated facts", erQuery(), forge.EnvironmentReviewFacts{Supported: true, RunAttempt: 1}},
+			{"facts changed after their digest", erQuery(), tampered},
+			{"facts for another run", query(func(q *forge.EnvironmentReviewQuery) { q.RunID = "30433643" }), valid},
+			{"facts for another attempt", query(func(q *forge.EnvironmentReviewQuery) { q.RunAttempt = 2 }), valid},
+			{"facts for another environment", query(func(q *forge.EnvironmentReviewQuery) { q.EnvironmentName = "staging" }), valid},
+			{"facts for another gated job", query(func(q *forge.EnvironmentReviewQuery) { q.GatedJobName = "verify" }), valid},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -1050,13 +1031,8 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("fake errors on an unseeded environment review query", func(t *testing.T) {
-		f := fake.New()
-		if _, err := f.EnvironmentReview(context.Background(), envReviewQuery()); err == nil {
+		if _, err := fake.New().EnvironmentReview(context.Background(), erQuery()); err == nil {
 			t.Fatal("EnvironmentReview unseeded: want error, got nil")
 		}
 	})
-}
-
-func urlForPage(r *http.Request) string {
-	return "http://" + r.Host + r.URL.Path
 }

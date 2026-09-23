@@ -89,8 +89,8 @@ func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, f
 		return fmt.Errorf("fake: seed environment review facts: %w", err)
 	}
 	if facts.Supported && !environmentReviewFactsAnswer(query, facts) {
-		return fmt.Errorf("fake: seeded environment review facts (run %q attempt %d environment %q) do not answer query run %q attempt %d environment %q gated job %q",
-			facts.RunID, facts.RunAttempt, facts.EnvironmentName, query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
+		return fmt.Errorf("fake: seeded environment review facts (run %q attempt %d environment %q gated job %q) do not answer query run %q attempt %d environment %q gated job %q",
+			facts.RunID, facts.RunAttempt, facts.EnvironmentName, facts.GatedJobName, query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -99,11 +99,11 @@ func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, f
 }
 
 // environmentReviewFactsAnswer reports whether supported facts observe the
-// run, attempt, and environment query names (GitHub environment names are
-// case-insensitive).
+// run, attempt, environment, and gated job query names (GitHub environment
+// names are case-insensitive).
 func environmentReviewFactsAnswer(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) bool {
 	return facts.RunID == query.RunID && facts.RunAttempt == query.RunAttempt &&
-		strings.EqualFold(facts.EnvironmentName, query.EnvironmentName)
+		strings.EqualFold(facts.EnvironmentName, query.EnvironmentName) && facts.GatedJobName == query.GatedJobName
 }
 
 // EnvironmentReview implements forge.Forge.

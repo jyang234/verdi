@@ -120,26 +120,6 @@ func encodeGeneric(t *testing.T, value any) string {
 	return buf.String()
 }
 
-// deepCopy returns an independent copy of a generic JSON value.
-func deepCopy(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for k, item := range v {
-			out[k] = deepCopy(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = deepCopy(item)
-		}
-		return out
-	default:
-		return v
-	}
-}
-
 // setMember replaces the value of a member the published object already
 // carries; a fixture may bind scenario values, never invent members.
 func setMember(t *testing.T, object map[string]any, key string, value any) {
@@ -209,20 +189,32 @@ func shapeDiff(published, variant any) (added, removed []string) {
 	return added, removed
 }
 
-// assertPublishedShape fails when a served fixture adds or drops any member
-// relative to its published example, except the declared exceptions.
-func assertPublishedShape(t *testing.T, name string, published, variant any, allowedAdded, allowedRemoved []string) {
-	t.Helper()
+// publishedShapeViolation reports how a served fixture departs from its
+// published example: any member it adds or drops beyond the declared
+// exceptions. "" means the fixture keeps every published member and adds
+// none.
+func publishedShapeViolation(published, variant any, allowedAdded, allowedRemoved []string) string {
 	added, removed := shapeDiff(published, variant)
-	if !sameStrings(added, allowedAdded) || !sameStrings(removed, allowedRemoved) {
-		t.Errorf("fixture %s departs from the published shape: added %v (allowed %v), removed %v (allowed %v)", name, added, allowedAdded, removed, allowedRemoved)
+	var problems []string
+	if extra := notIn(added, allowedAdded); len(extra) > 0 {
+		problems = append(problems, "adds "+strings.Join(extra, ", "))
 	}
+	if missing := notIn(removed, allowedRemoved); len(missing) > 0 {
+		problems = append(problems, "drops "+strings.Join(missing, ", "))
+	}
+	return strings.Join(problems, "; ")
 }
 
-func sameStrings(a, b []string) bool {
-	a = append([]string(nil), a...)
-	b = append([]string(nil), b...)
-	sort.Strings(a)
-	sort.Strings(b)
-	return strings.Join(a, "\x00") == strings.Join(b, "\x00")
+func notIn(values, allowed []string) []string {
+	permitted := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		permitted[value] = true
+	}
+	var out []string
+	for _, value := range values {
+		if !permitted[value] {
+			out = append(out, value)
+		}
+	}
+	return out
 }

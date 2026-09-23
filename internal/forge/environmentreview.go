@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -53,6 +54,53 @@ func (s EnvironmentReviewState) valid() bool {
 	}
 }
 
+// CloseWorkflowPath is the repository path of the dispatch-only close
+// workflow (plan R-CM-4, .github/workflows/close.yml). v2 ac-4 honors only
+// an environment review "of the dispatch-only close workflow run" (L2b
+// review I-3). GitHub reports a run's workflow either as this path or,
+// as its published "Get a workflow run" example shows
+// (".github/workflows/build.yml@main"), as the path followed by "@" and the
+// ref the workflow file was read from; both name this workflow.
+const CloseWorkflowPath = ".github/workflows/close.yml"
+
+// WorkflowDispatchEvent is the only run event v2 ac-4 honors: the close
+// workflow is dispatch-only.
+const WorkflowDispatchEvent = "workflow_dispatch"
+
+// IsCloseWorkflowPath reports whether a run's workflow path names
+// CloseWorkflowPath, bare or with a non-empty "@<ref>" suffix.
+func IsCloseWorkflowPath(path string) bool {
+	if path == CloseWorkflowPath {
+		return true
+	}
+	ref, ok := strings.CutPrefix(path, CloseWorkflowPath+"@")
+	return ok && ref != ""
+}
+
+// The workflow run and job vocabularies GitHub documents. A run's status and
+// conclusion are the enums of the workflow_run webhook payload's
+// workflow_run object (GitHub's OpenAPI description, the same run schema the
+// REST "Get a workflow run" response carries without an enum); a job's
+// status and conclusion are the enums of the REST job schema ("List jobs for
+// a workflow run attempt"). An unknown value of any of them fails closed
+// (ruling R-W1-8: unknown values of fields Verdi relies on still fail).
+var (
+	workflowRunStatuses = map[string]bool{
+		"requested": true, "in_progress": true, "completed": true, "queued": true, "pending": true, "waiting": true,
+	}
+	workflowRunConclusions = map[string]bool{
+		"action_required": true, "cancelled": true, "failure": true, "neutral": true, "skipped": true,
+		"stale": true, "success": true, "timed_out": true, "startup_failure": true,
+	}
+	workflowJobStatuses = map[string]bool{
+		"queued": true, "in_progress": true, "completed": true, "waiting": true, "requested": true, "pending": true,
+	}
+	workflowJobConclusions = map[string]bool{
+		"success": true, "failure": true, "neutral": true, "cancelled": true, "skipped": true,
+		"timed_out": true, "action_required": true,
+	}
+)
+
 // EnvironmentReviewQuery names one workflow run attempt's gated job and its
 // approval environment (v2 ac-4: "The query names the run, the attempt,
 // the environment (`close`), and the gated job"). RunID and RunAttempt
@@ -86,18 +134,26 @@ type EnvironmentReviewRow struct {
 // attempt's environment-review facts (v2 ac-4, dc-5) — provider facts, not
 // yet a countersign judgment (AC-1's port/judgment split applies here too).
 //
-// Supported is false for a forge with no environment-review concept at all
-// (GitLab, co-1's "unsupported source"): every run/job/environment/review
-// field must then be its zero value and UnsupportedReason names why —
-// NormalizeEnvironmentReview turns that into a disclosed zero-row result,
-// never an error that would break a close.
+// Supported is false for a forge adapter that does not implement
+// environment reviews as an approval source (co-1's "unsupported source"):
+// every run/job/environment/review field must then be its zero value and
+// UnsupportedReason names why — NormalizeEnvironmentReview turns that into a
+// disclosed zero-row result, never an error that would break a close.
+//
+// The run facts (event, workflow path, status, conclusion) and the gated
+// job's facts (how many jobs of the attempt carry its name, and for exactly
+// one: its id, status, conclusion, and stamps) are what lets the normalizer
+// express v2 ac-4's exclusions (L2b review I-3): a run that is not the
+// dispatch-only close workflow's, a cancelled or failed run, and a gated job
+// that is not in progress or completed successfully all yield no row.
 //
 // Times are normalized UTC RFC3339Nano. GatedJobCreatedAt/GatedJobStartedAt
 // are "" when the provider does not report them for this attempt's gated
-// job (dc-5: "when the creation stamp is unavailable"); GatedJobFound
-// records whether a job named the query's GatedJobName was found in this
-// attempt's job list at all (false covers, among other things, a run
-// cancelled before the gated job was ever created).
+// job (dc-5: "when the creation stamp is unavailable"); every gated-job
+// field except GatedJobName and GatedJobCount is empty unless exactly one
+// job of the attempt carries the gated job's name. RunStatus is "" when the
+// provider reports none (GitHub's run status is nullable); RunConclusion
+// and GatedJobConclusion are "" while the run or job has not concluded.
 type EnvironmentReviewFacts struct {
 	Supported         bool   `json:"supported"`
 	UnsupportedReason string `json:"unsupported_reason"`
@@ -113,18 +169,26 @@ type EnvironmentReviewFacts struct {
 	LatestRunAttempt int    `json:"latest_run_attempt"`
 	RunHeadSHA       string `json:"run_head_sha"`
 	RunURL           string `json:"run_url"`
-	EnvironmentID    string `json:"environment_id"`
-	EnvironmentName  string `json:"environment_name"`
+	RunEvent         string `json:"run_event"`
+	RunWorkflowPath  string `json:"run_workflow_path"`
+	RunStatus        string `json:"run_status"`
+	RunConclusion    string `json:"run_conclusion"`
 
-	GatedJobFound     bool   `json:"gated_job_found"`
-	GatedJobCreatedAt string `json:"gated_job_created_at"`
-	GatedJobStartedAt string `json:"gated_job_started_at"`
-
+	EnvironmentID   string `json:"environment_id"`
+	EnvironmentName string `json:"environment_name"`
 	// EnvironmentPreventSelfReview mirrors GitHub's own `prevent_self_review`
 	// field on the environment's `required_reviewers` protection rule; nil
 	// when the provider does not report it (dc-5: "the adapter discloses
 	// that setting when the forge reports it").
 	EnvironmentPreventSelfReview *bool `json:"environment_prevent_self_review"`
+
+	GatedJobName       string `json:"gated_job_name"`
+	GatedJobCount      int    `json:"gated_job_count"`
+	GatedJobID         string `json:"gated_job_id"`
+	GatedJobStatus     string `json:"gated_job_status"`
+	GatedJobConclusion string `json:"gated_job_conclusion"`
+	GatedJobCreatedAt  string `json:"gated_job_created_at"`
+	GatedJobStartedAt  string `json:"gated_job_started_at"`
 
 	Reviews []EnvironmentReviewRow `json:"reviews"`
 
@@ -183,27 +247,39 @@ func (f EnvironmentReviewFacts) Validate() error {
 	if f.Reviews == nil {
 		return fmt.Errorf("forge: environment_review.reviews must be non-null")
 	}
-
 	if !f.Supported {
-		if err := requireValue("environment_review.unsupported_reason", f.UnsupportedReason); err != nil {
+		if err := f.validateUnsupported(); err != nil {
 			return err
 		}
-		if f.RunID != "" || f.RunAttempt != 0 || f.LatestRunAttempt != 0 || f.RunHeadSHA != "" || f.RunURL != "" ||
-			f.EnvironmentID != "" || f.EnvironmentName != "" || f.GatedJobFound ||
-			f.GatedJobCreatedAt != "" || f.GatedJobStartedAt != "" ||
-			f.EnvironmentPreventSelfReview != nil || len(f.Reviews) != 0 {
-			return fmt.Errorf("forge: unsupported environment review facts must carry no run, job, environment, or review data")
-		}
-		wantDigest, err := f.providerFactsDigest()
-		if err != nil {
-			return fmt.Errorf("forge: recompute environment review provider snapshot identity: %w", err)
-		}
-		if f.ProviderSnapshotID != wantDigest {
-			return fmt.Errorf("forge: environment_review.provider_snapshot_id does not match normalized facts")
-		}
-		return nil
+	} else if err := f.validateSupported(); err != nil {
+		return err
 	}
+	wantDigest, err := f.providerFactsDigest()
+	if err != nil {
+		return fmt.Errorf("forge: recompute environment review provider snapshot identity: %w", err)
+	}
+	if f.ProviderSnapshotID != wantDigest {
+		return fmt.Errorf("forge: environment_review.provider_snapshot_id does not match normalized facts")
+	}
+	return nil
+}
 
+func (f EnvironmentReviewFacts) validateUnsupported() error {
+	if err := requireValue("environment_review.unsupported_reason", f.UnsupportedReason); err != nil {
+		return err
+	}
+	if f.RunID != "" || f.RunAttempt != 0 || f.LatestRunAttempt != 0 || f.RunHeadSHA != "" || f.RunURL != "" ||
+		f.RunEvent != "" || f.RunWorkflowPath != "" || f.RunStatus != "" || f.RunConclusion != "" ||
+		f.EnvironmentID != "" || f.EnvironmentName != "" || f.EnvironmentPreventSelfReview != nil ||
+		f.GatedJobName != "" || f.GatedJobCount != 0 || f.GatedJobID != "" || f.GatedJobStatus != "" ||
+		f.GatedJobConclusion != "" || f.GatedJobCreatedAt != "" || f.GatedJobStartedAt != "" ||
+		len(f.Reviews) != 0 {
+		return fmt.Errorf("forge: unsupported environment review facts must carry no run, job, environment, or review data")
+	}
+	return nil
+}
+
+func (f EnvironmentReviewFacts) validateSupported() error {
 	if f.UnsupportedReason != "" {
 		return fmt.Errorf("forge: supported environment review facts must carry no unsupported_reason")
 	}
@@ -219,17 +295,50 @@ func (f EnvironmentReviewFacts) Validate() error {
 	if err := validateCandidateSHA("environment_review.run_head_sha", f.RunHeadSHA); err != nil {
 		return err
 	}
-	if err := requireValue("environment_review.run_url", f.RunURL); err != nil {
-		return err
+	for field, value := range map[string]string{
+		"environment_review.run_url":           f.RunURL,
+		"environment_review.run_event":         f.RunEvent,
+		"environment_review.run_workflow_path": f.RunWorkflowPath,
+		"environment_review.environment_name":  f.EnvironmentName,
+		"environment_review.gated_job_name":    f.GatedJobName,
+	} {
+		if err := requireValue(field, value); err != nil {
+			return err
+		}
+	}
+	if f.RunStatus != "" && !workflowRunStatuses[f.RunStatus] {
+		return fmt.Errorf("forge: environment_review.run_status: unknown workflow run status %q", f.RunStatus)
+	}
+	if f.RunConclusion != "" && !workflowRunConclusions[f.RunConclusion] {
+		return fmt.Errorf("forge: environment_review.run_conclusion: unknown workflow run conclusion %q", f.RunConclusion)
 	}
 	if err := validateCanonicalID("environment_review.environment_id", f.EnvironmentID); err != nil {
 		return err
 	}
-	if err := requireValue("environment_review.environment_name", f.EnvironmentName); err != nil {
+	if err := f.validateGatedJob(); err != nil {
 		return err
 	}
-	if !f.GatedJobFound && (f.GatedJobCreatedAt != "" || f.GatedJobStartedAt != "") {
-		return fmt.Errorf("forge: environment_review gated job stamps present without gated_job_found")
+	return f.validateReviews()
+}
+
+func (f EnvironmentReviewFacts) validateGatedJob() error {
+	if f.GatedJobCount < 0 {
+		return fmt.Errorf("forge: environment_review.gated_job_count must not be negative, got %d", f.GatedJobCount)
+	}
+	if f.GatedJobCount != 1 {
+		if f.GatedJobID != "" || f.GatedJobStatus != "" || f.GatedJobConclusion != "" || f.GatedJobCreatedAt != "" || f.GatedJobStartedAt != "" {
+			return fmt.Errorf("forge: environment_review gated job details present although %d jobs carry the gated job's name", f.GatedJobCount)
+		}
+		return nil
+	}
+	if err := validateCanonicalID("environment_review.gated_job_id", f.GatedJobID); err != nil {
+		return err
+	}
+	if !workflowJobStatuses[f.GatedJobStatus] {
+		return fmt.Errorf("forge: environment_review.gated_job_status: unknown workflow job status %q", f.GatedJobStatus)
+	}
+	if f.GatedJobConclusion != "" && !workflowJobConclusions[f.GatedJobConclusion] {
+		return fmt.Errorf("forge: environment_review.gated_job_conclusion: unknown workflow job conclusion %q", f.GatedJobConclusion)
 	}
 	if f.GatedJobCreatedAt != "" {
 		if _, err := normalizedTime("forge: environment_review.gated_job_created_at", f.GatedJobCreatedAt); err != nil {
@@ -241,7 +350,10 @@ func (f EnvironmentReviewFacts) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
 
+func (f EnvironmentReviewFacts) validateReviews() error {
 	seen := make(map[string]struct{}, len(f.Reviews))
 	for i, row := range f.Reviews {
 		prefix := fmt.Sprintf("forge: environment_review.reviews[%d]", i)
@@ -265,14 +377,6 @@ func (f EnvironmentReviewFacts) Validate() error {
 		}
 		seen[key] = struct{}{}
 	}
-
-	wantDigest, err := f.providerFactsDigest()
-	if err != nil {
-		return fmt.Errorf("forge: recompute environment review provider snapshot identity: %w", err)
-	}
-	if f.ProviderSnapshotID != wantDigest {
-		return fmt.Errorf("forge: environment_review.provider_snapshot_id does not match normalized facts")
-	}
 	return nil
 }
 
@@ -288,23 +392,22 @@ func (f EnvironmentReviewFacts) providerFactsDigest() (string, error) {
 // NormalizeEnvironmentReview turns one workflow run attempt's
 // environment-review facts into shared forge.Approval rows exactly per v2's
 // mapping (ac-4, dc-5): only an approved review for facts' own environment,
-// honored only on the run's first attempt, dated by the gated job's
-// creation stamp — never its start — as a conservative lower bound.
+// of a workflow_dispatch run of the close workflow that is neither cancelled
+// nor failed, honored only while the run's first attempt is its latest, with
+// exactly one gated job in progress or completed successfully, dated by that
+// job's creation stamp — never its start — as a conservative lower bound.
 //
 // It first validates facts and returns an error for a value that breaks the
 // facts contract (a hand-built or corrupted value is an operational defect,
 // never a verdict), so a row is only ever derived from validated facts
 // (L2b review m-3). For valid facts it is pure and deterministic: the same
 // facts always produce the same rows and disclosure witnesses, and every
-// adverse or unsupported shape (an unsupported forge, a rerun, a rejected or
-// pending or absent review, a missing creation stamp) is a zero-row-plus-
-// disclosure outcome, never an error.
+// adverse or unsupported shape is a zero-row-plus-disclosure outcome, never
+// an error.
 //
-// The second return is the top-level disclosure witness list — reasons no
-// row was produced that a row's own ProviderWitnesses cannot carry, since
-// there is no row to attach them to. It is nil when every row that would
-// otherwise be suppressed simply never existed (no approved review at
-// all), which needs no witness of its own.
+// The second return is the top-level disclosure witness list: every reason
+// no row was produced, in a fixed order, since a refused row has no
+// ProviderWitnesses to carry them. It is nil when rows are produced.
 func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []string, error) {
 	if err := facts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("forge: normalize environment review: %w", err)
@@ -314,13 +417,8 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 			"environment-review:unsupported-forge: no rows produced: %s", facts.UnsupportedReason,
 		)}, nil
 	}
-	if facts.LatestRunAttempt != 1 || facts.RunAttempt != facts.LatestRunAttempt {
-		return []Approval{}, []string{fmt.Sprintf(
-			"environment-review:rerun-not-honored: run_id=%s run_attempt=%d latest_run_attempt=%d: only a run whose latest attempt is its first is honored, because GitHub's review history carries no attempt; a retry needs a new dispatch and a new review",
-			facts.RunID, facts.RunAttempt, facts.LatestRunAttempt,
-		)}, nil
-	}
 
+	refusals := environmentReviewRefusals(facts)
 	var approved []EnvironmentReviewRow
 	for _, row := range facts.Reviews {
 		if row.ProviderState == EnvironmentReviewApproved {
@@ -328,58 +426,165 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 		}
 	}
 	if len(approved) == 0 {
-		return []Approval{}, nil, nil
+		refusals = append(refusals, noApprovedReviewDisclosure(facts))
 	}
-
-	if facts.GatedJobCreatedAt == "" {
-		reason := "gated job creation stamp unavailable"
-		if !facts.GatedJobFound {
-			reason = "gated job not found in this run attempt's job list"
-		}
-		return []Approval{}, []string{fmt.Sprintf(
-			"environment-review:creation-stamp-unavailable: run_id=%s run_attempt=%d: %s: no row produced (approval age would be unproven, and the shared countersign types cannot express unproven without changing internal/countersign, so this fails closed)",
-			facts.RunID, facts.RunAttempt, reason,
-		)}, nil
+	if len(refusals) > 0 {
+		return []Approval{}, refusals, nil
 	}
 
 	rows := make([]Approval, 0, len(approved))
 	for _, row := range approved {
-		approvalID := fmt.Sprintf("github-environment-review:%s:%s:%d:%s:%s",
-			facts.Repository, facts.RunID, facts.RunAttempt, row.EnvironmentID, row.ReviewerActor.Subject)
-		approvalRef := fmt.Sprintf("%s environment=%s", facts.RunURL, facts.EnvironmentName)
-
-		witnesses := []ProviderWitness{
-			{Name: "provider_state", Value: string(row.ProviderState)},
-			{Name: "actor_user_id", Value: row.ReviewerActor.Subject},
-			{Name: "run_id", Value: facts.RunID},
-			{Name: "run_attempt", Value: "1"},
-			{Name: "run_head_sha", Value: facts.RunHeadSHA},
-			{Name: "run_url", Value: facts.RunURL},
-			{Name: "environment_id", Value: row.EnvironmentID},
-			{Name: "environment_name", Value: facts.EnvironmentName},
-			{Name: "gated_job_created_at", Value: facts.GatedJobCreatedAt},
-			{Name: "approval_id_derivation", Value: "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"},
-			{Name: "approved_at_derivation", Value: "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"},
-			{Name: "state_derivation", Value: "github's approved review state normalized to the shared active state"},
-		}
-		if facts.GatedJobStartedAt != "" {
-			witnesses = append(witnesses, ProviderWitness{Name: "gated_job_started_at", Value: facts.GatedJobStartedAt})
-		}
-		if facts.EnvironmentPreventSelfReview != nil {
-			witnesses = append(witnesses, ProviderWitness{
-				Name: "environment_prevent_self_review", Value: strconv.FormatBool(*facts.EnvironmentPreventSelfReview),
-			})
-		}
-
-		rows = append(rows, Approval{
-			ApprovalID: approvalID, ApprovalRef: approvalRef, State: ApprovalActive,
-			ApprovedAt: facts.GatedJobCreatedAt, UpdatedAt: facts.GatedJobCreatedAt,
-			CandidateSHA: facts.RunHeadSHA, Actor: row.ReviewerActor,
-			ProviderWitnesses: witnesses,
-		})
+		rows = append(rows, environmentReviewApproval(facts, row))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ApprovalID < rows[j].ApprovalID })
 	return rows, nil, nil
+}
+
+// environmentReviewRefusals lists, in a fixed order, every v2 ac-4
+// exclusion the run and its gated job fall under.
+func environmentReviewRefusals(f EnvironmentReviewFacts) []string {
+	subject := fmt.Sprintf("run_id=%s run_attempt=%d", f.RunID, f.RunAttempt)
+	var out []string
+	if f.LatestRunAttempt != 1 || f.RunAttempt != f.LatestRunAttempt {
+		out = append(out, fmt.Sprintf(
+			"environment-review:rerun-not-honored: %s latest_run_attempt=%d: only a run whose latest attempt is its first is honored, because GitHub's review history carries no attempt; a retry needs a new dispatch and a new review",
+			subject, f.LatestRunAttempt))
+	}
+	if f.RunEvent != WorkflowDispatchEvent {
+		out = append(out, fmt.Sprintf(
+			"environment-review:not-workflow-dispatch: %s event=%s: only a %s run of the close workflow is honored",
+			subject, f.RunEvent, WorkflowDispatchEvent))
+	}
+	if !IsCloseWorkflowPath(f.RunWorkflowPath) {
+		out = append(out, fmt.Sprintf(
+			"environment-review:not-close-workflow: %s workflow_path=%s: only the dispatch-only close workflow %s is honored",
+			subject, f.RunWorkflowPath, CloseWorkflowPath))
+	}
+	if !workflowRunEligible(f.RunStatus, f.RunConclusion) {
+		out = append(out, fmt.Sprintf(
+			"environment-review:run-not-eligible: %s status=%s conclusion=%s: only a run that has not concluded, or concluded success, is honored; a cancelled or failed run yields no approval",
+			subject, orNone(f.RunStatus), orNone(f.RunConclusion)))
+	}
+	gatedJob := fmt.Sprintf("%s gated_job=%s", subject, f.GatedJobName)
+	switch {
+	case f.GatedJobCount == 0:
+		out = append(out, fmt.Sprintf(
+			"environment-review:gated-job-not-found: %s: no job of this attempt carries the gated job's name, so no creation stamp dates the review",
+			gatedJob))
+	case f.GatedJobCount > 1:
+		out = append(out, fmt.Sprintf(
+			"environment-review:gated-job-ambiguous: %s count=%d: more than one job of this attempt carries the gated job's name, so no single creation stamp dates the review",
+			gatedJob, f.GatedJobCount))
+	default:
+		gatedJob = fmt.Sprintf("%s gated_job_id=%s", gatedJob, f.GatedJobID)
+		if !workflowJobEligible(f.GatedJobStatus, f.GatedJobConclusion) {
+			out = append(out, fmt.Sprintf(
+				"environment-review:gated-job-not-eligible: %s status=%s conclusion=%s: only a gated job in progress or completed successfully is honored",
+				gatedJob, f.GatedJobStatus, orNone(f.GatedJobConclusion)))
+		}
+		if f.GatedJobCreatedAt == "" {
+			out = append(out, fmt.Sprintf(
+				"environment-review:creation-stamp-unavailable: %s: the gated job carries no creation stamp, so approval age would be unproven, and the shared countersign types cannot express unproven without changing internal/countersign, so no row is produced (SI-232)",
+				gatedJob))
+		}
+	}
+	return out
+}
+
+// noApprovedReviewDisclosure says why a run with no approved entry for the
+// environment yields no row, including the bypass case: an administrator
+// who bypasses the protection rule leaves no approved review entry at all
+// (L2b review I-3).
+func noApprovedReviewDisclosure(f EnvironmentReviewFacts) string {
+	var rejected, pending int
+	for _, row := range f.Reviews {
+		switch row.ProviderState {
+		case EnvironmentReviewRejected:
+			rejected++
+		case EnvironmentReviewPending:
+			pending++
+		}
+	}
+	return fmt.Sprintf(
+		"environment-review:no-approved-review: run_id=%s run_attempt=%d environment=%s environment_id=%s rejected=%d pending=%d: the review history holds no approved entry for this environment; a rejected, pending, or absent review, or a protection rule an administrator bypassed, leaves none, so no row is produced",
+		f.RunID, f.RunAttempt, f.EnvironmentName, f.EnvironmentID, rejected, pending)
+}
+
+// workflowRunEligible reports whether a run is neither cancelled nor
+// failed: it has not concluded, or it concluded success. Every other
+// documented conclusion (failure, cancelled, timed_out, startup_failure,
+// action_required, neutral, skipped, stale) is not an unambiguous success,
+// and a run with no reported status is unproven, so both refuse.
+func workflowRunEligible(status, conclusion string) bool {
+	if conclusion == "" {
+		return status != "" && status != "completed"
+	}
+	return status == "completed" && conclusion == "success"
+}
+
+// workflowJobEligible reports whether the gated job is in progress or
+// completed successfully (L2b review I-3).
+func workflowJobEligible(status, conclusion string) bool {
+	return (status == "in_progress" && conclusion == "") || (status == "completed" && conclusion == "success")
+}
+
+func orNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
+}
+
+// environmentReviewApproval maps one approved review of eligible facts to
+// the shared row (v2 ac-4 body "Environment review rows").
+func environmentReviewApproval(facts EnvironmentReviewFacts, row EnvironmentReviewRow) Approval {
+	approvalID := fmt.Sprintf("github-environment-review:%s:%s:%d:%s:%s",
+		facts.Repository, facts.RunID, facts.RunAttempt, row.EnvironmentID, row.ReviewerActor.Subject)
+	approvalRef := fmt.Sprintf("%s environment=%s", facts.RunURL, facts.EnvironmentName)
+
+	witnesses := []ProviderWitness{
+		{Name: "provider_state", Value: string(row.ProviderState)},
+		{Name: "actor_user_id", Value: row.ReviewerActor.Subject},
+		{Name: "run_id", Value: facts.RunID},
+		{Name: "run_attempt", Value: strconv.Itoa(facts.RunAttempt)},
+		{Name: "run_latest_attempt", Value: strconv.Itoa(facts.LatestRunAttempt)},
+		{Name: "run_head_sha", Value: facts.RunHeadSHA},
+		{Name: "run_url", Value: facts.RunURL},
+		{Name: "run_event", Value: facts.RunEvent},
+		{Name: "run_workflow_path", Value: facts.RunWorkflowPath},
+		{Name: "run_status", Value: facts.RunStatus},
+		{Name: "environment_id", Value: row.EnvironmentID},
+		{Name: "environment_name", Value: facts.EnvironmentName},
+		{Name: "gated_job_name", Value: facts.GatedJobName},
+		{Name: "gated_job_id", Value: facts.GatedJobID},
+		{Name: "gated_job_status", Value: facts.GatedJobStatus},
+		{Name: "gated_job_created_at", Value: facts.GatedJobCreatedAt},
+		{Name: "approval_id_derivation", Value: "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"},
+		{Name: "approved_at_derivation", Value: "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"},
+		{Name: "state_derivation", Value: "github's approved review state normalized to the shared active state"},
+	}
+	if facts.RunConclusion != "" {
+		witnesses = append(witnesses, ProviderWitness{Name: "run_conclusion", Value: facts.RunConclusion})
+	}
+	if facts.GatedJobConclusion != "" {
+		witnesses = append(witnesses, ProviderWitness{Name: "gated_job_conclusion", Value: facts.GatedJobConclusion})
+	}
+	if facts.GatedJobStartedAt != "" {
+		witnesses = append(witnesses, ProviderWitness{Name: "gated_job_started_at", Value: facts.GatedJobStartedAt})
+	}
+	if facts.EnvironmentPreventSelfReview != nil {
+		witnesses = append(witnesses, ProviderWitness{
+			Name: "environment_prevent_self_review", Value: strconv.FormatBool(*facts.EnvironmentPreventSelfReview),
+		})
+	}
+	sort.Slice(witnesses, func(i, j int) bool { return witnesses[i].Name < witnesses[j].Name })
+
+	return Approval{
+		ApprovalID: approvalID, ApprovalRef: approvalRef, State: ApprovalActive,
+		ApprovedAt: facts.GatedJobCreatedAt, UpdatedAt: facts.GatedJobCreatedAt,
+		CandidateSHA: facts.RunHeadSHA, Actor: row.ReviewerActor,
+		ProviderWitnesses: witnesses,
+	}
 }
 
 // validateCanonicalID requires a provider numeric id in canonical positive
