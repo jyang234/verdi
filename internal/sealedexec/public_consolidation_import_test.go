@@ -10,8 +10,8 @@ import (
 )
 
 // consolidationVerdiSuccessors pins the reviewed successors of the sources the
-// immutable Task4 witness still binds by their historical digests. Two waves
-// of accepted work are pinned here:
+// immutable Task4 witness still binds by their historical digests. The
+// accepted work pinned here, wave by wave:
 //
 //   - SI-200 (spec-import-contract.md's import-sidecar clause, adopted and
 //     Task3 reviewed): contextcompile's classify.go, schema.go, validate.go.
@@ -24,6 +24,16 @@ import (
 //     410db101's reviewed round-1 fix (the hermetic conflict-provider seam and
 //     the move of the file-local hasDotDotElement to store.HasDotDotElement)
 //     and 1be75d01's startup judge-cache warm changed together.
+//   - SI-229 / plan R-CM-3 (closing-machinery wave 1, lane L1a; the
+//     controller's fix-brief ruling on review finding I-1): artifact's
+//     evidence.go, whose EvidenceProvenance gained the optional job_name field
+//     and its doc paragraph, and nothing else.
+//   - SI-227, as narrowed (closing-machinery wave 1, lane L2a): countersign's
+//     resolve.go, whose Request gained the optional SeparationDisclosures
+//     []string passthrough field and the two lines that append it into the
+//     canonical record's witnesses — carrying the kernel-consulted
+//     separation-of-duties decision's disclosure (or fail-closed reason) into
+//     evidence, with no change to Record's wire schema.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -295,6 +305,49 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 					"// canonicalOutPath returns the single absolute, alias-resolved destination\n"},
 			{From: "// store.HasDotDotElement rejects such spellings earlier still, so this function's\n",
 				To: "// hasDotDotElement rejects such spellings earlier still, so this function's\n"},
+		},
+	},
+	"internal/artifact/evidence.go": {
+		Historical: "a7cb95eed8a7bca420dce3035e72a4fc80f5bee2f598c59f069bc8e9be318201",
+		Successor:  "7b9865491b4b62dd545715a9eb20b5fce2c6cd3798595903abb9f94b76e25a2f",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tJobName  string           `json:\"job_name,omitempty\"`\n"},
+			{From: "//\n" +
+				"// JobName is an SI-229 addition (ledger SI-229, plan R-CM-3): SI-71's\n" +
+				"// authoritative-source match compares an obligation's CI-job reference\n" +
+				"// against a record's provenance, but Job carries I-25's ordering-id meaning\n" +
+				"// (GitHub's GITHUB_RUN_ATTEMPT, GitLab's monotonic CI_JOB_ID) — one field\n" +
+				"// cannot carry both a retry ordinal and a stable declared job name. JobName\n" +
+				"// is the CI job's declared name (GitHub GITHUB_JOB, GitLab CI_JOB_NAME),\n" +
+				"// optional and never inferred from a display label; 03 §Evidence records:\n" +
+				"// \"provenance.job_name is optional: the CI job's declared name.\n" +
+				"// Authoritative-source matching compares an obligation's CI-job reference\n" +
+				"// with job_name; job stays the ordering id.\" JobName never joins the fold's\n" +
+				"// (pipeline id, job id) ordering (internal/evidence's groupKey/\n" +
+				"// laterProvenance/recordSortKey stay Job-only) — amends SI-71's matching\n" +
+				"// operand only, not I-25's ordering.\n"},
+		},
+	},
+	"internal/countersign/resolve.go": {
+		Historical: "1a6d12b43a7b965bd0f731752954206fa2094d22b0e2c98d5632e833b2b2e94b",
+		Successor:  "52d336fce4c7c4acfb24121f820411db3e45bb809c2feffcf30a91d5bdfc971e",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tResolver          PrincipalResolver\n" +
+				"\t// SeparationDisclosures carries stable, pre-formatted disclosure\n" +
+				"\t// witnesses the caller's kernel-consulted separation decision produced\n" +
+				"\t// (SI-227, as narrowed) — e.g. a solo profile's role-collapse\n" +
+				"\t// disclosure — into the canonical record's top-level witnesses, and so\n" +
+				"\t// into its digest and every consumer that reads witnesses. Resolve\n" +
+				"\t// never interprets these strings; this is a pure passthrough seam, not\n" +
+				"\t// a schema change to Record itself.\n" +
+				"\tSeparationDisclosures []string\n" +
+				"}\n",
+				To: "\tResolver          PrincipalResolver\n}\n"},
+			{From: "\twitnesses := make([]string, 0, 4+len(authorFacts)+len(request.SeparationDisclosures)+len(evaluations)*6)\n" +
+				"\twitnesses = append(witnesses, authorFacts...)\n" +
+				"\twitnesses = append(witnesses, request.SeparationDisclosures...)\n",
+				To: "\twitnesses := make([]string, 0, 4+len(authorFacts)+len(evaluations)*6)\n" +
+					"\twitnesses = append(witnesses, authorFacts...)\n"},
 		},
 	},
 }

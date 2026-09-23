@@ -256,8 +256,29 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}
-	return runAlignForSpec(ctx, root, spec, covers, freeze, deps, stdout, stderr)
+	return runAlignForSpecAs(ctx, root, spec, covers, freeze, alignCallerBare, deps, stdout, stderr)
 }
+
+// alignCaller names which verb reached the shared generate-freeze-write fork,
+// because SI-231's one-behind recognition belongs to one of them only (the
+// ledger row as narrowed at L3b review m-2, ruling R-W1-9): the closure
+// ritual — close's freeze and `verdi close --prepare`'s refresh — and never
+// bare `verdi align`, whose merge-gate role (03 §Gates: gate-then-commit)
+// keeps its behavior at base 3e844905. The caller only chooses whether the
+// fork consults evaluateOneBehindReport; what that predicate accepts is still
+// decided there alone.
+type alignCaller int
+
+const (
+	// alignCallerBare is `verdi align` itself (runAlign), with or without
+	// --freeze. The zero value, so a caller that names no role keeps align's
+	// own pre-SI-231 behavior.
+	alignCallerBare alignCaller = iota
+	// alignCallerClosure is the closure ritual, which reaches the fork only
+	// through runAlignForSpec: close's and a feature close's freeze-align
+	// (freeze=true) and --prepare's refresh (freeze=false).
+	alignCallerClosure
+)
 
 // alignExpiryResumeHint is align's own bounded-wait resume guidance and the
 // zero-value default of alignDeps.ResumeHint: re-running align — optionally
@@ -274,9 +295,19 @@ const alignExpiryResumeHint = "Re-run align to start a fresh judge exchange (opt
 // story or spec-ref argument, never a branch name — can run the exact same
 // generate-freeze-write logic runAlign uses for the frozen closure report,
 // rather than duplicating it (CLAUDE.md: no copy-paste across call sites).
-// runAlign itself is unchanged in behavior: it still resolves branch ->
-// spec -> covers first, then delegates here.
+//
+// Its callers are exactly the closure ritual's — close's and a feature
+// close's freeze-align, and --prepare's refresh — so it enters the shared
+// fork as alignCallerClosure, the one role SI-231's one-behind recognition
+// applies to (R-W1-9). runAlign resolves branch -> spec -> covers first and
+// enters the same fork as alignCallerBare instead.
 func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontmatter, covers string, freeze bool, deps alignDeps, stdout, stderr io.Writer) int {
+	return runAlignForSpecAs(ctx, root, spec, covers, freeze, alignCallerClosure, deps, stdout, stderr)
+}
+
+// runAlignForSpecAs is the shared fork both entry points reach, caller naming
+// which verb entered it (see alignCaller).
+func runAlignForSpecAs(ctx context.Context, root string, spec *artifact.SpecFrontmatter, covers string, freeze bool, caller alignCaller, deps alignDeps, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "align: internal error: resolved spec has an invalid id:", err)
@@ -357,8 +388,67 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 			return 0
 		}
 
+		// SI-231 (ledger; owner D4, 2026-09-22; R-W1-6, narrowed by R-W1-9:
+		// recognized once, HERE, in this shared fork, for the closure ritual
+		// only — close's freeze here and --prepare's freeze=false branch below
+		// both treat a committed one-behind report as current, while bare
+		// `verdi align --freeze` never does): the branch above requires a
+		// LIVING, uncommitted report, which a CI checkout can never have — it
+		// holds only committed state. evaluateOneBehindReport (onebehind.go) is
+		// the ONE predicate closuregate.go's condition 4 also decides from, so
+		// what close's own gate accepted can never diverge from what this
+		// freeze actually does. Only reached when the living-report branch
+		// above already declined, so the ordinary local-operator run never
+		// pays for the extra git reads this needs.
+		if caller == alignCallerClosure {
+			oneBehind, err := evaluateOneBehindReport(ctx, root, specRef.Name, covers)
+			if err != nil {
+				fmt.Fprintln(stderr, "align:", err)
+				return 2
+			}
+			if oneBehind.Accepted {
+				// Freeze the COMMITTED report in place, keeping its own `covers`
+				// (HEAD's parent, the content-final head it actually audited) —
+				// never overwritten to HEAD, which merely carries the report
+				// commit itself and changes no code. Never regenerated, never
+				// judged, for the identical D6-21 reason the branch above avoids
+				// it: the judge is non-reproducible and a fresh run's content-hash
+				// identities cannot be matched back to these dispositions.
+				report, err := align.FreezeInPlace(oneBehind.Report, string(oneBehind.Body), frozenAt)
+				if err != nil {
+					fmt.Fprintln(stderr, "align:", err)
+					return 2
+				}
+				if err := atomicfile.Write(reportPath, report.Markdown, 0o644); err != nil {
+					fmt.Fprintln(stderr, "align:", err)
+					return 2
+				}
+				fmt.Fprintf(stdout, "align: froze %s in place under SI-231 (a committed one-behind report at %s covers %s, %d findings, dispositions preserved)\n", reportPath, covers, report.Frontmatter.Covers, len(report.Frontmatter.Findings))
+				fmt.Fprintf(stdout, "align: frozen at %s\n", report.Frontmatter.Frozen.At)
+				return 0
+			}
+		}
+
 		in.Freeze = true
 		in.FrozenAt = frozenAt
+	} else if caller == alignCallerClosure {
+		// SI-231, freeze=false half (--prepare only, R-W1-9): the committed
+		// one-behind report is already final, every finding is dispositioned,
+		// and the working-tree file holds exactly its bytes — regenerating
+		// here would re-run the non-reproducible judge and silently drop every
+		// disposition, exactly the trap the freeze=true branch above avoids.
+		// Leave the file untouched and say so, rather than falling through to
+		// the unconditional regenerate below (today's freeze=false behavior
+		// for every other state, and for bare `verdi align` always).
+		oneBehind, err := evaluateOneBehindReport(ctx, root, specRef.Name, covers)
+		if err != nil {
+			fmt.Fprintln(stderr, "align:", err)
+			return 2
+		}
+		if oneBehind.Accepted {
+			fmt.Fprintf(stdout, "align: %s is current under SI-231 (a committed one-behind report at %s covers %s, %d findings, all dispositioned); left byte-identical, no judge run\n", reportPath, covers, oneBehind.Report.Covers, len(oneBehind.Report.Findings))
+			return 0
+		}
 	}
 
 	// Cross-level re-recording awareness (ledger L-N14 companion): a

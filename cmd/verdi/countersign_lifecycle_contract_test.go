@@ -246,7 +246,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		jiraServer, publications := newCountersignJiraServer(t)
 		defer jiraServer.Close()
 		head := installCountersignContractAuthority(t, repo.Dir, true, true, jiraServer.URL)
-		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "2", Job: "1", Commit: head}
+		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "2", Job: "1", JobName: "1", Commit: head}
 		if err := produceSelfHostedEvidence(repo.Dir, head, prov); err != nil {
 			t.Fatalf("produce countersign story evidence: %v", err)
 		}
@@ -732,7 +732,7 @@ func readyCountersignCloseRepo(t *testing.T, class string) (string, string) {
 		repo := readyCloseFixtureRepo(t)
 		prepareCountersignStoryContext(t, repo.Dir)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
-		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "2", Job: "1", Commit: head}
+		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "2", Job: "1", JobName: "1", Commit: head}
 		if err := produceSelfHostedEvidence(repo.Dir, head, prov); err != nil {
 			t.Fatalf("produce countersign story evidence: %v", err)
 		}

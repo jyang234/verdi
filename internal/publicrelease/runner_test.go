@@ -101,6 +101,13 @@ func TestPublishOnlyTypedReportsAndExistingEvidenceCarrier(t *testing.T) {
 		if r.Provenance.Source != artifact.SourceLocal {
 			t.Fatal("local promoted to CI")
 		}
+		// SI-229: JobName carries the same constant job name Job already
+		// does, so the pre-existing public-execution-contract-release
+		// authoritative_source match (Job) keeps matching once obligation
+		// matching switches to comparing JobName.
+		if r.Provenance.JobName != Job {
+			t.Fatalf("Provenance.JobName = %q, want %q (Job constant)", r.Provenance.JobName, Job)
+		}
 	}
 }
 func TestSourceChecksActualPairSmoke(t *testing.T) {

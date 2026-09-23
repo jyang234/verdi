@@ -7,6 +7,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/forge"
@@ -22,9 +23,10 @@ type Forge struct {
 	openMRs   map[string][]forge.OpenMR    // targetBranch -> open MRs
 	files     map[string]map[string][]byte // branch -> path -> content
 
-	comments   map[string][]forge.Comment          // mrID -> comment feed
-	threads    map[string][]forge.ThreadResolution // mrID -> thread resolutions
-	approvals  map[string]forge.ApprovalSnapshot   // changeID -> current facts
+	comments   map[string][]forge.Comment              // mrID -> comment feed
+	threads    map[string][]forge.ThreadResolution     // mrID -> thread resolutions
+	approvals  map[string]forge.ApprovalSnapshot       // changeID -> current facts
+	envReviews map[string]forge.EnvironmentReviewFacts // query key -> seeded facts
 	nextCommID int
 }
 
@@ -39,6 +41,7 @@ func New() *Forge {
 		comments:   make(map[string][]forge.Comment),
 		threads:    make(map[string][]forge.ThreadResolution),
 		approvals:  make(map[string]forge.ApprovalSnapshot),
+		envReviews: make(map[string]forge.EnvironmentReviewFacts),
 		nextCommID: 1,
 	}
 }
@@ -72,6 +75,62 @@ func cloneApprovalSnapshot(snapshot forge.ApprovalSnapshot) forge.ApprovalSnapsh
 		}
 	}
 	return snapshot
+}
+
+// SeedEnvironmentReviewFacts makes EnvironmentReview(query) return facts for
+// the exact query tuple (run id, run attempt, environment name, gated job
+// name) — mirroring SeedApprovalSnapshot's seed-or-error pattern (v2 ac-4).
+// It refuses facts that break the facts contract, and supported facts that
+// answer a different run, attempt, environment, or gated job than query, so
+// the fake can never hand a consumer an observation a real adapter could not
+// produce (L2b review m-3).
+func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) error {
+	if err := facts.Validate(); err != nil {
+		return fmt.Errorf("fake: seed environment review facts: %w", err)
+	}
+	if facts.Supported && !environmentReviewFactsAnswer(query, facts) {
+		return fmt.Errorf("fake: seeded environment review facts (run %q attempt %d environment %q gated job %q) do not answer query run %q attempt %d environment %q gated job %q",
+			facts.RunID, facts.RunAttempt, facts.EnvironmentName, facts.GatedJobName, query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.envReviews[environmentReviewKey(query)] = cloneEnvironmentReviewFacts(facts)
+	return nil
+}
+
+// environmentReviewFactsAnswer reports whether supported facts observe the
+// run, attempt, environment, and gated job query names (GitHub environment
+// names are case-insensitive).
+func environmentReviewFactsAnswer(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) bool {
+	return facts.RunID == query.RunID && facts.RunAttempt == query.RunAttempt &&
+		strings.EqualFold(facts.EnvironmentName, query.EnvironmentName) && facts.GatedJobName == query.GatedJobName
+}
+
+// EnvironmentReview implements forge.Forge.
+func (f *Forge) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.EnvironmentReviewFacts{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	facts, ok := f.envReviews[environmentReviewKey(query)]
+	if !ok {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("fake: no environment review facts seeded for run %q attempt %d environment %q gated job %q", query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
+	}
+	return cloneEnvironmentReviewFacts(facts), nil
+}
+
+func environmentReviewKey(q forge.EnvironmentReviewQuery) string {
+	return fmt.Sprintf("%s\x00%d\x00%s\x00%s", q.RunID, q.RunAttempt, q.EnvironmentName, q.GatedJobName)
+}
+
+func cloneEnvironmentReviewFacts(facts forge.EnvironmentReviewFacts) forge.EnvironmentReviewFacts {
+	facts.Reviews = append([]forge.EnvironmentReviewRow(nil), facts.Reviews...)
+	if facts.EnvironmentPreventSelfReview != nil {
+		v := *facts.EnvironmentPreventSelfReview
+		facts.EnvironmentPreventSelfReview = &v
+	}
+	return facts
 }
 
 func bundleKey(ref, commit string) string { return ref + "@" + commit }

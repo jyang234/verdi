@@ -94,14 +94,14 @@ func runProduceRuntime(ctx context.Context, root, commit, storyArg, acID, witnes
 		return 2
 	}
 
-	var ciInfo struct{ Pipeline, Job string }
+	var ciInfo struct{ Pipeline, Job, JobName string }
 	if deps.Forge != nil {
 		info, err := deps.Forge.CIContext(ctx)
 		if err != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", err)
 			return 2
 		}
-		ciInfo.Pipeline, ciInfo.Job = info.Pipeline, info.Job
+		ciInfo.Pipeline, ciInfo.Job, ciInfo.JobName = info.Pipeline, info.Job, info.JobName
 	}
 
 	rec, err := runtimeprobe.Emit(runtimeprobe.ProbeInput{
@@ -112,6 +112,7 @@ func runProduceRuntime(ctx context.Context, root, commit, storyArg, acID, witnes
 		Commit:     commit,
 		Pipeline:   ciInfo.Pipeline,
 		Job:        ciInfo.Job,
+		JobName:    ciInfo.JobName,
 		InCI:       inCI,
 		ForceLocal: forceLocal,
 	})

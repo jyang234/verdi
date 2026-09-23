@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
@@ -81,6 +84,74 @@ func TestSlotWallObligationQualityDecodes(t *testing.T) {
 				obligation.Quality.Producer.Kind != tt.producerKind ||
 				obligation.Quality.AuthoritativeSource.Kind != tt.sourceKind {
 				t.Errorf("quality = %+v, want elaborated %s/%s declaration", obligation.Quality, tt.producerKind, tt.sourceKind)
+			}
+		})
+	}
+}
+
+// TestSlotWallStaticRecordReadsFreshnessStale pins the harness's static slot
+// to the reason e2e/tests/42-matrix-preview.spec.ts asserts
+// (`static:pending(obligation-quality:elaborated/freshness-stale)`): the
+// provisioned CI record matches the obligation's producer and its declared
+// authoritative source (SI-229: `job_name`, never the `job` ordering id), so
+// only the serving checkout moving past the record's commit keeps it pending.
+// It drives the production matcher on the harness's own obligation and
+// verdicts text, so a fixture that stops carrying `job_name` reads
+// source-ref-missing here, before Playwright ever runs.
+func TestSlotWallStaticRecordReadsFreshnessStale(t *testing.T) {
+	const (
+		recordCommit = "1111111111111111111111111111111111111111"
+		laterCommit  = "2222222222222222222222222222222222222222"
+	)
+	fmBytes, _, err := artifact.SplitFrontmatter([]byte(slotWallObligation(artifact.EvidenceStatic)))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	obligation, err := artifact.DecodeObligation(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeObligation: %v", err)
+	}
+	tests := []struct {
+		name             string
+		evaluationCommit string
+		edit             func(*artifact.Evidence)
+		wantState        evidence.ObligationMatchState
+		wantReason       evidence.ObligationMatchReason
+	}{
+		{"checkout moved past the record", laterCommit, nil,
+			evidence.ObligationUnproven, evidence.ObligationReasonFreshnessStale},
+		{"checkout at the record's commit", recordCommit, nil,
+			evidence.ObligationMatched, ""},
+		{"job ordering id alone never names the source", laterCommit,
+			func(r *artifact.Evidence) { r.Provenance.JobName = "" },
+			evidence.ObligationUnproven, evidence.ObligationReasonSourceRefMissing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The fold's own reader path: a JSON array whose every element
+			// strict-decodes through artifact.DecodeEvidence.
+			var raw []json.RawMessage
+			if err := json.Unmarshal([]byte(slotWallVerdicts(recordCommit)), &raw); err != nil {
+				t.Fatalf("decoding slotWallVerdicts: %v", err)
+			}
+			if len(raw) != 1 {
+				t.Fatalf("slotWallVerdicts carries %d records, want exactly the static one", len(raw))
+			}
+			record, err := artifact.DecodeEvidence(raw[0])
+			if err != nil {
+				t.Fatalf("DecodeEvidence: %v", err)
+			}
+			if tt.edit != nil {
+				tt.edit(record)
+			}
+			got, err := evidence.MatchObligation(context.Background(),
+				evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, Quality: obligation.Quality},
+				evidence.ObligationAssessmentInput{Kind: artifact.EvidenceStatic, Record: record, EvaluationCommit: tt.evaluationCommit})
+			if err != nil {
+				t.Fatalf("MatchObligation: %v", err)
+			}
+			if got.MatchState != tt.wantState || got.Reason != tt.wantReason {
+				t.Errorf("static slot = %s/%s, want %s/%s", got.MatchState, got.Reason, tt.wantState, tt.wantReason)
 			}
 		})
 	}

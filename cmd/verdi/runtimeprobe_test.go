@@ -73,9 +73,15 @@ func readRuntimeRecords(t *testing.T, root, specRef, commit string) []artifact.E
 	return recs
 }
 
+// fakeRuntimeDeps' CIContext reports job_name "7" — the same value as Job,
+// matching every close_*_test.go runtime-probe fixture's
+// fixtureElaboratedObligationMD(..., "7", ...) authoritative_source ref
+// (this helper is shared package-wide, not private to this file). A test
+// that must tell job from job_name apart overrides the CI context with
+// distinct values (TestRunProduceRuntime_Happy).
 func fakeRuntimeDeps() (*fake.Forge, syncDeps, *bytes.Buffer, *bytes.Buffer) {
 	f := fake.New()
-	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7"})
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "7"})
 	var stdout, stderr bytes.Buffer
 	return f, syncDeps{Forge: f, Stdout: &stdout, Stderr: &stderr}, &stdout, &stderr
 }
@@ -84,12 +90,14 @@ func fakeRuntimeDeps() (*fake.Forge, syncDeps, *bytes.Buffer, *bytes.Buffer) {
 // runtime-evidence ac-1, dc-1): given --story/--ac/--verdict/--witness
 // inside a genuine CI environment, it writes exactly one well-formed,
 // source: ci runtime record into derived/<spec>/<commit>/runtime.json,
-// pulling pipeline/job from the forge's CIContext like every other
-// producer.
+// pulling pipeline/job/job_name from the forge's CIContext like every
+// other producer (SI-229). Job and JobName differ here, so a producer that
+// stamped the job ordering id into job_name (or the reverse) fails.
 func TestRunProduceRuntime_Happy(t *testing.T) {
 	t.Setenv("CI", "true")
 	root := buildRuntimeProbeStore(t)
-	_, deps, stdout, stderr := fakeRuntimeDeps()
+	f, deps, stdout, stderr := fakeRuntimeDeps()
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7", JobName: "runtime-probe"})
 
 	code := runProduceRuntime(context.Background(), root, testCommit, "spec/runtime-fixture", "ac-2", "GET /healthz -> 200", artifact.VerdictPass, false, deps)
 	if code != 0 {
@@ -118,6 +126,9 @@ func TestRunProduceRuntime_Happy(t *testing.T) {
 	}
 	if r.Provenance.Pipeline != "913" || r.Provenance.Job != "7" {
 		t.Errorf("Provenance = %+v, want pipeline=913 job=7", r.Provenance)
+	}
+	if r.Provenance.JobName != "runtime-probe" {
+		t.Errorf("Provenance.JobName = %q, want %q (SI-229)", r.Provenance.JobName, "runtime-probe")
 	}
 	if !strings.Contains(stdout.String(), "spec/runtime-fixture") || !strings.Contains(stdout.String(), "ac-2") {
 		t.Errorf("stdout = %q, want it to name the spec and AC", stdout.String())

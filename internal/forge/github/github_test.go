@@ -321,6 +321,7 @@ func TestGitHub_CIContext(t *testing.T) {
 		"GITHUB_BASE_REF":             "main",
 		"GITHUB_RUN_ID":               "913",
 		"GITHUB_RUN_ATTEMPT":          "1",
+		"GITHUB_JOB":                  "verify",
 	}
 	a := New(Config{Owner: "acme", Repo: "svcfix", Getenv: func(k string) string { return env[k] }})
 
@@ -334,13 +335,16 @@ func TestGitHub_CIContext(t *testing.T) {
 	if info.Pipeline != "913" || info.Job != "1" {
 		t.Errorf("CIContext Pipeline/Job = %q/%q, want 913/1", info.Pipeline, info.Job)
 	}
+	if info.JobName != "verify" {
+		t.Errorf("CIContext JobName = %q, want %q (from GITHUB_JOB, SI-229)", info.JobName, "verify")
+	}
 }
 
-// TestGitHub_CIContext_OutsideCI proves Pipeline/Job come back empty when
-// none of GitHub Actions' own env vars are set — the "not running in CI
-// at all" case --produce's CI-only guard (cmd/verdi/sync.go) relies on
-// indirectly through internal/lint.ReadCIEnv, kept independent here at
-// the port level.
+// TestGitHub_CIContext_OutsideCI proves Pipeline/Job/JobName come back
+// empty when none of GitHub Actions' own env vars are set — the "not
+// running in CI at all" case --produce's CI-only guard (cmd/verdi/sync.go)
+// relies on indirectly through internal/lint.ReadCIEnv, kept independent
+// here at the port level.
 func TestGitHub_CIContext_OutsideCI(t *testing.T) {
 	a := New(Config{Owner: "acme", Repo: "svcfix", Getenv: func(string) string { return "" }})
 
@@ -350,6 +354,9 @@ func TestGitHub_CIContext_OutsideCI(t *testing.T) {
 	}
 	if info.Pipeline != "" || info.Job != "" {
 		t.Errorf("CIContext outside CI = %+v, want empty Pipeline/Job", info)
+	}
+	if info.JobName != "" {
+		t.Errorf("CIContext outside CI JobName = %q, want empty (SI-229)", info.JobName)
 	}
 }
 

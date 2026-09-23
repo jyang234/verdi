@@ -84,10 +84,65 @@
 # not a regression: the fold's ancestor-based "current" rule (03 §The fold)
 # means an earlier code commit's evidence stays valid until a newer one
 # supersedes it. verdi-evidence.yml is retired; its content lives here now.
+#
+# R-CM-4 (docs/superpowers/plans/2026-09-22-closing-machinery.md; spec/
+# remote-and-ci DC-1): close/** branches must get evidence for their EXACT
+# checked-out commit with NO path filter (03 §Closure ritual's closure gate
+# folds only source: ci records, and a path-filtered miss on the commit
+# being closed would leave it nothing fresh to fold, whatever that commit
+# changed). GitHub Actions cannot express "path-filtered everywhere except
+# close/**, unfiltered on close/**" inside ONE push trigger — a single
+# `on: push:` block's `branches`/`paths` filters apply uniformly to every
+# ref they match. So this job's OWN push trigger below now EXCLUDES
+# close/** via `branches-ignore` (every other branch keeps today's exact
+# path-filtered behaviour, and `tags: ["**"]` keeps every tag push running
+# this workflow as before), and a second, tiny workflow —
+# close-evidence.yml, push-triggered on close/** ONLY, with no paths:
+# filter at all — calls this job through `workflow_call` (the
+# `workflow_call:` trigger added to `on:` below) instead of duplicating its
+# steps. Reusing the SAME job body this way, rather than copying steps into
+# a second file, keeps the self-hosted evidence producer
+# (cmd/verdi/selfevidence.go) bound to the SAME make-verify run that
+# produced it, in the SAME job — exactly the "never a second, independent
+# run" invariant three paragraphs up already established.
+#
+# What the carve-out prevents, and what it does not: one push to a close/**
+# branch runs this job once, through close-evidence.yml, never also through
+# this file's own push trigger. It does not make two "verdi-evidence"
+# bundles for one commit impossible. The same commit can also be pushed to
+# another branch or a tag where this workflow runs, and each such run
+# uploads its own bundle. internal/forge/github's FetchEvidenceBundle finds
+# runs by head_sha alone and takes the first successful run, in API order,
+# that carries the artifact (the ambiguity named two paragraphs up). Every
+# such bundle comes from this same job definition over the same commit and
+# is source: ci, so whichever one it takes carries the same authority; which
+# one it takes is not defined. In close.yml's sequence the commit being
+# closed is a new commit pushed only to its close branch, so it normally
+# has one bundle.
+#
+# GITHUB_JOB: the construction relies on GITHUB_JOB being `verify` inside
+# the called job. GITHUB_JOB feeds the evidence records'
+# `provenance.job_name` (SI-229, lane L1a), which the obligation match
+# compares with the CI job the obligations name, `verify` (plan R-CM-4).
+# For a reusable workflow GitHub documents that "the github context is
+# always associated with the caller workflow", which would make GITHUB_JOB
+# the caller's job id; community reports show the called job's id instead.
+# close-evidence.yml's caller job and this file's job are both `verify`, so
+# GITHUB_JOB is `verify` under either reading; internal/specalign pins both
+# ids.
 name: verify
 
 on:
   push:
+    branches-ignore:
+      - "close/**"
+    # Tag pushes keep running this workflow exactly as before the close/**
+    # carve-out. With no branch or tag filter every tag push ran it, since
+    # path filters are not evaluated for tag pushes; GitHub runs a workflow
+    # that defines only branches/branches-ignore for no tag at all, so "**"
+    # (every tag name) restores the old behaviour.
+    tags:
+      - "**"
     paths:
       - "**.go"
       - "go.mod"
@@ -98,6 +153,7 @@ on:
       - "testdata/**"
       - "scripts/**"
       - "verdi.bindings.yaml"
+  workflow_call: {}
 
 jobs:
   verify:

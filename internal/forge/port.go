@@ -73,6 +73,14 @@ type CIInfo struct {
 	// treats an absent Job as sorting before any present Job in the same
 	// Pipeline.
 	Job string
+	// JobName is the CI job's declared name (GitLab: CI_JOB_NAME; GitHub
+	// Actions: GITHUB_JOB, the constant job-key string from the workflow
+	// YAML), "" outside CI — SI-229 (plan R-CM-3): distinct from Job, which
+	// keeps I-25's retry-ordering meaning. `verdi sync --produce`'s CI-
+	// provenance producer stamps this into `provenance.job_name` (03
+	// §Evidence records), and SI-71's authoritative-source match compares
+	// an obligation's CI-job reference against it, never against Job.
+	JobName string
 }
 
 // Forge is the I-22 port.
@@ -80,6 +88,16 @@ type Forge interface {
 	// ListApprovals returns the forge's current provider facts for changeID,
 	// including the forge-reported candidate head and an explicit empty set.
 	ListApprovals(ctx context.Context, changeID string) (ApprovalSnapshot, error)
+	// EnvironmentReview returns the forge's environment-review facts for one
+	// workflow run attempt's gated job (v2 ac-4, dc-5): the solo owner's
+	// only forge-recorded approval act, since GitHub refuses an author's
+	// approval of their own change and dc-3 bars claims, comments, and
+	// reactions. NormalizeEnvironmentReview turns the result into shared
+	// Approval rows per v2's mapping. A forge with no environment-review
+	// concept of its own (GitLab) returns EnvironmentReviewFacts{Supported:
+	// false} with a disclosed UnsupportedReason and a nil error — never an
+	// error that would break a close.
+	EnvironmentReview(ctx context.Context, query EnvironmentReviewQuery) (EnvironmentReviewFacts, error)
 	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
 	// CI run's artifact for (ref, commit) through the forge's own API and
 	// returns its full derived tree (every bundle file keyed by path
