@@ -28,6 +28,12 @@ import (
 //     controller's fix-brief ruling on review finding I-1): artifact's
 //     evidence.go, whose EvidenceProvenance gained the optional job_name field
 //     and its doc paragraph, and nothing else.
+//   - SI-227, as narrowed (closing-machinery wave 1, lane L2a): countersign's
+//     resolve.go, whose Request gained the optional SeparationDisclosures
+//     []string passthrough field and the two lines that append it into the
+//     canonical record's witnesses — carrying the kernel-consulted
+//     separation-of-duties decision's disclosure (or fail-closed reason) into
+//     evidence, with no change to Record's wire schema.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -320,6 +326,28 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 				"// (pipeline id, job id) ordering (internal/evidence's groupKey/\n" +
 				"// laterProvenance/recordSortKey stay Job-only) — amends SI-71's matching\n" +
 				"// operand only, not I-25's ordering.\n"},
+		},
+	},
+	"internal/countersign/resolve.go": {
+		Historical: "1a6d12b43a7b965bd0f731752954206fa2094d22b0e2c98d5632e833b2b2e94b",
+		Successor:  "52d336fce4c7c4acfb24121f820411db3e45bb809c2feffcf30a91d5bdfc971e",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tResolver          PrincipalResolver\n" +
+				"\t// SeparationDisclosures carries stable, pre-formatted disclosure\n" +
+				"\t// witnesses the caller's kernel-consulted separation decision produced\n" +
+				"\t// (SI-227, as narrowed) — e.g. a solo profile's role-collapse\n" +
+				"\t// disclosure — into the canonical record's top-level witnesses, and so\n" +
+				"\t// into its digest and every consumer that reads witnesses. Resolve\n" +
+				"\t// never interprets these strings; this is a pure passthrough seam, not\n" +
+				"\t// a schema change to Record itself.\n" +
+				"\tSeparationDisclosures []string\n" +
+				"}\n",
+				To: "\tResolver          PrincipalResolver\n}\n"},
+			{From: "\twitnesses := make([]string, 0, 4+len(authorFacts)+len(request.SeparationDisclosures)+len(evaluations)*6)\n" +
+				"\twitnesses = append(witnesses, authorFacts...)\n" +
+				"\twitnesses = append(witnesses, request.SeparationDisclosures...)\n",
+				To: "\twitnesses := make([]string, 0, 4+len(authorFacts)+len(evaluations)*6)\n" +
+					"\twitnesses = append(witnesses, authorFacts...)\n"},
 		},
 	},
 }
