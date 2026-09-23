@@ -7,6 +7,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/forge"
@@ -79,10 +80,30 @@ func cloneApprovalSnapshot(snapshot forge.ApprovalSnapshot) forge.ApprovalSnapsh
 // SeedEnvironmentReviewFacts makes EnvironmentReview(query) return facts for
 // the exact query tuple (run id, run attempt, environment name, gated job
 // name) — mirroring SeedApprovalSnapshot's seed-or-error pattern (v2 ac-4).
-func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) {
+// It refuses facts that break the facts contract, and supported facts that
+// answer a different run, attempt, environment, or gated job than query, so
+// the fake can never hand a consumer an observation a real adapter could not
+// produce (L2b review m-3).
+func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) error {
+	if err := facts.Validate(); err != nil {
+		return fmt.Errorf("fake: seed environment review facts: %w", err)
+	}
+	if facts.Supported && !environmentReviewFactsAnswer(query, facts) {
+		return fmt.Errorf("fake: seeded environment review facts (run %q attempt %d environment %q) do not answer query run %q attempt %d environment %q gated job %q",
+			facts.RunID, facts.RunAttempt, facts.EnvironmentName, query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.envReviews[environmentReviewKey(query)] = cloneEnvironmentReviewFacts(facts)
+	return nil
+}
+
+// environmentReviewFactsAnswer reports whether supported facts observe the
+// run, attempt, and environment query names (GitHub environment names are
+// case-insensitive).
+func environmentReviewFactsAnswer(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) bool {
+	return facts.RunID == query.RunID && facts.RunAttempt == query.RunAttempt &&
+		strings.EqualFold(facts.EnvironmentName, query.EnvironmentName)
 }
 
 // EnvironmentReview implements forge.Forge.

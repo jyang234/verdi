@@ -281,29 +281,34 @@ func (f EnvironmentReviewFacts) providerFactsDigest() (string, error) {
 // honored only on the run's first attempt, dated by the gated job's
 // creation stamp — never its start — as a conservative lower bound.
 //
-// It is pure and deterministic: the same facts always produce the same
-// rows and disclosure witnesses, with no error return — every adverse or
-// unsupported input shape (an unsupported forge, a rerun, a rejected or
-// pending or absent review, a missing creation stamp) is a legitimate
-// zero-row-plus-disclosure outcome, never a defect. A malformed facts
-// value is rejected earlier, by NewEnvironmentReviewFacts's own Validate.
+// It first validates facts and returns an error for a value that breaks the
+// facts contract (a hand-built or corrupted value is an operational defect,
+// never a verdict), so a row is only ever derived from validated facts
+// (L2b review m-3). For valid facts it is pure and deterministic: the same
+// facts always produce the same rows and disclosure witnesses, and every
+// adverse or unsupported shape (an unsupported forge, a rerun, a rejected or
+// pending or absent review, a missing creation stamp) is a zero-row-plus-
+// disclosure outcome, never an error.
 //
 // The second return is the top-level disclosure witness list — reasons no
 // row was produced that a row's own ProviderWitnesses cannot carry, since
 // there is no row to attach them to. It is nil when every row that would
 // otherwise be suppressed simply never existed (no approved review at
 // all), which needs no witness of its own.
-func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []string) {
+func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []string, error) {
+	if err := facts.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("forge: normalize environment review: %w", err)
+	}
 	if !facts.Supported {
 		return []Approval{}, []string{fmt.Sprintf(
 			"environment-review:unsupported-forge: no rows produced: %s", facts.UnsupportedReason,
-		)}
+		)}, nil
 	}
 	if facts.RunAttempt != 1 {
 		return []Approval{}, []string{fmt.Sprintf(
 			"environment-review:rerun-not-honored: run_id=%s run_attempt=%d: reruns are not honored, a retry needs a new dispatch and a new review",
 			facts.RunID, facts.RunAttempt,
-		)}
+		)}, nil
 	}
 
 	var approved []EnvironmentReviewRow
@@ -313,7 +318,7 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 		}
 	}
 	if len(approved) == 0 {
-		return []Approval{}, nil
+		return []Approval{}, nil, nil
 	}
 
 	if facts.GatedJobCreatedAt == "" {
@@ -324,7 +329,7 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 		return []Approval{}, []string{fmt.Sprintf(
 			"environment-review:creation-stamp-unavailable: run_id=%s run_attempt=%d: %s: no row produced (approval age would be unproven, and the shared countersign types cannot express unproven without changing internal/countersign, so this fails closed)",
 			facts.RunID, facts.RunAttempt, reason,
-		)}
+		)}, nil
 	}
 
 	rows := make([]Approval, 0, len(approved))
@@ -364,5 +369,5 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ApprovalID < rows[j].ApprovalID })
-	return rows, nil
+	return rows, nil, nil
 }

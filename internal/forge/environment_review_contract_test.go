@@ -73,6 +73,17 @@ func environmentReviewServer(t *testing.T, runBody, jobsBody, envBody, historyBo
 	return a, server.Close
 }
 
+// normalizeEnvReview normalizes validated facts, failing the test on an
+// operational error.
+func normalizeEnvReview(t *testing.T, facts forge.EnvironmentReviewFacts) ([]forge.Approval, []string) {
+	t.Helper()
+	rows, disclosures, err := forge.NormalizeEnvironmentReview(facts)
+	if err != nil {
+		t.Fatalf("NormalizeEnvironmentReview: %v", err)
+	}
+	return rows, disclosures
+}
+
 func hasWitness(witnesses []forge.ProviderWitness, name string) bool {
 	for _, w := range witnesses {
 		if w.Name == name {
@@ -120,6 +131,30 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 			if string(state) != raw {
 				t.Fatalf("decoded state = %q, want %q", state, raw)
 			}
+		}
+	})
+
+	t.Run("normalize refuses facts that break the facts contract (m-3)", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			facts forge.EnvironmentReviewFacts
+		}{
+			{"hand-built value never validated", forge.EnvironmentReviewFacts{
+				Supported: true, RunAttempt: 1, GatedJobFound: true, GatedJobCreatedAt: "not-a-time",
+				Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved}},
+			}},
+			{"zero value", forge.EnvironmentReviewFacts{}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rows, disclosures, err := forge.NormalizeEnvironmentReview(tt.facts)
+				if err == nil {
+					t.Fatalf("NormalizeEnvironmentReview(%s) = rows %+v disclosures %v, want an error", tt.name, rows, disclosures)
+				}
+				if len(rows) != 0 {
+					t.Fatalf("NormalizeEnvironmentReview(%s) produced rows %+v alongside its error", tt.name, rows)
+				}
+			})
 		}
 	})
 
@@ -232,7 +267,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if len(rows) != 0 {
 			t.Fatalf("rows = %+v, want none", rows)
 		}
@@ -249,7 +284,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if len(rows) != 0 {
 			t.Fatalf("rows = %+v, want none for a rerun even with an approved review present", rows)
 		}
@@ -277,7 +312,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 				if err != nil {
 					t.Fatalf("fixture: %v", err)
 				}
-				rows, _ := forge.NormalizeEnvironmentReview(facts)
+				rows, _ := normalizeEnvReview(t, facts)
 				if len(rows) != 0 {
 					t.Fatalf("rows = %+v, want none", rows)
 				}
@@ -303,7 +338,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 				if err != nil {
 					t.Fatalf("fixture: %v", err)
 				}
-				rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+				rows, disclosures := normalizeEnvReview(t, facts)
 				if len(rows) != 0 {
 					t.Fatalf("rows = %+v, want none (fail closed)", rows)
 				}
@@ -327,7 +362,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 			t.Fatalf("fixture: %v", err)
 		}
 
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if disclosures != nil {
 			t.Fatalf("disclosures = %v, want nil for a clean approved row", disclosures)
 		}
@@ -388,7 +423,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		rows, _ := forge.NormalizeEnvironmentReview(facts)
+		rows, _ := normalizeEnvReview(t, facts)
 		if len(rows) != 1 {
 			t.Fatalf("rows = %+v, want exactly 1", rows)
 		}
@@ -406,8 +441,8 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fixture: %v", err)
 		}
-		first, _ := forge.NormalizeEnvironmentReview(facts)
-		second, _ := forge.NormalizeEnvironmentReview(facts)
+		first, _ := normalizeEnvReview(t, facts)
+		second, _ := normalizeEnvReview(t, facts)
 		if len(first) != 2 || len(second) != 2 {
 			t.Fatalf("rows = %+v / %+v, want 2 each", first, second)
 		}
@@ -456,7 +491,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 			t.Fatalf("facts lack observation identity: %+v", facts)
 		}
 
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if disclosures != nil {
 			t.Fatalf("disclosures = %v, want nil", disclosures)
 		}
@@ -510,7 +545,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if len(facts.Reviews) != 2 {
 			t.Fatalf("reviews (drained across 2 pages) = %+v", facts.Reviews)
 		}
-		rows, _ := forge.NormalizeEnvironmentReview(facts)
+		rows, _ := normalizeEnvReview(t, facts)
 		if len(rows) != 1 {
 			t.Fatalf("rows = %+v, want exactly the one approved reviewer", rows)
 		}
@@ -537,7 +572,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 				if err != nil {
 					t.Fatalf("EnvironmentReview: %v", err)
 				}
-				rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+				rows, disclosures := normalizeEnvReview(t, facts)
 				if len(rows) != 0 {
 					t.Fatalf("rows = %+v, want none", rows)
 				}
@@ -577,7 +612,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if facts.RunAttempt != 2 || len(facts.Reviews) != 1 {
 			t.Fatalf("facts = %+v, want attempt 2 with the approval fact still present", facts)
 		}
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if len(rows) != 0 {
 			t.Fatalf("rows = %+v, want none for a rerun", rows)
 		}
@@ -759,7 +794,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if facts.UnsupportedReason == "" {
 			t.Fatal("UnsupportedReason is empty, want a disclosed reason")
 		}
-		rows, disclosures := forge.NormalizeEnvironmentReview(facts)
+		rows, disclosures := normalizeEnvReview(t, facts)
 		if len(rows) != 0 {
 			t.Fatalf("rows = %+v, want none", rows)
 		}
@@ -781,7 +816,9 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		}
 		f := fake.New()
 		query := envReviewQuery()
-		f.SeedEnvironmentReviewFacts(query, seed)
+		if err := f.SeedEnvironmentReviewFacts(query, seed); err != nil {
+			t.Fatalf("SeedEnvironmentReviewFacts: %v", err)
+		}
 
 		first, err := f.EnvironmentReview(context.Background(), query)
 		if err != nil {
@@ -794,6 +831,44 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		}
 		if second.Reviews[0].ProviderState != forge.EnvironmentReviewApproved {
 			t.Fatalf("fake returned aliased facts: %+v", second.Reviews[0])
+		}
+	})
+
+	t.Run("fake refuses seeds a real adapter could not produce (m-3)", func(t *testing.T) {
+		valid, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
+			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
+			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
+			Reviews: []forge.EnvironmentReviewRow{},
+		}, fixedClock())
+		if err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+		otherRun := envReviewQuery()
+		otherRun.RunID = "556"
+		otherAttempt := envReviewQuery()
+		otherAttempt.RunAttempt = 2
+		otherEnvironment := envReviewQuery()
+		otherEnvironment.EnvironmentName = "staging"
+		tests := []struct {
+			name  string
+			query forge.EnvironmentReviewQuery
+			facts forge.EnvironmentReviewFacts
+		}{
+			{"unvalidated facts", envReviewQuery(), forge.EnvironmentReviewFacts{Supported: true, RunAttempt: 1}},
+			{"facts for another run", otherRun, valid},
+			{"facts for another attempt", otherAttempt, valid},
+			{"facts for another environment", otherEnvironment, valid},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				f := fake.New()
+				if err := f.SeedEnvironmentReviewFacts(tt.query, tt.facts); err == nil {
+					t.Fatalf("SeedEnvironmentReviewFacts(%s): want error, got nil", tt.name)
+				}
+				if got, err := f.EnvironmentReview(context.Background(), tt.query); err == nil {
+					t.Fatalf("EnvironmentReview after a refused seed returned %+v, want the unseeded error", got)
+				}
+			})
 		}
 	})
 
