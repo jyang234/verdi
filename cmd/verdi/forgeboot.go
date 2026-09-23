@@ -189,12 +189,17 @@ func buildForgeWithIdentifier(kind, remoteURL string, remoteErr error, requireId
 }
 
 // githubConfig is the GitHub adapter's configuration for (owner, repo),
-// with its token read from the CI-provided environment.
+// with its token and API root read from the CI-provided environment. The
+// API root is GITHUB_API_URL, the variable GitHub Actions sets on every
+// runner to the API the run belongs to (symmetric with GitLab's
+// CI_API_V4_URL above); unset, the adapter keeps its own default, so a
+// local run and a run on github.com address the same API as before.
 func githubConfig(owner, repo string) forgegithub.Config {
 	return forgegithub.Config{
-		Owner: owner,
-		Repo:  repo,
-		Token: os.Getenv("GITHUB_TOKEN"),
+		BaseURL: os.Getenv("GITHUB_API_URL"),
+		Owner:   owner,
+		Repo:    repo,
+		Token:   os.Getenv("GITHUB_TOKEN"),
 	}
 }
 
