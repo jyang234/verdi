@@ -347,7 +347,23 @@ func (f *fakeNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkg, ru
 	return f.output[pkg], nil
 }
 
-func testGoTestJSON(pkg string, results map[string]testOutcome) []byte {
+// fakeModulePath is the module path writeGoMod declares for a unit-test
+// store root; fake streams name packages under it exactly as test2json does
+// (the full import path, never the relative package path).
+const fakeModulePath = "example.com/m"
+
+// writeGoMod makes root a Go module root declaring fakeModulePath.
+func writeGoMod(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module "+fakeModulePath+"\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testGoTestJSON renders a canned stream for relPkg, naming it by its full
+// import path under fakeModulePath as the real toolchain does.
+func testGoTestJSON(relPkg string, results map[string]testOutcome) []byte {
+	pkg := fakeModulePath + "/" + relPkg
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `{"Action":"start","Package":%q}`+"\n", pkg)
 	names := make([]string, 0, len(results))
@@ -375,6 +391,7 @@ func testGoTestJSON(pkg string, results map[string]testOutcome) []byte {
 // own kind/AC id, the exact producer ref, and the passed-in provenance.
 func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
 	root := t.TempDir()
+	writeGoMod(t, root)
 
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
 		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
@@ -455,6 +472,7 @@ func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
 // disclosure naming the obligation.
 func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
 	root := t.TempDir()
+	writeGoMod(t, root)
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
 		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
 			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestGone",
@@ -487,6 +505,7 @@ func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
 // swallowed as a disclosure.
 func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
 	root := t.TempDir()
+	writeGoMod(t, root)
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
 		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
 			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestA",
@@ -514,6 +533,7 @@ func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
 // hidden).
 func TestProduceGoTestEvidence_EndToEndMatchesObligation(t *testing.T) {
 	root := t.TempDir()
+	writeGoMod(t, root)
 	const commit = "ffffffffffffffffffffffffffffffffffffffff"
 
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
@@ -576,5 +596,86 @@ func TestGoTestRunPattern(t *testing.T) {
 	got := goTestRunPattern([]string{"TestB", "TestA"})
 	if got != "^(TestA|TestB)$" {
 		t.Errorf("goTestRunPattern = %q, want ^(TestA|TestB)$", got)
+	}
+}
+
+// TestGoModulePath proves the module path is read strictly from root/go.mod
+// (the Go Modules Reference module directive, single-line, quoted, or block
+// form), that a root with no go.mod is reported as not a module root with no
+// error, and that a go.mod declaring zero, two, or a malformed module path is
+// an error rather than a guess.
+func TestGoModulePath(t *testing.T) {
+	cases := []struct {
+		name        string
+		gomod       *string
+		wantPath    string
+		wantPresent bool
+		wantErr     bool
+	}{
+		{"single line", goModText("module example.com/m\n\ngo 1.25\n"), "example.com/m", true, false},
+		{"trailing comment", goModText("module example.com/m // the module\n"), "example.com/m", true, false},
+		{"interpreted quote", goModText("module \"example.com/q\"\n"), "example.com/q", true, false},
+		{"raw quote", goModText("module `example.com/r`\n"), "example.com/r", true, false},
+		{"block form", goModText("module (\n\texample.com/b\n)\n"), "example.com/b", true, false},
+		{"after a comment line", goModText("// module example.com/nope\nmodule example.com/yes\n"), "example.com/yes", true, false},
+		{"no go.mod", nil, "", false, false},
+		{"no module directive", goModText("go 1.25\n"), "", true, true},
+		{"two module directives", goModText("module a.com/x\nmodule b.com/y\n"), "", true, true},
+		{"extra token", goModText("module a.com/x b.com/y\n"), "", true, true},
+		{"bare module keyword", goModText("module\n"), "", true, true},
+		{"unterminated block", goModText("module (\n\ta.com/x\n"), "", true, true},
+		{"malformed quote", goModText("module \"a.com/x\n"), "", true, true},
+		{"empty quoted path", goModText("module \"\"\n"), "", true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			if c.gomod != nil {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(*c.gomod), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, present, err := goModulePath(root)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("goModulePath err = %v, wantErr %v", err, c.wantErr)
+			}
+			if present != c.wantPresent {
+				t.Errorf("present = %v, want %v", present, c.wantPresent)
+			}
+			if !c.wantErr && got != c.wantPath {
+				t.Errorf("module path = %q, want %q", got, c.wantPath)
+			}
+		})
+	}
+}
+
+func goModText(s string) *string { return &s }
+
+// TestProduceGoTestEvidence_NoGoModDisclosesWithoutExec proves a store root
+// that is not a Go module root (no go.mod) runs nothing and emits no record:
+// each selected obligation is disclosed by name as not run, and the step is
+// not an operational error for every other story.
+func TestProduceGoTestEvidence_NoGoModDisclosesWithoutExec(t *testing.T) {
+	root := t.TempDir()
+	writeObligation(t, root, "story-a", "ac-1", "behavioral",
+		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
+			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestA",
+			SourceKind: "ci-job", SourceRef: "verify",
+		}))
+	const commit = "1212121212121212121212121212121212121212"
+	runner := &fakeNamedGoTestRunner{}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", JobName: "verify", Commit: commit}
+	var stdout bytes.Buffer
+	if err := produceGoTestEvidence(context.Background(), root, commit, "verify", runner, prov, &stdout); err != nil {
+		t.Fatalf("produceGoTestEvidence: %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner.calls = %+v, want none (no module root to run in)", runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "obligation/story-a--ac-1--behavioral") || !strings.Contains(stdout.String(), "go.mod") {
+		t.Errorf("stdout = %q, want a disclosure naming the obligation and the missing go.mod", stdout.String())
+	}
+	if recs := readVerdicts(t, root, "spec/story-a", commit); len(recs) != 0 {
+		t.Errorf("records = %+v, want none", recs)
 	}
 }

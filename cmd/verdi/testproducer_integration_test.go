@@ -3,45 +3,127 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
-// TestRealNamedGoTestRunner_ExecPath is the brief's one hermetic
-// integration test: it runs the REAL `go test -json -count=1 -run ...
-// ./sample` against the tiny, dependency-free fixture module under
-// testdata/gotestfixture/ (via realNamedGoTestRunner, never a fake) to
-// prove the actual exec path end to end — real toolchain output flowing
-// through readNamedTestOutcomes and landing on all three real outcomes
-// contract 5 maps to a verdict, plus a requested-but-nonexistent test
-// reading absent. No network: this execs the local `go` toolchain against
-// a fixture module already on disk, exactly the one exec CLAUDE.md's "no
-// exec in any test" rule is deliberately waived for here (this file's
-// package doc explains why: it is the only place realNamedGoTestRunner
-// itself is exercised for real).
-func TestRealNamedGoTestRunner_ExecPath(t *testing.T) {
-	runner := realNamedGoTestRunner{}
-	pattern := goTestRunPattern([]string{"TestPass", "TestFail", "TestSkip", "TestAbsent"})
+// The go-test producer's hermetic integration tests: they exec the REAL local
+// `go` toolchain against the tiny, dependency-free fixture module under
+// testdata/gotestfixture/ (its own go.mod, so the parent module's ./... never
+// builds it). No network: hermeticGoEnv pins the child go command to the local
+// toolchain with the module proxy off.
 
-	out, err := runner.RunNamedGoTest(context.Background(), "testdata/gotestfixture", "sample", pattern)
-	if err != nil {
-		t.Fatalf("RunNamedGoTest: %v", err)
+// hermeticGoEnv pins every child `go` invocation of this test to the local
+// toolchain, no module proxy, and no workspace file, so the real-exec path
+// can never reach the network or pick up a developer's GOFLAGS.
+func hermeticGoEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+}
+
+// copyGoTestFixture copies the fixture module into a fresh temp dir that is
+// both the store root and the Go module root, so the production path can
+// write obligations and derived records there without touching testdata/.
+func copyGoTestFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS("testdata/gotestfixture")); err != nil {
+		t.Fatalf("copying the go-test fixture module: %v", err)
+	}
+	return root
+}
+
+// realToolchainCase is one obligation the real-toolchain test authors, and
+// the outcome the production path must reach for it: a record with
+// wantVerdict, or (wantVerdict == "") no record and a disclosure naming it.
+type realToolchainCase struct {
+	ac, kind, ref string
+	wantVerdict   artifact.EvidenceVerdict
+}
+
+// TestProduceGoTestEvidence_RealToolchain drives the REAL production path —
+// produceGoTestEvidence with realNamedGoTestRunner, exactly as runProduce
+// calls it — against the fixture module, and asserts what lands on disk:
+// test2json reports every event's Package as the full import path
+// (cmd/go/internal/test: test2json.NewConverter(..., p.ImportPath, ...)), so a
+// passing, failing, and skipped named test must each reach its own record,
+// and a named test that does not exist must reach none.
+func TestProduceGoTestEvidence_RealToolchain(t *testing.T) {
+	hermeticGoEnv(t)
+	root := copyGoTestFixture(t)
+	const story = "story-real"
+	const commit = "abababababababababababababababababababab"
+
+	cases := []realToolchainCase{
+		{"ac-1", "behavioral", "go-test:sample:TestPass", artifact.VerdictPass},
+		{"ac-2", "behavioral", "go-test:sample:TestFail", artifact.VerdictFail},
+		{"ac-3", "static", "go-test:sample:TestSkip", artifact.VerdictAbstain},
+		{"ac-4", "behavioral", "go-test:sample:TestAbsent", ""},
+	}
+	for _, c := range cases {
+		writeObligation(t, root, story, c.ac, c.kind, obligationMD(story, c.ac, c.kind, obligationQualityInput{
+			State: "elaborated", ProducerKind: "test", ProducerRef: c.ref,
+			SourceKind: "ci-job", SourceRef: "verify",
+		}))
 	}
 
-	outcomes, err := readNamedTestOutcomes(bytes.NewReader(out), "example.com/gotestfixture/sample")
-	if err != nil {
-		t.Fatalf("readNamedTestOutcomes: %v\n--- raw go test -json output ---\n%s", err, out)
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "7", JobName: "verify", Commit: commit}
+	var stdout bytes.Buffer
+	if err := produceGoTestEvidence(context.Background(), root, commit, "verify", realNamedGoTestRunner{}, prov, &stdout); err != nil {
+		t.Fatalf("produceGoTestEvidence through the real toolchain: %v", err)
 	}
 
-	if outcomes["TestPass"] != testOutcomePass {
-		t.Errorf("TestPass outcome = %q, want pass", outcomes["TestPass"])
+	byProducer := map[string]artifact.Evidence{}
+	for _, r := range readVerdicts(t, root, "spec/"+story, commit) {
+		byProducer[r.Producer] = r
 	}
-	if outcomes["TestFail"] != testOutcomeFail {
-		t.Errorf("TestFail outcome = %q, want fail", outcomes["TestFail"])
+	for _, c := range cases {
+		rec, ok := byProducer[c.ref]
+		if c.wantVerdict == "" {
+			if ok {
+				t.Errorf("%s: got record %+v, want none (the named test does not exist)", c.ref, rec)
+			}
+			id := "obligation/" + story + "--" + c.ac + "--" + c.kind
+			if !strings.Contains(stdout.String(), id) {
+				t.Errorf("%s: stdout %q has no disclosure naming %s", c.ref, stdout.String(), id)
+			}
+			continue
+		}
+		if !ok {
+			t.Errorf("%s: no record; stdout=%q", c.ref, stdout.String())
+			continue
+		}
+		if rec.Verdict != c.wantVerdict || string(rec.Kind) != c.kind || len(rec.EvidenceFor) != 1 || rec.EvidenceFor[0] != c.ac {
+			t.Errorf("%s: record = %+v, want verdict %s kind %s evidence_for [%s]", c.ref, rec, c.wantVerdict, c.kind, c.ac)
+		}
 	}
-	if outcomes["TestSkip"] != testOutcomeSkip {
-		t.Errorf("TestSkip outcome = %q, want skip", outcomes["TestSkip"])
-	}
-	if _, present := outcomes["TestAbsent"]; present {
-		t.Errorf("TestAbsent present in outcomes %+v, want absent (no such test exists)", outcomes)
+
+	// The passing test's record satisfies its obligation through the real
+	// matcher; the failing test's record violates, never matches.
+	for _, c := range []struct {
+		ac, ref string
+		want    evidence.ObligationMatchState
+	}{
+		{"ac-1", "go-test:sample:TestPass", evidence.ObligationMatched},
+		{"ac-2", "go-test:sample:TestFail", evidence.ObligationViolatedWithWitness},
+	} {
+		rec := byProducer[c.ref]
+		got, err := evidence.AssessObligation(context.Background(), evidence.ObligationAssessmentInput{
+			StoreRoot: root, SpecName: story, ACID: c.ac, Kind: artifact.EvidenceBehavioral,
+			Record: &rec, EvaluationCommit: commit,
+		})
+		if err != nil {
+			t.Fatalf("AssessObligation(%s): %v", c.ac, err)
+		}
+		if got.MatchState != c.want {
+			t.Errorf("AssessObligation(%s) = %q, want %q (reason %q)", c.ac, got.MatchState, c.want, got.Reason)
+		}
 	}
 }

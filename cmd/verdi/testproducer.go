@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +39,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -311,15 +313,99 @@ func goTestRunPattern(tests []string) string {
 	return "^(" + strings.Join(sorted, "|") + ")$"
 }
 
+// goModulePath reports the module path root/go.mod declares, and whether
+// root is a Go module root at all. The go command reports every test2json
+// event's Package as the package's full import path — the module path joined
+// with the package directory relative to the module root
+// (cmd/go/internal/test: test2json.NewConverter(..., p.ImportPath, ...)) —
+// and "the module root directory is the directory that contains the go.mod
+// file" (Go Modules Reference, go.mod files). No go.mod at root is
+// present == false with no error; a go.mod that cannot be read, or that does
+// not declare exactly one module path, is an error.
+func goModulePath(root string) (modulePath string, present bool, err error) {
+	raw, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("go-test producer: reading go.mod: %w", err)
+	}
+	modulePath, err = parseModuleDirective(raw)
+	if err != nil {
+		return "", true, fmt.Errorf("go-test producer: %s: %w", filepath.Join(root, "go.mod"), err)
+	}
+	return modulePath, true, nil
+}
+
+// parseModuleDirective extracts the one module path a go.mod declares, per
+// the Go Modules Reference grammar
+// `ModuleDirective = "module" ( ModulePath | "(" newline ModulePath newline ")" ) newline`,
+// where `//` starts a comment and a ModulePath may be a quoted string.
+func parseModuleDirective(data []byte) (string, error) {
+	fields := func(line string) []string {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		return strings.Fields(line)
+	}
+	lines := strings.Split(string(data), "\n")
+	var paths []string
+	for i := 0; i < len(lines); i++ {
+		f := fields(lines[i])
+		if len(f) == 0 || f[0] != "module" {
+			continue
+		}
+		if len(f) != 2 {
+			return "", fmt.Errorf("malformed module directive %q", strings.TrimSpace(lines[i]))
+		}
+		if f[1] != "(" {
+			paths = append(paths, f[1])
+			continue
+		}
+		closed := false
+		for i++; i < len(lines); i++ {
+			g := fields(lines[i])
+			if len(g) == 1 && g[0] == ")" {
+				closed = true
+				break
+			}
+			if len(g) > 1 {
+				return "", fmt.Errorf("malformed module block line %q", strings.TrimSpace(lines[i]))
+			}
+			paths = append(paths, g...)
+		}
+		if !closed {
+			return "", errors.New("unterminated module block")
+		}
+	}
+	if len(paths) != 1 {
+		return "", fmt.Errorf("want exactly one module path, found %d", len(paths))
+	}
+	p := paths[0]
+	if strings.HasPrefix(p, `"`) || strings.HasPrefix(p, "`") {
+		unquoted, err := strconv.Unquote(p)
+		if err != nil {
+			return "", fmt.Errorf("malformed quoted module path %s: %w", p, err)
+		}
+		p = unquoted
+	}
+	if p == "" || strings.ContainsAny(p, " \t\r\n") {
+		return "", fmt.Errorf("invalid module path %q", p)
+	}
+	return p, nil
+}
+
 // executeGoTestProducers groups selected by package, runs exactly one `go
 // test -json` per distinct package (restricted to the union of that
 // package's wanted top-level test names), and strict-decodes each run's
-// event stream. Returns outcomes keyed [package][test]; a wanted test
+// event stream against that package's full import path (modulePath joined
+// with the relative package path, as internal/publicrelease's runner joins
+// them). Returns outcomes keyed [package][test]; a wanted test
 // absent from its package's map means it never ran (readNamedTestOutcomes
 // still succeeded — the package reached its own terminal event — the named
 // test's own terminal event just never appeared). A runner or decode
 // failure is returned as an operational error, never swallowed.
-func executeGoTestProducers(ctx context.Context, root string, runner namedGoTestRunner, selected []selectedGoTestObligation) (map[string]map[string]testOutcome, error) {
+func executeGoTestProducers(ctx context.Context, root, modulePath string, runner namedGoTestRunner, selected []selectedGoTestObligation) (map[string]map[string]testOutcome, error) {
 	byPkg := map[string]map[string]bool{}
 	var pkgOrder []string
 	for _, s := range selected {
@@ -341,7 +427,7 @@ func executeGoTestProducers(ctx context.Context, root string, runner namedGoTest
 		if err != nil {
 			return nil, fmt.Errorf("go-test producer: %w", err)
 		}
-		outcomes, err := readNamedTestOutcomes(bytes.NewReader(out), pkg)
+		outcomes, err := readNamedTestOutcomes(bytes.NewReader(out), modulePath+"/"+pkg)
 		if err != nil {
 			return nil, fmt.Errorf("go-test producer: %w", err)
 		}
@@ -478,6 +564,11 @@ func goTestProducerAbsentDisclosure(s selectedGoTestObligation) disclosure.Discl
 	return disclosure.New(goTestProducerAbsentSource, s.ObligationID, text)
 }
 
+func goTestProducerNoModuleDisclosure(s selectedGoTestObligation) disclosure.Disclosure {
+	text := fmt.Sprintf("named test %s in package %s did not run: the store root has no go.mod, so it is not the Go module root the package path is relative to; no evidence record was emitted for it", s.Test, s.Package)
+	return disclosure.New(goTestProducerAbsentSource, s.ObligationID, text)
+}
+
 // verdictForOutcome maps a named test's own terminal test2json action to
 // an evidence verdict (contract 5: "pass only on that test's own terminal
 // pass event, fail on its fail event, abstain when it was skipped").
@@ -579,7 +670,19 @@ func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, ru
 	discl = append(discl, selectDiscl...)
 
 	if len(selected) > 0 {
-		results, err := executeGoTestProducers(ctx, root, runner, selected)
+		modulePath, isModuleRoot, err := goModulePath(root)
+		if err != nil {
+			return err
+		}
+		if !isModuleRoot {
+			// A producer ref's package path is relative to the module root; a
+			// store root with no go.mod has none, so no named test can run.
+			for _, s := range selected {
+				discl = append(discl, goTestProducerNoModuleDisclosure(s))
+			}
+			selected = nil
+		}
+		results, err := executeGoTestProducers(ctx, root, modulePath, runner, selected)
 		if err != nil {
 			return err
 		}
