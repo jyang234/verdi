@@ -1218,3 +1218,46 @@ func TestAuthorApproverCollapse(t *testing.T) {
 		})
 	}
 }
+
+// TestKernelSeparationRuleKernelErrorFailsClosed is kernelSeparationRule's
+// unit boundary for a gp.Authorize error (L2a review m-1), which sealed
+// Resolve inputs never reach: a profile that did not come unmodified from
+// DecodeProfile makes the kernel refuse to interpret it, so the rule stays
+// different-from-author and the disclosure names the kernel's error. The
+// modified profile would otherwise permit collapse, so only the error
+// stands between it and SeparationNone.
+func TestKernelSeparationRuleKernelErrorFailsClosed(t *testing.T) {
+	sealed, err := loadSelectedProfile(lifecycleSoloAcceptedSource())
+	if err != nil {
+		t.Fatalf("loadSelectedProfile: %v", err)
+	}
+	author := lifecycleAuthenticatedAuthor(t, sealed, "900")
+	if rule, _ := kernelSeparationRule(sealed, "story-review", author); rule != countersign.SeparationNone {
+		t.Fatalf("sealed profile rule = %q, want %q: the fixture must permit collapse", rule, countersign.SeparationNone)
+	}
+	modified := sealed
+	modified.ID = sealed.ID + "-modified"
+
+	for _, tc := range []struct {
+		name    string
+		profile gp.Profile
+	}{
+		{"never decoded", gp.Profile{Class: gp.ClassSolo}},
+		{"modified after decode", modified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, kernelErr := gp.Authorize(tc.profile, gp.AuthorizationRequest{Transition: kernelCloseTransition, Posture: gp.PostureAuthoritative})
+			if kernelErr == nil || !strings.Contains(kernelErr.Error(), "DecodeProfile") {
+				t.Fatalf("gp.Authorize error = %v, want the kernel's seal refusal", kernelErr)
+			}
+			rule, witnesses := kernelSeparationRule(tc.profile, "story-review", author)
+			if rule != countersign.SeparationDifferentFromAuthor {
+				t.Fatalf("rule = %q, want the fail-closed %q", rule, countersign.SeparationDifferentFromAuthor)
+			}
+			want := fmt.Sprintf(`kernel-separation-probe:author-as-approver:separation-required:kernel_answer="unproven":reason="kernel-error":detail=%q`, kernelErr.Error())
+			if len(witnesses) != 1 || witnesses[0] != want {
+				t.Fatalf("witnesses = %v, want exactly [%s]", witnesses, want)
+			}
+		})
+	}
+}
