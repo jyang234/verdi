@@ -12,8 +12,15 @@ Ledger next free: SI-239. Backlog: BL-44 (CF-1), BL-7 (L4), BL-8 (pilot).
 **Review history.** Independent review of a10f9920: one blocking finding (F1:
 the sunset measured a story's first implementing commit, so work begun before
 the sunset but completed after it could be exempted) and recommendations on the
-open choices. This revision is the single correction pass; the same reviewer
-performs one closure check.
+open choices. The correction pass (49204dd5) fixed F1; the single closure check
+confirmed that and found one correction-induced blocking issue, C1: requiring the
+closed commit to equal the implementation commit made the exemption unusable,
+because the exemption and the other required governance records must themselves be
+committed after that commit, and the report-only commit (SI-231) may carry nothing
+else. Per the repository review protocol C1 returned to the controller for explicit
+adjudication, with no third review round: ACCEPTED, and corrected in W3 below by
+separating the eligible implementation from the closed commit and proving content
+identity between them.
 
 **Owner decisions (2026-09-23).**
 
@@ -90,16 +97,28 @@ family needs ratification before any of it is built.
 - **W2 — one named story.** An exemption names exactly one story by spec ref and
   its accepted-spec digest. It cannot name a feature, a pattern, a group, "all",
   or a story that is not yet accepted. A changed accepted spec makes it stale.
-- **W3 — the exact completed implementation.** An exemption names the exact
-  default-branch commit H_e at which the story's implementation is complete — the
-  commit the close will audit — and H_e must already be on the default branch
-  when the exemption is authored, witnessed by commit ancestry. A close is covered
-  only when its audited commit H equals H_e; any other H, including one carrying
-  later changes to the implementation, is outside the exemption, which then does
-  not apply (the close blocks as today). Changing the implementation after
-  approval needs a new exemption, subject to W4 and W11. The signed exemption
-  binds H_e, the accepted-spec digest, and the eligibility witnesses of W4 and
-  W11; its resolution re-proves them at close time.
+- **W3 — the exact completed implementation, proven unchanged.** Three commits
+  are kept distinct. H_e is the eligible implementation commit: the
+  default-branch commit at which the story's implementation is complete, already
+  on the default branch when the exemption is authored (commit ancestry). H is the
+  closed content and authority head — the commit the report covers, which
+  necessarily comes later, because the exemption and the other required committed
+  governance records (the adoption, dispositions, context projections, approvals)
+  are committed after H_e. R is the report-only commit on top of H (SI-231,
+  unchanged). The signed exemption binds H_e and an implementation manifest: the
+  set P of implementation paths with each path's blob identity at H_e, where P
+  must contain (a) every path changed by the story's declared implementing commits,
+  each of which must be an ancestor of H_e, and (b) every file under each package
+  directory named by the story's elaborated obligations' producers. The close is
+  covered only when H descends from H_e and every path in P has exactly the
+  manifest's content at H — the same blob, the same absence for a path absent at
+  H_e, and no file added under a covered package directory. Paths outside P may
+  change between H_e and H; that is where the governance records live. Any change
+  to a path in P stales the exemption, which then does not apply (the close blocks
+  as today), and changing the implementation needs a new exemption, subject to W4
+  and W11. Bare ancestry is never enough. Eligibility (W4, W11) is bound to H_e;
+  CI evidence, the committed human records, and the countersign stay bound to
+  their existing current-candidate contracts (R and H), and SI-231 is not widened.
 - **W4 — a governed, monotonic sunset.** When a sealed review path is adopted in
   the repository (the review-capsule widening ratified and adopted), a signed
   constitution record fixes the cutoff as a default-branch commit C_cut. From then
@@ -184,10 +203,10 @@ initial inventory **the pilot only**.
 | # | Authority | Change | Route |
 |---|---|---|---|
 | A1 | spec/context-integrity-v2 (feature) | Add a decision: the policy-exemption artifact may name the review-phase sealed-provenance inputs as its departure target for one exact completed implementation of one inventoried story, under W1–W12; state its relationship to DC-7 and CO-1; add a constraint that such a close never claims sealed provenance. Every other item carried byte-identical. | Feature supersession → `spec/context-integrity-v3`, conflict record flipped to superseded and frozen (03 step 2, SI-3); source-coverage witness mapping all of v2. |
-| A2 | Policy-conflict gate authority design | §5.5: a second exemption witness family (phase `review`, the three required-input kinds, story ref, accepted-spec digest, H_e, and the W4/W11 eligibility witnesses) and its five-state resolution, where unknown eligibility or ancestry is unproven and blocks; §10: under an all-proven resolution, the three codes stay `unproven` rows but become non-blocking and the report names the exemption; §11: lifecycle integration and the close-time checks of W2–W6 and W9–W11. | Ledgered revision (SI entries), same review. |
+| A2 | Policy-conflict gate authority design | §5.5: a second exemption witness family (phase `review`, the three required-input kinds, story ref, accepted-spec digest, H_e, the implementation manifest (P and blob identities), and the W4/W11 eligibility witnesses) and its five-state resolution, where unknown eligibility or ancestry is unproven and blocks; §10: under an all-proven resolution, the three codes stay `unproven` rows but become non-blocking and the report names the exemption; §11: lifecycle integration and the close-time checks of W2–W6 and W9–W11, including W3's content-identity proof of P at the closed head H. | Ledgered revision (SI entries), same review. |
 | A3 | Context compiler authority design §6 | One sentence: the review capsule's three inputs stay `unproven` under any exemption; the exemption is applied by the conflict gate, never by the compiler. | Ledgered revision. |
 | A4 | spec/guided-lifecycle-governance-v3 | The accountability kernel (AC-4) names unsealed-provenance exemptions as an exception class; the escalation rule (W10) uses the kernel's existing inclusive interpretation, the catalog registers the metric name, and the profile's escalation rule sets the threshold, with no second evaluator; the separate escalation-approval role; the high-assurance prohibition. | Feature supersession only if an AC or DC text must change; otherwise a ledgered reading of AC-4. Decided in phase A. |
-| A5 | 03 evidence model (origin + mirror) | §Closure ritual and `verdi.rollup/v1`: the closure record and rollup carry the exemption's id and digest, H_e, the three unproven inputs, and any escalation approval — the canonical use history W10 counts. | Origin + mirror + 08 entry, applied after review (the SI-228/229 precedent). |
+| A5 | 03 evidence model (origin + mirror) | §Closure ritual and `verdi.rollup/v1`: the closure record and rollup carry the exemption's id and digest, H_e, the manifest digest and the content-identity result at H, the three unproven inputs, and any escalation approval — the canonical use history W10 counts. | Origin + mirror + 08 entry, applied after review (the SI-228/229 precedent). |
 | A6 | Constitution typed payload and cutoff record | A typed "unsealed-provenance" payload (permitted, cap, inventory) defaulting to not permitted, and the signed, append-only cutoff record (W4). | Part of A1/A2; schema lands in phase B. |
 
 No new artifact kind, directory, CLI verb, or MCP tool is introduced (DC-24; the
@@ -206,7 +225,7 @@ starts before that merge.
 
 | Lane | Scope | Tier |
 |---|---|---|
-| E1 | Exemption witness family, eligibility witnesses (H_e, cutoff ancestry, inventory), evaluator resolution, report classes, close-time walls W2–W6 and W9–W11 (`internal/policyartifact`, `internal/policyconflict`) | 3 |
+| E1 | Exemption witness family, eligibility witnesses (H_e, cutoff ancestry, inventory), the implementation manifest and its content-identity proof at H, evaluator resolution, report classes, close-time walls W2–W6 and W9–W11 (`internal/policyartifact`, `internal/policyconflict`) | 3 |
 | E2 | Authenticated approval reader: owner-signed payloads mapped through the governance kernel, for exemption, escalation, and disposition approvals (decision 5) | 3 |
 | E3 | Closure record, rollup, and archive label; the canonical use history; `verdi audit` listing; the escalation metric feed | 3 |
 | E3f | Board and journey presentation of the label (FABLE frontend lane) | 2 |
@@ -220,7 +239,10 @@ close through the real conflict evaluator, with no injected pass: adopted fixtur
 `--prepare` → fully dispositioned report-only commit R covering H → named CI
 records for R → artifact fetch → detached close with an exact-head, first-attempt
 environment approval and an effective exemption → frozen archive and rollup
-carrying the label, with the three inputs still `unproven` → publication. Every
+carrying the label, with the three inputs still `unproven` → publication. The
+positive run uses the real sequence, not an asserted equality: land the
+implementation at H_e → commit the adoption, the signed exemption, and the other
+required governance records at later commits, ending at H → report-only R → close. Every
 wall has positive, boundary, and negative coverage here or in a named lower-level
 test. Negative variants, each refusing with nothing archived or published:
 
@@ -228,8 +250,11 @@ test. Negative variants, each refusing with nothing archived or published:
   permission off; a high-assurance profile; missing or unauthorized approval;
 - an exemption for another story; a stale accepted-spec digest; a story outside
   the inventory; an exemption naming a mechanical conflict or any other unknown;
-- an exemption authored before H_e landed (W3); a close whose audited commit
-  differs from H_e because the implementation changed after approval (W3);
+- an exemption authored before H_e landed (W3); the same real sequence plus a
+  change to one implementation path after H_e (W3); a new file added under a
+  covered package directory (W3); a shared path in P changed by unrelated work
+  (W3, stales rather than passes); a manifest that omits a path a declared
+  implementing commit changed (W3); an H that does not descend from H_e (W3);
 - a story whose first implementing commit precedes the cutoff but whose completed
   implementation H_e follows it (W4); unknown ancestry (shallow history) (W4);
   an attempt to move or remove the cutoff (W4);
@@ -244,15 +269,15 @@ test. Negative variants, each refusing with nothing archived or published:
 **Phase C — adoption and pilot (owner).** L4: adopt the solo profile and
 constitution with the unsealed-provenance payload enabled (cap 1, inventory the
 pilot), the `countersign:` block, the registered adapter, and the judge secrets.
-The owner authors and signs the exemption for `spec/vatc-machine-projections` at
-its H_e. Then the pilot close through `close.yml`, recording the provider facts
+The owner authors and signs the exemption for `spec/vatc-machine-projections`,
+binding its H_e and implementation manifest. Then the pilot close through `close.yml`, recording the provider facts
 BL-8 lists.
 
 ## Ledger entries expected in phase A (from SI-239)
 
 The exemption's second witness family and its five-state resolution; the
-non-blocking-but-unproven report class; W3's exact-implementation binding (H_e)
-and its staleness rule; W4's cutoff record, its ancestry test, and its
+non-blocking-but-unproven report class; W3's three-commit model (H_e, H, R), the implementation manifest P and its
+completeness rule, and the content-identity coverage and staleness rule; W4's cutoff record, its ancestry test, and its
 monotonicity; W6's no-waiver rule; W9's definition of active and the issuance
 count; W10's use history, window, inclusive threshold, and escalation-approval
 role; W11's inventory and its initial content; W12's typed payload and default;
@@ -264,6 +289,10 @@ the A4 route. Each is recorded before any implementation that depends on it.
   (W9), escalation before a second use (W10), the sunset (W4), and the permanent
   label and audit (W8); the owner can set the cap to zero at any time through a
   governed constitution change.
+- A shared path in P (for example `go.mod`) changed by unrelated work stales the
+  pilot's exemption, and W11 then forbids reissuing it at a later H_e. This fails
+  closed. Keep P to what the rules require and close the pilot promptly after
+  adoption.
 - The pilot proves the exempted path only. It is labeled so; a sealed pilot needs
   the review-capsule widening and a genuinely new story built through sealed
   execution, a separate program.
