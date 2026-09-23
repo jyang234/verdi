@@ -396,11 +396,13 @@ func TestResolveMalformedAcceptedTreeIsOperational(t *testing.T) {
 // narrowed second finding).
 
 // lifecycleSoloConstitution/lifecycleSoloProfile is a solo governance
-// profile whose close roles (story-review, feature-uat) both map the SAME
-// forge-authenticated subject ("900") and declare NO distinctness rule at
-// all — solo profiles are not required to declare one (validateClassCoverage).
-// The kernel's own role-collapse disclosure is therefore the only source of
-// "permitted with collapse", never profile.Class read in isolation.
+// profile whose named author role and both close roles (story-review,
+// feature-uat) map the SAME forge-authenticated subject ("900") and that
+// declares NO distinctness rule at all — solo profiles are not required to
+// declare one (validateClassCoverage). SI-233: the author mapping is the
+// configuration that permits collapse, and the kernel's own role-collapse
+// disclosure is the only source of "permitted with collapse", never
+// profile.Class read in isolation.
 const lifecycleSoloConstitution = `---
 schema: verdi.policy-constitution/v1
 id: policy-constitution/constitution
@@ -410,7 +412,7 @@ owners: [platform-team]
 selected_profile: lifecycle-solo
 environments: [local, production]
 catalog:
-  roles: [feature-uat, story-review]
+  roles: [author, feature-uat, story-review]
   transitions: [close]
   evidence_sources: []
   escalation_metrics: []
@@ -438,6 +440,7 @@ applicable_transitions: [close]
 identity_trust_sources:
   - {id: forge-live, kind: forge}
 role_mappings:
+  - {role: author, trust_source: forge-live, subjects: ["900"]}
   - {role: feature-uat, trust_source: forge-live, subjects: ["900"]}
   - {role: story-review, trust_source: forge-live, subjects: ["900"]}
 ownership_sources: []
@@ -449,7 +452,8 @@ evidence_source_restrictions: []
 escalation_thresholds: []
 ---
 Hermetic solo lifecycle governance profile: the owner's principal fills
-both close roles, and the profile declares no distinctness rule at all.
+the author role and both close roles, and the profile declares no
+distinctness rule at all.
 `
 
 func lifecycleSoloAcceptedSource() fstest.MapFS {
@@ -476,7 +480,7 @@ owners: [platform-team]
 selected_profile: lifecycle-solo-escalation
 environments: [local, production]
 catalog:
-  roles: [feature-uat, story-review]
+  roles: [author, feature-uat, story-review]
   transitions: [close]
   evidence_sources: []
   escalation_metrics: [risk]
@@ -504,6 +508,7 @@ applicable_transitions: [close]
 identity_trust_sources:
   - {id: forge-live, kind: forge}
 role_mappings:
+  - {role: author, trust_source: forge-live, subjects: ["900"]}
   - {role: feature-uat, trust_source: forge-live, subjects: ["900"]}
   - {role: story-review, trust_source: forge-live, subjects: ["900"]}
 ownership_sources: []
@@ -819,5 +824,221 @@ func TestKernelSeparationRuleAuthorNotAuthenticated(t *testing.T) {
 	}
 	if len(witnesses) != 1 || !strings.Contains(witnesses[0], "unavailable") {
 		t.Fatalf("witnesses = %v, want exactly one disclosed unavailable reason", witnesses)
+	}
+}
+
+// --- SI-233: the kernel is asked exactly one question ----------------------
+//
+// kernelSeparationRule asks the kernel whether the candidate author's
+// principal may fill exactly two roles for the close transition: the named
+// author role and the obligation's approver role. The fixtures below vary
+// only the selected solo profile, so each case isolates what the profile's
+// own rules make the kernel answer.
+
+// kernelProbeCatalogRoles is every role the SI-233 cases name, so one
+// constitution serves each case's profile.
+const kernelProbeCatalogRoles = "author, feature-uat, policy-owner, story-review"
+
+// kernelProbeSource is the accepted tree for one SI-233 case: a
+// constitution whose catalog carries kernelProbeCatalogRoles, and one
+// selected profile of class whose role mappings and distinctness rules are
+// the YAML fragments the case varies. Every profile trusts only the forge
+// source and requires one story-review approver for close.
+func kernelProbeSource(class, roleMappings, distinctness string) fstest.MapFS {
+	constitution := fmt.Sprintf(`---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Lifecycle countersign kernel probe fixture constitution"
+owners: [platform-team]
+selected_profile: lifecycle-probe
+environments: [local, production]
+catalog:
+  roles: [%s]
+  transitions: [close]
+  evidence_sources: []
+  escalation_metrics: []
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+# Lifecycle countersign kernel probe fixture
+`, kernelProbeCatalogRoles)
+	profile := fmt.Sprintf(`---
+schema: verdi.governance-profile/v1
+id: lifecycle-probe
+class: %s
+applicable_transitions: [close]
+identity_trust_sources:
+  - {id: forge-live, kind: forge}
+role_mappings:
+%s
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - {transitions: [close], roles: [story-review], minimum: 1}
+distinctness_rules: %s
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+Hermetic kernel probe lifecycle governance profile.
+`, class, roleMappings, distinctness)
+	return fstest.MapFS{
+		".verdi/policy/constitution.md":             &fstest.MapFile{Data: []byte(constitution), Mode: 0o444},
+		".verdi/policy/profiles/lifecycle-probe.md": &fstest.MapFile{Data: []byte(profile), Mode: 0o444},
+	}
+}
+
+// kernelProbeMapping is one forge-live role mapping line of a probe
+// profile.
+func kernelProbeMapping(role string, subjects ...string) string {
+	quoted := make([]string, len(subjects))
+	for i, subject := range subjects {
+		quoted[i] = fmt.Sprintf("%q", subject)
+	}
+	return fmt.Sprintf("  - {role: %s, trust_source: forge-live, subjects: [%s]}", role, strings.Join(quoted, ", "))
+}
+
+// kernelProbeMappings joins mapping lines into a role_mappings block.
+func kernelProbeMappings(lines ...string) string { return strings.Join(lines, "\n") }
+
+// resolveKernelProbe resolves the story countersign for one approval by
+// approver on a change authored by author, under source's selected
+// profile, and requires a canonical record.
+func resolveKernelProbe(t *testing.T, approver, author string, source fstest.MapFS) Result {
+	t.Helper()
+	resolver, request := lifecycleFixture(t, "story", approver, author)
+	request.AcceptedProfileSource = source
+	result, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.Record == nil {
+		t.Fatalf("result = %+v, want a canonical countersign record", result)
+	}
+	return result
+}
+
+// kernelSeparationLines returns every witness the kernel-consulted
+// separation decision contributed, in record order.
+func kernelSeparationLines(witnesses []string) []string {
+	lines := []string{}
+	for _, witness := range witnesses {
+		if strings.HasPrefix(witness, "kernel-separation") {
+			lines = append(lines, witness)
+		}
+	}
+	return lines
+}
+
+// TestResolveKernelSeparationAsksOnlyAuthorAndApproverRoles is SI-233's
+// falsifier (L2a review I-1, probes P3 and P4): the kernel is asked only
+// whether the author may fill the author role and the approver role, so a
+// mapping of any unrelated role (policy-owner here) never changes who may
+// approve, in either direction, and a solo profile mapping the author role
+// and the approver role to the owner permits collapse.
+func TestResolveKernelSeparationAsksOnlyAuthorAndApproverRoles(t *testing.T) {
+	unrelated := kernelProbeMapping("policy-owner", "900")
+	for _, tc := range []struct {
+		name        string
+		mappings    []string
+		wantRule    countersign.SeparationRule
+		wantVerdict countersign.Verdict
+		wantLine    string
+	}{
+		{
+			name:        "approver role only",
+			mappings:    []string{kernelProbeMapping("story-review", "900")},
+			wantRule:    countersign.SeparationDifferentFromAuthor,
+			wantVerdict: countersign.VerdictViolated,
+			wantLine:    `"role-not-authorized":role="author"`,
+		},
+		{
+			name:        "author and approver roles",
+			mappings:    []string{kernelProbeMapping("author", "900"), kernelProbeMapping("story-review", "900")},
+			wantRule:    countersign.SeparationNone,
+			wantVerdict: countersign.VerdictProven,
+			wantLine:    `roles=["author" "story-review"]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			alone := resolveKernelProbe(t, "900", "900", kernelProbeSource("solo", kernelProbeMappings(tc.mappings...), "[]"))
+			withUnrelated := resolveKernelProbe(t, "900", "900", kernelProbeSource("solo", kernelProbeMappings(append(append([]string{}, tc.mappings...), unrelated)...), "[]"))
+			for _, run := range []struct {
+				name   string
+				result Result
+			}{{"alone", alone}, {"with unrelated policy-owner mapping", withUnrelated}} {
+				if run.result.Verdict != tc.wantVerdict || run.result.Record.Obligation.SeparationRule != tc.wantRule {
+					t.Errorf("%s: verdict=%q rule=%q, want %q %q; witnesses=%v", run.name, run.result.Verdict, run.result.Record.Obligation.SeparationRule, tc.wantVerdict, tc.wantRule, run.result.Record.Witnesses)
+				}
+				if !containsLifecycleWitness(kernelSeparationLines(run.result.Record.Witnesses), tc.wantLine) {
+					t.Errorf("%s: kernel separation witnesses = %v, want one containing %s", run.name, kernelSeparationLines(run.result.Record.Witnesses), tc.wantLine)
+				}
+			}
+			if got, want := strings.Join(kernelSeparationLines(withUnrelated.Record.Witnesses), "\n"), strings.Join(kernelSeparationLines(alone.Record.Witnesses), "\n"); got != want {
+				t.Errorf("an unrelated role mapping changed the kernel separation answer:\nwith:\n%s\nwithout:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestResolveKernelSeparationSoloRulesKeepSelfApprovalRefused is the
+// wrongful-permit falsifier (L2a review I-2, probes P1 and P2): a solo
+// profile whose own rules do not let the author also approve keeps
+// different-from-author, so the author's own approval never proves the
+// countersign.
+func TestResolveKernelSeparationSoloRulesKeepSelfApprovalRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mappings     []string
+		distinctness string
+		wantReason   string
+	}{
+		{
+			name:         "different-principal rule between author and approver",
+			mappings:     []string{kernelProbeMapping("author", "900"), kernelProbeMapping("story-review", "900")},
+			distinctness: "\n  - {transitions: [close], left_role: author, right_role: story-review, relation: different-principal}",
+			wantReason:   `"distinctness-violated"`,
+		},
+		{
+			name:         "different-principal rule between the two approver roles",
+			mappings:     []string{kernelProbeMapping("author", "900"), kernelProbeMapping("feature-uat", "900"), kernelProbeMapping("story-review", "900")},
+			distinctness: "\n  - {transitions: [close], left_role: feature-uat, right_role: story-review, relation: different-principal}",
+			wantReason:   `"distinctness-unproven"`,
+		},
+		{
+			name:         "approver role mapped only to another principal",
+			mappings:     []string{kernelProbeMapping("author", "900"), kernelProbeMapping("story-review", "101")},
+			distinctness: "[]",
+			wantReason:   `"role-not-authorized":role="story-review"`,
+		},
+		{
+			name:         "approver role unmapped",
+			mappings:     []string{kernelProbeMapping("author", "900")},
+			distinctness: "[]",
+			wantReason:   `"role-not-authorized":role="story-review"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := resolveKernelProbe(t, "900", "900", kernelProbeSource("solo", kernelProbeMappings(tc.mappings...), tc.distinctness))
+			if result.Record.Obligation.SeparationRule != countersign.SeparationDifferentFromAuthor {
+				t.Fatalf("separation rule = %q, want %q; witnesses=%v", result.Record.Obligation.SeparationRule, countersign.SeparationDifferentFromAuthor, result.Record.Witnesses)
+			}
+			if result.Verdict == countersign.VerdictProven {
+				t.Fatalf("self-approval proved the countersign: witnesses=%v", result.Record.Witnesses)
+			}
+			if !containsLifecycleWitness(kernelSeparationLines(result.Record.Witnesses), tc.wantReason) {
+				t.Fatalf("kernel separation witnesses = %v, want one naming %s", kernelSeparationLines(result.Record.Witnesses), tc.wantReason)
+			}
+		})
 	}
 }

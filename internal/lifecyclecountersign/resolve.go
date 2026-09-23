@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sort"
 	"time"
 
@@ -303,45 +304,45 @@ func unproven(operand, detail string) Result {
 // countersign.Obligation.Transition above.
 const kernelCloseTransition = "close"
 
+// kernelAuthorRole is the named author role the kernel separation probe
+// has the candidate author's principal fill beside the close obligation's
+// approver role (SI-233).
+const kernelAuthorRole = "author"
+
 // kernelSeparationRule asks the governance kernel's authorization
-// interpreter (gp.Authorize), using the selected profile's own rules for
-// the close transition and the resolved candidate author's identity,
-// whether the obligation's approverRole must be filled by a principal
-// different from the author (SI-227, as narrowed by PR #345 finding F1).
-// It never decides from profile.Class alone: gp.Authorize is always
-// consulted, and Class only gates which POSITIVE answer (collapse) can be
-// honored.
+// interpreter (gp.Authorize) exactly one question, using the selected
+// profile's own rules for the close transition (SI-227, SI-233): may the
+// resolved candidate author's principal fill both the named author role
+// and the obligation's approverRole? It never decides from profile.Class
+// alone: gp.Authorize is always consulted, and Class only gates which
+// POSITIVE answer (collapse) can be honored.
 //
 // Outcomes:
-//   - required (team, high-assurance, or any profile whose own rules say
-//     so): countersign.SeparationDifferentFromAuthor, today's behavior,
-//     AC-3's self-approval refusal intact;
-//   - permitted with collapse under a solo profile whose kernel decision
-//     cleanly authorizes the author also filling approverRole, carrying a
-//     solo role-collapse disclosure for the author's own principal:
+//   - collapse permitted: profile.Class is solo, the kernel's decision is
+//     authorized, and its solo role-collapse disclosure names the author's
+//     principal for exactly the author role and approverRole —
 //     countersign.SeparationNone, with that disclosure returned as a
 //     witness for the caller to carry into the countersign record;
-//   - unavailable or unproven kernel answer (an unauthenticated author, a
-//     kernel error, or any decision that is not a clean authorized solo
-//     collapse): countersign.SeparationDifferentFromAuthor (fail closed),
-//     with a witness disclosing why.
+//   - separation required: every other answer, including every
+//     team and high-assurance profile, any profile whose own close rules
+//     refuse or cannot prove the author in both roles, an unauthenticated
+//     author, and a kernel error — countersign.SeparationDifferentFromAuthor
+//     (fail closed, AC-3's self-approval refusal intact), with witnesses
+//     disclosing why.
 func kernelSeparationRule(profile gp.Profile, approverRole string, author gp.PrincipalResolution) (countersign.SeparationRule, []string) {
 	if author.State != gp.ResolutionAuthenticated {
 		return countersign.SeparationDifferentFromAuthor, []string{
 			`kernel-separation:unavailable:reason="candidate author principal is not authenticated"`,
 		}
 	}
-	approvals := []gp.ApprovalRecord{{Role: approverRole, PrincipalID: author.PrincipalID}}
-	for _, otherRole := range otherProfileRoles(profile, approverRole) {
-		if holds, err := gp.HoldsRole(profile, author.Claim, otherRole); err == nil && holds {
-			approvals = append(approvals, gp.ApprovalRecord{Role: otherRole, PrincipalID: author.PrincipalID})
-		}
-	}
 	decision, err := gp.Authorize(profile, gp.AuthorizationRequest{
 		Transition:  kernelCloseTransition,
 		Posture:     gp.PostureAuthoritative,
 		Resolutions: []gp.PrincipalResolution{author},
-		Approvals:   approvals,
+		Approvals: []gp.ApprovalRecord{
+			{Role: kernelAuthorRole, PrincipalID: author.PrincipalID},
+			{Role: approverRole, PrincipalID: author.PrincipalID},
+		},
 	})
 	if err != nil {
 		return countersign.SeparationDifferentFromAuthor, []string{
@@ -349,35 +350,32 @@ func kernelSeparationRule(profile gp.Profile, approverRole string, author gp.Pri
 		}
 	}
 	if profile.Class == gp.ClassSolo && decision.State == gp.AuthorizationAuthorized {
-		for _, d := range decision.Disclosures {
-			if d.Code == gp.ReasonSoloRoleCollapse && d.PrincipalID == author.PrincipalID {
-				return countersign.SeparationNone, []string{
-					fmt.Sprintf("kernel-separation:solo-role-collapse:principal_id=%q:roles=%q", d.PrincipalID, d.Roles),
-				}
+		if d, ok := authorApproverCollapse(decision, author.PrincipalID, approverRole); ok {
+			return countersign.SeparationNone, []string{
+				fmt.Sprintf("kernel-separation:solo-role-collapse:principal_id=%q:roles=%q", d.PrincipalID, d.Roles),
 			}
 		}
 	}
 	return countersign.SeparationDifferentFromAuthor, kernelRequiredWitnesses(profile, decision)
 }
 
-// otherProfileRoles returns every distinct role name profile's own role
-// mappings declare besides approverRole, sorted for determinism — the
-// candidate "other" roles kernelSeparationRule probes the author's
-// membership against. It reads only the already-decoded, sealed profile's
-// public field; the actual membership question is answered by the
-// kernel's own exported gp.HoldsRole, never reimplemented here.
-func otherProfileRoles(profile gp.Profile, approverRole string) []string {
-	seen := map[string]bool{approverRole: true}
-	var roles []string
-	for _, m := range profile.RoleMappings {
-		if seen[m.Role] {
+// authorApproverCollapse returns the kernel's solo role-collapse
+// disclosure that names principal for exactly the author role and
+// approverRole — the only disclosure SI-233 lets permit collapse.
+func authorApproverCollapse(decision gp.AuthorizationDecision, principal gp.PrincipalID, approverRole string) (gp.Disclosure, bool) {
+	want := []string{kernelAuthorRole, approverRole}
+	sort.Strings(want)
+	for _, d := range decision.Disclosures {
+		if d.Code != gp.ReasonSoloRoleCollapse || d.PrincipalID != principal {
 			continue
 		}
-		seen[m.Role] = true
-		roles = append(roles, m.Role)
+		got := append([]string{}, d.Roles...)
+		sort.Strings(got)
+		if slices.Equal(got, want) {
+			return d, true
+		}
 	}
-	sort.Strings(roles)
-	return roles
+	return gp.Disclosure{}, false
 }
 
 // kernelRequiredWitnesses discloses why kernelSeparationRule kept
