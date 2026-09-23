@@ -12,9 +12,10 @@ import (
 )
 
 // environmentReviewRunJSON is the tolerant subset of GitHub's workflow run
-// object ac-4 needs (GitHub REST API docs, "Get a workflow run attempt":
-// "Same response schema as Get a workflow run" — id, run_attempt, head_sha,
-// html_url).
+// object ac-4 needs (GitHub REST API docs, "Get a workflow run", GET
+// /repos/{owner}/{repo}/actions/runs/{run_id}: id, run_attempt — "1 for
+// first attempt and higher if the workflow was re-run", so the run
+// endpoint reports the latest attempt — head_sha, html_url).
 type environmentReviewRunJSON struct {
 	ID         int64  `json:"id"`
 	RunAttempt int    `json:"run_attempt"`
@@ -88,55 +89,38 @@ type environmentProtectionRuleJSON struct {
 	Reviewers         []json.RawMessage `json:"reviewers"`
 }
 
-// EnvironmentReview implements forge.Forge (v2 ac-4, dc-5): reads the
-// queried run attempt's head commit and URL, the attempt's jobs (to find
-// the gated job's creation/start stamps), the named environment's id and
-// self-review setting, and the run's review history (filtered to the named
-// environment). Every call rides the approval decode seam
-// (getApprovalJSON/DecodeApprovalJSON): GitHub's responses are an open
-// contract (ruling R-W1-8), so members this adapter does not model are
-// ignored while trailing data, unknown review states, and missing ids are
-// still rejected (co-1).
+// EnvironmentReview implements forge.Forge (v2 ac-4, dc-5). It reads, in
+// this order, the run's review history (filtered to the named environment
+// by id), the queried attempt's jobs (to find the gated job's creation and
+// start stamps), the named environment's id and self-review setting, and
+// last the run itself: its latest attempt, head commit, and URL.
+//
+// The run is read after the review history on purpose (L2b review I-1):
+// GitHub's review history carries no attempt, so it can be attributed to
+// attempt 1 only if no rerun existed when it was read, and a latest attempt
+// of 1 observed afterwards proves exactly that.
+//
+// Every call rides the approval decode seam (getApprovalJSON/
+// DecodeApprovalJSON): GitHub's responses are an open contract (ruling
+// R-W1-8), so members this adapter does not model are ignored while trailing
+// data, unknown review states, and missing ids are still rejected (co-1).
 func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
-	if query.RunID == "" {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run id is empty")
+	runID, err := validateEnvironmentReviewQuery(query)
+	if err != nil {
+		return forge.EnvironmentReviewFacts{}, err
 	}
-	if query.RunAttempt < 1 {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run attempt %d is not a positive attempt number", query.RunAttempt)
-	}
-	if query.EnvironmentName == "" {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: environment name is empty")
-	}
-	if query.GatedJobName == "" {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: gated job name is empty")
-	}
-	runIDNum, err := strconv.ParseInt(query.RunID, 10, 64)
-	if err != nil || runIDNum <= 0 || strconv.FormatInt(runIDNum, 10) != query.RunID {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run id %q is not a canonical positive base-10 id", query.RunID)
+	base := fmt.Sprintf("%s/repos/%s/%s", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo)
+
+	historyURL := fmt.Sprintf("%s/actions/runs/%d/approvals", base, runID)
+	entries, err := githubDrainStrictList(ctx, a, historyURL, func(p []environmentReviewHistoryEntryJSON) []environmentReviewHistoryEntryJSON { return p })
+	if err != nil {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d review history: %w", runID, err)
 	}
 
-	runURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/attempts/%d", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runIDNum, query.RunAttempt)
-	var run environmentReviewRunJSON
-	if _, err := a.getApprovalJSON(ctx, runURL, &run); err != nil {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d attempt %d: %w", runIDNum, query.RunAttempt, err)
-	}
-	if run.ID != runIDNum {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d reported id %d", runIDNum, query.RunAttempt, run.ID)
-	}
-	if run.RunAttempt != query.RunAttempt {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d reported run_attempt %d", runIDNum, query.RunAttempt, run.RunAttempt)
-	}
-	if run.HeadSHA == "" {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d carries no head sha", runIDNum, query.RunAttempt)
-	}
-	if run.HTMLURL == "" {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d carries no html url", runIDNum, query.RunAttempt)
-	}
-
-	jobsURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/attempts/%d/jobs", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runIDNum, query.RunAttempt)
+	jobsURL := fmt.Sprintf("%s/actions/runs/%d/attempts/%d/jobs", base, runID, query.RunAttempt)
 	jobs, err := githubDrainStrictList(ctx, a, jobsURL, func(p environmentReviewJobsResponse) []environmentReviewJobJSON { return p.Jobs })
 	if err != nil {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d attempt %d jobs: %w", runIDNum, query.RunAttempt, err)
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d attempt %d jobs: %w", runID, query.RunAttempt, err)
 	}
 	var gatedJobFound bool
 	var gatedJobCreatedAt, gatedJobStartedAt string
@@ -145,7 +129,7 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 			continue
 		}
 		if gatedJobFound {
-			return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d carries more than one job named %q", runIDNum, query.RunAttempt, query.GatedJobName)
+			return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d attempt %d carries more than one job named %q", runID, query.RunAttempt, query.GatedJobName)
 		}
 		gatedJobFound = true
 		if j.CreatedAt != "" {
@@ -162,7 +146,7 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		}
 	}
 
-	envURL := fmt.Sprintf("%s/repos/%s/%s/environments/%s", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, url.PathEscape(query.EnvironmentName))
+	envURL := fmt.Sprintf("%s/environments/%s", base, url.PathEscape(query.EnvironmentName))
 	var env environmentJSON
 	if _, err := a.getApprovalJSON(ctx, envURL, &env); err != nil {
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading environment %q: %w", query.EnvironmentName, err)
@@ -183,49 +167,35 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		}
 	}
 
-	historyURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/approvals", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runIDNum)
-	entries, err := githubDrainStrictList(ctx, a, historyURL, func(p []environmentReviewHistoryEntryJSON) []environmentReviewHistoryEntryJSON { return p })
+	rows, err := environmentReviewRows(entries, env.ID, query.EnvironmentName)
 	if err != nil {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d review history: %w", runIDNum, err)
+		return forge.EnvironmentReviewFacts{}, err
 	}
 
-	// An entry belongs to this environment only when one of its own
-	// environments carries the environment's id (names are case-insensitive
-	// and renameable, ids are not; L2b review m-2), and the row's
-	// environment id is taken from that entry.
-	var rows []forge.EnvironmentReviewRow
-	for i, entry := range entries {
-		if len(entry.Environments) == 0 {
-			return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: review history entry %d names no environment", i)
-		}
-		matched := int64(0)
-		for _, e := range entry.Environments {
-			if e.ID <= 0 {
-				return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: review history entry %d names an environment with no stable id", i)
-			}
-			if e.ID == env.ID {
-				matched = e.ID
-			}
-		}
-		if matched == 0 {
-			continue
-		}
-		if entry.User.ID <= 0 {
-			return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: review history entry for environment %q carries no stable reviewer id", query.EnvironmentName)
-		}
-		rows = append(rows, forge.EnvironmentReviewRow{
-			ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: strconv.FormatInt(entry.User.ID, 10)},
-			ProviderState: entry.State,
-			EnvironmentID: strconv.FormatInt(matched, 10),
-		})
+	runURL := fmt.Sprintf("%s/actions/runs/%d", base, runID)
+	var run environmentReviewRunJSON
+	if _, err := a.getApprovalJSON(ctx, runURL, &run); err != nil {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d: %w", runID, err)
+	}
+	if run.ID != runID {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d reported id %d", runID, run.ID)
+	}
+	if run.RunAttempt < 1 {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d carries no run_attempt", runID)
+	}
+	if run.HeadSHA == "" {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d carries no head sha", runID)
+	}
+	if run.HTMLURL == "" {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run %d carries no html url", runID)
 	}
 
-	repository := a.cfg.Owner + "/" + a.cfg.Repo
 	facts, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
 		Supported:                    true,
-		Repository:                   repository,
-		RunID:                        strconv.FormatInt(runIDNum, 10),
+		Repository:                   a.cfg.Owner + "/" + a.cfg.Repo,
+		RunID:                        strconv.FormatInt(runID, 10),
 		RunAttempt:                   query.RunAttempt,
+		LatestRunAttempt:             run.RunAttempt,
 		RunHeadSHA:                   run.HeadSHA,
 		RunURL:                       run.HTMLURL,
 		EnvironmentID:                strconv.FormatInt(env.ID, 10),
@@ -240,4 +210,59 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: normalize facts: %w", err)
 	}
 	return facts, nil
+}
+
+// validateEnvironmentReviewQuery checks the query and returns its run id as
+// the canonical positive base-10 number (L2b review m-1).
+func validateEnvironmentReviewQuery(query forge.EnvironmentReviewQuery) (int64, error) {
+	if query.RunAttempt < 1 {
+		return 0, fmt.Errorf("github: environment review: run attempt %d is not a positive attempt number", query.RunAttempt)
+	}
+	if query.EnvironmentName == "" {
+		return 0, fmt.Errorf("github: environment review: environment name is empty")
+	}
+	if query.GatedJobName == "" {
+		return 0, fmt.Errorf("github: environment review: gated job name is empty")
+	}
+	runID, err := strconv.ParseInt(query.RunID, 10, 64)
+	if err != nil || runID <= 0 || strconv.FormatInt(runID, 10) != query.RunID {
+		return 0, fmt.Errorf("github: environment review: run id %q is not a canonical positive base-10 id", query.RunID)
+	}
+	return runID, nil
+}
+
+// environmentReviewRows keeps the review-history entries for environment
+// envID. An entry belongs to it only when one of the entry's own
+// environments carries that id (names are case-insensitive and renameable,
+// ids are not; L2b review m-2), and the row's environment id is taken from
+// that entry. An entry naming no environment, or an environment without an
+// id, is refused rather than silently dropped.
+func environmentReviewRows(entries []environmentReviewHistoryEntryJSON, envID int64, envName string) ([]forge.EnvironmentReviewRow, error) {
+	var rows []forge.EnvironmentReviewRow
+	for i, entry := range entries {
+		if len(entry.Environments) == 0 {
+			return nil, fmt.Errorf("github: environment review: review history entry %d names no environment", i)
+		}
+		matched := int64(0)
+		for _, e := range entry.Environments {
+			if e.ID <= 0 {
+				return nil, fmt.Errorf("github: environment review: review history entry %d names an environment with no stable id", i)
+			}
+			if e.ID == envID {
+				matched = e.ID
+			}
+		}
+		if matched == 0 {
+			continue
+		}
+		if entry.User.ID <= 0 {
+			return nil, fmt.Errorf("github: environment review: review history entry for environment %q carries no stable reviewer id", envName)
+		}
+		rows = append(rows, forge.EnvironmentReviewRow{
+			ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: strconv.FormatInt(entry.User.ID, 10)},
+			ProviderState: entry.State,
+			EnvironmentID: strconv.FormatInt(matched, 10),
+		})
+	}
+	return rows, nil
 }

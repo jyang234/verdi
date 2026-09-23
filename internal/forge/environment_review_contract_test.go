@@ -49,14 +49,14 @@ func envReviewQuery() forge.EnvironmentReviewQuery {
 }
 
 // environmentReviewServer serves the 4 fixed routes an EnvironmentReview
-// call reads (run attempt, jobs, environment, review history), keyed by
+// call reads (run, attempt jobs, environment, review history), keyed by
 // run 555 attempt 1 / environment "close" — the healthy fixtures above use
 // these exact ids.
 func environmentReviewServer(t *testing.T, runBody, jobsBody, envBody, historyBody string) (*github.Adapter, func()) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/repos/acme/widgets/actions/runs/555/attempts/1":
+		case "/repos/acme/widgets/actions/runs/555":
 			writeJSON(t, w, runBody)
 		case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
 			writeJSON(t, w, jobsBody)
@@ -82,6 +82,17 @@ func normalizeEnvReview(t *testing.T, facts forge.EnvironmentReviewFacts) ([]for
 		t.Fatalf("NormalizeEnvironmentReview: %v", err)
 	}
 	return rows, disclosures
+}
+
+// baseSupportedFacts is a valid supported facts draft with no reviews and no
+// gated job.
+func baseSupportedFacts() forge.EnvironmentReviewFacts {
+	return forge.EnvironmentReviewFacts{
+		Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
+		RunHeadSHA: candidateA, RunURL: envReviewRunURL,
+		EnvironmentID: "9", EnvironmentName: "close",
+		Reviews: []forge.EnvironmentReviewRow{},
+	}
 }
 
 func hasWitness(witnesses []forge.ProviderWitness, name string) bool {
@@ -165,7 +176,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		history := string(publishedFixture(t, "github/environment-approvals-items.json"))
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/repos/octo-org/octo-repo/actions/runs/30433642", "/repos/octo-org/octo-repo/actions/runs/30433642/attempts/1":
+			case "/repos/octo-org/octo-repo/actions/runs/30433642":
 				writeJSON(t, w, run)
 			case "/repos/octo-org/octo-repo/actions/runs/30433642/attempts/1/jobs":
 				writeJSON(t, w, jobs)
@@ -192,7 +203,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 
 	baseSupported := func() forge.EnvironmentReviewFacts {
 		return forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
+			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
 			RunHeadSHA: candidateA, RunURL: envReviewRunURL,
 			EnvironmentID: "9", EnvironmentName: "close",
 			Reviews: []forge.EnvironmentReviewRow{},
@@ -208,6 +219,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 			{"missing run id", func(f *forge.EnvironmentReviewFacts) { f.RunID = "" }},
 			{"zero run attempt", func(f *forge.EnvironmentReviewFacts) { f.RunAttempt = 0 }},
 			{"negative run attempt", func(f *forge.EnvironmentReviewFacts) { f.RunAttempt = -1 }},
+			{"zero latest run attempt", func(f *forge.EnvironmentReviewFacts) { f.LatestRunAttempt = 0 }},
 			{"missing run head sha", func(f *forge.EnvironmentReviewFacts) { f.RunHeadSHA = "" }},
 			{"missing run url", func(f *forge.EnvironmentReviewFacts) { f.RunURL = "" }},
 			{"missing environment id", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "" }},
@@ -585,7 +597,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		var jobsCalls, historyCalls int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555/attempts/1":
+			case "/repos/acme/widgets/actions/runs/555":
 				writeJSON(t, w, envReviewRunHealthy)
 			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
 				jobsCalls++
@@ -668,7 +680,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		runBody := `{"id":555,"run_attempt":2,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `"}`
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555/attempts/2":
+			case "/repos/acme/widgets/actions/runs/555":
 				writeJSON(t, w, runBody)
 			case "/repos/acme/widgets/actions/runs/555/attempts/2/jobs":
 				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T09:05:00Z")))
@@ -690,7 +702,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EnvironmentReview: %v", err)
 		}
-		if facts.RunAttempt != 2 || len(facts.Reviews) != 1 {
+		if facts.RunAttempt != 2 || facts.LatestRunAttempt != 2 || len(facts.Reviews) != 1 {
 			t.Fatalf("facts = %+v, want attempt 2 with the approval fact still present", facts)
 		}
 		rows, disclosures := normalizeEnvReview(t, facts)
@@ -699,6 +711,88 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		}
 		if !disclosuresContain(disclosures, "rerun-not-honored") {
 			t.Fatalf("disclosures = %v, want rerun-not-honored", disclosures)
+		}
+	})
+
+	t.Run("github attributes no rerun's review to attempt 1 (I-1, m-10)", func(t *testing.T) {
+		rerunRun := `{"id":555,"run_attempt":2,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `"}`
+		jobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z"))
+		tests := []struct {
+			name    string
+			history string
+		}{
+			{"attempt 1 rejected, attempt 2 approved by the same reviewer", "[" + envReviewHistoryEntryJSON("rejected", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
+			{"the same owner approved attempts 1 and 2", "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
+			{"attempt 1 approved, rerun not yet reviewed", "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				a, closeServer := environmentReviewServer(t, rerunRun, jobs, envReviewEnvHealthy, tt.history)
+				defer closeServer()
+				facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
+				if err != nil {
+					t.Fatalf("EnvironmentReview: %v, want a rerun disclosure, not an operational error", err)
+				}
+				if facts.RunAttempt != 1 || facts.LatestRunAttempt != 2 {
+					t.Fatalf("attempts = queried %d latest %d, want 1 and 2", facts.RunAttempt, facts.LatestRunAttempt)
+				}
+				rows, disclosures := normalizeEnvReview(t, facts)
+				if len(rows) != 0 {
+					t.Fatalf("rows = %+v, want none: a rerun's review cannot be attributed to attempt 1", rows)
+				}
+				if !disclosuresContain(disclosures, "rerun-not-honored") || !disclosuresContain(disclosures, "latest_run_attempt=2") {
+					t.Fatalf("disclosures = %v, want rerun-not-honored naming latest attempt 2", disclosures)
+				}
+			})
+		}
+	})
+
+	t.Run("github reads the review history before the run's latest attempt (I-1)", func(t *testing.T) {
+		var order []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/actions/runs/555":
+				order = append(order, "run")
+				writeJSON(t, w, envReviewRunHealthy)
+			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
+				order = append(order, "jobs")
+				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z")))
+			case "/repos/acme/widgets/environments/close":
+				order = append(order, "environment")
+				writeJSON(t, w, envReviewEnvHealthy)
+			case "/repos/acme/widgets/actions/runs/555/approvals":
+				order = append(order, "history")
+				writeJSON(t, w, "["+envReviewHistoryEntryJSON("approved", 901, 9, "close")+"]")
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
+		if _, err := a.EnvironmentReview(context.Background(), envReviewQuery()); err != nil {
+			t.Fatalf("EnvironmentReview: %v", err)
+		}
+		if strings.Join(order, ",") != "history,jobs,environment,run" {
+			t.Fatalf("read order = %v, want the review history first and the run last", order)
+		}
+	})
+
+	t.Run("validate refuses a repeated decision only while the latest attempt is the first (m-10, co-1)", func(t *testing.T) {
+		row := forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
+		draft := baseSupportedFacts()
+		draft.Reviews = []forge.EnvironmentReviewRow{row, row}
+		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
+			t.Fatal("NewEnvironmentReviewFacts with a repeated decision at latest attempt 1: want error, got nil")
+		}
+		draft.LatestRunAttempt = 2
+		facts, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
+		if err != nil {
+			t.Fatalf("NewEnvironmentReviewFacts with a repeated decision after a rerun: %v", err)
+		}
+		rows, disclosures := normalizeEnvReview(t, facts)
+		if len(rows) != 0 || !disclosuresContain(disclosures, "rerun-not-honored") {
+			t.Fatalf("rows = %+v disclosures = %v, want none with rerun-not-honored", rows, disclosures)
 		}
 	})
 
@@ -807,13 +901,15 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		var server *httptest.Server
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555/attempts/1":
+			case "/repos/acme/widgets/actions/runs/555":
 				writeJSON(t, w, envReviewRunHealthy)
 			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
 				if r.URL.Query().Get("page") == "" {
 					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?page=2>; rel=\"next\", <"+server.URL+r.URL.Path+"?page=3>; rel=\"next\"")
 				}
 				writeJSON(t, w, envReviewJobsBody())
+			case "/repos/acme/widgets/actions/runs/555/approvals":
+				writeJSON(t, w, "[]")
 			default:
 				http.NotFound(w, r)
 			}
@@ -832,7 +928,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		var server *httptest.Server
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/repos/acme/widgets/actions/runs/555/attempts/1":
+			case "/repos/acme/widgets/actions/runs/555":
 				writeJSON(t, w, envReviewRunHealthy)
 			case "/repos/acme/widgets/actions/runs/555/attempts/1/jobs":
 				writeJSON(t, w, envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "")))
@@ -886,7 +982,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 
 	t.Run("fake seeds and returns independent environment review facts", func(t *testing.T) {
 		draft := forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
+			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
 			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
 			GatedJobFound: true, GatedJobCreatedAt: "2026-08-26T09:00:00Z",
 			Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}},
@@ -917,7 +1013,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 
 	t.Run("fake refuses seeds a real adapter could not produce (m-3)", func(t *testing.T) {
 		valid, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
-			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
+			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1, LatestRunAttempt: 1,
 			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
 			Reviews: []forge.EnvironmentReviewRow{},
 		}, fixedClock())

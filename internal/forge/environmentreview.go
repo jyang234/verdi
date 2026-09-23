@@ -102,13 +102,19 @@ type EnvironmentReviewFacts struct {
 	Supported         bool   `json:"supported"`
 	UnsupportedReason string `json:"unsupported_reason"`
 
-	Repository      string `json:"repository"`
-	RunID           string `json:"run_id"`
-	RunAttempt      int    `json:"run_attempt"`
-	RunHeadSHA      string `json:"run_head_sha"`
-	RunURL          string `json:"run_url"`
-	EnvironmentID   string `json:"environment_id"`
-	EnvironmentName string `json:"environment_name"`
+	Repository string `json:"repository"`
+	RunID      string `json:"run_id"`
+	// RunAttempt is the attempt the query names; LatestRunAttempt is the
+	// run's own run_attempt, its latest attempt, read after the review
+	// history (L2b review I-1). GitHub's review history carries no attempt,
+	// so a review is honored only while the latest attempt is 1 and equals
+	// the queried attempt.
+	RunAttempt       int    `json:"run_attempt"`
+	LatestRunAttempt int    `json:"latest_run_attempt"`
+	RunHeadSHA       string `json:"run_head_sha"`
+	RunURL           string `json:"run_url"`
+	EnvironmentID    string `json:"environment_id"`
+	EnvironmentName  string `json:"environment_name"`
 
 	GatedJobFound     bool   `json:"gated_job_found"`
 	GatedJobCreatedAt string `json:"gated_job_created_at"`
@@ -182,7 +188,7 @@ func (f EnvironmentReviewFacts) Validate() error {
 		if err := requireValue("environment_review.unsupported_reason", f.UnsupportedReason); err != nil {
 			return err
 		}
-		if f.RunID != "" || f.RunAttempt != 0 || f.RunHeadSHA != "" || f.RunURL != "" ||
+		if f.RunID != "" || f.RunAttempt != 0 || f.LatestRunAttempt != 0 || f.RunHeadSHA != "" || f.RunURL != "" ||
 			f.EnvironmentID != "" || f.EnvironmentName != "" || f.GatedJobFound ||
 			f.GatedJobCreatedAt != "" || f.GatedJobStartedAt != "" ||
 			f.EnvironmentPreventSelfReview != nil || len(f.Reviews) != 0 {
@@ -206,6 +212,9 @@ func (f EnvironmentReviewFacts) Validate() error {
 	}
 	if f.RunAttempt < 1 {
 		return fmt.Errorf("forge: environment_review.run_attempt must be at least 1, got %d", f.RunAttempt)
+	}
+	if f.LatestRunAttempt < 1 {
+		return fmt.Errorf("forge: environment_review.latest_run_attempt must be at least 1, got %d", f.LatestRunAttempt)
 	}
 	if err := validateCandidateSHA("environment_review.run_head_sha", f.RunHeadSHA); err != nil {
 		return err
@@ -245,8 +254,13 @@ func (f EnvironmentReviewFacts) Validate() error {
 		if row.EnvironmentID != f.EnvironmentID {
 			return fmt.Errorf("%s.environment_id %q is not the observed environment %q", prefix, row.EnvironmentID, f.EnvironmentID)
 		}
+		// Once a run has been rerun its history spans attempts, so the same
+		// reviewer's same decision can legitimately recur (L2b review m-10);
+		// the normalizer then refuses every row. While the latest attempt is
+		// the first, a repeated (reviewer, state) pair would give two rows
+		// one composite identity, which co-1 rejects.
 		key := row.ReviewerActor.Subject + "\x00" + string(row.ProviderState)
-		if _, exists := seen[key]; exists {
+		if _, exists := seen[key]; exists && f.LatestRunAttempt == 1 {
 			return fmt.Errorf("%s: duplicate (reviewer, state) pair for reviewer %q state %q", prefix, row.ReviewerActor.Subject, row.ProviderState)
 		}
 		seen[key] = struct{}{}
@@ -262,27 +276,12 @@ func (f EnvironmentReviewFacts) Validate() error {
 	return nil
 }
 
+// providerFactsDigest is the digest of every provider fact, deliberately
+// excluding the observation stamp and the digest itself.
 func (f EnvironmentReviewFacts) providerFactsDigest() (string, error) {
-	identity := struct {
-		Supported                    bool                   `json:"supported"`
-		UnsupportedReason            string                 `json:"unsupported_reason"`
-		Repository                   string                 `json:"repository"`
-		RunID                        string                 `json:"run_id"`
-		RunAttempt                   int                    `json:"run_attempt"`
-		RunHeadSHA                   string                 `json:"run_head_sha"`
-		RunURL                       string                 `json:"run_url"`
-		EnvironmentID                string                 `json:"environment_id"`
-		EnvironmentName              string                 `json:"environment_name"`
-		GatedJobFound                bool                   `json:"gated_job_found"`
-		GatedJobCreatedAt            string                 `json:"gated_job_created_at"`
-		GatedJobStartedAt            string                 `json:"gated_job_started_at"`
-		EnvironmentPreventSelfReview *bool                  `json:"environment_prevent_self_review"`
-		Reviews                      []EnvironmentReviewRow `json:"reviews"`
-	}{
-		f.Supported, f.UnsupportedReason, f.Repository, f.RunID, f.RunAttempt, f.RunHeadSHA, f.RunURL,
-		f.EnvironmentID, f.EnvironmentName, f.GatedJobFound, f.GatedJobCreatedAt, f.GatedJobStartedAt,
-		f.EnvironmentPreventSelfReview, f.Reviews,
-	}
+	identity := f
+	identity.ObservedAt = ""
+	identity.ProviderSnapshotID = ""
 	return canonjson.Digest(identity)
 }
 
@@ -315,10 +314,10 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 			"environment-review:unsupported-forge: no rows produced: %s", facts.UnsupportedReason,
 		)}, nil
 	}
-	if facts.RunAttempt != 1 {
+	if facts.LatestRunAttempt != 1 || facts.RunAttempt != facts.LatestRunAttempt {
 		return []Approval{}, []string{fmt.Sprintf(
-			"environment-review:rerun-not-honored: run_id=%s run_attempt=%d: reruns are not honored, a retry needs a new dispatch and a new review",
-			facts.RunID, facts.RunAttempt,
+			"environment-review:rerun-not-honored: run_id=%s run_attempt=%d latest_run_attempt=%d: only a run whose latest attempt is its first is honored, because GitHub's review history carries no attempt; a retry needs a new dispatch and a new review",
+			facts.RunID, facts.RunAttempt, facts.LatestRunAttempt,
 		)}, nil
 	}
 
