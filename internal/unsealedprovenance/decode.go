@@ -64,6 +64,7 @@ func DecodePayload(raw []byte) (*Payload, error) {
 	payload.Inventory = make([]InventoryEntry, len(*doc.Inventory))
 	for i, entry := range *doc.Inventory {
 		if entry == nil || entry.ID == nil || entry.Story == nil || entry.AdmittedBy == nil {
+			// vocab:identity — machinery diagnostic naming the SI-255 wire fields id, story, and admitted_by.
 			return nil, fmt.Errorf("unsealedprovenance: inventory[%d] requires id, story, and admitted_by", i)
 		}
 		payload.Inventory[i] = InventoryEntry{ID: *entry.ID, Story: *entry.Story, AdmittedBy: *entry.AdmittedBy}

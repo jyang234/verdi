@@ -36,7 +36,8 @@ type Payload struct {
 
 // InventoryEntry is one owner-reviewed inventory entry (design §6, SI-244).
 type InventoryEntry struct {
-	ID         string `yaml:"id" json:"id"`                   // kebab-case
+	ID string `yaml:"id" json:"id"` // kebab-case
+	// vocab:identity — "story" is the SI-255 wire field name (frontmatter and JSON key), never display prose.
 	Story      string `yaml:"story" json:"story"`             // spec/<name>, unpinned, unfragmented
 	AdmittedBy string `yaml:"admitted_by" json:"admitted_by"` // one non-blank line naming the governed change
 }
