@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -185,8 +186,12 @@ func TestCloseRequestTemplateBytesArePinned(t *testing.T) {
 // swap this test proves equal to EncodeRequest's output.
 func TestCloseRequestTemplateIsTheCanonicalEncodingWithSpecEmpty(t *testing.T) {
 	template := readCloseRequestTemplate(t)
+	accepted := regexp.MustCompile(specRefValidationPattern)
 	for _, spec := range []string{"spec/a", "spec/vatc-machine-projections", "spec/a1-2b-c3"} {
 		t.Run(spec, func(t *testing.T) {
+			if !accepted.MatchString(spec) {
+				t.Fatalf("sample %q is not a value close.yml's validation accepts (%s)", spec, specRefValidationPattern)
+			}
 			canonical, err := contextcompile.EncodeRequest(closeRequestFor(spec))
 			if err != nil {
 				t.Fatalf("EncodeRequest(close request for %s): %v", spec, err)

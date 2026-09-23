@@ -14,6 +14,7 @@
 package specalign
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -319,6 +320,11 @@ func TestCloseDispatchJobNeverUsesForbiddenFlags(t *testing.T) {
 // the resulting close/<name> branch is the FINAL step (nothing runs after
 // it that could still abort with the archive commit stranded, unpushed, in
 // the ephemeral runner).
+//
+// Lane E4b (SI-258) widens this by exactly one step: the jq step that fills
+// the committed context-request template must sit after the sync and before
+// the close, so the close reads a request filled from the validated input
+// in this same run. No other ordering constraint changes.
 func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 	job := closeJob(t)
 	steps := job.Steps
@@ -326,6 +332,7 @@ func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 	validateIdx := -1
 	checkoutIdx := -1
 	syncIdx := -1
+	instantiateIdx := -1
 	closeIdx := -1
 	pushIdx := -1
 	for i, s := range steps {
@@ -336,6 +343,8 @@ func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 			validateIdx = i
 		case strings.Contains(s.Run, "verdi sync") && !strings.Contains(s.Run, "--produce"):
 			syncIdx = i
+		case strings.HasPrefix(strings.TrimSpace(s.Run), "jq "):
+			instantiateIdx = i
 		case strings.Contains(s.Run, "verdi close"):
 			closeIdx = i
 		case strings.Contains(s.Run, "git push"):
@@ -362,11 +371,15 @@ func TestCloseDispatchStepsProvenSequence(t *testing.T) {
 		t.Fatalf("close.yml: no `git push` step found (verdi close itself never pushes — dc-3 — so this job must push the archive commit itself for a closure MR to be possible)")
 	}
 
+	if instantiateIdx == -1 {
+		t.Fatalf("close.yml: no jq step filling the context-request template found (SI-258); decoded run steps: %v", runCommands(steps))
+	}
+
 	if validateIdx > checkoutIdx {
 		t.Errorf("close.yml: spec_ref validation (step %d) must come before actions/checkout (step %d) — reject before running any verb, including checkout", validateIdx, checkoutIdx)
 	}
-	if validateIdx >= syncIdx || syncIdx >= closeIdx || closeIdx >= pushIdx {
-		t.Errorf("close.yml: steps must run in order validate(%d) < sync(%d) < close(%d) < push(%d)", validateIdx, syncIdx, closeIdx, pushIdx)
+	if validateIdx >= syncIdx || syncIdx >= instantiateIdx || instantiateIdx >= closeIdx || closeIdx >= pushIdx {
+		t.Errorf("close.yml: steps must run in order validate(%d) < sync(%d) < instantiate request(%d) < close(%d) < push(%d)", validateIdx, syncIdx, instantiateIdx, closeIdx, pushIdx)
 	}
 	if pushIdx != len(steps)-1 {
 		t.Errorf("close.yml: the git push step must be the FINAL step (index %d of %d), got index %d", len(steps)-1, len(steps), pushIdx)
@@ -520,6 +533,29 @@ func TestCloseDispatchPushIsAPlainFastForwardOfTheCloseBranch(t *testing.T) {
 // passes to the shell as data.
 const specRefFromInput = "${{ inputs.spec_ref }}"
 
+// specRefValidationPattern is the only spec_ref shape close.yml accepts
+// (SI-258): a whole spec/<name> ref. A scheme-prefixed tracker ref is
+// refused, because the context request the close step passes binds a spec
+// ref and a tracker ref cannot fill its spec field.
+const specRefValidationPattern = `^spec/[a-z0-9]+(-[a-z0-9]+)*$`
+
+// closeRequestFilledPath is where close.yml writes the filled request:
+// under the checkout root, in the git-ignored .build/ (.gitignore) that
+// already holds the built binary, so readinessload.ValidatedContextRequestPath
+// stops its walk at the store root and never meets a host symlink above it
+// (ruling R-PBW1-7).
+const closeRequestFilledPath = ".build/close-context-request.json"
+
+// closeRequestInstantiateCommand is the one step that fills the template
+// (SI-258): it sets spec from the validated input and touches no other
+// field, and -c -S reproduce the canonical encoding (see
+// TestCloseRequestTemplateIsTheCanonicalEncodingWithSpecEmpty).
+const closeRequestInstantiateCommand = `jq -c -S --arg spec "$SPEC_REF" '.spec = $spec' ` + closeRequestTemplateRel + ` > ` + closeRequestFilledPath
+
+// closeStepCommand is the close step's exact command: the validated spec ref
+// and the filled request.
+const closeStepCommand = `./.build/verdi close "$SPEC_REF" --context-request ` + closeRequestFilledPath
+
 // TestCloseDispatchRunScriptsNeverInterpolateExpressions proves no run:
 // script in close.yml contains a `${{ ... }}` expression, and in particular
 // never `${{ inputs.spec_ref }}`. The runner substitutes an expression into
@@ -536,10 +572,14 @@ func TestCloseDispatchRunScriptsNeverInterpolateExpressions(t *testing.T) {
 }
 
 // TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation
-// proves the validation step (index 0) and the close step both read the
-// input as env SPEC_REF, that the close step's command is exactly
-// `./.build/verdi close "$SPEC_REF"`, and that no step other than those two
-// receives the input at all.
+// proves the validation step (index 0), the request-instantiation step, and
+// the close step read the input as env SPEC_REF, that the close step's
+// command is exactly closeStepCommand, and that no other step receives the
+// input at all.
+//
+// Lane E4b (SI-258) widens the allowed receivers from two steps to three:
+// the jq step that fills the template's spec needs the validated input, and
+// nothing else it needs comes from a dispatch input.
 func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *testing.T) {
 	job := closeJob(t)
 	if len(job.Steps) == 0 {
@@ -548,28 +588,190 @@ func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *tes
 	if got := job.Steps[0].Env["SPEC_REF"]; got != specRefFromInput {
 		t.Errorf("close.yml: the first (validation) step must receive the input as env SPEC_REF: %q, got %q", specRefFromInput, got)
 	}
-	closeCmd := `./.build/verdi close "$SPEC_REF"`
-	matches := findExactRunSteps(job.Steps, closeCmd)
-	if len(matches) != 1 {
-		t.Fatalf("close.yml: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", closeCmd, len(matches), runCommands(job.Steps))
-	}
-	if got := job.Steps[matches[0]].Env["SPEC_REF"]; got != specRefFromInput {
-		t.Errorf("close.yml: the close step must receive the input as env SPEC_REF: %q, got %q", specRefFromInput, got)
+	receivers := map[int]bool{0: true}
+	for _, cmd := range []string{closeRequestInstantiateCommand, closeStepCommand} {
+		matches := findExactRunSteps(job.Steps, cmd)
+		if len(matches) != 1 {
+			t.Fatalf("close.yml: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", cmd, len(matches), runCommands(job.Steps))
+		}
+		if got := job.Steps[matches[0]].Env["SPEC_REF"]; got != specRefFromInput {
+			t.Errorf("close.yml: the step running %q must receive the input as env SPEC_REF: %q, got %q", cmd, specRefFromInput, got)
+		}
+		receivers[matches[0]] = true
 	}
 	for i, step := range job.Steps {
-		if i == 0 || i == matches[0] {
+		if receivers[i] {
 			continue
 		}
 		for name, value := range step.Env {
 			if strings.Contains(value, "inputs.") {
-				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through env %s=%q; only the validation and close steps may", i, step.Name, name, value)
+				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through env %s=%q; only the validation, request-instantiation, and close steps may", i, step.Name, name, value)
 			}
 		}
 		for name, value := range step.With {
 			if strings.Contains(value, "inputs.") {
-				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through with %s=%q; only the validation and close steps may", i, step.Name, name, value)
+				t.Errorf("close.yml: step %d (name %q) receives a dispatch input through with %s=%q; only the validation, request-instantiation, and close steps may", i, step.Name, name, value)
 			}
 		}
+	}
+}
+
+// TestCloseDispatchValidationAcceptsOnlySpecRefs proves the validation step
+// (SI-258) accepts exactly the spec/<name> shape: it declares one pattern,
+// specRefValidationPattern, tests $SPEC_REF against it once, and on refusal
+// prints the value with printf %q (a newline in the input cannot start a
+// workflow command) and exits 1. The pattern read from the workflow is then
+// evaluated in Go against accepted and refused inputs. For this pattern
+// (anchors, ASCII bracket ranges, one group, + and *) bash's POSIX ERE and
+// Go's RE2 accept the same strings, and both anchor $ at the end of the
+// input, not at an embedded newline.
+func TestCloseDispatchValidationAcceptsOnlySpecRefs(t *testing.T) {
+	job := closeJob(t)
+	if len(job.Steps) == 0 {
+		t.Fatalf("close.yml: the close job has no steps")
+	}
+	run := job.Steps[0].Run
+	var patterns []string
+	for _, line := range strings.Split(run, "\n") {
+		line = strings.TrimSpace(line)
+		if name, value, ok := strings.Cut(line, "="); ok && strings.HasSuffix(name, "_re") {
+			patterns = append(patterns, name+"="+value)
+		}
+	}
+	if want := []string{"spec_re='" + specRefValidationPattern + "'"}; !slices.Equal(patterns, want) {
+		t.Fatalf("close.yml: the validation step must declare exactly the one pattern %v (tracker refs are no longer accepted, SI-258), got %v", want, patterns)
+	}
+	if n := strings.Count(run, "=~"); n != 1 {
+		t.Errorf("close.yml: the validation step must test $SPEC_REF against one pattern, found %d =~ tests", n)
+	}
+	if !strings.Contains(run, `if [[ "$SPEC_REF" =~ $spec_re ]]; then`) {
+		t.Errorf("close.yml: the validation step must test exactly `[[ \"$SPEC_REF\" =~ $spec_re ]]`, got %q", run)
+	}
+	refusal := ""
+	for _, line := range strings.Split(run, "\n") {
+		if strings.Contains(line, "::error::") {
+			refusal = strings.TrimSpace(line)
+		}
+	}
+	if !strings.HasPrefix(refusal, "printf '::error::") || !strings.Contains(refusal, "%q") || !strings.HasSuffix(refusal, `"$SPEC_REF"`) {
+		t.Errorf("close.yml: the refusal must print the value with printf %%q, got %q", refusal)
+	}
+	for _, reason := range []string{"tracker ref", "binds a spec ref"} {
+		if !strings.Contains(refusal, reason) {
+			t.Errorf("close.yml: the refusal must say why a tracker ref is refused (missing %q), got %q", reason, refusal)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(run), "exit 1") {
+		t.Errorf("close.yml: the validation step must end with exit 1 after the refusal, got %q", run)
+	}
+
+	re := regexp.MustCompile(specRefValidationPattern)
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"spec/a", true},
+		{"spec/vatc-machine-projections", true},
+		{"spec/a1-2b-c3", true},
+		{"jira:LOAN-1482", false},
+		{"jira:KEY", false},
+		{"feature/a", false},
+		{"spec/", false},
+		{"spec/A", false},
+		{"spec/-a", false},
+		{"spec/a-", false},
+		{"spec/a--b", false},
+		{"spec/a/b", false},
+		{"spec/a@0123456789abcdef0123456789abcdef01234567", false},
+		{"spec/a#ac-1", false},
+		{" spec/a", false},
+		{"spec/a\n", false},
+		{"spec/a\nspec/b", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%q", tt.input), func(t *testing.T) {
+			if got := re.MatchString(tt.input); got != tt.want {
+				t.Errorf("spec_ref pattern on %q = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCloseDispatchInstantiatesTheRequestTemplate proves the one step that
+// fills the committed template (SI-258): it runs exactly
+// closeRequestInstantiateCommand, after the sync and before the close,
+// receives only SPEC_REF (from the dispatch input, through env), and
+// declares no key but name, env and run, so no shell:, working-directory:
+// (which would move where .build/ resolves), if:, or continue-on-error: can
+// change what it writes. The template it reads exists at that path.
+func TestCloseDispatchInstantiatesTheRequestTemplate(t *testing.T) {
+	job := closeJob(t)
+	matches := findExactRunSteps(job.Steps, closeRequestInstantiateCommand)
+	if len(matches) != 1 {
+		t.Fatalf("close.yml: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", closeRequestInstantiateCommand, len(matches), runCommands(job.Steps))
+	}
+	idx := matches[0]
+	syncs := findExactRunSteps(job.Steps, "./.build/verdi sync")
+	closes := findExactRunSteps(job.Steps, closeStepCommand)
+	if len(syncs) != 1 || len(closes) != 1 {
+		t.Fatalf("close.yml: expected one sync step and one close step, found %d and %d", len(syncs), len(closes))
+	}
+	if !(syncs[0] < idx && idx < closes[0]) {
+		t.Errorf("close.yml: the request-instantiation step (index %d) must run after the sync (index %d) and before the close (index %d)", idx, syncs[0], closes[0])
+	}
+	step := job.Steps[idx]
+	if want := map[string]string{"SPEC_REF": specRefFromInput}; !maps.Equal(step.Env, want) {
+		t.Errorf("close.yml: the request-instantiation step's env must be exactly %v, got %v", want, step.Env)
+	}
+	if want := []string{"env", "name", "run"}; !slices.Equal(step.Keys, want) {
+		t.Errorf("close.yml: the request-instantiation step must declare exactly the keys %v, got %v", want, step.Keys)
+	}
+	if _, err := os.Stat(closeRequestTemplatePath(verdiRepoRoot)); err != nil {
+		t.Errorf("close.yml: the template the instantiation step reads must be committed at %s: %v", closeRequestTemplateRel, err)
+	}
+}
+
+// redirectTargetRE finds a shell output redirection (`> target`) that
+// follows whitespace, so the '>' of a `<name>` placeholder is not read as
+// one.
+var redirectTargetRE = regexp.MustCompile(`(?:^|\s)>\s*(\S+)`)
+
+// contextRequestOperandRE finds the operand of every --context-request flag.
+var contextRequestOperandRE = regexp.MustCompile(`--context-request\s+(\S+)`)
+
+// TestCloseDispatchWritesTheRequestOnlyUnderBuild pins ruling R-PBW1-7: the
+// filled request lives at closeRequestFilledPath, relative to the checkout
+// root and inside the git-ignored .build/, and nowhere else. No step names
+// RUNNER_TEMP or /tmp, every redirect that writes a context request targets
+// closeRequestFilledPath, every --context-request operand is that path, and
+// the committed template is only ever read.
+func TestCloseDispatchWritesTheRequestOnlyUnderBuild(t *testing.T) {
+	job := closeJob(t)
+	operands := 0
+	for i, step := range job.Steps {
+		for _, forbidden := range []string{"RUNNER_TEMP", "/tmp"} {
+			if strings.Contains(step.Run, forbidden) {
+				t.Errorf("close.yml: step %d (name %q) names %s; the filled request lives only at %s", i, step.Name, forbidden, closeRequestFilledPath)
+			}
+		}
+		for _, m := range redirectTargetRE.FindAllStringSubmatch(step.Run, -1) {
+			if strings.Contains(m[1], "context-request") && m[1] != closeRequestFilledPath {
+				t.Errorf("close.yml: step %d (name %q) writes a context request to %q, want only %q", i, step.Name, m[1], closeRequestFilledPath)
+			}
+		}
+		for _, m := range contextRequestOperandRE.FindAllStringSubmatch(step.Run, -1) {
+			operands++
+			if m[1] != closeRequestFilledPath {
+				t.Errorf("close.yml: step %d (name %q) passes --context-request %q, want %q", i, step.Name, m[1], closeRequestFilledPath)
+			}
+		}
+	}
+	if operands != 1 {
+		t.Errorf("close.yml: expected exactly one --context-request operand across all steps, found %d", operands)
+	}
+	if !strings.HasPrefix(closeRequestFilledPath, ".build/") || strings.Contains(closeRequestFilledPath, "..") {
+		t.Errorf("closeRequestFilledPath %q must be a relative path inside .build/", closeRequestFilledPath)
 	}
 }
 
@@ -582,9 +784,13 @@ func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *tes
 // at the commit, after the freeze and the archive move. The values are the
 // ones actions/checkout's README gives for pushing with the built-in token;
 // they are scoped to this one step's environment.
+//
+// Lane E4b (SI-258) changes only the command this test looks up, to
+// closeStepCommand (the close step now also passes the filled request); the
+// identity it pins is unchanged.
 func TestCloseDispatchCloseStepHasACommitterIdentity(t *testing.T) {
 	job := closeJob(t)
-	matches := findExactRunSteps(job.Steps, `./.build/verdi close "$SPEC_REF"`)
+	matches := findExactRunSteps(job.Steps, closeStepCommand)
 	if len(matches) != 1 {
 		t.Fatalf("close.yml: expected exactly one `verdi close` step, found %d; decoded run steps: %v", len(matches), runCommands(job.Steps))
 	}
