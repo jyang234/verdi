@@ -33,14 +33,16 @@ type mergeRecordProjectJSON struct {
 // mergeRecordMergeRequestJSON is the subset of one merge request of "List
 // merge requests associated with a commit" (GET
 // /projects/:id/repository/commits/:sha/merge_requests) the read needs.
-// merge_commit_sha and merged_at are nullable. squash_commit_sha is
-// deliberately not modeled: a squash commit is never a merge commit.
+// merge_commit_sha and merged_at are nullable. target_project_id must be the
+// queried project's id. squash_commit_sha is deliberately not modeled: a
+// squash commit is never a merge commit.
 type mergeRecordMergeRequestJSON struct {
-	IID            int64   `json:"iid"`
-	State          string  `json:"state"`
-	TargetBranch   string  `json:"target_branch"`
-	MergeCommitSHA *string `json:"merge_commit_sha"`
-	MergedAt       *string `json:"merged_at"`
+	IID             int64   `json:"iid"`
+	State           string  `json:"state"`
+	TargetBranch    string  `json:"target_branch"`
+	TargetProjectID int64   `json:"target_project_id"`
+	MergeCommitSHA  *string `json:"merge_commit_sha"`
+	MergedAt        *string `json:"merged_at"`
 }
 
 // MergeRecords implements forge.Forge (SI-249; plan R-PB-2): the merge
@@ -84,7 +86,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 
 	changes := make([]forge.ChangeRequestMerge, 0, len(mergeRequests))
 	for i, mergeRequest := range mergeRequests {
-		change, err := mergeRequestChangeRequestMerge(mergeRequest)
+		change, err := mergeRequestChangeRequestMerge(mergeRequest, project.ID)
 		if err != nil {
 			// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 			return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: merge request entry %d for commit %s: %w", i, commit, err)
@@ -112,12 +114,28 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 // merged, and locked fails closed. merge_commit_sha and merged_at are honored
 // only when merged; a fast-forward merge reports a null merge_commit_sha, so
 // its facts carry no merge commit and it stays unproven.
-func mergeRequestChangeRequestMerge(mergeRequest mergeRecordMergeRequestJSON) (forge.ChangeRequestMerge, error) {
+//
+// The merge request's target_project_id must be the queried project
+// (projectID, from "Retrieve a project"), mirroring the GitHub adapter's
+// base-repository check (lane EF review F2): a merge into another project's
+// default branch is not a merge into this one's. A missing target_project_id
+// or a different one is a provider contract violation — an operational
+// error, never unavailability and never a merge request silently dropped.
+func mergeRequestChangeRequestMerge(mergeRequest mergeRecordMergeRequestJSON, projectID int64) (forge.ChangeRequestMerge, error) {
 	if mergeRequest.IID <= 0 {
 		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ChangeRequestMerge{}, fmt.Errorf("merge request carries no positive iid")
 	}
 	id := strconv.FormatInt(mergeRequest.IID, 10)
+	if mergeRequest.TargetProjectID <= 0 {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
+		return forge.ChangeRequestMerge{}, fmt.Errorf("merge request %s carries no positive target_project_id", id)
+	}
+	if mergeRequest.TargetProjectID != projectID {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
+		return forge.ChangeRequestMerge{}, fmt.Errorf("merge request %s targets project id %d, not the queried project id %d: a provider contract violation",
+			id, mergeRequest.TargetProjectID, projectID)
+	}
 	change := forge.ChangeRequestMerge{ChangeID: id, TargetBranch: mergeRequest.TargetBranch}
 	switch mergeRequest.State {
 	case "opened", "locked":

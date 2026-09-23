@@ -25,13 +25,18 @@ const mrtCommit = "6dcb09b5b57875f334f61aebed695e2e4193db5e"
 
 func mrtClock() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
 
+// mrtProjectID is the queried project's id in "Retrieve a project"; every
+// merge request's target_project_id carries it unless a row says otherwise.
+const mrtProjectID = 42
+
 // mrtMR is a minimal merge request body carrying the members the adapter
 // reads plus two it never reads (title, squash_commit_sha), which must be
-// ignored.
+// ignored. Its target project is the queried project.
 func mrtMR(iid int64, state string, mergedAt, mergeSHA any, target string) map[string]any {
 	return map[string]any{
 		"iid": iid, "state": state, "merged_at": mergedAt, "merge_commit_sha": mergeSHA,
-		"target_branch": target, "title": "unmodeled", "squash_commit_sha": mrtCommit,
+		"target_branch": target, "target_project_id": mrtProjectID,
+		"title": "unmodeled", "squash_commit_sha": mrtCommit,
 	}
 }
 
@@ -275,6 +280,74 @@ func TestGitLabMergeRecords_FailsClosedOnProviderShape(t *testing.T) {
 			}
 			if errors.Is(err, forge.ErrUnavailable) {
 				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; a provider shape or configuration fault is operational, never unavailability", err)
+			}
+		})
+	}
+}
+
+// TestGitLabMergeRecords_RefusesAnotherProjectsMergeRequest mirrors the
+// GitHub base-repository check (lane EF review F2, for symmetry; review
+// probe G1): each merge request's target_project_id must be the id of
+// "Retrieve a project". A mismatch is a provider contract violation,
+// reported as an operational error — never unavailability, and never a merge
+// request silently dropped — and a missing target_project_id is refused.
+// Each row names the error it must fail with.
+func TestGitLabMergeRecords_RefusesAnotherProjectsMergeRequest(t *testing.T) {
+	foreign := func(iid int64) map[string]any {
+		mr := mrtMR(iid, "merged", "2026-09-20T10:15:30Z", mrtCommit, "main")
+		mr["project_id"] = 777
+		mr["target_project_id"] = 777
+		return mr
+	}
+	tests := []struct {
+		name    string
+		setup   func(*mrtServer)
+		wantErr string
+	}{
+		{"review probe G1: a merged merge request targeting another project", func(s *mrtServer) {
+			s.mrPages = []string{mrtEncode(t, []any{foreign(9)})}
+		}, "merge request 9 targets project id 777, not the queried project id 42"},
+		{"a merge request of another project beside one of this project is not dropped", func(s *mrtServer) {
+			s.mrPages = []string{mrtEncode(t, []any{mrtMR(7, "merged", "2026-09-20T10:15:30Z", mrtCommit, "main"), foreign(9)})}
+		}, "not the queried project id 42"},
+		{"a merge request of another project on a later page", func(s *mrtServer) {
+			s.mrPages = []string{
+				mrtEncode(t, []any{mrtMR(7, "opened", nil, nil, "main")}),
+				mrtEncode(t, []any{foreign(9)}),
+			}
+		}, "not the queried project id 42"},
+		{"a merge request without target_project_id", func(s *mrtServer) {
+			mr := mrtMR(5, "opened", nil, nil, "main")
+			delete(mr, "target_project_id")
+			s.mrPages = []string{mrtEncode(t, []any{mr})}
+		}, "merge request 5 carries no positive target_project_id"},
+		{"a merge request with a null target_project_id", func(s *mrtServer) {
+			mr := mrtMR(5, "opened", nil, nil, "main")
+			mr["target_project_id"] = nil
+			s.mrPages = []string{mrtEncode(t, []any{mr})}
+		}, "merge request 5 carries no positive target_project_id"},
+		{"a target_project_id of the wrong type", func(s *mrtServer) {
+			mr := mrtMR(5, "opened", nil, nil, "main")
+			mr["target_project_id"] = "42"
+			s.mrPages = []string{mrtEncode(t, []any{mr})}
+		}, "target_project_id of type int64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newMRTServer(t)
+			tt.setup(s)
+			facts, err := s.adapter().MergeRecords(context.Background(), mrtCommit)
+			if err == nil {
+				t.Fatalf("MergeRecords = %+v, want an operational error naming %q", facts, tt.wantErr)
+			}
+			if errors.Is(err, forge.ErrUnavailable) {
+				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; a provider contract violation is operational, never unavailability", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("MergeRecords error %q, want it to name %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(facts, forge.MergeRecordFacts{}) {
+				t.Fatalf("MergeRecords returned facts %+v beside its error, want the zero value", facts)
 			}
 		})
 	}

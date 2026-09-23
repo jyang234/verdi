@@ -269,6 +269,17 @@ const mrPublishedMRHead = "af5b13261899fb2c0db30abdd0af8b07cb44fdc5"
 // request reports. Every other published member and value is kept.
 const mrGitLabMergedAt = "2018-03-26T17:40:00.000Z"
 
+// The two GitLab examples come from different pages and name different
+// projects: "Retrieve a project" is project 3, and the commit's merge request
+// targets project 35 (target_project_id). The adapter refuses a merge
+// request whose target project is not the queried project (lane EF review
+// F2), so a scenario binds one example's id to the other's — a value change,
+// never an invented member.
+const (
+	mrGitLabPublishedProjectID       = 3
+	mrGitLabPublishedTargetProjectID = 35
+)
+
 // publishedCommitMergeRequestObject is a fresh copy of the one merge request
 // in GitLab's published "List merge requests associated with a commit"
 // example.
@@ -284,11 +295,13 @@ func publishedProjectObject(t *testing.T) map[string]any {
 	return asObject(t, publishedValue(t, "gitlab/project.json"))
 }
 
-// mrGitLabMR is the published merge request bound to one scenario; a merged
-// scenario adds merged_at (mrGitLabMergedAt's doc).
+// mrGitLabMR is the published merge request bound to one scenario and to the
+// published project (its target_project_id is set to the project's id); a
+// merged scenario adds merged_at (mrGitLabMergedAt's doc).
 func mrGitLabMR(t *testing.T, state string, mergeSHA, squashSHA any, target string) map[string]any {
 	t.Helper()
 	mr := publishedCommitMergeRequestObject(t)
+	setMember(t, mr, "target_project_id", mrGitLabPublishedProjectID)
 	setMember(t, mr, "state", state)
 	setMember(t, mr, "merge_commit_sha", mergeSHA)
 	setMember(t, mr, "squash_commit_sha", squashSHA)
@@ -360,32 +373,77 @@ func (s *mrGitLabScenario) mrsBody() string {
 }
 
 func TestMergeRecordsPublishedGitLab(t *testing.T) {
-	t.Run("the published examples decode verbatim", func(t *testing.T) {
+	// Each published example decodes verbatim; its partner is the other
+	// published example with only its project id bound to match.
+	verbatim := []struct {
+		name           string
+		scenario       func(*testing.T) *mrGitLabScenario
+		wantRepository string
+	}{
+		{
+			name: "the published merge request list decodes verbatim",
+			scenario: func(t *testing.T) *mrGitLabScenario {
+				project := publishedProjectObject(t)
+				setMember(t, project, "id", mrGitLabPublishedTargetProjectID)
+				return &mrGitLabScenario{
+					t: t, commit: mrPublishedMRHead, project: project,
+					rawMRs: string(publishedFixture(t, "gitlab/commit-merge-requests.json")),
+				}
+			},
+			wantRepository: "35",
+		},
+		{
+			name: "the published project decodes verbatim",
+			scenario: func(t *testing.T) *mrGitLabScenario {
+				mr := publishedCommitMergeRequestObject(t)
+				setMember(t, mr, "target_project_id", mrGitLabPublishedProjectID)
+				return &mrGitLabScenario{
+					t: t, commit: mrPublishedMRHead, mrs: []map[string]any{mr},
+					rawProject: string(publishedFixture(t, "gitlab/project.json")),
+				}
+			},
+			wantRepository: "3",
+		},
+	}
+	for _, tt := range verbatim {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.scenario(t)
+			facts, err := s.adapter().MergeRecords(context.Background(), mrPublishedMRHead)
+			if err != nil {
+				t.Fatalf("MergeRecords over the published examples: %v", err)
+			}
+			if got, want := s.requestedPaths, []string{"/projects/3", "/projects/3/repository/commits/" + mrPublishedMRHead + "/merge_requests"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("requests = %v, want %v", got, want)
+			}
+			if facts.DefaultBranch != "main" || facts.Repository != tt.wantRepository || facts.Commit != mrPublishedMRHead {
+				t.Fatalf("facts = %+v, want the published default branch main for project %s", facts, tt.wantRepository)
+			}
+			want := []forge.ChangeRequestMerge{{ChangeID: "1", State: forge.ChangeRequestOpen, TargetBranch: "main"}}
+			if !reflect.DeepEqual(facts.Changes, want) {
+				t.Fatalf("changes = %+v, want the opened published merge request %+v", facts.Changes, want)
+			}
+			proof, err := forge.ProveMergedIntoDefault(facts)
+			if err != nil {
+				t.Fatalf("ProveMergedIntoDefault: %v", err)
+			}
+			if proof.State != forge.MergeProofUnproven || proof.Reason != forge.MergeProofReasonNoMergeIntoDefault {
+				t.Fatalf("proof = %+v, want unproven for an opened merge request", proof)
+			}
+		})
+	}
+
+	t.Run("the verbatim published pair names two projects and is refused", func(t *testing.T) {
 		s := &mrGitLabScenario{
 			t: t, commit: mrPublishedMRHead,
 			rawProject: string(publishedFixture(t, "gitlab/project.json")),
 			rawMRs:     string(publishedFixture(t, "gitlab/commit-merge-requests.json")),
 		}
 		facts, err := s.adapter().MergeRecords(context.Background(), mrPublishedMRHead)
-		if err != nil {
-			t.Fatalf("MergeRecords over the published examples: %v", err)
+		if err == nil || errors.Is(err, forge.ErrUnavailable) {
+			t.Fatalf("MergeRecords = %+v, %v; want an operational error that is not unavailability", facts, err)
 		}
-		if got, want := s.requestedPaths, []string{"/projects/3", "/projects/3/repository/commits/" + mrPublishedMRHead + "/merge_requests"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("requests = %v, want %v", got, want)
-		}
-		if facts.DefaultBranch != "main" || facts.Repository != "3" || facts.Commit != mrPublishedMRHead {
-			t.Fatalf("facts = %+v, want the published default branch main for project 3", facts)
-		}
-		want := []forge.ChangeRequestMerge{{ChangeID: "1", State: forge.ChangeRequestOpen, TargetBranch: "main"}}
-		if !reflect.DeepEqual(facts.Changes, want) {
-			t.Fatalf("changes = %+v, want the opened published merge request %+v", facts.Changes, want)
-		}
-		proof, err := forge.ProveMergedIntoDefault(facts)
-		if err != nil {
-			t.Fatalf("ProveMergedIntoDefault: %v", err)
-		}
-		if proof.State != forge.MergeProofUnproven || proof.Reason != forge.MergeProofReasonNoMergeIntoDefault {
-			t.Fatalf("proof = %+v, want unproven for an opened merge request", proof)
+		if want := "merge request 1 targets project id 35, not the queried project id 3"; !strings.Contains(err.Error(), want) {
+			t.Fatalf("MergeRecords error %q, want it to name %q", err, want)
 		}
 	})
 
