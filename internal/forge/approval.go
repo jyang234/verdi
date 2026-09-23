@@ -195,9 +195,10 @@ func (s ApprovalSnapshot) providerFactsDigest() (string, error) {
 // any data after the one JSON value is rejected.
 //
 // Provider responses are an OPEN contract (closing-machinery wave-1 ruling
-// R-W1-8): GitHub's REST breaking-changes policy classes "adding a response
-// field" as additive, and GitLab likewise adds response members over time,
-// so spec/vatc-forge-countersign-v2 co-1's unknown-field rejection, which
+// R-W1-8): GitHub's REST API versioning policy classes "adding a response
+// field" as an additive change available in every supported version, and
+// GitLab's REST API adds new features within its v4 major version, so
+// spec/vatc-forge-countersign-v2 co-1's unknown-field rejection, which
 // applies only "where the provider contract is closed", does not reach them.
 // This is the ratified spec/forge-transport ac-1/dc-1 posture for foreign
 // payloads (internal/httpjson carries its policy prose), with trailing-data
