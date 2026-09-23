@@ -3,7 +3,7 @@
 Status: phase A authority text for review. Ratified by the owner's merge of the
 pull request that carries it, together with `spec/context-integrity-v3` DC-25 and
 CO-7. Plan: `docs/superpowers/plans/2026-09-23-unsealed-provenance-exemption.md`
-(walls W1–W12, owner decision D-OC-1). Ledger: SI-239 through SI-248.
+(walls W1–W12, owner decision D-OC-1). Ledger: SI-239 through SI-249.
 
 This design is normative for the one departure `spec/context-integrity-v3` DC-25
 admits. Where it and an earlier design differ, the earlier design's text is
@@ -37,8 +37,9 @@ Three commits are distinct and each has one role (SI-239):
 
 - **H_e — the eligible implementation commit.** A default-branch commit at which
   the story's implementation is complete, chosen by the exemption's author and
-  bound into the signed exemption. It is on the default branch when the exemption
-  is authored (commit ancestry). Eligibility (§5, §6) is decided at H_e.
+  bound into the signed exemption. It must have landed on the default branch
+  before the exemption is approved and before it is issued, proven by the
+  prior-landing witness of §5 Scope. Eligibility (§5, §6) is decided at H_e.
 - **H — the closed content and authority head.** The commit the story's
   alignment report covers and whose committed store supplies authority at close:
   the adopted constitution, the exemption itself, dispositions, projections, and
@@ -66,7 +67,9 @@ The close is covered only when both hold:
      escalation approval;
    - `.verdi/policy/dispositions/` — semantic fallback dispositions;
    - `.verdi/policy/projections/` and the generated instruction projections that
-     the committed projection manifest at H lists by path;
+     the committed projection manifest at H lists by path — those paths are
+     outputs the existing compiler verifies against constitution authority, never
+     independent authority to widen this allowlist;
    - the approval payload files the authenticated approval reader defines
      (phase B lane E2), which live under `.verdi/policy/`.
 
@@ -97,7 +100,9 @@ family (SI-241):
     group (W2);
   - `accepted_spec_digest`: the canonical content digest of that accepted spec;
   - `implementation`: `{ commit: H_e, tree: <H_e tree id> }`;
-  - `inventory_entry`: the inventory entry id (§6).
+  - `inventory_entry`: the inventory entry id (§6);
+  - `landed_snapshot`: D, the default-branch commit the approver verified already
+    contains H_e (§5 Scope). The approvals sign the exemption including D.
 
 An exemption carrying both families, more than one required-input witness, or a
 required-input witness with any other phase or input set fails strict decoding.
@@ -115,12 +120,28 @@ states as §5.5, each proven, violated-with-witness, or unproven (SI-242):
   spec (W2); H descends from H_e and every tree difference is in the allowlist
   (§3, W3); the inventory entry still names this story and H_e is admitted by it
   (§6, W11).
-- **Scope.** Eligibility at H_e: the commit that introduced the exemption is a
-  descendant of H_e (authored after the implementation landed, W3) and is
-  reachable from the default branch (issued, §9); if a cutoff record exists,
-  H_e is an ancestor of its cutoff commit (§7, W4); the typed payload permits
-  unsealed-provenance exemptions (§8, W12); the governing profile is not
-  high-assurance (W12).
+- **Scope.** Eligibility at H_e, including the prior-landing witness (SI-249).
+  Let M_e be the first commit on the default branch's first-parent chain from which
+  the exemption's introducing commit is reachable — the issuance merge. Scope is
+  proven only when all hold:
+  - M_e is a merge commit, the exemption's introducing commit is not an ancestor of
+    M_e's first parent, and it is an ancestor of M_e (issued by a merge, §9);
+  - H_e is an ancestor of D, D is on the default branch's first-parent chain, and
+    D is an ancestor of M_e's first parent — so H_e was part of a real default-branch
+    state that the approval bound and that preceded issuance;
+  - if a cutoff record exists, H_e is an ancestor of its cutoff commit (§7, W4);
+  - the typed payload permits unsealed-provenance exemptions (§8, W12), and the
+    governing profile is not high-assurance (W12).
+
+  A fast-forward or direct-push issuance (M_e not a merge commit), a D that is not
+  on the first-parent chain or does not precede M_e's first parent, and history
+  that is shallow or otherwise unavailable leave the order unknown: Scope is
+  unproven and the exemption is ineffective. In particular, an implementation and
+  its exemption that reach the default branch in the same merge fail, because
+  M_e's first parent does not contain H_e. The enforceable boundary is approval
+  (the signed D) and issuance (M_e), not the moment a person drafts the text,
+  which no repository fact can witness; this is an explicit rule the owner
+  ratifies with this design (SI-249).
 - **Bound.** `expiry` is equal to or later than `evaluated_on`; a review
   condition alone is unproven.
 - **Authorization.** The kernel's result for the transition
@@ -197,7 +218,10 @@ can each count as below the cap. An issued exemption is active until it expires,
 is consumed by a successful close, or is withdrawn by a governed constitution
 change that removes it. Issuance counts the
 candidate: a new exemption is refused when the active count including it would
-exceed `cap`. An exemption already issued stays usable even when the active count
+exceed `cap`, where the active count is read from the default-branch state at its
+own issuance merge's first parent — the canonical state it was issued into — so two
+proposals drafted against the same old default-branch head are counted in the
+order they merge, and the second sees the first. An exemption already issued stays usable even when the active count
 equals `cap`. Consumed and expired exemptions remain listed permanently in the
 audit. The ratified amendment's proposed value is `cap: 1` (the pilot); raising it
 is a governed change made after reviewing the pilot's audit.
@@ -284,15 +308,16 @@ digest)", add:
 > presents the close as sealed
 
 08 entry: "Unsealed-provenance exemption — the closure record's disclosure
-(2026-09-23)", citing D-OC-1, SI-239 through SI-248, and the mirror sync.
+(2026-09-23)", citing D-OC-1, SI-239 through SI-249, and the mirror sync.
 
 ## 13. Verification requirements (phase B, E7)
 
 Every wall has positive, boundary, and negative coverage in the composed hermetic
 built-binary close through the real conflict evaluator, or in a named lower-level
 test. The positive run is the real sequence: adopted fixture with the payload
-permitting one exemption → implementation at H_e → merge the signed exemption into
-the default branch → cut the close branch there and commit the dispositions,
+permitting one exemption → implementation merged onto the default branch at H_e →
+approval binding a default-branch snapshot D that contains H_e → merge the signed
+exemption into the default branch by a merge commit → cut the close branch there and commit the dispositions,
 ending at H → report-only R → CI records for R →
 artifact fetch → detached close with the environment approval → archive and
 rollup carrying the block → publication. Negative variants, each refusing with
@@ -300,7 +325,11 @@ nothing archived or published, include at least: no exemption; expired; review
 condition only; permission off; high-assurance; missing or unauthorized approval;
 another story; a feature; a stale accepted-spec digest; a story outside the
 inventory; claim and required-input witnesses mixed; an exemption authored before
-H_e landed; an exemption present only on an unmerged branch; a non-allowlisted change between H_e and H (a source file, a rename, a
+H_e landed; an implementation and its exemption merged together; both fast-forwarded
+onto the default branch together; a D not on the first-parent chain or not preceding
+the issuance merge; an exemption present only on an unmerged branch; two exemption
+proposals drafted against the same old default head, the second counted after the
+first merges; a non-allowlisted change between H_e and H (a source file, a rename, a
 mode change); an H not descending from H_e; H_e after the cutoff while the story
 began before it; unknown ancestry; an attempt to move or remove the cutoff; a
 waived or attestation-only criterion; issuance at exactly the cap and one over it,
@@ -328,6 +357,9 @@ missing use history; and the label and `unproven` inputs present in every output
 | Plan A5 | §10, §12 | exact |
 | Plan A6 | §7, §8 | exact |
 | Closure-check note on manifest completeness | §3 | resolved by construction: no signer-declared list |
+| Phase A review PA-F1 (prior landing) | §2, §4 `landed_snapshot`, §5 Scope, §9 | added: approval binds a verified default-branch snapshot; issuance by a merge whose first parent contains H_e; unknown order blocks; drafting time explicitly not the boundary (SI-249) |
+| Phase A review notes (projection outputs; concurrent issuance) | §3, §9 | added |
 
-Coverage: 16 of 16 source items mapped; two refinements named; no intentional
+Coverage: 18 of 18 source items mapped; two refinements and one owner-ratified
+boundary rule (SI-249) named; no intentional
 omission.

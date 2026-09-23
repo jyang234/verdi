@@ -122,7 +122,7 @@ decisions:
     text: "the policy-exemption artifact's single home is this feature's constitution store: this feature owns its artifact schema, storage, identity, digest, and effective-policy enforcement, while Guided Lifecycle and Governance owns the lifecycle-wide accountability and escalation requirements the artifact must satisfy; no feature may introduce a second exemption artifact kind or directory, and the committed storage path is admitted through the ratified verdi-store-layout amendment flow"
     anchor: dc-24
   - id: dc-25
-    text: "a story built outside sealed execution may close only under one governed unsealed-provenance exemption: an instance of the single policy-exemption artifact whose only departure is the review phase's builder-receipt, evidence-bundle, and result-diff inputs, for one inventoried story and one exact completed implementation proven unchanged at the closed head; it is issued on the default branch, capped, escalated before repeated use, never selectable at close time, unavailable to high-assurance profiles and to work completed after the governed sunset cutoff, and it cannot cover any other unknown, unresolved, stale, or violated state"
+    text: "a story built outside sealed execution may close only under one governed unsealed-provenance exemption: an instance of the single policy-exemption artifact whose only departure is the review phase's builder-receipt, evidence-bundle, and result-diff inputs, for one inventoried story and one exact completed implementation proven unchanged at the closed head; it is approved against, and issued by a merge after, a default-branch state that already contained that implementation, and it is capped, escalated before repeated use, never selectable at close time, unavailable to high-assurance profiles and to work completed after the governed sunset cutoff, and it cannot cover any other unknown, unresolved, stale, or violated state"
     anchor: dc-25
 constraints:
   - id: co-1
@@ -790,8 +790,9 @@ artifact; DC-25 lets that artifact name this one departure, under the rules of
 `docs/superpowers/specs/2026-09-23-unsealed-provenance-exemption-design.md`:
 one inventoried story; one exact completed implementation, bound by commit and
 tree and proven unchanged at the closed head except for a fixed governance
-allowlist; issued only by merge into the default branch, after the implementation
-landed; a hard expiry; authenticated approval; a cap on active exemptions;
+allowlist; approved against a default-branch snapshot that already contained that
+implementation and issued only by a merge whose first parent contained it, an
+unknown order blocking; a hard expiry; authenticated approval; a cap on active exemptions;
 escalation through a distinct signed approval before a repeated use; a typed
 constitution payload that is off by default and unavailable to high-assurance
 profiles; and an append-only sunset cutoff after which no completed

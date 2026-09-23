@@ -7,7 +7,7 @@ proves and without opening a second ordinary way to close. The pilot is
 
 **Base.** origin/main `90e5d5e0` (closing-machinery wave 1 merged, PR #348).
 Worktree `verdi-wt/ordinary-close`, branch `design/ordinary-close-amendment`.
-Ledger next free: SI-239. Backlog: BL-44 (CF-1), BL-7 (L4), BL-8 (pilot).
+Ledger next free before this plan: SI-239 (phase A records SI-239 through SI-249). Backlog: BL-44 (CF-1), BL-7 (L4), BL-8 (pilot).
 
 **Review history.** Independent review of a10f9920: one blocking finding (F1:
 the sunset measured a story's first implementing commit, so work begun before
@@ -60,7 +60,10 @@ of the amendment text.
 8. `--prepare` produces and refreshes the report before a countersign approval
    exists, keeping its protections for uncommitted dispositions, and does not say
    READY while a required proof or approval is missing. Preparation stays distinct
-   from authorization to close.
+   from authorization to close. Only the countersign refusal is deferred: a
+   blocking constitutional verdict or exemption-approval check still stops
+   `--prepare` before it changes anything, and E5 tests those two cases
+   separately.
 
 ## Why an exemption, and not a second close path
 
@@ -100,8 +103,10 @@ family needs ratification before any of it is built.
 - **W3 — the exact completed implementation, proven unchanged.** Three commits
   are kept distinct (SI-239). H_e is the eligible implementation commit: a
   default-branch commit at which the story's implementation is complete, chosen
-  when the exemption is authored (after adoption) and already on the default
-  branch then. H is the closed content and authority head — the commit the report
+  when the exemption is authored (after adoption). It must have landed before the
+  exemption is approved and issued: the approval binds a default-branch snapshot
+  that contains it, and issuance must be a merge whose first parent contains it;
+  an unknown order blocks (SI-249). H is the closed content and authority head — the commit the report
   covers — which comes later because the exemption and the other required
   committed governance records are committed after H_e. R is the report-only
   commit on H (SI-231, unchanged). The exempted implementation is the whole tree at
