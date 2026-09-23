@@ -28,18 +28,14 @@ func resolveLifecycleCountersign(ctx context.Context, resolver lifecycleCounters
 	if resolver == nil {
 		return lifecyclecountersign.Result{}, fmt.Errorf("lifecycle countersign resolver is nil")
 	}
-	branch, err := gitx.CurrentBranch(ctx, root)
+	// The source branch is the branch being closed (SI-257): the checked-out
+	// branch, else a detached checkout's validated CI ref — one shared
+	// reading, never a private env fallback. Unknown stays "", which the
+	// countersign reports as unproven "source-branch" — never inferred from
+	// the candidate SHA.
+	branch, err := resolveBranchBeingClosed(ctx, root)
 	if err != nil {
 		return lifecyclecountersign.Result{}, fmt.Errorf("resolving countersign source branch: %w", err)
-	}
-	if branch == "" {
-		// A detached checkout (CurrentBranch's normal, non-error reading of
-		// one) carries no branch name of its own; in CI, the dispatching ref
-		// (GitLab CI_COMMIT_REF_NAME, GitHub GITHUB_HEAD_REF/GITHUB_REF_NAME)
-		// is the same source `verdi sync` already reads for exactly this
-		// reason (resolveCIRefName, forgeboot.go). Outside CI it stays "",
-		// unproven downstream — never inferred from the candidate SHA.
-		branch = resolveCIRefName()
 	}
 	request := lifecyclecountersign.Request{
 		Root: root, Manifest: manifest, Model: mdl, TargetClass: class,
