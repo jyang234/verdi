@@ -71,6 +71,19 @@ import (
 //	                               last member. Every member and value is kept,
 //	                               including the duplicated
 //	                               `approvals_before_merge` key.
+//	commit-merge-requests.json     commits.md, "List merge requests associated
+//	                               with a commit"
+//	                               (GET /projects/:id/repository/commits/:sha/merge_requests),
+//	                               byte for byte
+//	project.json                   projects.md, "Retrieve a project"
+//	                               (GET /projects/:id). The published block is
+//	                               not JSON; the only repairs are removing its
+//	                               six `// ...` annotations, each with the
+//	                               whitespace before it. Every member and value
+//	                               is kept.
+//
+// The last two were retrieved from the same commit on 2026-09-23 (plan
+// R-PB-2, the merge-record read).
 //
 // Every fixture is pinned by digest, so an edit to a published example fails
 // every test that loads it.
@@ -83,8 +96,10 @@ var publishedFixtureDigests = map[string]string{
 	"github/pull-request-simple-items.json":        "fdb544829605fc3cdd93afb401343ce1916ec443d1d966b6e27ed99fb508a723",
 	"github/pull-request.json":                     "9ddeaeacb4261ac334d3122d62287231a565f30cadadc93c325669a6707dc192",
 	"github/workflow-run.json":                     "8621daf2a19b1ae8161c9cdef790bf80dd919459f03944540f46d4ed8d71527b",
+	"gitlab/commit-merge-requests.json":            "bb9c8df82d37aaff010e396b75b2e45e76de44098f4cf4793c8e2fc1c056d0fe",
 	"gitlab/merge-request-approvals.json":          "9d5ba2817c13f69d33a01144697cb074293d7373ddd8138dd3e1c402d8605a79",
 	"gitlab/merge-request.json":                    "c4ed439df0521e266b8d916fe6e0c52d52c5e25a13105a465b4d53f619b53556",
+	"gitlab/project.json":                          "4a06486fb19de43f3f36d6eb87a235e6f9dcf7597805fa82342b4baac4421fe6",
 }
 
 // publishedFixture returns one pinned published example's exact bytes.
