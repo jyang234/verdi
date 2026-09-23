@@ -405,9 +405,11 @@ func (f EnvironmentReviewFacts) providerFactsDigest() (string, error) {
 // adverse or unsupported shape is a zero-row-plus-disclosure outcome, never
 // an error.
 //
-// The second return is the top-level disclosure witness list: every reason
-// no row was produced, in a fixed order, since a refused row has no
-// ProviderWitnesses to carry them. It is nil when rows are produced.
+// The second return is the top-level disclosure witness list, since a
+// refused row has no ProviderWitnesses to carry them: every reason no row
+// was produced, in a fixed order, then one disclosure per rejected or
+// pending review (L2b review m-5). It is nil when rows are produced and no
+// review failed to approve.
 func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []string, error) {
 	if err := facts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("forge: normalize environment review: %w", err)
@@ -420,16 +422,23 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 
 	refusals := environmentReviewRefusals(facts)
 	var approved []EnvironmentReviewRow
+	var reviewDisclosures []string
 	for _, row := range facts.Reviews {
 		if row.ProviderState == EnvironmentReviewApproved {
 			approved = append(approved, row)
+			continue
 		}
+		// A rejected or pending review is never an approval, and says so
+		// (L2b review m-5), whether or not another reviewer approved.
+		reviewDisclosures = append(reviewDisclosures, fmt.Sprintf(
+			"environment-review:review-not-approved: run_id=%s run_attempt=%d environment_id=%s reviewer=%s state=%s: only an approved review is an approval",
+			facts.RunID, facts.RunAttempt, row.EnvironmentID, row.ReviewerActor.Subject, row.ProviderState))
 	}
 	if len(approved) == 0 {
 		refusals = append(refusals, noApprovedReviewDisclosure(facts))
 	}
 	if len(refusals) > 0 {
-		return []Approval{}, refusals, nil
+		return []Approval{}, append(refusals, reviewDisclosures...), nil
 	}
 
 	rows := make([]Approval, 0, len(approved))
@@ -437,7 +446,7 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 		rows = append(rows, environmentReviewApproval(facts, row))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ApprovalID < rows[j].ApprovalID })
-	return rows, nil, nil
+	return rows, reviewDisclosures, nil
 }
 
 // environmentReviewRefusals lists, in a fixed order, every v2 ac-4
@@ -545,8 +554,8 @@ func noApprovedReviewDisclosure(f EnvironmentReviewFacts) string {
 		}
 	}
 	return fmt.Sprintf(
-		"environment-review:no-approved-review: run_id=%s run_attempt=%d environment=%s environment_id=%s rejected=%d pending=%d: the review history holds no approved entry for this environment; a rejected, pending, or absent review, or a protection rule an administrator bypassed, leaves none, so no row is produced",
-		f.RunID, f.RunAttempt, f.EnvironmentName, f.EnvironmentID, rejected, pending)
+		"environment-review:no-approved-review: run_id=%s run_attempt=%d environment=%s environment_id=%s reviews=%d rejected=%d pending=%d: the review history holds no approved entry for this environment; a rejected, pending, or absent review, or a protection rule an administrator bypassed, leaves none, so no row is produced",
+		f.RunID, f.RunAttempt, f.EnvironmentName, f.EnvironmentID, len(f.Reviews), rejected, pending)
 }
 
 // workflowRunEligible reports whether a run is neither cancelled nor
@@ -598,9 +607,13 @@ func environmentReviewApproval(facts EnvironmentReviewFacts, row EnvironmentRevi
 		{Name: "gated_job_id", Value: facts.GatedJobID},
 		{Name: "gated_job_status", Value: facts.GatedJobStatus},
 		{Name: "gated_job_created_at", Value: facts.GatedJobCreatedAt},
+		// Every derived field is disclosed (v2 dc-5; L2b review m-5).
 		{Name: "approval_id_derivation", Value: "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"},
+		{Name: "approval_ref_derivation", Value: "the run's url and the environment's name (github's review history carries no review url)"},
 		{Name: "approved_at_derivation", Value: "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"},
+		{Name: "updated_at_derivation", Value: "equal to approved_at: github's review history records no review update time"},
 		{Name: "state_derivation", Value: "github's approved review state normalized to the shared active state"},
+		{Name: "candidate_sha_derivation", Value: "the run's head commit: an environment review approves one exact workflow run"},
 	}
 	if facts.RunConclusion != "" {
 		witnesses = append(witnesses, ProviderWitness{Name: "run_conclusion", Value: facts.RunConclusion})

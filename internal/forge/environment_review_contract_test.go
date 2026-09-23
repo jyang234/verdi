@@ -111,9 +111,12 @@ func approvedReviewRow(reviewer string) forge.EnvironmentReviewRow {
 // The derived-field disclosures every environment-review row carries,
 // verbatim (v2 dc-5: "each derived field is disclosed in provider_witnesses").
 const (
-	wantApprovalIDDerivation = "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"
-	wantApprovedAtDerivation = "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"
-	wantStateDerivation      = "github's approved review state normalized to the shared active state"
+	wantApprovalIDDerivation   = "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"
+	wantApprovalRefDerivation  = "the run's url and the environment's name (github's review history carries no review url)"
+	wantApprovedAtDerivation   = "the gated job's creation stamp: a conservative lower bound, since github's review history carries no review time; the job's start stamp is recorded separately below, never as the approval instant"
+	wantUpdatedAtDerivation    = "equal to approved_at: github's review history records no review update time"
+	wantStateDerivation        = "github's approved review state normalized to the shared active state"
+	wantCandidateSHADerivation = "the run's head commit: an environment review approves one exact workflow run"
 )
 
 // scenarioWitnesses is the exact provider-witness set of the published
@@ -124,7 +127,9 @@ func scenarioWitnesses() map[string]string {
 	return map[string]string{
 		"actor_user_id":                   erReviewer,
 		"approval_id_derivation":          wantApprovalIDDerivation,
+		"approval_ref_derivation":         wantApprovalRefDerivation,
 		"approved_at_derivation":          wantApprovedAtDerivation,
+		"candidate_sha_derivation":        wantCandidateSHADerivation,
 		"environment_id":                  erEnvID,
 		"environment_name":                "close",
 		"environment_prevent_self_review": "false",
@@ -144,6 +149,7 @@ func scenarioWitnesses() map[string]string {
 		"run_url":                         erRunURL,
 		"run_workflow_path":               erWorkflowPath,
 		"state_derivation":                wantStateDerivation,
+		"updated_at_derivation":           wantUpdatedAtDerivation,
 	}
 }
 
@@ -828,6 +834,45 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 				want := fmt.Sprintf("rejected=%d pending=%d", tt.rejected, tt.pending)
 				if !disclosuresContain(disclosures, "environment-review:no-approved-review:") || !disclosuresContain(disclosures, want) || !disclosuresContain(disclosures, "bypassed") {
 					t.Fatalf("disclosures = %v, want no-approved-review with %s naming the bypass case", disclosures, want)
+				}
+			})
+		}
+	})
+
+	t.Run("github discloses every review that is not an approval (m-5)", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			entries   func(t *testing.T) []map[string]any
+			wantRows  []string
+			wantKinds string
+			wantText  []string
+		}{
+			{"rejected", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "rejected", erEnvIDNum, "close", erReviewerNum)}
+			}, nil, "no-approved-review,review-not-approved", []string{"reviews=1 rejected=1 pending=0", "reviewer=1 state=rejected"}},
+			{"pending", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "pending", erEnvIDNum, "close", erReviewerNum)}
+			}, nil, "no-approved-review,review-not-approved", []string{"reviews=1 rejected=0 pending=1", "reviewer=1 state=pending"}},
+			{"absent", func(t *testing.T) []map[string]any { return []map[string]any{} }, nil, "no-approved-review", []string{"reviews=0 rejected=0 pending=0"}},
+			{"approved alongside another reviewer's pending review", func(t *testing.T) []map[string]any {
+				return []map[string]any{historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum), historyEntry(t, "pending", erEnvIDNum, "close", 2)}
+			}, []string{scenarioApprovalID(erReviewer)}, "review-not-approved", []string{"reviewer=2 state=pending"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				s.historyPages = [][]map[string]any{tt.entries(t)}
+				_, rows, disclosures := reviewScenario(t, s, erQuery())
+				if got := approvalIDs(rows); !reflect.DeepEqual(got, append([]string{}, tt.wantRows...)) {
+					t.Fatalf("rows = %v, want %v", got, tt.wantRows)
+				}
+				if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != tt.wantKinds {
+					t.Fatalf("disclosure kinds = %v (%v), want %s", kinds, disclosures, tt.wantKinds)
+				}
+				for _, text := range tt.wantText {
+					if !disclosuresContain(disclosures, text) {
+						t.Fatalf("disclosures = %v, want %q", disclosures, text)
+					}
 				}
 			})
 		}
