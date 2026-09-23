@@ -16,40 +16,71 @@
 # nothing but that spec's deviation-report.md, the report's `covers` is
 # HEAD's parent, it is not frozen, every finding is dispositioned, and the
 # working-tree report is byte-identical to the committed one. A CI checkout
-# meets that last clause unless .gitattributes applies eol or smudge
-# conversion to the report; in that case close stops at condition 4 naming
-# the clause (it fails closed). When every clause holds, close freezes that
-# committed report in place.
+# meets that last clause unless .gitattributes applies a checkout
+# conversion to the report (eol, ident, working-tree-encoding, or a smudge
+# filter; this repository's .gitattributes applies none); then close stops
+# at condition 4 naming the clause (it fails closed). When every clause
+# holds, close freezes that committed report in place.
 #
-# PREREQUISITES STILL LANDING. This workflow cannot complete a close until
-# two other lanes of the closing-machinery program land:
+# LANDED: lanes L2a, L2b and L2c, the close countersign (SI-230, SI-233,
+# SI-235, SI-236). `verdi close` resolves the countersign at HEAD before it
+# cuts its branch (cmd/verdi/close.go). On this detached checkout it takes
+# the pull request's source branch from GITHUB_REF_NAME, close/<name> when
+# the operator dispatches from that branch (cmd/verdi/countersign.go; L2a).
+# Under a solo profile whose kernel permits the author/approver collapse
+# (SI-233), it also reads THIS run's review in the `close` environment as
+# the solo approval (L2c, through L2b's GitHub environment-review adapter
+# in internal/forge): the run id and attempt come from GITHUB_RUN_ID
+# and GITHUB_RUN_ATTEMPT, and the environment and the gated job are both
+# pinned to `close` (internal/lifecyclecountersign/environmentreview.go),
+# which is why this job's id is `close` and it declares no job-level
+# `name:` (cmd/verdi's TestCloseWorkflowPinsTheEnvironmentReviewQuery pins
+# both). Only a run's first attempt counts, so a retry is a new dispatch,
+# never a re-run, and a solo owner can approve only if the environment
+# allows self-review (spec/vatc-forge-countersign-v2 ac-4, dc-5). The
+# countersign only reads: it never requests, creates or writes an
+# approval, and this file reads no approval itself.
 #
-#   - Lane L2: the countersign (SI-230). `verdi close` resolves the
-#     countersign at HEAD before it cuts its branch (cmd/verdi/close.go),
-#     and the resolver takes the pull request's source branch from
-#     gitx.CurrentBranch. This job's checkout is detached (see the checkout
-#     step), so the current branch is empty and the resolver reports the
-#     source branch unproven. L2 must take the source branch from the
-#     dispatching ref, GITHUB_REF_NAME (close/<name> when the operator
-#     dispatches from that branch), when running in CI. This lane does not
-#     implement that. L2 also reads this run's `close` environment review
-#     as the solo approval (SI-230); this file reads no approval itself.
-#   - Lane L4: store adoption (R-CM-5, controller + owner merge, no
-#     ledger entry — plan §Lanes). This repository's verdi.yaml carries no
-#     `countersign:` block and has adopted no governance profile at all
-#     (solo starter or otherwise): `verdi policy adopt --starter --profile
-#     solo`, the profile's R-CM-1 extension (naming the close transition
-#     and a `story-review`/`feature-uat` role), and the `countersign:`
-#     block itself still need to land through the policy store's own
-#     governed change path. L2's resolver depends on both an adopted
-#     profile and a configured `countersign:` block to authorize the solo
-#     close approval-act against; until L4 lands, no close run in this
-#     repository can resolve a countersign at all, independent of L2's own
-#     code.
+# PREREQUISITES STILL OPEN. No close can pass in this repository today.
+# The countersign reads unproven, because .verdi/verdi.yaml carries no
+# `countersign:` block and no governance profile is adopted
+# (internal/lifecyclecountersign/resolve.go). Lane L4 (R-CM-5: store
+# adoption, an owner ritual; plan §Lanes) would add both: an adopted solo
+# profile that maps the `author` role and the close approver role
+# (`story-review` or `feature-uat`) to the owner through a forge trust
+# source and names a `close` transition, plus the verdi.yaml
+# `countersign:` block. L4 is HELD by ruling R-W1-12, because adoption
+# turns on the constitutional conflict gate for every close, and under
+# current authority that gate cannot pass here:
+#   (a) `verdi close` then requires `--context-request`, which this job
+#       does not pass;
+#   (b) the starter constitution registers no harness adapter that a
+#       request could name;
+#   (c) the conflict gate reads its branch from the checkout, which is
+#       empty on this detached checkout (the countersign's GITHUB_REF_NAME
+#       reading does not apply to it);
+#   (d) the conflict gate's judge (`align.judge_cmd`) would run on the CI
+#       runner (THE JUDGE below);
+#   (e) disposition approvers cannot be authenticated in CI;
+#   (f) the review-phase conflict gate is blocked-unproven by three v1
+#       review inputs (builder receipt, evidence bundle, result diff) that
+#       only sealed-execution receipts and a review-capsule widening, not
+#       yet built, could supply;
+#   (g) with a countersign configured on an adopted store, `verdi close
+#       --prepare` resolves the countersign before it refreshes the report
+#       and exits 1 while no approval exists (under solo, none can exist
+#       before the close run), so step 1 below cannot run there.
+# Ruling R-W1-12 and the owner decisions it waits on are recorded in
+# docs/superpowers/reports/2026-09-22-closing-machinery-wave-1.md.
 #
-# THE OPERATOR SEQUENCE. <name> is the spec being closed. H is the
-# candidate commit: the commit being closed, where the spec is still active
-# and accepted-pending-build.
+# THE OPERATOR SEQUENCE. <name> is the spec being closed. H is the audited
+# commit: the commit the deviation report covers, where the spec is still
+# active and accepted-pending-build. The close runs at R, the one-behind
+# report commit step 1 makes on top of H: the evidence records, the
+# countersign candidate (the closure pull request's head, which must equal
+# the local HEAD, and for a solo environment-review approval the close
+# run's head too; v2 dc-3, ac-4) and the published rollup all bind R,
+# while the frozen report covers H.
 #
 #   1. Prepare the report on the close branch, locally. Create close/<name>
 #      at H (`git checkout -b close/<name> H`). <name> must be exactly the
@@ -77,7 +108,7 @@
 #      the upload of the `verdi-evidence` artifact for R.
 #   3. Open the closure pull request from close/<name> to the default
 #      branch, with R as its head. The countersign reads this pull request
-#      (lane L2 above), so it must be open before the dispatch.
+#      (LANDED above), so it must be open before the dispatch.
 #   4. After the close-evidence.yml run for R has completed successfully,
 #      dispatch this workflow from close/<name>: `gh workflow run close.yml
 #      --ref close/<name> -f spec_ref=spec/<name>`, or "Run workflow" on
@@ -107,9 +138,9 @@
 # bundle close-evidence.yml already produced and uploaded for the exact
 # commit on close/<name> (internal/forge's fetch-by-(ref,commit) path,
 # cmd/verdi/sync.go's runSync) — it never re-produces evidence itself, which
-# would be a second, independent, non-CI-gated claim about the same commit
-# and exactly the "never trust records produced earlier in the same run"
-# violation the brief warns against.
+# would be a second, independent, non-CI-gated claim about the same commit.
+# Evidence is authoritative only because it is fetched from the forge
+# artifact store by (ref, commit) (spec/remote-and-ci DC-1, plan R-CM-4).
 #
 # WHY checkout pins `ref: ${{ github.sha }}`: see that step's own comment.
 # In short, the DEFAULT (ref: omitted) checkout of a branch-name ref
@@ -117,8 +148,9 @@
 # close`'s own `git checkout -b close/<name>` branch cut (git refuses `-b`
 # on an existing branch name); pinning to the commit SHA checks out
 # detached instead, avoiding the collision entirely. The detached HEAD has
-# no current branch, which is why lane L2 must read the countersign's
-# source branch from GITHUB_REF_NAME (PREREQUISITES above).
+# no current branch, which is why the countersign reads its source branch
+# from GITHUB_REF_NAME (LANDED above); the conflict gate has no such
+# reading (PREREQUISITES (c)).
 #
 # permissions: is the least-privilege set this exact sequence needs, and
 # nothing else (unlisted scopes default to "none" once permissions: is
@@ -130,37 +162,48 @@
 #     and download the "verdi-evidence" artifact
 #     (internal/forge/github/github.go: GET .../actions/runs,
 #     .../actions/runs/{id}/artifacts, .../actions/artifacts/{id}/zip).
+#     Under a solo collapse the countersign also reads this run, its
+#     attempt's jobs, the `close` environment, and the run's review
+#     history (internal/forge/github/environmentreview.go: GET
+#     .../actions/runs/{id}, .../actions/runs/{id}/attempts/{n}/jobs,
+#     .../environments/close, .../actions/runs/{id}/approvals). GitHub's
+#     REST docs list all four under Actions read (documented; no live run
+#     has exercised them yet).
 #   - pull-requests: read — cmd/verdi/closuregate.go's
 #     checkPendingSupersessionCondition, called unconditionally inside
 #     `verdi close`'s closure gate, discovers the spec's open MR via
 #     forge.FindOpenMR (GET .../pulls); without this scope that call
 #     degrades to a disclosed-unproven condition rather than a proven one.
-#     Lane L2's countersign reading (SI-230) also discovers the closure
-#     pull request and reads this run's environment review; L2 states any
-#     scope it needs beyond these three.
-# No other GITHUB_TOKEN scope is used by this sequence. The tracker
-# PublishRollup step (the round-6 hermetic fake provider by default, per
-# .verdi/verdi.yaml's providers.jira.mode: fake) is not a GitHub API call
-# and needs no scope here.
+#     The countersign uses it too: it finds the closure pull request and
+#     reads its head and reviews (internal/forge/github/approval.go: GET
+#     .../pulls, .../pulls/{n}, .../pulls/{n}/reviews).
+# No other GITHUB_TOKEN scope is used by this sequence, so these three
+# suffice. The tracker PublishRollup step (the round-6 hermetic fake
+# provider by default, per .verdi/verdi.yaml's providers.jira.mode: fake)
+# is not a GitHub API call and needs no scope here.
 #
-# THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs only in step 1's
-# local report refresh. This job never calls it: `verdi close` freezes the
-# committed report in place (SI-231, lane L3b), and the freeze-in-place
-# path (cmd/verdi/align.go, runAlignForSpec) returns before any judge
-# call. Any other report shape stops the job at condition 4, before any
-# freeze. The runner therefore needs no judge binary or credentials.
+# THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs in step 1's local
+# report refresh. While the store is not adopted, this job never calls it:
+# `verdi close` freezes the committed report in place (SI-231, lane L3b),
+# and the freeze-in-place path (cmd/verdi/align.go, runAlignForSpec)
+# returns before any judge call. Any other report shape stops the job at
+# condition 4, before any freeze. The runner therefore needs no judge
+# binary or credentials only while the store is not adopted; once it is,
+# the conflict gate would run the judge here (PREREQUISITES (d)).
 #
 # PUBLICATION PRECEDES THE PUSH. `verdi close` publishes the rollup to
 # the tracker (cmd/verdi/close.go, PublishRollup) before this job's final
 # `git push`. If that push is rejected, because close/<name> moved on
-# origin after the dispatch (for example an operator push during the
-# approval wait), the job fails with the rollup already published for the
-# closed commit, and the archive commit exists only on the runner, which
-# discards it. Origin is unchanged: the spec is still active there, and
-# the closure pull request shows whatever close/<name> now holds. The
-# operator then does NOT merge that pull request. They put close/<name>
-# back into the shape step 1 describes (one commit whose only change is
-# the dispositioned deviation-report.md, on top of the candidate), wait
+# origin after `verdi close` read the countersign (for example an operator
+# push while the job runs), the job fails with the rollup already
+# published for R, and the archive commit exists only on the runner, which
+# discards it. (A push during the approval wait moves the pull request's
+# head before the job starts, so the countersign finds that head unequal
+# to R and nothing is published.) Origin is unchanged: the spec is still
+# active there, and the closure pull request shows whatever close/<name>
+# now holds. The operator then does NOT merge that pull request. They put
+# close/<name> back into the shape step 1 describes (one commit whose only
+# change is the dispositioned deviation-report.md, on top of H), wait
 # for that commit's evidence run, and dispatch and approve again. The new
 # run publishes again; PublishRollup is idempotent on (story, commit)
 # (internal/provider/port.go), so republishing the same commit updates the
