@@ -114,6 +114,7 @@ func (r Resolver) currentRunEnvironmentReview(ctx context.Context, snapshot forg
 // that is not a canonical positive base-10 number.
 func currentRunQuery(ci forge.CIInfo) (forge.EnvironmentReviewQuery, string) {
 	unresolved := func(reason string) string {
+		// vocab:identity — "close" names the GitHub workflow file close.yml, a provider resource, not a Verdi lifecycle class.
 		return fmt.Sprintf(environmentReviewWitnessPrefix+"current-run-unresolved: run_id=%q run_attempt=%q: %s; only the close workflow run's own environment review is a solo approval, so none is requested",
 			ci.Pipeline, ci.Job, reason)
 	}
