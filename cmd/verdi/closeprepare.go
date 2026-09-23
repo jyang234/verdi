@@ -387,11 +387,32 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 			fmt.Fprintln(stderr, "close: --prepare:", err)
 			return 2
 		}
-		prelude.Disclosures += discloseRegeneratedDispositions(report, specRef, head, stdout)
+
+		// SI-231 (ledger; owner D4): the shared align fork
+		// (runAlignForSpec, called below regardless) recognizes a
+		// committed one-behind report and leaves it byte-identical, never
+		// regenerating — so this call site's own regeneration disclosure
+		// and "ALIGNMENT REQUIRED ... refreshed it" framing, both written
+		// for the OTHER (stale/absent) case, would be false here: nothing
+		// is about to be regenerated, and nothing was. evaluateOneBehindReport
+		// is the ONE predicate every consumer decides this from, so this
+		// check can never drift from what the fork below actually does.
+		oneBehind, obErr := evaluateOneBehindReport(ctx, root, specRef.Name, head)
+		if obErr != nil {
+			fmt.Fprintln(stderr, "close: --prepare:", obErr)
+			return 2
+		}
+		if !oneBehind.Accepted {
+			prelude.Disclosures += discloseRegeneratedDispositions(report, specRef, head, stdout)
+		}
 		if rc := runAlignForSpec(ctx, root, spec, head, false, prepareAlignDeps(deps, modelDigest, storyArg), stdout, stderr); rc != 0 {
 			return rc
 		}
-		fmt.Fprintf(stdout, "close: --prepare: ALIGNMENT REQUIRED (living report was %s for HEAD %s; the existing align engine refreshed it)\n", freshness, head)
+		if oneBehind.Accepted {
+			fmt.Fprintf(stdout, "close: --prepare: current under SI-231 (a committed one-behind report at HEAD %s covers %s); no alignment required\n", head, oneBehind.Parent)
+		} else {
+			fmt.Fprintf(stdout, "close: --prepare: ALIGNMENT REQUIRED (living report was %s for HEAD %s; the existing align engine refreshed it)\n", freshness, head)
+		}
 
 		refreshed, rc := reloadRefreshedReport(reportPath, stderr)
 		if rc != 0 {

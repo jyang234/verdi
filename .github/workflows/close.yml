@@ -7,21 +7,20 @@
 # CI only"), an act that must be a deliberate, named, human-triggered
 # event, never an automatic reaction to a push.
 #
+# LANDED: lane L3b, closure condition 4 (SI-231, owner decision D4).
+# Condition 4 of the closure gate (condition 6 for a feature,
+# cmd/verdi/closuregate.go) accepts either of two shapes. One is the living,
+# uncommitted deviation-report.md whose `covers` equals HEAD, which a CI
+# checkout never has. The other is the committed one-behind report this
+# sequence produces: HEAD has exactly one parent, HEAD's commit changes
+# nothing but that spec's deviation-report.md, the report's `covers` is
+# HEAD's parent, it is not frozen, every finding is dispositioned, and the
+# working-tree report is byte-identical to the committed one (always true
+# in a CI checkout). Close then freezes that committed report in place.
+#
 # PREREQUISITES STILL LANDING. This workflow cannot complete a close until
 # two other lanes of the closing-machinery program land:
 #
-#   - Lane L3b: closure condition 4 (SI-231, owner decision D4). Today
-#     condition 4 of the closure gate (condition 6 for a feature,
-#     cmd/verdi/closuregate.go) accepts only a living, uncommitted
-#     deviation-report.md whose `covers` equals HEAD. A CI checkout carries
-#     only committed state, so until L3b lands every run of this job that
-#     reaches the closure gate fails that condition ("closure: 4. deviation
-#     report ready to freeze", exit 1) before the branch cut, with nothing
-#     committed, published, or pushed. SI-231 adds one accepted shape: HEAD
-#     has exactly one parent, HEAD's commit changes nothing but that spec's
-#     deviation-report.md, the report's `covers` is HEAD's parent, it is
-#     not frozen, and every finding is dispositioned. Close then freezes
-#     that report in place.
 #   - Lane L2: the countersign (SI-230). `verdi close` resolves the
 #     countersign at HEAD before it cuts its branch (cmd/verdi/close.go),
 #     and the resolver takes the pull request's source branch from
@@ -32,6 +31,18 @@
 #     dispatches from that branch), when running in CI. This lane does not
 #     implement that. L2 also reads this run's `close` environment review
 #     as the solo approval (SI-230); this file reads no approval itself.
+#   - Lane L4: store adoption (R-CM-5, controller + owner merge, no
+#     ledger entry — plan §Lanes). This repository's verdi.yaml carries no
+#     `countersign:` block and has adopted no governance profile at all
+#     (solo starter or otherwise): `verdi policy adopt --starter --profile
+#     solo`, the profile's R-CM-1 extension (naming the close transition
+#     and a `story-review`/`feature-uat` role), and the `countersign:`
+#     block itself still need to land through the policy store's own
+#     governed change path. L2's resolver depends on both an adopted
+#     profile and a configured `countersign:` block to authorize the solo
+#     close approval-act against; until L4 lands, no close run in this
+#     repository can resolve a countersign at all, independent of L2's own
+#     code.
 #
 # THE OPERATOR SEQUENCE. <name> is the spec being closed. H is the
 # candidate commit: the commit being closed, where the spec is still active
@@ -47,10 +58,16 @@
 #      and refuses close/<name> with exit 2. Disposition every finding in
 #      deviation-report.md. Then commit deviation-report.md as the ONLY
 #      change. That commit, R, has H as its only parent. The dispositions
-#      reach the CI runner only as R's committed content. After R is
-#      committed, do not run `--prepare` again on this branch: at this
-#      lane's base it treats a report covering HEAD's parent as stale and
-#      regenerates it, which can discard dispositions.
+#      reach the CI runner only as R's committed content, so a later change
+#      to the report must be folded into R itself (amend R); a new commit on
+#      top would no longer cover its parent. After R is committed,
+#      re-running `--prepare` on this branch is safe only when every finding
+#      in R's report is dispositioned AND the working-tree
+#      deviation-report.md is byte-identical to R's. Then `verdi close
+#      --prepare`'s shared align engine recognizes R as a committed
+#      one-behind report (SI-231) and reports it current, leaving the file
+#      untouched. In any other state it treats the report as stale and
+#      regenerates it, which can discard dispositions (it names which).
 #   2. Push the close branch (`git push -u origin close/<name>`). The push
 #      triggers close-evidence.yml, which runs verify.yml's `verify` job
 #      with no path filter: `make verify`, then `verdi sync --produce`, then
@@ -124,11 +141,11 @@
 # and needs no scope here.
 #
 # THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs only in step 1's
-# local report refresh. This job never calls it: once L3b lands, `verdi
-# close` freezes the committed report in place, and the freeze-in-place
+# local report refresh. This job never calls it: `verdi close` freezes the
+# committed report in place (SI-231, lane L3b), and the freeze-in-place
 # path (cmd/verdi/align.go, runAlignForSpec) returns before any judge
-# call. Until then the job stops at condition 4, before any freeze. The
-# runner therefore needs no judge binary or credentials.
+# call. Any other report shape stops the job at condition 4, before any
+# freeze. The runner therefore needs no judge binary or credentials.
 #
 # PUBLICATION PRECEDES THE PUSH. `verdi close` publishes the rollup to
 # the tracker (cmd/verdi/close.go, PublishRollup) before this job's final
