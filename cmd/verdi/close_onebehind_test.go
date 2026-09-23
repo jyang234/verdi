@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -61,5 +66,86 @@ func TestCloseBuiltBinary_OneBehindCommittedReport(t *testing.T) {
 	}
 	if len(archived.Findings) != 1 || archived.Findings[0].ID != "f-1" || !archived.Findings[0].Dispositioned() {
 		t.Fatalf("archived Findings = %+v, want the single committed, dispositioned f-1 finding preserved verbatim", archived.Findings)
+	}
+}
+
+// TestCloseBuiltBinary_OneBehindWorkingTreeDivergenceRefuses is SI-231's
+// working-tree clause end to end (ledger row as amended at L3b review I-1,
+// ruling R-W1-9; the reviewer's built-binary witness made permanent): after
+// commit R, an operator's uncommitted change to the report — through the
+// sanctioned `verdi disposition --amend` verb, or a hand retraction — makes
+// the real binary's close refuse at closure condition 4, naming the
+// divergence, and archive nothing. Before the clause, the same run passed
+// condition 4, froze R's bytes over the operator's change, printed
+// "dispositions preserved", and archived the discarded disposition.
+func TestCloseBuiltBinary_OneBehindWorkingTreeDivergenceRefuses(t *testing.T) {
+	ctx := context.Background()
+	bin := buildVerdiBinary(t)
+
+	cases := []struct {
+		name    string
+		diverge func(t *testing.T, repoDir, reportPath, parent string)
+	}{
+		{
+			name: "an uncommitted verdi disposition --amend",
+			diverge: func(t *testing.T, repoDir, _, _ string) {
+				stdout, stderr, code := runExperimentBuiltBinary(t, bin, repoDir, nil, "disposition", "spec/exp-spike", "f-1", "accepted-deviation", "--rationale", "not fixed after all", "--amend")
+				if code != 0 {
+					t.Fatalf("disposition --amend = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+				}
+			},
+		},
+		{
+			name: "a working-tree retraction",
+			diverge: func(t *testing.T, _, reportPath, parent string) {
+				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, "", ""))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+			parent := repo.Head
+			head := commitOneBehindReport(t, ctx, repo.Dir, "exp-spike", oneBehindRenderedReport(t, parent, artifact.FindingFixed, ""))
+			repo.Head = head
+			writeFixtureVerdicts(t, repo.Dir, "spec/exp-spike", head, featureFixtureEvidenceJSON("ac-1", "static", "pass", head))
+			startCloseExperimentCountersignForge(t, repo)
+
+			activePath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "exp-spike")
+			tc.diverge(t, repo.Dir, activePath, parent)
+			before, err := os.ReadFile(activePath)
+			if err != nil {
+				t.Fatalf("reading the diverged working-tree report: %v", err)
+			}
+
+			stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
+			if code != 1 {
+				t.Fatalf("close (working tree differs from R) = %d, want 1 (a verdict refusal); stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, "[FAIL] closure: 4.") {
+				t.Fatalf("stdout = %q, want closure condition 4 to FAIL", stdout)
+			}
+			if !strings.Contains(stdout, oneBehindWorkingTreeDivergence) {
+				t.Fatalf("stdout = %q, want condition 4 to name the working-tree clause %q", stdout, oneBehindWorkingTreeDivergence)
+			}
+			if strings.Contains(stdout, "dispositions preserved") {
+				t.Fatalf("stdout = %q, want no freeze claim at all", stdout)
+			}
+
+			archivedPath := store.DeviationReportPath(repo.Dir, store.ZoneArchive, "exp-spike")
+			if _, err := os.Stat(archivedPath); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("stat %s = %v, want it absent — a refused close archives nothing", archivedPath, err)
+			}
+			after, err := os.ReadFile(activePath)
+			if err != nil {
+				t.Fatalf("reading the working-tree report after close: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("the refused close rewrote the operator's working-tree report:\nbefore=%s\nafter=%s", before, after)
+			}
+			if got := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD")); got != head {
+				t.Fatalf("HEAD = %s after a refused close, want R %s unchanged", got, head)
+			}
+		})
 	}
 }

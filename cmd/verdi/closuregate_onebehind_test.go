@@ -9,6 +9,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestCheckDispositionCompleteCondition_OneBehind is SI-231's closure-gate
@@ -102,4 +103,35 @@ func TestCheckDispositionCompleteCondition_OneBehind(t *testing.T) {
 			t.Fatalf("Reason = %q, want the path-count clause named", cond.Reason)
 		}
 	})
+
+	// SI-231 as amended at L3b review I-1 (R-W1-9): condition 4 is where
+	// close refuses BEFORE its freeze would write HEAD's committed bytes over
+	// the working tree, so both divergence shapes must refuse here, naming
+	// the working-tree clause — before this clause, both passed.
+	for _, tc := range []struct {
+		name        string
+		disposition artifact.FindingDisposition
+		note        string
+	}{
+		{name: "a disposition amended in the working tree after the report commit refuses naming the divergence", disposition: artifact.FindingAcceptedDeviation, note: "not fixed after all"},
+		{name: "a working-tree retraction after the report commit refuses naming the divergence", disposition: "", note: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := oneBehindBaseRepo(t)
+			parent := repo.Head
+			head := commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindRenderedReport(t, parent, artifact.FindingFixed, ""))
+			writeOneBehindFile(t, store.DeviationReportPath(repo.Dir, store.ZoneActive, oneBehindReportSpecName), oneBehindRenderedReport(t, parent, tc.disposition, tc.note))
+
+			cond, err := checkDispositionCompleteCondition(ctx, repo.Dir, specOneBehind, head)
+			if err != nil {
+				t.Fatalf("checkDispositionCompleteCondition: %v", err)
+			}
+			if cond.OK {
+				t.Fatal("cond.OK = true, want false (the working-tree report differs from the one HEAD commits)")
+			}
+			if !strings.Contains(cond.Reason, oneBehindWorkingTreeDivergence) {
+				t.Fatalf("Reason = %q, want the working-tree clause %q named", cond.Reason, oneBehindWorkingTreeDivergence)
+			}
+		})
+	}
 }

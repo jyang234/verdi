@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
@@ -52,6 +54,25 @@ digest: sha256:%s
 # Alignment report
 `, covers, findingsYAML, strings.Repeat("0", 64))
 }
+
+// oneBehindRenderedReport renders a legal one-finding (f-1) report through
+// the production renderer, so the body carries the finding's rendered line
+// `verdi disposition` locates before it amends a disposition — the
+// hand-written oneBehindReportContent body ("# Alignment report" alone)
+// cannot be amended by that verb.
+func oneBehindRenderedReport(t *testing.T, covers string, disposition artifact.FindingDisposition, note string) string {
+	t.Helper()
+	findings := []artifact.Finding{{ID: "f-1", Kind: artifact.FindingComputed, Text: "boundary holds", Disposition: disposition, Note: note}}
+	fm := &artifact.DeviationFrontmatter{Schema: "verdi.deviation/v1", Covers: covers, Findings: findings, Digest: "sha256:" + strings.Repeat("0", 64)}
+	if err := fm.Validate(); err != nil {
+		t.Fatalf("oneBehindRenderedReport fixture is invalid: %v", err)
+	}
+	return string(align.RenderMarkdown(fm, align.RenderBody(findings, nil, nil, nil, nil, nil)))
+}
+
+// oneBehindWorkingTreeDivergence is the refusal phrase SI-231's working-tree
+// clause names (ledger row as amended at L3b review I-1, ruling R-W1-9).
+const oneBehindWorkingTreeDivergence = "the working-tree report differs from the committed report; commit or discard the change"
 
 // commitOneBehindReport writes deviation-report.md for specName with
 // content, stages ONLY that path, and commits ONLY that path — the exact
@@ -251,4 +272,80 @@ func TestEvaluateOneBehindReport(t *testing.T) {
 			t.Fatalf("Reason = %q, want it to name the other spec's own report path", got.Reason)
 		}
 	})
+}
+
+// TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD is SI-231's
+// working-tree clause (ledger row as amended at L3b review I-1, ruling
+// R-W1-9): an otherwise accepted one-behind commit is refused, by name,
+// whenever the spec's deviation-report.md on disk is not byte-identical to
+// the report HEAD commits — otherwise close would freeze HEAD's bytes over
+// an operator's uncommitted disposition change and report it preserved.
+func TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, reportPath, parent string)
+	}{
+		{
+			name: "a disposition amended after the report commit",
+			mutate: func(t *testing.T, reportPath, parent string) {
+				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, artifact.FindingAcceptedDeviation, "not fixed after all"))
+			},
+		},
+		{
+			name: "a finding retracted to undispositioned after the report commit",
+			mutate: func(t *testing.T, reportPath, parent string) {
+				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, "", ""))
+			},
+		},
+		{
+			name: "one byte appended to the committed report",
+			mutate: func(t *testing.T, reportPath, parent string) {
+				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, artifact.FindingFixed, "")+"\n")
+			},
+		},
+		{
+			name: "the report deleted from the working tree",
+			mutate: func(t *testing.T, reportPath, _ string) {
+				if err := os.Remove(reportPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := oneBehindBaseRepo(t)
+			parent := repo.Head
+			head := commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindRenderedReport(t, parent, artifact.FindingFixed, ""))
+			reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, oneBehindReportSpecName)
+
+			clean, err := evaluateOneBehindReport(ctx, repo.Dir, oneBehindReportSpecName, head)
+			if err != nil {
+				t.Fatalf("evaluateOneBehindReport (clean working tree): %v", err)
+			}
+			if !clean.Accepted {
+				t.Fatalf("clean working tree: Accepted = false, want true (the fixture must isolate the working-tree clause); Reason=%q", clean.Reason)
+			}
+
+			tc.mutate(t, reportPath, parent)
+			got, err := evaluateOneBehindReport(ctx, repo.Dir, oneBehindReportSpecName, head)
+			if err != nil {
+				t.Fatalf("evaluateOneBehindReport: %v", err)
+			}
+			if got.Accepted {
+				t.Fatal("Accepted = true, want false (the working-tree report is not HEAD's committed report)")
+			}
+			if !strings.Contains(got.Reason, oneBehindWorkingTreeDivergence) {
+				t.Fatalf("Reason = %q, want it to name the working-tree clause %q", got.Reason, oneBehindWorkingTreeDivergence)
+			}
+		})
+	}
+}
+
+func writeOneBehindFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }

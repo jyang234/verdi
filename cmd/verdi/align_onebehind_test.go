@@ -92,3 +92,38 @@ func TestRunAlignForSpec_OneBehind_FreezeFalse(t *testing.T) {
 		t.Fatalf("report changed across a freeze=false one-behind run:\nbefore=%s\nafter=%s", before, after)
 	}
 }
+
+// TestRunAlignForSpec_OneBehind_WorkingTreeDivergence is SI-231's
+// working-tree clause at the shared align fork (ledger row as amended at
+// L3b review I-1, ruling R-W1-9): when the operator's deviation-report.md
+// differs from the report HEAD commits, neither half of the fork may claim
+// SI-231 over it — freeze=true must never stamp HEAD's bytes over the
+// operator's and print "dispositions preserved", and freeze=false must
+// never call the file "left byte-identical" while describing HEAD's
+// content. Both fall through to the fork's pre-SI-231 behavior instead.
+func TestRunAlignForSpec_OneBehind_WorkingTreeDivergence(t *testing.T) {
+	ctx := context.Background()
+	for _, freeze := range []bool{true, false} {
+		t.Run(map[bool]string{true: "freeze=true", false: "freeze=false"}[freeze], func(t *testing.T) {
+			repo := oneBehindBaseRepo(t)
+			parent := repo.Head
+			head := commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindRenderedReport(t, parent, artifact.FindingFixed, ""))
+			reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, oneBehindReportSpecName)
+			writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, artifact.FindingAcceptedDeviation, "not fixed after all"))
+
+			deps := alignDeps{Runner: upstream.NewFakeRunner(), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+			var stdout, stderr bytes.Buffer
+			rc := runAlignForSpec(ctx, repo.Dir, oneBehindAlignSpec(), head, freeze, deps, &stdout, &stderr)
+			t.Logf("runAlignForSpec(freeze=%v) = %d; stdout=%q stderr=%q", freeze, rc, stdout.String(), stderr.String())
+			for _, claim := range []string{"SI-231", "dispositions preserved", "left byte-identical"} {
+				if strings.Contains(stdout.String(), claim) {
+					t.Fatalf("stdout = %q, want no %q claim over a working-tree report that differs from HEAD's", stdout.String(), claim)
+				}
+			}
+			after := decodeReportFile(t, reportPath)
+			if len(after.Findings) == 1 && after.Findings[0].ID == "f-1" && after.Findings[0].Disposition == artifact.FindingFixed {
+				t.Fatalf("the operator's working-tree disposition (accepted-deviation) was replaced by HEAD's committed one (fixed): %+v", after.Findings)
+			}
+		})
+	}
+}
