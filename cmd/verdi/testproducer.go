@@ -344,15 +344,14 @@ func goTestProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure.Dis
 // authoritative obligations (SI-229: authoritative_source.ref ==
 // jobName), excludes a runtime-kind obligation (03 §Evidence kinds: runtime
 // evidence is post-deploy), then grammar-parses each survivor's producer ref
-// and rejects a
-// package path that crosses into a nested module under root. jobName == ""
-// (not running in a named CI job at all) naturally selects nothing, since
-// an elaborated obligation's authoritative_source.ref is always non-blank
-// (internal/artifact/obligation.go's Validate). A rejected ref is disclosed
-// on its own obligation and excluded, never returned as an error, and never
-// reaches the `-run` expression another obligation's test shares. The
-// returned slice is sorted (package, test, spec, ac) for deterministic
-// execution grouping and emission order.
+// and rejects a package path that crosses into a nested module under root.
+// jobName == "" (not running in a named CI job at all) naturally selects
+// nothing, since an elaborated obligation's authoritative_source.ref is
+// always non-blank (internal/artifact/obligation.go's Validate). A rejected
+// ref is disclosed on its own obligation and excluded, never returned as an
+// error, and never reaches the `-run` expression another obligation's test
+// shares. The returned slice is sorted (package, test, spec, ac) for
+// deterministic execution grouping and emission order.
 func selectGoTestObligations(root string, candidates []testProducerCandidate, jobName string) ([]selectedGoTestObligation, []disclosure.Disclosure) {
 	var selected []selectedGoTestObligation
 	var discl []disclosure.Disclosure
@@ -703,10 +702,13 @@ func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]
 // naturally selects zero obligations (an elaborated obligation's
 // authoritative_source.ref is never blank) and makes this a silent no-op,
 // matching contract 2's "only inside sync --produce in CI" without a
-// separate gate. Every disclosure collected along the way (a malformed
-// producer ref, an undecodable obligation elsewhere in the store, or a
-// named test that never ran) is rendered to stdout; only a runner or
-// stream failure returns an error (the caller's exit 2).
+// separate gate. Every disclosure collected along the way (a malformed,
+// nested-module, or runtime-kind ref; an undecodable or misfiled
+// obligation elsewhere in the store; a store root that is not a module
+// root; a package that did not build or load; or a named test that never
+// ran) is rendered to stdout. Only a missing runner, a runner or stream
+// failure, an unreadable go.mod, or a failed write returns an error (the
+// caller's exit 2).
 func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, runner namedGoTestRunner, prov artifact.EvidenceProvenance, stdout io.Writer) error {
 	candidates, discl, err := discoverTestProducerObligations(root)
 	if err != nil {
