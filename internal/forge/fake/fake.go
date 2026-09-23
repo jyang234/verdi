@@ -22,9 +22,10 @@ type Forge struct {
 	openMRs   map[string][]forge.OpenMR    // targetBranch -> open MRs
 	files     map[string]map[string][]byte // branch -> path -> content
 
-	comments   map[string][]forge.Comment          // mrID -> comment feed
-	threads    map[string][]forge.ThreadResolution // mrID -> thread resolutions
-	approvals  map[string]forge.ApprovalSnapshot   // changeID -> current facts
+	comments   map[string][]forge.Comment              // mrID -> comment feed
+	threads    map[string][]forge.ThreadResolution     // mrID -> thread resolutions
+	approvals  map[string]forge.ApprovalSnapshot       // changeID -> current facts
+	envReviews map[string]forge.EnvironmentReviewFacts // query key -> seeded facts
 	nextCommID int
 }
 
@@ -39,6 +40,7 @@ func New() *Forge {
 		comments:   make(map[string][]forge.Comment),
 		threads:    make(map[string][]forge.ThreadResolution),
 		approvals:  make(map[string]forge.ApprovalSnapshot),
+		envReviews: make(map[string]forge.EnvironmentReviewFacts),
 		nextCommID: 1,
 	}
 }
@@ -72,6 +74,42 @@ func cloneApprovalSnapshot(snapshot forge.ApprovalSnapshot) forge.ApprovalSnapsh
 		}
 	}
 	return snapshot
+}
+
+// SeedEnvironmentReviewFacts makes EnvironmentReview(query) return facts for
+// the exact query tuple (run id, run attempt, environment name, gated job
+// name) — mirroring SeedApprovalSnapshot's seed-or-error pattern (v2 ac-4).
+func (f *Forge) SeedEnvironmentReviewFacts(query forge.EnvironmentReviewQuery, facts forge.EnvironmentReviewFacts) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.envReviews[environmentReviewKey(query)] = cloneEnvironmentReviewFacts(facts)
+}
+
+// EnvironmentReview implements forge.Forge.
+func (f *Forge) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.EnvironmentReviewFacts{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	facts, ok := f.envReviews[environmentReviewKey(query)]
+	if !ok {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("fake: no environment review facts seeded for run %q attempt %d environment %q gated job %q", query.RunID, query.RunAttempt, query.EnvironmentName, query.GatedJobName)
+	}
+	return cloneEnvironmentReviewFacts(facts), nil
+}
+
+func environmentReviewKey(q forge.EnvironmentReviewQuery) string {
+	return fmt.Sprintf("%s\x00%d\x00%s\x00%s", q.RunID, q.RunAttempt, q.EnvironmentName, q.GatedJobName)
+}
+
+func cloneEnvironmentReviewFacts(facts forge.EnvironmentReviewFacts) forge.EnvironmentReviewFacts {
+	facts.Reviews = append([]forge.EnvironmentReviewRow(nil), facts.Reviews...)
+	if facts.EnvironmentPreventSelfReview != nil {
+		v := *facts.EnvironmentPreventSelfReview
+		facts.EnvironmentPreventSelfReview = &v
+	}
+	return facts
 }
 
 func bundleKey(ref, commit string) string { return ref + "@" + commit }

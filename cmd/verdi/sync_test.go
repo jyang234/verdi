@@ -1018,6 +1018,9 @@ func (erroringForge) CIContext(ctx context.Context) (forgepkg.CIInfo, error) {
 func (erroringForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]forgepkg.OpenMR, error) {
 	return nil, nil
 }
+func (erroringForge) EnvironmentReview(ctx context.Context, query forgepkg.EnvironmentReviewQuery) (forgepkg.EnvironmentReviewFacts, error) {
+	return forgepkg.EnvironmentReviewFacts{}, errors.New("forge: simulated transport failure")
+}
 func (erroringForge) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	return nil, errors.New("forge: simulated transport failure")
 }

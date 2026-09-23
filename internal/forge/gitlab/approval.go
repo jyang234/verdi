@@ -126,6 +126,29 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	return snapshot, nil
 }
 
+// EnvironmentReview implements forge.Forge (v2 ac-4, dc-5): GitLab has no
+// environment-review concept analogous to GitHub's protected-environment
+// reviewer gate — environment reviews are a GitHub-only approval source by
+// construction (dc-5: "environment reviews are not a countersign source
+// under team or high-assurance profiles", and the mapping itself is keyed
+// "github-environment-review"). This is co-1's "unsupported source": no
+// network call is made, and NormalizeEnvironmentReview turns the disclosed
+// result into a zero-row outcome, never an error that would break a close.
+func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.EnvironmentReviewFacts{}, err
+	}
+	facts, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
+		Supported:         false,
+		UnsupportedReason: "gitlab: environment reviews are a GitHub-only approval source (v2 dc-5); gitlab has no forge-recorded review of a protected-environment workflow run to report",
+		Repository:        a.cfg.ProjectID,
+	}, a.cfg.Clock())
+	if err != nil {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("gitlab: environment review: normalize unsupported facts: %w", err)
+	}
+	return facts, nil
+}
+
 func (a *Adapter) getApprovalJSON(ctx context.Context, requestURL string, out any) (headers http.Header, err error) {
 	response, err := a.transport.RawDo(ctx, http.MethodGet, requestURL, nil, a.setAuth)
 	if err != nil {

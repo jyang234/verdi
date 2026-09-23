@@ -104,3 +104,35 @@ func githubDrainList[T any, I any](ctx context.Context, a *Adapter, firstURL str
 	}
 	return all, nil
 }
+
+// githubDrainStrictList mirrors githubDrainList, but rides the strict
+// approval-decode seam (getApprovalJSON/forge.DecodeApprovalJSON) rather
+// than httpjson's tolerant subset decode, and approvalNextLink's stricter
+// Link-header validation (a malformed or multiply-claimed rel="next" is
+// rejected rather than silently stopping) rather than parseLinkNext's
+// lenient one — the same posture approval.go's drainApprovalReviews
+// already uses for approval-domain data (co-1's amendment extends that
+// closed-contract posture to the ac-4 environment-review endpoints).
+func githubDrainStrictList[T any, I any](ctx context.Context, a *Adapter, firstURL string, items func(T) []I) ([]I, error) {
+	var all []I
+	next := withPerPage(firstURL)
+	visited := make(map[string]struct{})
+	for next != "" {
+		current := next
+		if _, exists := visited[current]; exists {
+			return nil, fmt.Errorf("github: environment review pagination cycle detected: %s was already visited", current)
+		}
+		visited[current] = struct{}{}
+		var page T
+		headers, err := a.getApprovalJSON(ctx, current, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, items(page)...)
+		next, err = approvalNextLink(headers.Get("Link"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return all, nil
+}
