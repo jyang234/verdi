@@ -36,20 +36,52 @@ func (e DiffEntry) Pure() bool {
 // DiffNameStatus returns the changed paths between base and head in dir
 // (`git diff --name-status -M`, rename detection enabled) — VL-010's diff
 // base per I-14 (merge-base(HEAD, default branch), supplied by the caller
-// via the engine's Context rather than computed here).
+// via the engine's Context rather than computed here). The answer is the
+// full diff in repository-root-relative paths whatever the repository's or
+// user's diff.ignoreSubmodules, submodule.<name>.ignore, .gitmodules
+// `ignore`, or diff.relative settings say: see diffNameStatus.
 func DiffNameStatus(ctx context.Context, dir, base, head string) ([]DiffEntry, error) {
 	return diffNameStatus(ctx, "DiffNameStatus", dir, base, head, "-M")
 }
 
 // DiffNameStatusCopies returns the complete handback diff with rename and
 // copy detection, including unchanged copy sources via --find-copies-harder.
-// DiffNameStatus remains rename-only for its existing VL-010 callers.
+// DiffNameStatus remains rename-only for its existing VL-010 callers. Like
+// DiffNameStatus, it answers independently of the submodule-ignore and
+// diff.relative settings (see diffNameStatus).
 func DiffNameStatusCopies(ctx context.Context, dir, base, head string) ([]DiffEntry, error) {
 	return diffNameStatus(ctx, "DiffNameStatusCopies", dir, base, head, "-M", "-C", "--find-copies-harder")
 }
 
+// diffNameStatus is the one place both variants build their git command, so
+// the two flags below are decided once.
+//
+// Its callers use the answer as the COMPLETE list of what base..head
+// changes: the SI-231 one-behind predicate accepts a commit whose sole
+// change is a report, VL-010 and VL-016 check every changed path, spec
+// import checks an exact write set, and the sealed-execution handback looks
+// for protected paths. Plain `git diff` honors two families of ordinary
+// settings that make it report less, and verdi runs inside other people's
+// repositories, where either may be set:
+//
+//   - --ignore-submodules=none. A submodule `ignore = all`, from
+//     diff.ignoreSubmodules or submodule.<name>.ignore in any config scope,
+//     or from a COMMITTED .gitmodules that every clone inherits, drops a
+//     gitlink change from the output. The one-behind predicate then
+//     accepted a commit that also bumped a submodule, and close froze a
+//     report whose covers named code HEAD no longer has (L3b re-review N-1).
+//     For a commit-to-commit diff the flag only changes that; it compares
+//     gitlink commits and never looks inside a submodule's working tree.
+//   - --no-relative. diff.relative=true, with git run from a subdirectory
+//     (cmd.Dir is the caller's store root, which store.FindRoot may find
+//     below the git root), drops every path outside that directory and
+//     reports the rest relative to it. Callers compare in repository-root
+//     paths. The flag needs git 2.28 or later.
+//
+// SI-226 fixed the same kind of defect in StatusDirty: a git setting
+// changing what a verdi check sees.
 func diffNameStatus(ctx context.Context, operation, dir, base, head string, detectionArgs ...string) ([]DiffEntry, error) {
-	args := append([]string{"diff", "--name-status"}, detectionArgs...)
+	args := append([]string{"diff", "--name-status", "--no-relative", "--ignore-submodules=none"}, detectionArgs...)
 	args = append(args, base, head)
 	out, err := run(ctx, dir, args...)
 	if err != nil {

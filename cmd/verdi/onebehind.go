@@ -27,7 +27,9 @@
 // the working-tree file — so without this clause an operator's uncommitted
 // disposition change (a `verdi disposition --amend` after commit R, or a
 // retraction) would be overwritten while close printed "dispositions
-// preserved". A CI checkout never diverges, so the clause costs CI nothing.
+// preserved". A CI checkout diverges only when .gitattributes applies eol or
+// smudge conversion to the report; the clause then refuses by name, so that
+// case fails closed.
 package main
 
 import (
@@ -86,9 +88,15 @@ func evaluateOneBehindReport(ctx context.Context, root, specName, head string) (
 	// coordinates by re-basing the store-relative path through RepoPrefix,
 	// as requireCleanIndex relates the two (close.go): without it a nested
 	// store refuses its own report and accepts a root store's same-named
-	// one. Under diff.relative git reports only this directory's paths, and
-	// relative to it, so no entry can equal the re-based path: that
-	// configuration refuses, never accepts.
+	// one. DiffNameStatus keeps to those coordinates and lists every changed
+	// path, gitlinks included, whatever diff.relative or a submodule
+	// `ignore` setting says (gitx passes --no-relative and
+	// --ignore-submodules=none). So an entry equal to the re-based path is
+	// this store's own report, and the entry count covers the whole commit.
+	// The covers clause below is a structural backstop as well: a report
+	// that did not change across parent..head is the parent's own file, and
+	// no commit's tree can carry that commit's own id, so its covers cannot
+	// name the parent.
 	prefix, err := gitx.RepoPrefix(ctx, root)
 	if err != nil {
 		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
