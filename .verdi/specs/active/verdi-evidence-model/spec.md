@@ -443,7 +443,12 @@ Closure is an MR, because every mutation of the committed zone is an MR:
    evidence only).
 3. It runs `verdi align --freeze` for the final alignment report and
    generates `rollup.json` (schema `verdi.rollup/v1`: the final fold,
-   per-AC statuses, evidence summaries, digest), then opens a **closure MR**
+   per-AC statuses, evidence summaries, digest; when the close consumed an
+   unsealed-provenance exemption, the rollup and the closure record also carry
+   its `provenance_exemption` block — the exemption's identity, the exempted
+   implementation commit and tree, and the three sealed-provenance inputs still
+   `unproven` — permanently, so the archive never presents the close as sealed),
+   then opens a **closure MR**
    containing exactly: the two frozen artifacts plus the spec directory's
    active→archive move.
 4. CODEOWNERS routes the closure MR; merging it *is* closure. The merge

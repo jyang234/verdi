@@ -259,7 +259,9 @@ The review capsule names the accepted spec, result diff, evidence bundle,
 builder receipt, and review policy as `required_inputs`. Wave 3 can prove the
 accepted spec and applicable review policy, but it has no ratified request or
 receipt grammar for the other three. They are therefore emitted as
-`unproven`, with their fixed disclosure codes, and the compile remains advisory
+`unproven`, with their fixed disclosure codes — and they stay `unproven` under any
+exemption, which the conflict gate applies and the compiler never does
+(unsealed-provenance exemption design §10, SI-248) — and the compile remains advisory
 and exits 0. No unsigned placeholder is consumed as a report or receipt. The
 Wave-4 owner may widen the request and proof grammar through a later ledgered
 schema revision. `required_inputs` is `[]` for design and build; for review it
