@@ -474,6 +474,8 @@ func writeOneBehindFile(t *testing.T, path, content string) {
 // walks up to the nearest .verdi), while DiffNameStatus and Show answer in
 // repository-root-relative paths, so the predicate re-bases the report's
 // store-relative path through gitx.RepoPrefix, as requireCleanIndex does.
+// The diff.relative rows (BL-34; L3b re-review RR-7) prove those paths stay
+// repository-root-relative whatever diff.relative says.
 func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
 	ctx := context.Background()
 	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
@@ -543,6 +545,74 @@ func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
 		if got.Accepted {
 			t.Fatal("Accepted = true, want false: a commit that also changes code outside the store is never SI-231's shape")
 		}
+		// The diff itself must see main.go (gitx passes --no-relative), so
+		// the refusal is the path count, never an accident of a hidden path.
+		if want := "changes 2 path(s), not exactly one"; !strings.Contains(got.Reason, want) {
+			t.Fatalf("Reason = %q, want the path-count clause (%q): the change outside the store must be counted", got.Reason, want)
+		}
+	})
+
+	// BL-34 (L3b residual 1): diff.relative no longer makes a nested store
+	// refuse its own genuine report, at the predicate or at condition 4.
+	t.Run("diff.relative accepts a nested store's genuine one-behind report", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files:   map[string]string{"sub/.verdi/verdi.yaml": manifest},
+			Message: "nested store",
+		}})
+		runGitCmd(t, repo.Dir, "config", "diff.relative", "true")
+		sub := filepath.Join(repo.Dir, "sub")
+		writeOneBehindFile(t, filepath.Join(sub, filepath.FromSlash(rel)), oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+		head := commitAllOnCurrentBranch(t, repo.Dir, "R in the nested store")
+
+		got, err := evaluateOneBehindReport(ctx, sub, oneBehindReportSpecName, head)
+		if err != nil {
+			t.Fatalf("evaluateOneBehindReport: %v", err)
+		}
+		if !got.Accepted || got.Parent != repo.Head {
+			t.Fatalf("got Accepted=%v Parent=%q Reason=%q, want the nested store's own one-behind report accepted under diff.relative with parent %q", got.Accepted, got.Parent, got.Reason, repo.Head)
+		}
+
+		spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/" + oneBehindReportSpecName}}
+		cond, err := checkDispositionCompleteCondition(ctx, sub, spec, head)
+		if err != nil {
+			t.Fatalf("checkDispositionCompleteCondition: %v", err)
+		}
+		if !cond.OK {
+			t.Fatalf("condition 4 OK = false under diff.relative, want true; Reason=%q", cond.Reason)
+		}
+	})
+
+	// L3b re-review RR-7 made permanent: under diff.relative, run from sub/,
+	// plain git reports sub/sub/.verdi/…/deviation-report.md as
+	// sub/.verdi/…/deviation-report.md, which is exactly this nested store's
+	// re-based path, and only the covers clause refused. With
+	// repository-root paths the path clause itself refuses.
+	t.Run("diff.relative cannot make a deeper store's report collide with this store's", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"sub/.verdi/verdi.yaml":     manifest,
+				"sub/sub/.verdi/verdi.yaml": manifest,
+				// This store's own report, committed before the parent: the
+				// unchanged file the predicate would read at HEAD.
+				"sub/" + rel: oneBehindReportContent(strings.Repeat("a", 40), oneBehindDispositionedFindingYAML),
+			},
+			Message: "two nested stores",
+		}})
+		runGitCmd(t, repo.Dir, "config", "diff.relative", "true")
+		sub := filepath.Join(repo.Dir, "sub")
+		writeOneBehindFile(t, filepath.Join(sub, "sub", filepath.FromSlash(rel)), oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+		head := commitAllOnCurrentBranch(t, repo.Dir, "R in the deeper store")
+
+		got, err := evaluateOneBehindReport(ctx, sub, oneBehindReportSpecName, head)
+		if err != nil {
+			t.Fatalf("evaluateOneBehindReport: %v", err)
+		}
+		if got.Accepted {
+			t.Fatal("Accepted = true, want false: the deeper store's report is not this store's")
+		}
+		if want := "sole changed path is sub/sub/" + rel; !strings.Contains(got.Reason, want) {
+			t.Fatalf("Reason = %q, want the path clause naming the deeper store's repository-root path (%q)", got.Reason, want)
+		}
 	})
 }
 
@@ -586,6 +656,114 @@ func TestEvaluateOneBehindReport_ShallowCheckout(t *testing.T) {
 			}
 			if strings.Contains(got.Reason, "a root commit or a merge") {
 				t.Fatalf("Reason = %q, want no root-or-merge claim at a shallow boundary, where the parent count is unknown", got.Reason)
+			}
+		})
+	}
+}
+
+// .gitmodules formats for the lib submodule the submodule rows below
+// record; %s is its url, the local path of oneBehindLibRepo's repository.
+const (
+	oneBehindPlainGitmodules    = "[submodule \"lib\"]\n\tpath = lib\n\turl = %s\n"
+	oneBehindIgnoringGitmodules = "[submodule \"lib\"]\n\tpath = lib\n\turl = %s\n\tignore = all\n"
+)
+
+// oneBehindLibRepo builds the local second repository the submodule rows
+// point lib at, returning its path and its two commits A and B. Nothing is
+// ever cloned from it, so no file:// protocol and no network is involved.
+func oneBehindLibRepo(t *testing.T) (dir, commitA, commitB string) {
+	t.Helper()
+	lib := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"lib.go": "package lib // A\n"}, Message: "lib commit A"},
+		{Files: map[string]string{"lib.go": "package lib // B\n"}, Message: "lib commit B"},
+	})
+	return lib.Dir, lib.Heads[0], lib.Heads[1]
+}
+
+// stageOneBehindGitlink stages the gitlink (mode 160000) lib at sha, the
+// index entry `git submodule update` + `git add lib` leaves. lib/ is kept an
+// empty directory, as an uninitialized submodule's is, so a later
+// `git add -A` leaves the entry alone rather than staging its deletion.
+func stageOneBehindGitlink(t *testing.T, dir, sha string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0o755); err != nil {
+		t.Fatalf("mkdir lib: %v", err)
+	}
+	runGitCmd(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+sha+",lib")
+}
+
+// commitOneBehindReportWithGitlinkBump is RR-8's commit R (L3b re-review
+// N-1): the spec's report written and staged together with the gitlink lib
+// bumped to sha, committed as ONE single-parent commit. Returns R.
+func commitOneBehindReportWithGitlinkBump(t *testing.T, dir, specName, content, sha string) string {
+	t.Helper()
+	rel := store.DeviationReportRelPath(store.ZoneActive, specName)
+	writeOneBehindFile(t, filepath.Join(dir, filepath.FromSlash(rel)), content)
+	runGitCmd(t, dir, "add", "--", rel)
+	stageOneBehindGitlink(t, dir, sha)
+	runGitCmd(t, dir, "commit", "--quiet", "--no-verify", "-m", "commit the report and bump lib")
+	return strings.TrimSpace(gitOutput(t, dir, "rev-parse", "HEAD"))
+}
+
+// assertOneBehindSubmoduleFixture proves parent..head really changes the two
+// paths RR-8 names (the report added, lib bumped), and that plain
+// `git diff --name-status` in dir, under dir's configuration, reports
+// plainDiff: the row's ignore setting must really blind plain git.
+func assertOneBehindSubmoduleFixture(t *testing.T, dir, parent, head, reportRel, plainDiff string) {
+	t.Helper()
+	if got, want := strings.TrimSpace(gitOutput(t, dir, "diff", "--name-status", "--ignore-submodules=none", parent, head)), "A\t"+reportRel+"\nM\tlib"; got != want {
+		t.Fatalf("fixture: the true diff = %q, want %q", got, want)
+	}
+	if got := strings.TrimSpace(gitOutput(t, dir, "diff", "--name-status", parent, head)); got != plainDiff {
+		t.Fatalf("fixture: plain `git diff --name-status` = %q, want %q", got, plainDiff)
+	}
+}
+
+// TestEvaluateOneBehindReport_SubmoduleBumpIsNeverHidden is L3b re-review
+// N-1 at the predicate: a commit R that adds the spec's report AND bumps a
+// submodule changes two paths, so it is never SI-231's shape, whatever
+// submodule `ignore` setting would hide the bump from plain git. Before gitx
+// passed --ignore-submodules=none, each ignore row was ACCEPTED: close froze
+// the report and its covers named a parent whose code HEAD no longer has.
+func TestEvaluateOneBehindReport_SubmoduleBumpIsNeverHidden(t *testing.T) {
+	ctx := context.Background()
+	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
+	reportOnly := "A\t" + rel
+	cases := []struct {
+		name       string
+		gitmodules string
+		config     [][2]string
+		plainDiff  string
+	}{
+		{name: "no configuration (control)", gitmodules: oneBehindPlainGitmodules, plainDiff: reportOnly + "\nM\tlib"},
+		{name: "local diff.ignoreSubmodules=all", gitmodules: oneBehindPlainGitmodules, config: [][2]string{{"diff.ignoreSubmodules", "all"}}, plainDiff: reportOnly},
+		{name: "local submodule.<name>.ignore=all", gitmodules: oneBehindPlainGitmodules, config: [][2]string{{"submodule.lib.ignore", "all"}}, plainDiff: reportOnly},
+		{name: "committed .gitmodules ignore = all", gitmodules: oneBehindIgnoringGitmodules, plainDiff: reportOnly},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := oneBehindBaseRepo(t)
+			libDir, libA, libB := oneBehindLibRepo(t)
+			writeOneBehindFile(t, filepath.Join(repo.Dir, ".gitmodules"), fmt.Sprintf(tc.gitmodules, libDir))
+			runGitCmd(t, repo.Dir, "add", "--", ".gitmodules")
+			stageOneBehindGitlink(t, repo.Dir, libA)
+			runGitCmd(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "record lib at commit A")
+			parent := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+			head := commitOneBehindReportWithGitlinkBump(t, repo.Dir, oneBehindReportSpecName, oneBehindReportContent(parent, oneBehindDispositionedFindingYAML), libB)
+			for _, kv := range tc.config {
+				runGitCmd(t, repo.Dir, "config", kv[0], kv[1])
+			}
+			assertOneBehindSubmoduleFixture(t, repo.Dir, parent, head, rel, tc.plainDiff)
+
+			got, err := evaluateOneBehindReport(ctx, repo.Dir, oneBehindReportSpecName, head)
+			if err != nil {
+				t.Fatalf("evaluateOneBehindReport: %v", err)
+			}
+			if got.Accepted {
+				t.Fatal("Accepted = true, want false: R also bumps the submodule lib, so HEAD's code is not the audited parent's")
+			}
+			if want := "changes 2 path(s), not exactly one"; !strings.Contains(got.Reason, want) {
+				t.Fatalf("Reason = %q, want the path-count clause (%q)", got.Reason, want)
 			}
 		})
 	}
