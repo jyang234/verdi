@@ -21,11 +21,14 @@
 //     package argument exactly as given on the command line; the package's
 //     fail event carries FailedBuild when its build or setup failed.
 //
-// Decoding posture: the stream is the toolchain's open format, read the way
-// the forge-transport rule reads open provider formats. Every documented
-// field decodes into its declared JSON type (a type mismatch fails), unknown
-// fields are ignored so an additive toolchain field cannot break a run, and
-// an unknown Action fails closed.
+// Decoding posture: strict, as CLAUDE.md requires of all JSON
+// (DisallowUnknownFields plus trailing-data rejection; unknown enum values
+// fail closed). The toolchain's event stream is not a ratified open contract
+// the way forge-transport ac-1/dc-1 make provider responses one, so no
+// relaxation applies. Every field decodes into its declared JSON type (a
+// type mismatch fails), a field Event does not declare fails, anything after
+// the last event fails, and an unknown Action fails closed; each such error
+// names the event that carried it.
 package gotestjson
 
 import (
@@ -36,6 +39,14 @@ import (
 )
 
 // Event is one line of a `go test -json` stream: a TestEvent or a BuildEvent.
+// Its fields are exactly the union of the two shapes Go 1.25.5 writes: the
+// test2json event (src/cmd/internal/test2json/test2json.go, type event: Time,
+// Action, Package, Test, Elapsed, Output, FailedBuild, Key, Value) and the
+// build event (src/cmd/go/internal/load/printer.go, type jsonBuildEvent:
+// ImportPath, Action, Output). ReadPackage decodes it with
+// DisallowUnknownFields, so a toolchain upgrade that adds a field fails
+// closed — an error, never a silently dropped field — until Verdi learns the
+// field here.
 type Event struct {
 	Time        string `json:",omitempty"`
 	Action      string
@@ -109,13 +120,14 @@ func (r Result) Built() bool {
 
 // ReadPackage reads one package's `go test -json` stream to its end. It
 // returns an error, and no Result, for a stream that cannot be the
-// toolchain's account of that one package: undecodable JSON, an unknown
-// action, a TestEvent naming another package, a BuildEvent carrying a
-// TestEvent's Package or Test, a duplicate start, an event before start or
-// after the package's terminal event, a run or terminal event out of
-// sequence, a duplicate terminal event, the package completing while a test
-// is still running, a test running despite a build failure or an unloaded
-// package, or a stream that ends before the package's terminal event.
+// toolchain's account of that one package: undecodable JSON or trailing
+// data, a field Event does not declare, an unknown action, a TestEvent
+// naming another package, a BuildEvent carrying a TestEvent's Package or
+// Test, a duplicate start, an event before start or after the package's
+// terminal event, a run or terminal event out of sequence, a duplicate
+// terminal event, the package completing while a test is still running, a
+// test running despite a build failure or an unloaded package, or a stream
+// that ends before the package's terminal event.
 func ReadPackage(r io.Reader, want Target) (Result, error) {
 	if want.ImportPath == "" {
 		return Result{}, errors.New("gotestjson: target has no import path")
@@ -128,6 +140,7 @@ func ReadPackage(r io.Reader, want Target) (Result, error) {
 	running := map[string]bool{}
 	started, finished, ran := false, false, false
 	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
 	for n := 1; ; n++ {
 		var e Event
 		if err := dec.Decode(&e); err == io.EOF {
