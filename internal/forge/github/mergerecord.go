@@ -29,8 +29,14 @@ type mergeRecordRepositoryJSON struct {
 // mergeRecordPullJSON is the subset of one pull-request-simple object of
 // "List pull requests associated with a commit" (GET
 // /repos/{owner}/{repo}/commits/{commit_sha}/pulls) the read needs. The
-// simple object carries no `merged` boolean: a pull request is merged
-// exactly when its state is closed and merged_at is non-null. merged_at and
+// simple object carries no `merged` boolean: GitHub reports a pull request
+// merged exactly when its state is closed and merged_at is non-null. That
+// includes an "indirect merge" — GitHub marks a pull request merged when its
+// head commits reach the base branch outside it, for example by a direct
+// push — and no member of the simple object tells an indirect merge from
+// one GitHub performed, so merged here means only that GitHub reports it
+// merged, never that GitHub created its merge commit (see the pending owner
+// ruling on SI-249 evidence, lane EF review F1). merged_at and
 // merge_commit_sha are nullable; Base and Base.Repo are pointers so a
 // missing or null base, or base repository, is refused rather than read as
 // an empty branch or a zero id. base.repo is required in pull-request-simple;
@@ -50,17 +56,20 @@ type mergeRecordPullJSON struct {
 }
 
 // MergeRecords implements forge.Forge (SI-249; plan R-PB-2): the pull
-// requests GitHub associates with commit, each with its state, base branch,
-// merge commit, and merge time, plus the repository's default branch. It
-// reads the repository first, then drains the commit's pull requests.
+// requests GitHub associates with commit, each with the state, base branch,
+// merge commit, and merge time GitHub reports for it, plus the repository's
+// default branch. It reads the repository first, then drains the commit's
+// pull requests. A reported merge is not proof that GitHub created the merge
+// commit (pullChangeRequestMerge's doc; lane EF review F1).
 //
 // commit must be a full lowercase SHA; anything else is refused before any
 // request. Transport failures, rate limiting, and unexpected statuses wrap
 // forge.ErrUnavailable as every other approval-domain read does, except a
 // 404 on the repository read, which means the configured repository does not
 // exist or the token cannot see it: a configuration defect, reported as an
-// operational error. A JSON or schema violation, an unknown state, or a
-// missing id is an operational error that does not wrap ErrUnavailable.
+// operational error. A JSON or schema violation, an unknown state, a missing
+// id, or a pull request based in another repository is an operational error
+// that does not wrap ErrUnavailable.
 func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeRecordFacts, error) {
 	if err := forge.ValidateMergeRecordCommit(commit); err != nil {
 		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
@@ -118,10 +127,14 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 }
 
 // pullChangeRequestMerge maps one pull-request-simple object. merge_commit_sha
-// is honored only for a merged pull request: an open pull request's
-// merge_commit_sha is GitHub's test merge, and a closed unmerged one's is a
-// stale test merge, and neither is ever a merge commit. A state outside
-// {open, closed} fails closed.
+// is honored only for a pull request GitHub reports merged: an open pull
+// request's merge_commit_sha is GitHub's test merge, and a closed unmerged
+// one's is a stale test merge, and neither is ever a merge commit. For a
+// pull request GitHub reports merged it is the commit GitHub names as the
+// merge commit — which does NOT by itself prove GitHub created it: GitHub
+// does not document which commit it reports for an indirect merge (see the
+// pending owner ruling on SI-249 evidence, lane EF review F1). A state
+// outside {open, closed} fails closed.
 //
 // The pull request's base repository must be the queried repository
 // (repoID, from "Get a repository"; lane EF review F2): the endpoint's

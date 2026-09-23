@@ -24,7 +24,11 @@ const (
 	ChangeRequestOpen ChangeRequestState = "open"
 	// ChangeRequestClosed is a change closed without merging.
 	ChangeRequestClosed ChangeRequestState = "closed"
-	// ChangeRequestMerged is a change the forge merged.
+	// ChangeRequestMerged is a change the forge reports merged. A forge
+	// also reports a change merged when its commits reach the target
+	// branch outside it (GitHub's indirect merges, GitLab's push-detected
+	// merges), so this state does NOT by itself mean the forge performed
+	// the merge (ProveMergedIntoDefault's doc; lane EF review F1).
 	ChangeRequestMerged ChangeRequestState = "merged"
 )
 
@@ -57,8 +61,10 @@ func (s ChangeRequestState) valid() bool {
 // change's canonical decimal number within the repository (GitHub pull
 // request number, GitLab merge request iid). MergeCommitSHA is "" unless
 // State is merged and the forge reports a merge commit; an open change's
-// provider test merge is never carried. MergedAt is the forge's merge time,
-// normalized UTC RFC3339Nano, present exactly when State is merged.
+// provider test merge is never carried. A reported merge commit is the
+// commit the forge names, not proof that the forge created it
+// (ProveMergedIntoDefault's doc). MergedAt is the merge time the forge
+// reports, normalized UTC RFC3339Nano, present exactly when State is merged.
 type ChangeRequestMerge struct {
 	ChangeID       string             `json:"change_id"`
 	State          ChangeRequestState `json:"state"`
@@ -264,8 +270,10 @@ func (f MergeRecordFacts) providerFactsDigest() (string, error) {
 type MergeProofState string
 
 const (
-	// MergeProofProven means the forge reports a change merged into its
-	// default branch whose merge commit is exactly the commit.
+	// MergeProofProven means the forge reports this exact commit as the
+	// merge commit of a change it reports merged into its default branch —
+	// and nothing more: it does NOT by itself prove the forge created the
+	// commit (ProveMergedIntoDefault's doc).
 	MergeProofProven MergeProofState = "proven"
 	// MergeProofUnproven means it does not; Reason says why.
 	MergeProofUnproven MergeProofState = "unproven"
@@ -276,9 +284,9 @@ const (
 	// MergeProofReasonUnsupported means the adapter cannot read merge
 	// records (facts.Supported is false).
 	MergeProofReasonUnsupported = "merge-records-unsupported"
-	// MergeProofReasonNoMergeIntoDefault means no associated change is
-	// merged into the forge's default branch with the commit as its merge
-	// commit.
+	// MergeProofReasonNoMergeIntoDefault means the forge reports no
+	// associated change merged into its default branch with the commit as
+	// its merge commit.
 	MergeProofReasonNoMergeIntoDefault = "no-merge-into-default-branch"
 )
 
@@ -297,14 +305,27 @@ type MergeProof struct {
 	Detail             string          `json:"detail,omitempty"`
 }
 
-// ProveMergedIntoDefault decides, from forge-authenticated merge records
-// alone, whether the forge merged a change request into its default branch
-// with facts.Commit as that change's merge commit (SI-249; design §5 Scope,
-// the landing snapshot D and the issuance merge M_e). It is proven exactly
-// when some change has State merged, TargetBranch equal to the forge's
-// DefaultBranch, and MergeCommitSHA equal to Commit; when several qualify,
-// the lowest ChangeID is reported. Everything else is unproven with a closed
-// Reason, including an unsupported adapter.
+// ProveMergedIntoDefault decides, from the forge's merge records alone,
+// whether the forge reports this exact commit as the merge commit of a
+// change it reports merged into its default branch (SI-249; SI-254; design
+// §5 Scope, the landing snapshot D and the issuance merge M_e). That is all
+// a proven MergeProof establishes. It is proven exactly when some change has
+// State merged, TargetBranch equal to the forge's DefaultBranch, and
+// MergeCommitSHA equal to Commit; when several qualify, the lowest ChangeID
+// is reported. Everything else is unproven with a closed Reason, including
+// an unsupported adapter.
+//
+// A proven MergeProof does NOT by itself prove that the forge created
+// Commit when it merged the change. A forge's merged state also covers a
+// change it marked merged because the change's commits reached the target
+// branch outside it: GitHub's "indirect merges" (for example a direct push
+// to the base branch), for which GitHub does not document which merge
+// commit it reports, and GitLab's push-detected merges, which per lane EF
+// review F1 record the pushed commit as the merge commit. Neither provider's
+// merge-record response tells such a merge from one the forge performed.
+// Whether SI-249's "created by the forge at merge time" needs a stronger
+// proof is the pending owner ruling on SI-249 evidence (lane EF review F1);
+// until it is recorded, a consumer must not read proven as forge-created.
 //
 // This predicate never claims a two-parent merge commit: a squash or rebase
 // merge can report a single-parent commit as its merge commit, and whether

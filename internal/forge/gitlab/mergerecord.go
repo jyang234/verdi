@@ -46,17 +46,20 @@ type mergeRecordMergeRequestJSON struct {
 }
 
 // MergeRecords implements forge.Forge (SI-249; plan R-PB-2): the merge
-// requests GitLab associates with commit, each with its state, target
-// branch, merge commit, and merge time, plus the project's default branch.
-// It reads the project first, then drains the commit's merge requests.
+// requests GitLab associates with commit, each with the state, target
+// branch, merge commit, and merge time GitLab reports for it, plus the
+// project's default branch. It reads the project first, then drains the
+// commit's merge requests. A reported merge is not proof that GitLab created
+// the merge commit (mergeRequestChangeRequestMerge's doc; lane EF review F1).
 //
 // commit must be a full lowercase SHA; anything else is refused before any
 // request. Transport failures, rate limiting, and unexpected statuses wrap
 // forge.ErrUnavailable as every other approval-domain read does, except a
 // 404 on the project read, which means the configured project does not
 // exist or the token cannot see it: a configuration defect, reported as an
-// operational error. A JSON or schema violation, an unknown state, or a
-// missing id is an operational error that does not wrap ErrUnavailable.
+// operational error. A JSON or schema violation, an unknown state, a missing
+// id, or a merge request that targets another project is an operational
+// error that does not wrap ErrUnavailable.
 func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeRecordFacts, error) {
 	if err := forge.ValidateMergeRecordCommit(commit); err != nil {
 		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
@@ -114,6 +117,15 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 // merged, and locked fails closed. merge_commit_sha and merged_at are honored
 // only when merged; a fast-forward merge reports a null merge_commit_sha, so
 // its facts carry no merge commit and it stays unproven.
+//
+// GitLab's merged state means only that GitLab reports the merge request
+// merged. It also covers a push-detected merge — GitLab marks a merge
+// request merged when a push to its target branch contains its commits and,
+// per lane EF review F1, records the pushed commit as merge_commit_sha — and
+// no member of this response tells that from a merge GitLab performed. So a
+// reported merge_commit_sha does NOT by itself prove GitLab created the
+// commit (see the pending owner ruling on SI-249 evidence, lane EF review
+// F1).
 //
 // The merge request's target_project_id must be the queried project
 // (projectID, from "Retrieve a project"), mirroring the GitHub adapter's
