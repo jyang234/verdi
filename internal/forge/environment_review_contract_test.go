@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -227,6 +232,48 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 		if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != "not-workflow-dispatch,not-close-workflow,creation-stamp-unavailable" {
 			t.Fatalf("disclosure kinds = %v (%v)", kinds, disclosures)
+		}
+	})
+
+	t.Run("the github review-history decoder declares no attempt, review id, or review time", func(t *testing.T) {
+		// GitHub's review history carries no attempt, review id, or review
+		// time (dc-5). Under tolerant decoding an extra member is ignored, so
+		// the guarantee that the adapter never reads one is structural: its
+		// review-history decode types must not declare one.
+		fields := structFields(t, filepath.Join("github", "environmentreview.go"),
+			"environmentReviewHistoryEntryJSON", "environmentReviewHistoryEnvironmentJSON")
+		for _, field := range fields {
+			lower := strings.ToLower(field)
+			for _, forbidden := range []string{"attempt", "submitted", "review_id", "reviewid", "_at", "time"} {
+				if strings.Contains(lower, forbidden) {
+					t.Errorf("review-history decode type declares %q; GitHub's review history supplies no attempt, review id, or review time", field)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			t.Fatal("review-history decode types declare no fields")
+		}
+	})
+
+	t.Run("the review-history fixture guard refuses members GitHub does not publish", func(t *testing.T) {
+		published := publishedHistoryEntryObject(t)
+		if problem := historyFixtureViolation(published, historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)); problem != "" {
+			t.Fatalf("scenario entry flagged: %s", problem)
+		}
+		withAttempt := historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)
+		withAttempt["attempt"] = 1
+		if problem := historyFixtureViolation(published, withAttempt); !strings.Contains(problem, "attempt") {
+			t.Fatalf("an entry with an attempt member passed the guard (%q)", problem)
+		}
+		withRunAttempt := historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)
+		asObject(t, asArray(t, withRunAttempt["environments"])[0])["run_attempt"] = 1
+		if problem := historyFixtureViolation(published, withRunAttempt); !strings.Contains(problem, "attempt") {
+			t.Fatalf("an entry whose environment carries an attempt member passed the guard (%q)", problem)
+		}
+		trimmed := historyEntry(t, "approved", erEnvIDNum, "close", erReviewerNum)
+		delete(trimmed, "comment")
+		if problem := historyFixtureViolation(published, trimmed); !strings.Contains(problem, "drops .comment") {
+			t.Fatalf("a trimmed entry passed the guard (%q)", problem)
 		}
 	})
 
@@ -592,6 +639,11 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 		if row.Actor != (forge.ProviderActor{Scheme: "github-user-id", Subject: erReviewer}) {
 			t.Fatalf("Actor = %+v, want the reviewer's stable user id", row.Actor)
+		}
+		for _, w := range row.ProviderWitnesses {
+			if strings.HasPrefix(w.Name, "review_") || strings.Contains(w.Name, "submitted") {
+				t.Errorf("witness %q invents a review id or review time GitHub does not supply", w.Name)
+			}
 		}
 		if got := witnessMap(row.ProviderWitnesses); !reflect.DeepEqual(got, scenarioWitnesses()) {
 			t.Fatalf("provider witnesses =\n%v\nwant exactly\n%v", got, scenarioWitnesses())
@@ -1127,4 +1179,62 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 			t.Fatal("EnvironmentReview unseeded: want error, got nil")
 		}
 	})
+}
+
+// structFields lists every field of the named struct types in one Go source
+// file, each as its Go name and json tag name ("Name/json"), including the
+// fields of nested anonymous structs. It fails the test when a type is
+// missing, so a rename cannot silently empty the check.
+func structFields(t *testing.T, path string, typeNames ...string) []string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	wanted := make(map[string]bool, len(typeNames))
+	for _, name := range typeNames {
+		wanted[name] = false
+	}
+	var fields []string
+	var collect func(*ast.StructType)
+	collect = func(st *ast.StructType) {
+		for _, field := range st.Fields.List {
+			tag := ""
+			if field.Tag != nil {
+				unquoted, err := strconv.Unquote(field.Tag.Value)
+				if err != nil {
+					t.Fatalf("unquoting tag %s: %v", field.Tag.Value, err)
+				}
+				tag = strings.Split(reflect.StructTag(unquoted).Get("json"), ",")[0]
+			}
+			for _, name := range field.Names {
+				fields = append(fields, name.Name+"/"+tag)
+			}
+			if nested, ok := field.Type.(*ast.StructType); ok {
+				collect(nested)
+			}
+		}
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		spec, ok := node.(*ast.TypeSpec)
+		if !ok {
+			return true
+		}
+		if _, want := wanted[spec.Name.Name]; !want {
+			return true
+		}
+		st, ok := spec.Type.(*ast.StructType)
+		if !ok {
+			t.Fatalf("%s is not a struct type", spec.Name.Name)
+		}
+		wanted[spec.Name.Name] = true
+		collect(st)
+		return true
+	})
+	for name, found := range wanted {
+		if !found {
+			t.Fatalf("type %s not found in %s", name, path)
+		}
+	}
+	return fields
 }
