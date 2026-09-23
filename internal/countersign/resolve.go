@@ -27,6 +27,14 @@ type Request struct {
 	EvaluatedAt       string
 	CandidateAuthor   *gp.PrincipalResolution
 	Resolver          PrincipalResolver
+	// SeparationDisclosures carries stable, pre-formatted disclosure
+	// witnesses the caller's kernel-consulted separation decision produced
+	// (SI-227, as narrowed) — e.g. a solo profile's role-collapse
+	// disclosure — into the canonical record's top-level witnesses, and so
+	// into its digest and every consumer that reads witnesses. Resolve
+	// never interprets these strings; this is a pure passthrough seam, not
+	// a schema change to Record itself.
+	SeparationDisclosures []string
 }
 
 type evaluatedApproval struct {
@@ -93,8 +101,9 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 		return evaluations[i].record.ApprovalID < evaluations[j].record.ApprovalID
 	})
 
-	witnesses := make([]string, 0, 4+len(authorFacts)+len(evaluations)*6)
+	witnesses := make([]string, 0, 4+len(authorFacts)+len(request.SeparationDisclosures)+len(evaluations)*6)
 	witnesses = append(witnesses, authorFacts...)
+	witnesses = append(witnesses, request.SeparationDisclosures...)
 	if candidateMatch {
 		witnesses = append(witnesses, fmt.Sprintf("candidate-sha-match:snapshot=%q:local=%q", request.Snapshot.CandidateSHA, request.LocalCandidateSHA))
 	} else {
