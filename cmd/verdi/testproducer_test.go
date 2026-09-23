@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -902,14 +903,12 @@ func TestRealNamedGoTestRunner(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			hermeticGoEnv(t)
-			if c.goBin != "" {
-				bin := t.TempDir()
-				if c.goBin != "-" {
-					if err := os.WriteFile(filepath.Join(bin, "go"), []byte(c.goBin), 0o755); err != nil {
-						t.Fatal(err)
-					}
-				}
-				t.Setenv("PATH", bin)
+			switch c.goBin {
+			case "":
+			case "-":
+				fakeGoOnPath(t, "")
+			default:
+				fakeGoOnPath(t, c.goBin)
 			}
 			start := time.Now()
 			out, err := realNamedGoTestRunner{}.RunNamedGoTest(c.ctx(t), c.dir(t), "./sample", goTestRunPattern([]string{"TestFail", "TestPass"}))
@@ -937,6 +936,64 @@ func TestRealNamedGoTestRunner(t *testing.T) {
 			}
 			if !errors.Is(err, c.wantErr) {
 				t.Fatalf("RunNamedGoTest err = %v, want one wrapping %v", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// fakeGoOnPath is the real runner's exec seam: it puts script, as the only
+// `go`, alone on PATH for the rest of t. An empty script puts no go there.
+func fakeGoOnPath(t *testing.T, script string) {
+	t.Helper()
+	bin := t.TempDir()
+	if script != "" {
+		if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+}
+
+// TestRealNamedGoTestRunner_Argv pins the real runner's command line through
+// the fake-`go` seam, a script that records its arguments one per line:
+// exactly `go test -json -count=1 -run '^(...)$' <pkgArg>`, nothing more.
+// -count=1 is the flag that keeps go test from replaying a cached result
+// (SI-228: CI runs `go test -json -count=1` per named package); CI restores
+// GOCACHE between runs, so without it an earlier run's result could become
+// this job's record. Any added flag fails the pin as well.
+func TestRealNamedGoTestRunner_Argv(t *testing.T) {
+	const stream = `{"Action":"start","Package":"example.com/gotestfixture/sample"}`
+	cases := []struct {
+		name    string
+		pkgArg  string
+		tests   []string
+		wantRun string
+	}{
+		{"one test", "./sample", []string{"TestPass"}, "^(TestPass)$"},
+		{"several tests, sorted and anchored", "./sample", []string{"TestPass", "TestFail"}, "^(TestFail|TestPass)$"},
+		{"nested package", "./internal/forge", []string{"TestX"}, "^(TestX)$"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hermeticGoEnv(t)
+			argvFile := filepath.Join(t.TempDir(), "argv")
+			fakeGoOnPath(t, "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '"+argvFile+"'\nprintf '%s\\n' '"+stream+"'\n")
+
+			out, err := realNamedGoTestRunner{}.RunNamedGoTest(context.Background(), t.TempDir(), c.pkgArg, goTestRunPattern(c.tests))
+			if err != nil {
+				t.Fatalf("RunNamedGoTest: %v", err)
+			}
+			if string(out) != stream+"\n" {
+				t.Errorf("RunNamedGoTest = %q, want the fake go's stdout %q", out, stream+"\n")
+			}
+			data, err := os.ReadFile(argvFile)
+			if err != nil {
+				t.Fatalf("the fake go recorded no arguments: %v", err)
+			}
+			got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			want := []string{"test", "-json", "-count=1", "-run", c.wantRun, c.pkgArg}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("go argv = %q, want exactly %q", got, want)
 			}
 		})
 	}
