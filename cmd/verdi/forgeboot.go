@@ -182,13 +182,19 @@ func buildForgeWithIdentifier(kind, remoteURL string, remoteErr error, requireId
 		if err != nil && requireIdentifier {
 			return nil, err
 		}
-		return forgegithub.New(forgegithub.Config{
-			Owner: owner,
-			Repo:  repo,
-			Token: os.Getenv("GITHUB_TOKEN"),
-		}), nil
+		return forgegithub.New(githubConfig(owner, repo)), nil
 	default:
 		return nil, fmt.Errorf("unknown forge kind %q", kind)
+	}
+}
+
+// githubConfig is the GitHub adapter's configuration for (owner, repo),
+// with its token read from the CI-provided environment.
+func githubConfig(owner, repo string) forgegithub.Config {
+	return forgegithub.Config{
+		Owner: owner,
+		Repo:  repo,
+		Token: os.Getenv("GITHUB_TOKEN"),
 	}
 }
 
