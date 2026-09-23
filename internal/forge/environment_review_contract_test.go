@@ -905,6 +905,53 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("github yields no row unless the creation stamp is a proven lower bound on the review (I-2)", func(t *testing.T) {
+		withStamps := func(created, started string) func(*erScenario) {
+			return func(s *erScenario) {
+				s.jobPages[0][0]["created_at"] = created
+				setMember(t, s.jobPages[0][0], "started_at", started)
+			}
+		}
+		tests := []struct {
+			name         string
+			apply        func(*erScenario)
+			wantKind     string
+			wantApproved string
+		}{
+			{"created before started (published start)", func(*erScenario) {}, "", erCreatedAt},
+			{"created a day before started (delayed dispatch)", withStamps("2020-01-19T17:42:40Z", erStartedAt), "", "2020-01-19T17:42:40Z"},
+			{"created at the start", withStamps(erStartedAt, erStartedAt), "", erStartedAt},
+			{"created after started", withStamps("2020-01-20T23:42:40Z", erStartedAt), "creation-after-start", ""},
+			{"created after the observation", withStamps("2026-08-27T09:00:00Z", "2026-08-27T09:05:00Z"), "creation-after-observation", ""},
+			{"no start stamp", func(s *erScenario) {
+				delete(s.jobPages[0][0], "started_at")
+				s.jobAllowRemoved = []string{".started_at"}
+			}, "start-stamp-unavailable", ""},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := newERScenario(t)
+				tt.apply(s)
+				_, rows, disclosures := reviewScenario(t, s, erQuery())
+				if tt.wantKind == "" {
+					if len(rows) != 1 || disclosures != nil {
+						t.Fatalf("rows = %v disclosures = %v, want one row", approvalIDs(rows), disclosures)
+					}
+					if rows[0].ApprovedAt != tt.wantApproved {
+						t.Fatalf("ApprovedAt = %q, want the creation stamp %q", rows[0].ApprovedAt, tt.wantApproved)
+					}
+					return
+				}
+				if len(rows) != 0 {
+					t.Fatalf("rows = %v (approved_at %q), want none", approvalIDs(rows), rows[0].ApprovedAt)
+				}
+				if kinds := disclosureKinds(disclosures); strings.Join(kinds, ",") != tt.wantKind {
+					t.Fatalf("disclosure kinds = %v (%v), want exactly %s", kinds, disclosures, tt.wantKind)
+				}
+			})
+		}
+	})
+
 	t.Run("github drains every page of jobs and review history", func(t *testing.T) {
 		s := newERScenario(t)
 		s.jobPages = [][]map[string]any{{scenarioJob(t, "verify")}, {scenarioJob(t, "close")}}

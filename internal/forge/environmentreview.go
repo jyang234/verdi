@@ -482,13 +482,52 @@ func environmentReviewRefusals(f EnvironmentReviewFacts) []string {
 				"environment-review:gated-job-not-eligible: %s status=%s conclusion=%s: only a gated job in progress or completed successfully is honored",
 				gatedJob, f.GatedJobStatus, orNone(f.GatedJobConclusion)))
 		}
-		if f.GatedJobCreatedAt == "" {
-			out = append(out, fmt.Sprintf(
-				"environment-review:creation-stamp-unavailable: %s: the gated job carries no creation stamp, so approval age would be unproven, and the shared countersign types cannot express unproven without changing internal/countersign, so no row is produced (SI-232)",
-				gatedJob))
-		}
+		out = append(out, stampRefusals(f, gatedJob)...)
 	}
 	return out
+}
+
+// stampRefusals refuses a row unless the gated job's creation stamp is a
+// proven lower bound on the review (L2b review I-2): it must exist (SI-232),
+// the start stamp must exist so the bound can be checked, and it must be
+// neither later than the job's start — a job cannot start before its review,
+// so a later creation stamp would understate approval age — nor later than
+// the observation.
+func stampRefusals(f EnvironmentReviewFacts, gatedJob string) []string {
+	var out []string
+	if f.GatedJobCreatedAt == "" {
+		out = append(out, fmt.Sprintf(
+			"environment-review:creation-stamp-unavailable: %s: the gated job carries no creation stamp, so approval age would be unproven, and the shared countersign types cannot express unproven without changing internal/countersign, so no row is produced (SI-232)",
+			gatedJob))
+	}
+	if f.GatedJobStartedAt == "" {
+		out = append(out, fmt.Sprintf(
+			"environment-review:start-stamp-unavailable: %s: the gated job carries no start stamp, so its creation stamp cannot be proven not later than the review; no row is produced",
+			gatedJob))
+	}
+	if f.GatedJobCreatedAt == "" {
+		return out
+	}
+	if f.GatedJobStartedAt != "" && stampLater(f.GatedJobCreatedAt, f.GatedJobStartedAt) {
+		out = append(out, fmt.Sprintf(
+			"environment-review:creation-after-start: %s created_at=%s started_at=%s: a job cannot start before its review, so a creation stamp later than the start is not a lower bound on the review; no row is produced",
+			gatedJob, f.GatedJobCreatedAt, f.GatedJobStartedAt))
+	}
+	if stampLater(f.GatedJobCreatedAt, f.ObservedAt) {
+		out = append(out, fmt.Sprintf(
+			"environment-review:creation-after-observation: %s created_at=%s observed_at=%s: a creation stamp later than the observation is not a lower bound on the review; no row is produced",
+			gatedJob, f.GatedJobCreatedAt, f.ObservedAt))
+	}
+	return out
+}
+
+// stampLater reports whether stamp a is later than stamp b. Validate has
+// already proved both are normalized RFC3339Nano; were either unparseable,
+// it reports true, so the row is refused rather than admitted.
+func stampLater(a, b string) bool {
+	left, errLeft := time.Parse(time.RFC3339Nano, a)
+	right, errRight := time.Parse(time.RFC3339Nano, b)
+	return errLeft != nil || errRight != nil || left.After(right)
 }
 
 // noApprovedReviewDisclosure says why a run with no approved entry for the
