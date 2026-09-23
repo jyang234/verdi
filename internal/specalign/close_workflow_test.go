@@ -717,7 +717,7 @@ func TestCloseDispatchInstantiatesTheRequestTemplate(t *testing.T) {
 	if len(syncs) != 1 || len(closes) != 1 {
 		t.Fatalf("close.yml: expected one sync step and one close step, found %d and %d", len(syncs), len(closes))
 	}
-	if !(syncs[0] < idx && idx < closes[0]) {
+	if idx <= syncs[0] || idx >= closes[0] {
 		t.Errorf("close.yml: the request-instantiation step (index %d) must run after the sync (index %d) and before the close (index %d)", idx, syncs[0], closes[0])
 	}
 	step := job.Steps[idx]

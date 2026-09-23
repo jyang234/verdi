@@ -77,10 +77,6 @@ func closeRequestFor(spec string) contextcompile.Request {
 	}
 }
 
-// emptySpecMember is the template's one spec member. The canonical encoding
-// sorts keys, so `spec` is the last member and occurs exactly once.
-const emptySpecMember = `"spec":""`
-
 // swapSpecMember replaces the one member `"spec":<from>` in doc with
 // `"spec":<to>`, each value written verbatim between quotes. It refuses a
 // document that does not carry exactly one such member, and a value that
