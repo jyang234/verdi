@@ -349,7 +349,10 @@ requires, missing execution is an unmet requirement rather than a conflict.
 ### 5.5 Exemption application
 
 The evaluator computes the original mechanical result before exemptions. An
-exemption may depart only from exact current claim witnesses it names. It is
+exemption may depart only from exact current claim witnesses it names, or, for a
+required-input exemption, from the review phase's three sealed-provenance inputs
+under the unsealed-provenance exemption design
+(`2026-09-23-unsealed-provenance-exemption-design.md`, SI-241, SI-242). It is
 eligible only when its scope covers the evaluated conflict scope, its witness
 digests are current, its bound is effective under §8, and its approvals are
 authorized under §9. Effective exempted claims are removed only inside the
@@ -838,7 +841,10 @@ disclosure codes fail closed.
 
 The sealed conflict snapshot carries every disclosure emitted by the compiler
 stages that produced that snapshot. Exactly four inherited codes independently
-block this verdict as unproven: `applicability-unknown`,
+block this verdict as unproven (except that the three review codes do not
+independently block when an effective required-input exemption covers all
+three — unsealed-provenance exemption design §10, SI-248; they remain disclosed):
+`applicability-unknown`,
 `review-result-diff-unproven`, `review-evidence-bundle-unproven`, and
 `review-builder-receipt-unproven`. The remaining compiler codes stay visible
 but do not independently block policy-conflict proof: required repository
@@ -925,7 +931,10 @@ The provider evaluates before the command's first effect:
 4. `verdi close`, `verdi close --preflight`, and `verdi close --prepare` build
    the accepted review request before branch creation, alignment-report
    refresh, archive movement, report freezing, staging, commit, or publication.
-   All three modes evaluate the same conflict result.
+   All three modes evaluate the same conflict result. For a story closing under
+   an unsealed-provenance exemption, close additionally applies that design's
+   close-time compensating controls (§5) and escalation (§9); `--prepare` and
+   `--preflight` report them without authorizing the close.
 
 The later sealed-execution adapter consumes the same provider and accepted
 request. It does not gain a weaker verdict or a second evaluator.
