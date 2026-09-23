@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -38,5 +39,32 @@ func TestRunPrepare_OneBehindCommittedReport(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "regenerated") || strings.Contains(stdout.String(), "reversed to") {
 		t.Fatalf("stdout = %q, want no regenerated-dispositions disclosure — nothing was regenerated", stdout.String())
+	}
+}
+
+// TestRunPrepare_OneBehindWorkingTreeDivergence is SI-231's working-tree
+// clause at --prepare (ledger row as amended at L3b review I-1, ruling
+// R-W1-9): after commit R, a working-tree report that differs from R's is
+// not the one-behind shape, so --prepare never calls it current under
+// SI-231 or "left byte-identical"; it takes the stale-report path it takes
+// at base, disclosing what the refresh may cost.
+func TestRunPrepare_OneBehindWorkingTreeDivergence(t *testing.T) {
+	ctx := context.Background()
+	repo := buildCloseFixtureRepo(t)
+	parent := repo.Head
+	commitOneBehindReport(t, ctx, repo.Dir, "close-fixture", oneBehindRenderedReport(t, parent, artifact.FindingFixed, ""))
+	writeOneBehindFile(t, store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture"), oneBehindRenderedReport(t, parent, artifact.FindingAcceptedDeviation, "not fixed after all"))
+
+	deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New(), JudgeCmd: alignFakeJudgeOK(t)}
+	var stdout, stderr bytes.Buffer
+	runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+
+	for _, claim := range []string{"SI-231", "left byte-identical"} {
+		if strings.Contains(stdout.String(), claim) {
+			t.Fatalf("stdout = %q, want no %q claim over a working-tree report that differs from R's", stdout.String(), claim)
+		}
+	}
+	if !strings.Contains(stdout.String(), "ALIGNMENT REQUIRED") {
+		t.Fatalf("stdout = %q, want the stale-report path's ALIGNMENT REQUIRED line", stdout.String())
 	}
 }
