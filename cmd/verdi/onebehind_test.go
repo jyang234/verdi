@@ -274,6 +274,112 @@ func TestEvaluateOneBehindReport(t *testing.T) {
 	})
 }
 
+// TestEvaluateOneBehindReport_ChangeShapes is clause (2)'s status half (L3b
+// review m-1): HEAD's sole change must ADD or MODIFY the spec's own report.
+// A report renamed into place from another spec, a deleted report, and a
+// file-to-symlink type change each touch exactly that one path yet are
+// refused by name; a mode-only change is refused too, by the covers clause,
+// since it carries the parent's bytes, whose covers can never name the
+// parent itself. Each row first proves its diff really has the one-entry
+// shape it names, so it can never degrade into a two-path refusal.
+func TestEvaluateOneBehindReport_ChangeShapes(t *testing.T) {
+	ctx := context.Background()
+	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
+	cases := []struct {
+		name string
+		// build commits the shape on top of repo.Head and returns HEAD.
+		build      func(t *testing.T, repo *fixturegit.Repo) string
+		wantStatus string
+		wantReason string
+	}{
+		{
+			name: "another spec's report renamed into this path, covers edited to the parent",
+			build: func(t *testing.T, repo *fixturegit.Repo) string {
+				otherRel := store.DeviationReportRelPath(store.ZoneActive, "other-spec")
+				// A long, unchanged body keeps git's rename detection above
+				// its threshold across the covers edit.
+				body := strings.Repeat("a line of report body that the rename keeps unchanged\n", 60)
+				writeOneBehindFile(t, filepath.Join(repo.Dir, filepath.FromSlash(otherRel)), oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML)+body)
+				parent := commitAllOnCurrentBranch(t, repo.Dir, "another spec's report")
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(repo.Dir, filepath.FromSlash(rel))), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				runGitCmd(t, repo.Dir, "mv", otherRel, rel)
+				writeOneBehindFile(t, filepath.Join(repo.Dir, filepath.FromSlash(rel)), oneBehindReportContent(parent, oneBehindDispositionedFindingYAML)+body)
+				return commitAllOnCurrentBranch(t, repo.Dir, "rename another spec's report into place")
+			},
+			wantStatus: "R",
+			wantReason: "(status R)",
+		},
+		{
+			name: "the report deleted",
+			build: func(t *testing.T, repo *fixturegit.Repo) string {
+				commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+				runGitCmd(t, repo.Dir, "rm", "-q", rel)
+				return commitAllOnCurrentBranch(t, repo.Dir, "delete the report")
+			},
+			wantStatus: "D",
+			wantReason: "(status D)",
+		},
+		{
+			name: "the report replaced by a symlink (a type change)",
+			build: func(t *testing.T, repo *fixturegit.Repo) string {
+				commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+				full := filepath.Join(repo.Dir, filepath.FromSlash(rel))
+				if err := os.Remove(full); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../other-spec/deviation-report.md", full); err != nil {
+					t.Fatal(err)
+				}
+				return commitAllOnCurrentBranch(t, repo.Dir, "replace the report with a symlink")
+			},
+			wantStatus: "T",
+			wantReason: "(status T)",
+		},
+		{
+			name: "a mode-only change to the report",
+			build: func(t *testing.T, repo *fixturegit.Repo) string {
+				commitOneBehindReport(t, ctx, repo.Dir, oneBehindReportSpecName, oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+				if err := os.Chmod(filepath.Join(repo.Dir, filepath.FromSlash(rel)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return commitAllOnCurrentBranch(t, repo.Dir, "make the report executable")
+			},
+			wantStatus: "M",
+			wantReason: "not HEAD's parent",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := oneBehindBaseRepo(t)
+			head := tc.build(t, repo)
+			parent, err := gitx.RevParse(ctx, repo.Dir, head+"^")
+			if err != nil {
+				t.Fatalf("RevParse(%s^): %v", head, err)
+			}
+			entries, err := gitx.DiffNameStatus(ctx, repo.Dir, parent, head)
+			if err != nil {
+				t.Fatalf("DiffNameStatus: %v", err)
+			}
+			if len(entries) != 1 || entries[0].Path != rel || entries[0].Status != tc.wantStatus {
+				t.Fatalf("fixture diff = %+v, want the single %s entry for %s", entries, tc.wantStatus, rel)
+			}
+
+			got, err := evaluateOneBehindReport(ctx, repo.Dir, oneBehindReportSpecName, head)
+			if err != nil {
+				t.Fatalf("evaluateOneBehindReport: %v, want a named refusal, not an operational error", err)
+			}
+			if got.Accepted {
+				t.Fatalf("Accepted = true, want false for a %s change", tc.wantStatus)
+			}
+			if !strings.Contains(got.Reason, tc.wantReason) {
+				t.Fatalf("Reason = %q, want it to contain %q", got.Reason, tc.wantReason)
+			}
+		})
+	}
+}
+
 // TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD is SI-231's
 // working-tree clause (ledger row as amended at L3b review I-1, ruling
 // R-W1-9): an otherwise accepted one-behind commit is refused, by name,
@@ -355,6 +461,9 @@ func TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD(t *testing.T) {
 
 func writeOneBehindFile(t *testing.T, path, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
