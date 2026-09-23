@@ -179,7 +179,7 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 		Snapshot: snapshot, LocalCandidateSHA: request.LocalCandidateSHA,
 		Profile: profile, TrustSourceID: config.TrustSource,
 		Obligation: countersign.Obligation{
-			Transition: "close", Scheme: countersign.SchemeAttestation,
+			Transition: kernelCloseTransition, Scheme: countersign.SchemeAttestation,
 			Kind: countersign.KindCountersign, Role: role, RequiredCount: requiredCount,
 			SeparationRule: separationRule,
 		},
@@ -300,9 +300,10 @@ func unproven(operand, detail string) Result {
 	return Result{Verdict: countersign.VerdictUnproven, Witnesses: witnesses}
 }
 
-// kernelCloseTransition is the fixed transition name every kernel
-// separation probe evaluates — the same literal Resolve binds into
-// countersign.Obligation.Transition above.
+// kernelCloseTransition is the one transition name both the kernel
+// separation probe evaluates and Resolve binds into
+// countersign.Obligation.Transition, so the probe and the obligation are
+// the same transition by construction.
 const kernelCloseTransition = "close"
 
 // kernelAuthorRole is the named author role the kernel separation probe

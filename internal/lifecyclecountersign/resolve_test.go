@@ -704,6 +704,9 @@ func TestResolveKernelSeparationSoloCollapse(t *testing.T) {
 	if result.Record.Obligation.SeparationRule != countersign.SeparationNone {
 		t.Fatalf("separation rule = %q, want %q", result.Record.Obligation.SeparationRule, countersign.SeparationNone)
 	}
+	if result.Record.Obligation.Transition != kernelCloseTransition {
+		t.Fatalf("obligation transition = %q, want the probed %q", result.Record.Obligation.Transition, kernelCloseTransition)
+	}
 	if !containsLifecycleWitness(result.Record.Witnesses, `kernel-separation-probe:author-as-approver:collapse-permitted:kernel_disclosure="solo-role-collapse":`) {
 		t.Fatalf("record witnesses = %v, want the kernel's solo role-collapse disclosure on the collapse-permitted probe witness", result.Record.Witnesses)
 	}
