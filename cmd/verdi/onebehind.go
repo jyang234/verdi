@@ -10,9 +10,11 @@
 // and condition 4 to recognize it too.
 //
 // ONE predicate decides it (ledger contract item 1) so the rule can never
-// drift between its two consumers: closuregate.go's checkDispositionCompleteCondition
-// (both the story condition 4 and, by reuse, the feature condition 6) and
-// align.go's runAlignForSpec freeze fork. Read-only, through internal/gitx
+// drift between its consumers: closuregate.go's checkDispositionCompleteCondition
+// (both the story condition 4 and, by reuse, the feature condition 6),
+// align.go's shared fork as the closure ritual enters it (close's freeze and
+// --prepare's refresh, never bare `verdi align` — ruling R-W1-9), and
+// closeprepare.go's own disclosure. Read-only, through internal/gitx
 // alone — no new git primitive: RevParse alone answers the parent-count
 // question (a second call's failure IS the "no second parent" answer, not an
 // operational error — see soleParent), DiffNameStatus finds the changed
