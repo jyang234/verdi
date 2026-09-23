@@ -545,3 +545,48 @@ func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
 		}
 	})
 }
+
+// TestEvaluateOneBehindReport_ShallowCheckout is clause (1) at a shallow
+// boundary (L3b review m-5): a depth-1 clone cannot see HEAD's parent, so
+// whether HEAD has exactly one parent is unknown, and the refusal says so
+// rather than calling HEAD "a root commit or a merge". A depth-2 clone sees
+// the parent and accepts.
+func TestEvaluateOneBehindReport_ShallowCheckout(t *testing.T) {
+	ctx := context.Background()
+	src := oneBehindBaseRepo(t)
+	head := commitOneBehindReport(t, ctx, src.Dir, oneBehindReportSpecName, oneBehindReportContent(src.Head, oneBehindDispositionedFindingYAML))
+
+	for _, tc := range []struct {
+		depth        string
+		wantAccepted bool
+	}{
+		{depth: "1", wantAccepted: false},
+		{depth: "2", wantAccepted: true},
+	} {
+		t.Run("depth "+tc.depth, func(t *testing.T) {
+			parentDir := t.TempDir()
+			runGitCmd(t, parentDir, "clone", "--quiet", "--depth", tc.depth, "file://"+src.Dir, "clone")
+			clone := filepath.Join(parentDir, "clone")
+			if shallow, err := gitx.IsShallow(ctx, clone); err != nil || !shallow {
+				t.Fatalf("fixture: IsShallow(clone) = %v, %v, want a shallow clone", shallow, err)
+			}
+
+			got, err := evaluateOneBehindReport(ctx, clone, oneBehindReportSpecName, head)
+			if err != nil {
+				t.Fatalf("evaluateOneBehindReport: %v", err)
+			}
+			if got.Accepted != tc.wantAccepted {
+				t.Fatalf("Accepted = %v, want %v; Reason=%q", got.Accepted, tc.wantAccepted, got.Reason)
+			}
+			if tc.wantAccepted {
+				return
+			}
+			if !strings.Contains(got.Reason, "shallow checkout") {
+				t.Fatalf("Reason = %q, want it to name the shallow checkout", got.Reason)
+			}
+			if strings.Contains(got.Reason, "a root commit or a merge") {
+				t.Fatalf("Reason = %q, want no root-or-merge claim at a shallow boundary, where the parent count is unknown", got.Reason)
+			}
+		})
+	}
+}

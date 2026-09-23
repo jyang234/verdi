@@ -72,13 +72,12 @@ type oneBehindOutcome struct {
 // parent; (5) every finding is dispositioned; (6) the working-tree report
 // is byte-identical to the committed one.
 func evaluateOneBehindReport(ctx context.Context, root, specName, head string) (oneBehindOutcome, error) {
-	parent, hasOneParent, err := soleParent(ctx, root, head)
+	parent, parentRefusal, err := soleParent(ctx, root, head)
 	if err != nil {
 		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
 	}
-	if !hasOneParent {
-		// vocab:identity — non-vocabulary homograph: git's own merge commit (two parents), never the `merge` lifecycle transition word
-		return oneBehindOutcome{Reason: fmt.Sprintf("%s is not a single-parent commit (a root commit or a merge) — SI-231 requires exactly one parent", head)}, nil
+	if parentRefusal != "" {
+		return oneBehindOutcome{Reason: parentRefusal}, nil
 	}
 
 	// DiffNameStatus and Show answer in REPOSITORY-root-relative paths, and
@@ -167,23 +166,37 @@ func workingTreeDivergence(workingPath string, committed []byte) (string, error)
 	return "", nil
 }
 
-// soleParent reports head's one and only parent SHA, using RevParse alone
-// (no new git primitive): "<head>^" resolves the first parent, and its
-// failure means head has none (a root commit) — by the time this runs, root
-// is already a validated repository and head an already-resolved commit (every
-// caller derives it from gitx.RevParse/gitx.CurrentBranch upstream), so that
-// failure is always a legitimate "no parent" answer here, never a swallowed
-// operational error. "<head>^2" resolving successfully means a second parent
-// exists (head is a merge commit), so hasOneParent is false in both the
-// no-parent and multi-parent case — "exactly one parent" is the only state
-// that returns true.
-func soleParent(ctx context.Context, root, head string) (parent string, hasOneParent bool, err error) {
+// soleParent answers clause (1): head's one and only parent SHA, or the
+// refusal naming why head has not exactly one, using RevParse alone (no new
+// git primitive). "<head>^2" resolving successfully means a second parent
+// exists (head is a merge commit). "<head>^" failing means git sees no
+// parent at all: by the time this runs, root is already a validated
+// repository and head an already-resolved commit (every caller derives it
+// from gitx.RevParse/gitx.CurrentBranch upstream), so that is either a root
+// commit or — in a shallow checkout — a parent beyond the shallow boundary,
+// where the parent count is unknown and is named as such (L3b review m-5;
+// close.yml fetches full history). A head whose first parent IS visible is
+// not a boundary commit, so git reads its complete parent list and "<head>^2"
+// answers truthfully even in a shallow checkout. "exactly one parent" is the
+// only state that returns an empty refusal.
+func soleParent(ctx context.Context, root, head string) (parent, refusal string, err error) {
 	parent, perr := gitx.RevParse(ctx, root, head+"^")
 	if perr != nil {
-		return "", false, nil
+		shallow, serr := gitx.IsShallow(ctx, root)
+		if serr != nil {
+			return "", "", serr
+		}
+		if shallow {
+			return "", fmt.Sprintf("%s's parent lies beyond this shallow checkout's boundary, so whether it has exactly one parent is unknown — SI-231 requires exactly one parent; fetch the full history (for example with fetch-depth: 0)", head), nil
+		}
+		return "", fmt.Sprintf(notSingleParentFormat, head), nil
 	}
 	if _, serr := gitx.RevParse(ctx, root, head+"^2"); serr == nil {
-		return "", false, nil
+		return "", fmt.Sprintf(notSingleParentFormat, head), nil
 	}
-	return parent, true, nil
+	return parent, "", nil
 }
+
+// notSingleParentFormat is clause (1)'s refusal for a head git sees in full.
+// vocab:identity — non-vocabulary homograph: git's own merge commit (two parents), never the `merge` lifecycle transition word
+const notSingleParentFormat = "%s is not a single-parent commit (a root commit or a merge) — SI-231 requires exactly one parent"
