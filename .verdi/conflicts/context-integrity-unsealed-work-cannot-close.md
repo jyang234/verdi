@@ -3,7 +3,7 @@ id: conflict/context-integrity-unsealed-work-cannot-close
 kind: conflict
 title: "Context Integrity v2 leaves work built outside sealed execution no governed way to close"
 status: superseded
-frozen: { at: 2026-09-23, commit: 276c72ad86e04e07345be9fe0ba02a7123d82eef }
+frozen: { at: 2026-09-23, commit: d9a284224bddc0678159411b0aa00a2f9eea60b7 }
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/context-integrity-v2 }
