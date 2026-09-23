@@ -142,9 +142,11 @@ func cloneEnvironmentReviewFacts(facts forge.EnvironmentReviewFacts) forge.Envir
 // consumer an observation a real adapter could not produce.
 func (f *Forge) SeedMergeRecordFacts(commit string, facts forge.MergeRecordFacts) error {
 	if err := facts.Validate(); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Errorf("fake: seed merge record facts: %w", err)
 	}
 	if facts.Commit != commit {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Errorf("fake: seeded merge record facts observe commit %q, not %q", facts.Commit, commit)
 	}
 	f.mu.Lock()
@@ -163,6 +165,7 @@ func (f *Forge) MergeRecords(ctx context.Context, commit string) (forge.MergeRec
 	defer f.mu.Unlock()
 	facts, ok := f.mergeRecords[commit]
 	if !ok {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("fake: no merge record facts seeded for commit %q", commit)
 	}
 	return cloneMergeRecordFacts(facts), nil

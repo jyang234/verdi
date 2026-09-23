@@ -55,15 +55,18 @@ type mergeRecordPullJSON struct {
 // missing id is an operational error that does not wrap ErrUnavailable.
 func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeRecordFacts, error) {
 	if err := forge.ValidateMergeRecordCommit(commit); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: %w", err)
 	}
 	repoURL := fmt.Sprintf("%s/repos/%s/%s", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo)
 
 	var repo mergeRecordRepositoryJSON
 	if err := a.readMergeRecordRepository(ctx, repoURL, &repo); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: reading repository %s/%s: %w", a.cfg.Owner, a.cfg.Repo, err)
 	}
 	if repo.DefaultBranch == "" {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: repository %s/%s reports no default_branch", a.cfg.Owner, a.cfg.Repo)
 	}
 
@@ -74,6 +77,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 		return page, nil
 	})
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: reading pull requests associated with commit %s: %w", commit, err)
 	}
 
@@ -81,6 +85,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 	for i, pull := range pulls {
 		change, err := pullChangeRequestMerge(pull)
 		if err != nil {
+			// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 			return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: pull request entry %d for commit %s: %w", i, commit, err)
 		}
 		changes = append(changes, change)
@@ -94,6 +99,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 		Changes:       changes,
 	}, a.cfg.Clock())
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: normalize facts: %w", err)
 	}
 	return facts, nil

@@ -107,6 +107,7 @@ func ValidateMergeRecordCommit(commit string) error {
 func NewMergeRecordFacts(draft MergeRecordFacts, observedAt time.Time) (MergeRecordFacts, error) {
 	stamp, err := NormalizeTimestamp(observedAt.Format(time.RFC3339Nano))
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return MergeRecordFacts{}, fmt.Errorf("forge: merge records observed_at: %w", err)
 	}
 	facts := draft
@@ -121,6 +122,7 @@ func NewMergeRecordFacts(draft MergeRecordFacts, observedAt time.Time) (MergeRec
 
 	facts.ProviderSnapshotID, err = facts.providerFactsDigest()
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return MergeRecordFacts{}, fmt.Errorf("forge: merge records provider snapshot identity: %w", err)
 	}
 	if err := facts.Validate(); err != nil {
@@ -171,6 +173,7 @@ func (f MergeRecordFacts) Validate() error {
 	}
 	wantDigest, err := f.providerFactsDigest()
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Errorf("forge: recompute merge records provider snapshot identity: %w", err)
 	}
 	if f.ProviderSnapshotID != wantDigest {
@@ -184,6 +187,7 @@ func (f MergeRecordFacts) validateUnsupported() error {
 		return err
 	}
 	if f.DefaultBranch != "" || len(f.Changes) != 0 {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Errorf("forge: unsupported merge records must carry no default branch and no changes")
 	}
 	return nil
@@ -191,6 +195,7 @@ func (f MergeRecordFacts) validateUnsupported() error {
 
 func (f MergeRecordFacts) validateSupported() error {
 	if f.UnsupportedReason != "" {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Errorf("forge: supported merge records must carry no unsupported_reason")
 	}
 	if err := requireValue("merge_records.default_branch", f.DefaultBranch); err != nil {
@@ -228,6 +233,7 @@ func (c ChangeRequestMerge) validate(prefix string) error {
 	}
 	if c.State != ChangeRequestMerged {
 		if c.MergeCommitSHA != "" || c.MergedAt != "" {
+			// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 			return fmt.Errorf("forge: %s: a change in state %q carries no merge commit or merge time", prefix, c.State)
 		}
 		return nil
@@ -345,6 +351,7 @@ func ProveMergedIntoDefault(facts MergeRecordFacts) (MergeProof, error) {
 		for _, change := range qualifying {
 			ids = append(ids, change.ChangeID)
 		}
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		proof.Detail = fmt.Sprintf("changes %s each report merge commit %s into the default branch %s; the lowest change id is reported",
 			strings.Join(ids, ", "), facts.Commit, facts.DefaultBranch)
 	}
@@ -370,15 +377,20 @@ func noMergeIntoDefaultDetail(facts MergeRecordFacts) string {
 func changeNotQualifying(facts MergeRecordFacts, change ChangeRequestMerge) string {
 	switch {
 	case change.State == ChangeRequestOpen:
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return "open, not merged; an open change's provider test merge is never a merge"
 	case change.State == ChangeRequestClosed:
+		// vocab:identity — a provider change-request state (closed without merging), not a Verdi lifecycle state.
 		return "closed without merging"
 	case change.TargetBranch != facts.DefaultBranch:
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Sprintf("merged into %s, not the default branch %s (merge commit %s)",
 			change.TargetBranch, facts.DefaultBranch, orNone(change.MergeCommitSHA))
 	case change.MergeCommitSHA == "":
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return "merged into the default branch with no forge-reported merge commit (a fast-forward merge leaves none)"
 	default:
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return fmt.Sprintf("merged into the default branch with merge commit %s, not %s", change.MergeCommitSHA, facts.Commit)
 	}
 }

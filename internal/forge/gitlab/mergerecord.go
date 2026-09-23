@@ -57,18 +57,22 @@ type mergeRecordMergeRequestJSON struct {
 // missing id is an operational error that does not wrap ErrUnavailable.
 func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeRecordFacts, error) {
 	if err := forge.ValidateMergeRecordCommit(commit); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: %w", err)
 	}
 	projectURL := fmt.Sprintf("%s/projects/%s", a.cfg.BaseURL, url.PathEscape(a.cfg.ProjectID))
 
 	var project mergeRecordProjectJSON
 	if err := a.readMergeRecordProject(ctx, projectURL, &project); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: reading project %s: %w", a.cfg.ProjectID, err)
 	}
 	if project.ID <= 0 {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: project %s carries no stable id", a.cfg.ProjectID)
 	}
 	if project.DefaultBranch == "" {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: project %s reports no default_branch", a.cfg.ProjectID)
 	}
 
@@ -96,6 +100,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 		Changes:       changes,
 	}, a.cfg.Clock())
 	if err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("gitlab: merge records: normalize facts: %w", err)
 	}
 	return facts, nil
