@@ -10,7 +10,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 )
 
-// environmentReviewRunJSON is the closed subset of GitHub's workflow run
+// environmentReviewRunJSON is the tolerant subset of GitHub's workflow run
 // object ac-4 needs (GitHub REST API docs, "Get a workflow run attempt":
 // "Same response schema as Get a workflow run" — id, run_attempt, head_sha,
 // html_url).
@@ -28,7 +28,7 @@ type environmentReviewJobsResponse struct {
 	Jobs       []environmentReviewJobJSON `json:"jobs"`
 }
 
-// environmentReviewJobJSON is the closed subset of GitHub's workflow job
+// environmentReviewJobJSON is the tolerant subset of GitHub's workflow job
 // object dc-5 needs: name (to find the gated job among the attempt's jobs,
 // since a job carries no environment reference of its own) and
 // created_at/started_at (dc-5's conservative-lower-bound approval instant
@@ -61,7 +61,7 @@ type environmentReviewHistoryEntryJSON struct {
 	} `json:"user"`
 }
 
-// environmentJSON is the closed subset of GitHub's "Get an environment"
+// environmentJSON is the tolerant subset of GitHub's "Get an environment"
 // response ac-4/dc-5 need: id, name, and protection_rules (for the
 // required_reviewers rule's prevent_self_review setting).
 type environmentJSON struct {
@@ -91,11 +91,11 @@ type environmentProtectionRuleJSON struct {
 // queried run attempt's head commit and URL, the attempt's jobs (to find
 // the gated job's creation/start stamps), the named environment's id and
 // self-review setting, and the run's review history (filtered to the named
-// environment). Every call rides the strict approval-decode seam
-// (getApprovalJSON/DecodeApprovalJSON), the same closed-contract posture
-// ListApprovals uses for approval-domain facts (co-1's amendment: "an
-// environment review's composite identity replaces the provider id it
-// lacks... adapters normalize provider-specific shapes").
+// environment). Every call rides the approval decode seam
+// (getApprovalJSON/DecodeApprovalJSON): GitHub's responses are an open
+// contract (ruling R-W1-8), so members this adapter does not model are
+// ignored while trailing data, unknown review states, and missing ids are
+// still rejected (co-1).
 func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
 	if query.RunID == "" {
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run id is empty")

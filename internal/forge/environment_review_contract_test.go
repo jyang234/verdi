@@ -123,6 +123,38 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("github decodes the published run jobs environment and review history examples", func(t *testing.T) {
+		run := string(publishedFixture(t, "github/workflow-run.json"))
+		jobs := string(publishedFixture(t, "github/job-paginated.json"))
+		env := string(publishedFixture(t, "github/environment.json"))
+		history := string(publishedFixture(t, "github/environment-approvals-items.json"))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/octo-org/octo-repo/actions/runs/30433642", "/repos/octo-org/octo-repo/actions/runs/30433642/attempts/1":
+				writeJSON(t, w, run)
+			case "/repos/octo-org/octo-repo/actions/runs/30433642/attempts/1/jobs":
+				writeJSON(t, w, jobs)
+			case "/repos/octo-org/octo-repo/environments/staging":
+				writeJSON(t, w, env)
+			case "/repos/octo-org/octo-repo/actions/runs/30433642/approvals":
+				writeJSON(t, w, history)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "octo-org", Repo: "octo-repo", HTTPClient: server.Client(), Clock: fixedClock})
+		facts, err := a.EnvironmentReview(context.Background(), forge.EnvironmentReviewQuery{RunID: "30433642", RunAttempt: 1, EnvironmentName: "staging", GatedJobName: "build"})
+		if err != nil {
+			t.Fatalf("EnvironmentReview over the verbatim published examples: %v", err)
+		}
+		if !facts.Supported || facts.RunHeadSHA != "acb5820ced9479c074f688cc328bf03f341a511d" || facts.EnvironmentID != "161088068" {
+			t.Fatalf("facts = %+v", facts)
+		}
+	})
+
 	baseSupported := func() forge.EnvironmentReviewFacts {
 		return forge.EnvironmentReviewFacts{
 			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
@@ -595,7 +627,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		})
 	})
 
-	t.Run("github rejects duplicate unknown trailing and unknown-state facts", func(t *testing.T) {
+	t.Run("github rejects duplicate trailing and unknown-state facts", func(t *testing.T) {
 		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", ""))
 		healthyHistory := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
 
@@ -603,16 +635,11 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 			name                                string
 			runBody, jobsBody, envBody, history string
 		}{
-			{"run: unknown field", `{"id":555,"run_attempt":1,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `","mystery":true}`, healthyJobs, envReviewEnvHealthy, healthyHistory},
 			{"run: trailing data", envReviewRunHealthy + " true", healthyJobs, envReviewEnvHealthy, healthyHistory},
-			{"jobs: unknown field on a job", envReviewRunHealthy, `{"total_count":1,"jobs":[{"name":"close","created_at":"2026-08-26T09:00:00Z","mystery":true}]}`, envReviewEnvHealthy, healthyHistory},
 			{"jobs: trailing data", envReviewRunHealthy, healthyJobs + " true", envReviewEnvHealthy, healthyHistory},
-			{"environment: unknown field", envReviewRunHealthy, healthyJobs, `{"id":9,"name":"close","mystery":true}`, healthyHistory},
 			{"environment: trailing data", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy + " true", healthyHistory},
-			{"history: unknown field", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901},"mystery":true}]`},
 			{"history: trailing data", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, healthyHistory + " true"},
 			{"history: unknown provider state", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"commented","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901}}]`},
-			{"history: attempt field github does not supply", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901},"attempt":1}]`},
 			{"history: duplicate reviewer", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "," + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"},
 		}
 		for _, tt := range tests {
@@ -621,6 +648,40 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 				defer closeServer()
 				if _, err := a.EnvironmentReview(context.Background(), envReviewQuery()); err == nil {
 					t.Fatalf("EnvironmentReview(%s): want error, got nil", tt.name)
+				}
+			})
+		}
+	})
+
+	t.Run("github ignores response members it does not model (open provider contract)", func(t *testing.T) {
+		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", ""))
+		healthyHistory := "[" + envReviewHistoryEntryJSON("approved", 901, 9, "close") + "]"
+		a, closeHealthy := environmentReviewServer(t, envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, healthyHistory)
+		defer closeHealthy()
+		want, err := a.EnvironmentReview(context.Background(), envReviewQuery())
+		if err != nil {
+			t.Fatalf("EnvironmentReview healthy: %v", err)
+		}
+		tests := []struct {
+			name                                string
+			runBody, jobsBody, envBody, history string
+		}{
+			{"run", `{"id":555,"run_attempt":1,"head_sha":"` + candidateA + `","html_url":"` + envReviewRunURL + `","mystery":true}`, healthyJobs, envReviewEnvHealthy, healthyHistory},
+			{"jobs", envReviewRunHealthy, `{"total_count":1,"jobs":[{"name":"close","created_at":"2026-08-26T09:00:00Z","mystery":true}],"mystery":1}`, envReviewEnvHealthy, healthyHistory},
+			{"environment", envReviewRunHealthy, healthyJobs, `{"id":9,"name":"close","mystery":true}`, healthyHistory},
+			{"history", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close","mystery":1}],"user":{"id":901,"login":"x"},"mystery":true}]`},
+			{"history: an attempt member GitHub does not supply is never read", envReviewRunHealthy, healthyJobs, envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":9,"name":"close"}],"user":{"id":901},"attempt":2}]`},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				a, closeServer := environmentReviewServer(t, tt.runBody, tt.jobsBody, tt.envBody, tt.history)
+				defer closeServer()
+				got, err := a.EnvironmentReview(context.Background(), envReviewQuery())
+				if err != nil {
+					t.Fatalf("EnvironmentReview(%s) with additional provider members: %v", tt.name, err)
+				}
+				if got.ProviderSnapshotID != want.ProviderSnapshotID {
+					t.Fatalf("additional provider members changed the facts: got %+v want %+v", got, want)
 				}
 			})
 		}

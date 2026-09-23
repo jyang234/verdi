@@ -189,10 +189,28 @@ func (s ApprovalSnapshot) providerFactsDigest() (string, error) {
 	return canonjson.Digest(identity)
 }
 
-// DecodeApprovalJSON strict-decodes one closed provider approval response.
+// DecodeApprovalJSON decodes one provider approval-domain response body
+// (a GitHub or GitLab REST response) as a tolerant subset: the members out
+// declares are strictly typed, members out does not declare are ignored, and
+// any data after the one JSON value is rejected.
+//
+// Provider responses are an OPEN contract (closing-machinery wave-1 ruling
+// R-W1-8): GitHub's REST breaking-changes policy classes "adding a response
+// field" as additive, and GitLab likewise adds response members over time,
+// so spec/vatc-forge-countersign-v2 co-1's unknown-field rejection, which
+// applies only "where the provider contract is closed", does not reach them.
+// This is the ratified spec/forge-transport ac-1/dc-1 posture for foreign
+// payloads (internal/httpjson carries its policy prose), with trailing-data
+// rejection kept because an approval response is exactly one value. The
+// remaining co-1 rejections belong to the caller, on the members it relies
+// on: missing ids, unknown states or statuses (closed-vocabulary types such
+// as ApprovalState and EnvironmentReviewState reject unknown values while
+// decoding), ambiguous pagination, and duplicate approval identities.
+//
+// Every caller decodes a provider response; no Verdi-owned canonical JSON
+// rides this seam.
 func DecodeApprovalJSON(reader io.Reader, out any) error {
 	decoder := json.NewDecoder(reader)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return fmt.Errorf("forge: decode approval response: %w", err)
 	}
