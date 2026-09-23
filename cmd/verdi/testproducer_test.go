@@ -450,6 +450,59 @@ func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
 	}
 }
 
+// TestProduceGoTestEvidence_RejectedStreamIsOperational proves a stream the
+// shared reader rejects — one carrying a field Go 1.25.5 does not write
+// (internal/gotestjson decodes strictly), or one truncated before its
+// package's terminal event (03 §Bundle assembly) — is an operational error
+// naming the offending event, and that no record is written for anyone.
+func TestProduceGoTestEvidence_RejectedStreamIsOperational(t *testing.T) {
+	const pkg = fakeModulePath + "/pkg/a"
+	cases := []struct {
+		name    string
+		stream  string
+		wantErr string
+	}{
+		{"unknown field on a test event",
+			`{"Action":"start","Package":"` + pkg + `"}` + "\n" +
+				`{"Action":"run","Package":"` + pkg + `","Test":"TestA"}` + "\n" +
+				`{"Action":"pass","Package":"` + pkg + `","Test":"TestA","Surprise":1}` + "\n" +
+				`{"Action":"pass","Package":"` + pkg + `"}` + "\n",
+			`event 3: json: unknown field "Surprise"`},
+		{"unknown field on a build event",
+			`{"ImportPath":"` + pkg + `","Action":"build-output","Output":"# cgo warning\n","Surprise":1}` + "\n" +
+				string(testGoTestJSON("pkg/a", map[string]string{"TestA": gotestjson.ActionPass})),
+			`event 1: json: unknown field "Surprise"`},
+		{"truncated before the package's terminal event",
+			`{"Action":"start","Package":"` + pkg + `"}` + "\n" +
+				`{"Action":"run","Package":"` + pkg + `","Test":"TestA"}` + "\n" +
+				`{"Action":"pass","Package":"` + pkg + `","Test":"TestA"}` + "\n",
+			"truncated"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeGoMod(t, root)
+			writeObligation(t, root, "story-a", "ac-1", "behavioral",
+				obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
+					State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestA",
+					SourceKind: "ci-job", SourceRef: "verify",
+				}))
+			const commit = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+			runner := &fakeNamedGoTestRunner{output: map[string][]byte{"./pkg/a": []byte(c.stream)}}
+			prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", JobName: "verify", Commit: commit}
+			var stdout bytes.Buffer
+			err := produceGoTestEvidence(context.Background(), root, commit, "verify", runner, prov, &stdout)
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("produceGoTestEvidence err = %v, want an error containing %q", err, c.wantErr)
+			}
+			path := filepath.Join(store.DerivedSpecDir(root, store.RefSlug("spec/story-a")), commit, "verdicts.json")
+			if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("verdicts.json at %s: stat err = %v, want none written", path, statErr)
+			}
+		})
+	}
+}
+
 // readVerdicts (selfevidence_test.go) already reads and strict-decodes
 // derived/<slug>/<commit>/verdicts.json for a specRef — reused here rather
 // than redefined (CLAUDE.md: never copy-paste within the same package).

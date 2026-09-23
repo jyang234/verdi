@@ -32,7 +32,9 @@ func TestTestEventsRequireActualCompleteNamedPass(t *testing.T) {
 		// Go 1.25 events, read by the shared internal/gotestjson reader; the
 		// release policy stays this package's own.
 		{"attr on a required pass", strings.Replace(good, "{\"Action\":\"pass\",\"Package\":\"p\",\"Test\":\"TestA\"}", "{\"Action\":\"attr\",\"Package\":\"p\",\"Test\":\"TestA\",\"Key\":\"k\",\"Value\":\"v\"}\n{\"Action\":\"pass\",\"Package\":\"p\",\"Test\":\"TestA\"}", 1), 0, []string{"TestA"}, false},
-		{"additive unknown field", strings.Replace(good, `"Test":"TestA"}`, `"Test":"TestA","Surprise":1}`, 1), 0, []string{"TestA"}, false},
+		// The complete stream plus one field Go 1.25.5 does not write: the
+		// shared reader decodes strictly, so the field alone refuses it.
+		{"unknown field", strings.Replace(good, `"Test":"TestA"}`, `"Test":"TestA","Surprise":1}`, 1), 0, []string{"TestA"}, true},
 		{"build output", "{\"ImportPath\":\"p\",\"Action\":\"build-output\",\"Output\":\"# p\\n\"}\n" + good, 0, []string{"TestA"}, true},
 		{"build failure", "{\"ImportPath\":\"p [p.test]\",\"Action\":\"build-fail\"}\n{\"Action\":\"start\",\"Package\":\"p\"}\n{\"Action\":\"fail\",\"Package\":\"p\",\"FailedBuild\":\"p [p.test]\"}\n", 0, []string{"TestA"}, true},
 		{"package failed", strings.Replace(good, `{"Action":"pass","Package":"p"}`, `{"Action":"fail","Package":"p"}`, 1), 0, []string{"TestA"}, true},

@@ -101,8 +101,6 @@ func TestReadPackage(t *testing.T) {
 			&want{pkg: pkg, loaded: true, built: false, outcome: ActionFail, failedBuild: pkg + " [" + pkg + ".test]"}},
 		{"unloaded package, GODEBUG gotestjsonbuildtext=1 (no build events, no FailedBuild)", stream(evFor(pkgArg, "start", ""), evFor(pkgArg, "output", "", `"Output":"FAIL\t./p [setup failed]\n"`), evFor(pkgArg, "fail", "")), target,
 			&want{pkg: pkgArg, loaded: false, built: false, outcome: ActionFail}},
-		{"additive unknown fields are ignored", stream(ev("start", "", `"Surprise":{"x":[1]}`), ev("run", "TestA", `"Source":"new"`), ev("pass", "TestA", `"OutputType":"frame"`), ev("pass", "")), target,
-			ptr(withTests(passed, map[string]string{"TestA": ActionPass}))},
 		{"build output without failure", stream(build("build-output", pkg, `"Output":"# cgo warning\n"`), ev("start", ""), ev("run", "TestA"), ev("pass", "TestA"), ev("pass", "")), target,
 			&want{pkg: pkg, loaded: true, built: true, outcome: ActionPass, buildOutput: true, tests: map[string]string{"TestA": ActionPass}}},
 
@@ -170,6 +168,71 @@ func TestReadPackage(t *testing.T) {
 }
 
 func ptr(w want) *want { return &w }
+
+// TestReadPackageDecodesStrictly proves the reader's decoding posture
+// (CLAUDE.md: "JSON via DisallowUnknownFields + trailing-data rejection"):
+// every field Go 1.25.5 writes — the test2json event's Time, Action,
+// Package, Test, Elapsed, Output, FailedBuild, Key, and Value, and the build
+// event's ImportPath, Action, and Output — decodes, while a field it does
+// not write, on a TestEvent or a BuildEvent, and anything after the last
+// event are errors naming the event that carried them.
+func TestReadPackageDecodesStrictly(t *testing.T) {
+	const stamp = `"Time":"2026-09-22T22:41:53.758675-04:00"`
+	failedBuild := `"FailedBuild":"` + pkg + ` [` + pkg + `.test]"`
+	cases := []struct {
+		name    string
+		in      string
+		wantErr []string // nil: accepted; otherwise each substring must appear in the error
+	}{
+		// --- every field the toolchain writes decodes ---
+		{"TestEvent Time", stream(ev("start", "", stamp), ev("pass", "", stamp)), nil},
+		{"TestEvent Test and Elapsed", stream(ev("start", ""), ev("run", "TestA"), ev("pass", "TestA", `"Elapsed":0.01`), ev("pass", "", `"Elapsed":0.2`)), nil},
+		{"TestEvent Output", stream(ev("start", ""), ev("output", "", `"Output":"PASS\n"`), ev("pass", "")), nil},
+		{"attr event Key and Value", stream(ev("start", ""), ev("run", "TestA"), ev("attr", "TestA", `"Key":"k"`, `"Value":"v"`), ev("pass", "TestA"), ev("pass", "")), nil},
+		{"package fail FailedBuild", stream(ev("start", ""), ev("fail", "", failedBuild)), nil},
+		{"BuildEvent ImportPath, Action, and Output", stream(build("build-output", pkg, `"Output":"# cgo warning\n"`), ev("start", ""), ev("pass", "")), nil},
+		{"build-fail BuildEvent", stream(build("build-fail", pkg+" ["+pkg+".test]"), ev("start", ""), ev("fail", "", failedBuild)), nil},
+
+		// --- a field the toolchain does not write is an error naming its event ---
+		{"unknown field on a TestEvent", stream(ev("start", ""), ev("run", "TestA", `"Surprise":{"x":[1]}`), ev("pass", "TestA"), ev("pass", "")),
+			[]string{"event 2", `unknown field "Surprise"`}},
+		{"unknown field on the package's start", stream(ev("start", "", `"Source":"new"`), ev("pass", "")),
+			[]string{"event 1", `unknown field "Source"`}},
+		{"unknown field on a test's terminal event", stream(ev("start", ""), ev("run", "TestA"), ev("pass", "TestA", `"OutputType":"frame"`), ev("pass", "")),
+			[]string{"event 3", `unknown field "OutputType"`}},
+		{"unknown field on the package's terminal event", stream(ev("start", ""), ev("pass", "", `"Surprise":null`)),
+			[]string{"event 2", `unknown field "Surprise"`}},
+		{"unknown field on a build-output BuildEvent", stream(build("build-output", pkg, `"Output":"# x\n"`, `"Surprise":1`), ev("start", ""), ev("pass", "")),
+			[]string{"event 1", `unknown field "Surprise"`}},
+		{"unknown field on a build-fail BuildEvent", stream(build("build-output", pkg, `"Output":"# x\n"`), build("build-fail", pkg, `"Reason":"x"`), ev("start", ""), ev("fail", "", failedBuild)),
+			[]string{"event 2", `unknown field "Reason"`}},
+
+		// --- trailing data ---
+		{"trailing garbage after the package's terminal event", stream(ev("start", ""), ev("pass", ""), "garbage"),
+			[]string{"event 3"}},
+		{"trailing garbage on the terminal event's line", stream(ev("start", ""), ev("pass", "")+" }"),
+			[]string{"event 3"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ReadPackage(strings.NewReader(c.in), target)
+			if c.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ReadPackage: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ReadPackage = %+v, want an error containing %q", got, c.wantErr)
+			}
+			for _, s := range c.wantErr {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("ReadPackage error = %q, want it to contain %q", err, s)
+				}
+			}
+		})
+	}
+}
 
 // TestEventRoundTrip proves Event carries every Go 1.25 field under its
 // toolchain name: a TestEvent with Key/Value and a BuildEvent with
