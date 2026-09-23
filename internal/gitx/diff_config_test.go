@@ -98,9 +98,10 @@ func buildSubmoduleDiffRepo(t *testing.T, gitmodulesFormat string) submoduleDiff
 //     runs with cmd.Dir = the store root, which may sit below the git root),
 //     hides every path outside it and re-bases the rest onto it.
 //
-// Every row asserts the exact entries for both variants, and first proves
-// that plain git really is misled by the row's configuration, so a row can
-// never pass because its setting silently did nothing.
+// Every row asserts the exact entries for both variants, reporting each
+// variant's failure on its own, and first proves that plain git really is
+// misled by the row's configuration, so a row can never pass because its
+// setting silently did nothing.
 func TestDiffNameStatus_ConfigurationIndependent(t *testing.T) {
 	ctx := context.Background()
 	want := []DiffEntry{
@@ -190,10 +191,11 @@ func TestDiffNameStatus_ConfigurationIndependent(t *testing.T) {
 			for _, v := range diffVariants {
 				got, err := v.diff(ctx, dir, repo.Base, repo.Head)
 				if err != nil {
-					t.Fatalf("%s: %v", v.name, err)
+					t.Errorf("%s: %v", v.name, err)
+					continue
 				}
 				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("%s = %+v, want %+v — the full repository-root diff regardless of configuration", v.name, got, want)
+					t.Errorf("%s = %+v, want %+v — the full repository-root diff regardless of configuration", v.name, got, want)
 				}
 			}
 		})
@@ -231,10 +233,11 @@ func TestDiffNameStatus_MalformedOutputErrors(t *testing.T) {
 			for _, v := range diffVariants {
 				got, err := v.diff(ctx, t.TempDir(), "base", "head")
 				if err == nil {
-					t.Fatalf("%s over %q = %+v, nil; want a malformed-line error", v.name, tc.output, got)
+					t.Errorf("%s over %q = %+v, nil; want a malformed-line error", v.name, tc.output, got)
+					continue
 				}
 				if !strings.Contains(err.Error(), "malformed") {
-					t.Fatalf("%s over %q: err = %v, want it to name the malformed line", v.name, tc.output, err)
+					t.Errorf("%s over %q: err = %v, want it to name the malformed line", v.name, tc.output, err)
 				}
 			}
 		})
