@@ -27,9 +27,9 @@
 // the working-tree file — so without this clause an operator's uncommitted
 // disposition change (a `verdi disposition --amend` after commit R, or a
 // retraction) would be overwritten while close printed "dispositions
-// preserved". A CI checkout diverges only when .gitattributes applies eol or
-// smudge conversion to the report; the clause then refuses by name, so that
-// case fails closed.
+// preserved". A CI checkout diverges only when .gitattributes applies a
+// checkout conversion to the report (eol, ident, working-tree-encoding, or a
+// smudge filter); the clause then refuses by name, so that case fails closed.
 package main
 
 import (
