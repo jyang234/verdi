@@ -97,6 +97,8 @@ func TestReadPackage(t *testing.T) {
 			build("build-fail", pkgArg),
 			evFor(pkgArg, "start", ""), evFor(pkgArg, "output", "", `"Output":"FAIL\t./p [setup failed]\n"`), evFor(pkgArg, "fail", "", `"FailedBuild":"./p"`)), target,
 			&want{pkg: pkgArg, loaded: false, built: false, outcome: ActionFail, failedBuild: pkgArg, buildOutput: true, buildFailed: true}},
+		{"package fail carrying FailedBuild without a build-fail event", stream(ev("start", ""), ev("output", "", `"Output":"FAIL\texample.com/m/p [build failed]\n"`), ev("fail", "", `"FailedBuild":"example.com/m/p [example.com/m/p.test]"`)), target,
+			&want{pkg: pkg, loaded: true, built: false, outcome: ActionFail, failedBuild: pkg + " [" + pkg + ".test]"}},
 		{"unloaded package, GODEBUG gotestjsonbuildtext=1 (no build events, no FailedBuild)", stream(evFor(pkgArg, "start", ""), evFor(pkgArg, "output", "", `"Output":"FAIL\t./p [setup failed]\n"`), evFor(pkgArg, "fail", "")), target,
 			&want{pkg: pkgArg, loaded: false, built: false, outcome: ActionFail}},
 		{"additive unknown fields are ignored", stream(ev("start", "", `"Surprise":{"x":[1]}`), ev("run", "TestA", `"Source":"new"`), ev("pass", "TestA", `"OutputType":"frame"`), ev("pass", "")), target,
