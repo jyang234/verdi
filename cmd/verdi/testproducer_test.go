@@ -140,104 +140,120 @@ func writeObligation(t *testing.T, root, story, ac, forKind, content string) {
 	}
 }
 
-// TestGoTestProducerSelection proves the combined discovery+selection walk
-// (contract 2): an unresolved-design-debt obligation is never a candidate;
-// a checker-kind or authenticated-human-kind producer is never a
-// candidate; a candidate bound to a DIFFERENT CI job is silently excluded
-// (no disclosure); a candidate whose producer ref fails the grammar is
-// excluded WITH a disclosure naming its obligation; and exactly the one
-// well-formed, this-job, test-kind, grammar-valid obligation is selected.
+// selectionOutcome is where one obligation file ends up after discovery and
+// selection for a job.
+type selectionOutcome int
+
+const (
+	ignoredEntirely     selectionOutcome = iota // never a candidate, no disclosure
+	anotherJobs                                 // a candidate, silently not this job's
+	selectedForJob                              // selected for this job
+	disclosedAtDiscover                         // disclosed by discovery, skipped
+	disclosedAtSelect                           // disclosed by selection, skipped
+)
+
+// TestGoTestProducerSelection proves discovery and selection (contract 2),
+// one obligation file per row in its own store: only an elaborated,
+// test-producer, ci-job obligation for this job whose ref parses is selected;
+// unresolved, checker, and human obligations are never candidates; another
+// job's obligation is skipped silently (and so is everything when no job
+// name was detected); an undecodable file or a copy away from its convention
+// path is disclosed at discovery; a malformed ref, a nested-module package,
+// and a runtime-kind obligation are disclosed at selection, each naming only
+// its own obligation.
 func TestGoTestProducerSelection(t *testing.T) {
-	root := t.TempDir()
-
-	writeObligation(t, root, "story-unresolved", "ac-1", "behavioral",
-		obligationMD("story-unresolved", "ac-1", "behavioral", obligationQualityInput{State: "unresolved-design-debt"}))
-
-	writeObligation(t, root, "story-checker", "ac-1", "static",
-		obligationMD("story-checker", "ac-1", "static", obligationQualityInput{
-			State: "elaborated", ProducerKind: "checker", ProducerRef: "verify:static",
-			SourceKind: "ci-job", SourceRef: "verify",
-		}))
-
-	writeObligation(t, root, "story-human", "ac-1", "attestation",
-		obligationMD("story-human", "ac-1", "attestation", obligationQualityInput{
-			State: "elaborated", ProducerKind: "authenticated-human", ProducerRef: "role:owner",
-			SourceKind: "governed-attestation", SourceRef: "approval:owner",
-		}))
-
-	writeObligation(t, root, "story-other-job", "ac-1", "behavioral",
-		obligationMD("story-other-job", "ac-1", "behavioral", obligationQualityInput{
-			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/other:TestOther",
-			SourceKind: "ci-job", SourceRef: "lint",
-		}))
-
-	writeObligation(t, root, "story-malformed", "ac-1", "behavioral",
-		obligationMD("story-malformed", "ac-1", "behavioral", obligationQualityInput{
-			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/bad",
-			SourceKind: "ci-job", SourceRef: "verify",
-		}))
-
-	writeObligation(t, root, "story-valid", "ac-1", "behavioral",
-		obligationMD("story-valid", "ac-1", "behavioral", obligationQualityInput{
-			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestA",
-			SourceKind: "ci-job", SourceRef: "verify",
-		}))
-
-	// A totally broken obligation elsewhere in the store must never break
-	// discovery for the other stories.
-	brokenDir := filepath.Join(root, ".verdi", "obligations", "story-broken")
-	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
-		t.Fatal(err)
+	testQ := func(ref, job string) obligationQualityInput {
+		return obligationQualityInput{State: "elaborated", ProducerKind: "test", ProducerRef: ref, SourceKind: "ci-job", SourceRef: job}
 	}
-	if err := os.WriteFile(filepath.Join(brokenDir, "ac-1--behavioral.md"), []byte("not an obligation at all"), 0o644); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name       string
+		kind       string
+		q          obligationQualityInput
+		raw        string // non-empty: the file's content verbatim
+		file       string // non-empty: file path under .verdi/obligations/ instead of the convention path
+		job        string
+		want       selectionOutcome
+		wantSource string
+	}{
+		{name: "test producer for this job", kind: "behavioral", q: testQ("go-test:pkg/a:TestA", "verify"), job: "verify", want: selectedForJob},
+		{name: "static test producer for this job", kind: "static", q: testQ("go-test:pkg/a:TestA", "verify"), job: "verify", want: selectedForJob},
+		{name: "unresolved design debt", kind: "behavioral", q: obligationQualityInput{State: "unresolved-design-debt"}, job: "verify", want: ignoredEntirely},
+		{name: "checker producer", kind: "static", q: obligationQualityInput{State: "elaborated", ProducerKind: "checker", ProducerRef: "verify:static", SourceKind: "ci-job", SourceRef: "verify"}, job: "verify", want: ignoredEntirely},
+		{name: "authenticated-human producer", kind: "attestation", q: obligationQualityInput{State: "elaborated", ProducerKind: "authenticated-human", ProducerRef: "role:owner", SourceKind: "governed-attestation", SourceRef: "approval:owner"}, job: "verify", want: ignoredEntirely},
+		{name: "another job", kind: "behavioral", q: testQ("go-test:pkg/a:TestA", "lint"), job: "verify", want: anotherJobs},
+		{name: "no detected job", kind: "behavioral", q: testQ("go-test:pkg/a:TestA", "verify"), job: "", want: anotherJobs},
+		{name: "malformed producer ref", kind: "behavioral", q: testQ("go-test:pkg/a", "verify"), job: "verify", want: disclosedAtSelect, wantSource: goTestProducerMalformedRefSource},
+		{name: "nested-module package", kind: "behavioral", q: testQ("go-test:nested/x:TestA", "verify"), job: "verify", want: disclosedAtSelect, wantSource: goTestProducerMalformedRefSource},
+		{name: "runtime-kind obligation", kind: "runtime", q: testQ("go-test:pkg/a:TestA", "verify"), job: "verify", want: disclosedAtSelect, wantSource: goTestProducerRuntimeKindSource},
+		{name: "undecodable file", raw: "not an obligation at all", job: "verify", want: disclosedAtDiscover, wantSource: testProducerObligationUnreadableSource},
+		{name: "copy away from its convention path", kind: "behavioral", q: testQ("go-test:pkg/a:TestA", "verify"), file: "story-a/ac-1--behavioral-copy.md", job: "verify", want: disclosedAtDiscover, wantSource: testProducerObligationMisfiledSource},
+		{name: "copy under another story's directory", kind: "behavioral", q: testQ("go-test:pkg/a:TestA", "verify"), file: "story-b/ac-1--behavioral.md", job: "verify", want: disclosedAtDiscover, wantSource: testProducerObligationMisfiledSource},
 	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "nested", "go.mod"), []byte("module example.com/nested\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			content := c.raw
+			if content == "" {
+				content = obligationMD("story-a", "ac-1", c.kind, c.q)
+			}
+			rel := c.file
+			if rel == "" {
+				rel = "story-a/ac-1--" + c.kind + ".md"
+				if c.kind == "" {
+					rel = "story-a/ac-1--behavioral.md"
+				}
+			}
+			path := filepath.Join(root, ".verdi", "obligations", filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	candidates, discoverDiscl, err := discoverTestProducerObligations(root)
-	if err != nil {
-		t.Fatalf("discoverTestProducerObligations: %v", err)
-	}
-	if len(discoverDiscl) != 1 {
-		t.Fatalf("discovery disclosures = %d, want 1 (the broken obligation); got %+v", len(discoverDiscl), discoverDiscl)
-	}
-	if !disclosure.IsRendered(disclosure.Render(discoverDiscl[0])) {
-		t.Errorf("discovery disclosure does not render as a recognized disclosure line")
-	}
+			candidates, discoverDiscl, err := discoverTestProducerObligations(root)
+			if err != nil {
+				t.Fatalf("discoverTestProducerObligations: %v", err)
+			}
+			selected, selectDiscl := selectGoTestObligations(root, candidates, c.job)
 
-	// Exactly the three test-kind, ci-job-sourced, elaborated candidates
-	// reach selection (other-job, malformed, valid) — checker/human/
-	// unresolved never became candidates at all.
-	wantSpecs := map[string]bool{"story-other-job": true, "story-malformed": true, "story-valid": true}
-	if len(candidates) != len(wantSpecs) {
-		t.Fatalf("candidates = %d, want %d; got %+v", len(candidates), len(wantSpecs), candidates)
-	}
-	for _, c := range candidates {
-		if !wantSpecs[c.SpecName] {
-			t.Errorf("unexpected candidate spec %q (checker/human/unresolved obligations must never become candidates)", c.SpecName)
-		}
-	}
-
-	selected, selectDiscl := selectGoTestObligations(root, candidates, "verify")
-	if len(selected) != 1 {
-		t.Fatalf("selected = %d, want 1; got %+v", len(selected), selected)
-	}
-	if selected[0].SpecName != "story-valid" || selected[0].Package != "pkg/a" || selected[0].Test != "TestA" {
-		t.Errorf("selected[0] = %+v, want story-valid/pkg/a/TestA", selected[0])
-	}
-	if len(selectDiscl) != 1 {
-		t.Fatalf("selection disclosures = %d, want 1 (the malformed producer ref); got %+v", len(selectDiscl), selectDiscl)
-	}
-	rendered := disclosure.Render(selectDiscl[0])
-	if !strings.Contains(rendered, "obligation/story-malformed--ac-1--behavioral") {
-		t.Errorf("malformed-ref disclosure = %q, want it to name the obligation", rendered)
-	}
-
-	// jobName == "" (not in a named CI job at all) selects nothing, with no
-	// disclosures — an elaborated obligation's authoritative_source.ref is
-	// never blank, so nothing can ever match an empty job name.
-	emptyJobSelected, emptyJobDiscl := selectGoTestObligations(root, candidates, "")
-	if len(emptyJobSelected) != 0 || len(emptyJobDiscl) != 0 {
-		t.Errorf("selectGoTestObligations(candidates, \"\") = (%d selected, %d disclosures), want (0, 0)", len(emptyJobSelected), len(emptyJobDiscl))
+			wantCandidates, wantSelected, wantDiscover, wantSelect := 0, 0, 0, 0
+			switch c.want {
+			case anotherJobs:
+				wantCandidates = 1
+			case selectedForJob:
+				wantCandidates, wantSelected = 1, 1
+			case disclosedAtDiscover:
+				wantDiscover = 1
+			case disclosedAtSelect:
+				wantCandidates, wantSelect = 1, 1
+			}
+			if len(candidates) != wantCandidates || len(selected) != wantSelected || len(discoverDiscl) != wantDiscover || len(selectDiscl) != wantSelect {
+				t.Fatalf("got %d candidates, %d selected, %d discovery and %d selection disclosures; want %d, %d, %d, %d",
+					len(candidates), len(selected), len(discoverDiscl), len(selectDiscl), wantCandidates, wantSelected, wantDiscover, wantSelect)
+			}
+			if c.want == selectedForJob {
+				got := selected[0]
+				if got.SpecName != "story-a" || got.ACID != "ac-1" || string(got.Kind) != c.kind || got.Package != "pkg/a" || got.Test != "TestA" || got.ProducerRef != c.q.ProducerRef {
+					t.Errorf("selected = %+v, want story-a/ac-1/%s pkg/a TestA", got, c.kind)
+				}
+			}
+			for _, d := range append(discoverDiscl, selectDiscl...) {
+				r := disclosure.Render(d)
+				if !disclosure.IsRendered(r) || !strings.Contains(r, "["+c.wantSource+"]") {
+					t.Errorf("disclosure %q, want a rendered %s disclosure", r, c.wantSource)
+				}
+				if c.want == disclosedAtSelect && !strings.Contains(r, "obligation/story-a--ac-1--"+c.kind) {
+					t.Errorf("disclosure %q does not name its own obligation", r)
+				}
+			}
+		})
 	}
 }
 
@@ -790,6 +806,78 @@ func TestNamedTestDigest(t *testing.T) {
 				t.Errorf("changing %s left the digest %q unchanged", c.name, got)
 			}
 		})
+	}
+}
+
+// --- execution guards (contract 3) ----------------------------------------
+
+// TestRealNamedGoTestRunner proves the real runner's error surface: a
+// failing test (nonzero go test exit) still returns the toolchain's stream,
+// while a cancelled context, a missing go binary, and a run with no output
+// are errors that say why.
+func TestRealNamedGoTestRunner(t *testing.T) {
+	cases := []struct {
+		name     string
+		dir      func(t *testing.T) string
+		ctx      func() context.Context
+		noGo     bool
+		wantErr  string // "" means success
+		wantOut  string
+		wantIsCt bool
+	}{
+		{name: "failing test returns its stream", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: context.Background, wantOut: `"Package":"example.com/gotestfixture/sample"`},
+		{name: "cancelled context", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}, wantErr: "context canceled", wantIsCt: true},
+		{name: "no go binary", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: context.Background, noGo: true, wantErr: "executable file not found"},
+		{name: "no output outside any module", dir: func(t *testing.T) string { return t.TempDir() }, ctx: context.Background, wantErr: "produced no output"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hermeticGoEnv(t)
+			if c.noGo {
+				t.Setenv("PATH", t.TempDir())
+			}
+			out, err := realNamedGoTestRunner{}.RunNamedGoTest(c.ctx(), c.dir(t), "./sample", goTestRunPattern([]string{"TestFail", "TestPass"}))
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("RunNamedGoTest: %v", err)
+				}
+				if !strings.Contains(string(out), c.wantOut) {
+					t.Errorf("stream lacks %s:\n%s", c.wantOut, out)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("RunNamedGoTest err = %v, want one containing %q", err, c.wantErr)
+			}
+			if c.wantIsCt && !errors.Is(err, context.Canceled) {
+				t.Errorf("err %v does not wrap context.Canceled", err)
+			}
+		})
+	}
+}
+
+// TestProduceGoTestEvidence_NilRunner proves a selected obligation with no
+// runner configured is an error, never a nil-interface panic.
+func TestProduceGoTestEvidence_NilRunner(t *testing.T) {
+	root := t.TempDir()
+	writeGoMod(t, root)
+	writeObligation(t, root, "story-a", "ac-1", "behavioral",
+		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
+			State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:TestA",
+			SourceKind: "ci-job", SourceRef: "verify",
+		}))
+	var stdout bytes.Buffer
+	err := produceGoTestEvidence(context.Background(), root, "c0ffee", "verify", nil, artifact.EvidenceProvenance{Source: artifact.SourceCI, Commit: "c0ffee"}, &stdout)
+	if err == nil || !strings.Contains(err.Error(), "no test runner") {
+		t.Fatalf("produceGoTestEvidence(nil runner) err = %v, want a no-runner error", err)
+	}
+	// Nothing selected needs no runner.
+	if err := produceGoTestEvidence(context.Background(), root, "c0ffee", "lint", nil, artifact.EvidenceProvenance{Source: artifact.SourceCI, Commit: "c0ffee"}, &stdout); err != nil {
+		t.Errorf("produceGoTestEvidence(nil runner, nothing selected) = %v, want nil", err)
 	}
 }
 

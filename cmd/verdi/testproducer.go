@@ -50,6 +50,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/gotestjson"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // --- Grammar (contract 1) ---------------------------------------------
@@ -197,6 +198,24 @@ func testProducerObligationUnreadableDisclosure(root, path string, err error) di
 	return disclosure.New(testProducerObligationUnreadableSource, filepath.ToSlash(rel), text)
 }
 
+// testProducerObligationMisfiledSource is the disclosure source for a
+// decodable obligation file that is not at the convention path its own id
+// names (store.ObligationPath), which is the only path the matcher reads.
+const testProducerObligationMisfiledSource = "sync:go-test-producer-obligation-misfiled"
+
+func testProducerObligationMisfiledDisclosure(root, path, conventionPath string) disclosure.Disclosure {
+	rel, relErr := filepath.Rel(root, path)
+	if relErr != nil {
+		rel = path
+	}
+	wantRel, relErr := filepath.Rel(root, conventionPath)
+	if relErr != nil {
+		wantRel = conventionPath
+	}
+	text := fmt.Sprintf("is not at %s, the convention path its id names and the only path the matcher reads; no per-test evidence was considered for it", filepath.ToSlash(wantRel))
+	return disclosure.New(testProducerObligationMisfiledSource, filepath.ToSlash(rel), text)
+}
+
 // discoverTestProducerObligations walks every spec directory under
 // .verdi/obligations/ and returns every elaborated obligation whose
 // declared producer kind is "test" and whose authoritative source kind is
@@ -205,8 +224,9 @@ func testProducerObligationUnreadableDisclosure(root, path string, err error) di
 // unelaborated obligation is never a candidate). A missing .verdi/
 // obligations/ tree is the ordinary "no obligations authored yet" case
 // (evidence.Obligations's own absence posture), not an error. An
-// individual obligation file that cannot be read or decoded is disclosed
-// and skipped, never fails the whole walk (see package doc).
+// individual obligation file that cannot be read or decoded, or that is not
+// at the convention path its own id names, is disclosed and skipped, never
+// fails the whole walk (see package doc).
 func discoverTestProducerObligations(root string) ([]testProducerCandidate, []disclosure.Disclosure, error) {
 	obligationsRoot := filepath.Join(root, ".verdi", "obligations")
 	specDirs, err := os.ReadDir(obligationsRoot)
@@ -264,9 +284,16 @@ func discoverTestProducerObligations(root string) ([]testProducerCandidate, []di
 				discl = append(discl, testProducerObligationUnreadableDisclosure(root, path, err))
 				continue
 			}
-			storySlug, acID, _, ok := artifact.SplitObligationName(ref.Name)
+			storySlug, acID, kind, ok := artifact.SplitObligationName(ref.Name)
 			if !ok {
 				discl = append(discl, testProducerObligationUnreadableDisclosure(root, path, fmt.Errorf("id %q does not split into <story-slug>--<ac-id>--<for-kind>", decoded.ID)))
+				continue
+			}
+			// The matcher reads an obligation only at its convention path
+			// (evidence.AssessObligation); a copy anywhere else is not the
+			// obligation it assesses, so it produces nothing here either.
+			if conventionPath := store.ObligationPath(root, storySlug, acID, kind); path != conventionPath {
+				discl = append(discl, testProducerObligationMisfiledDisclosure(root, path, conventionPath))
 				continue
 			}
 			candidates = append(candidates, testProducerCandidate{
@@ -303,9 +330,21 @@ func goTestProducerMalformedRefDisclosure(c testProducerCandidate, reason error)
 	return disclosure.New(goTestProducerMalformedRefSource, c.ObligationID, text)
 }
 
+// goTestProducerRuntimeKindSource is the disclosure source for a runtime-kind
+// obligation naming a test producer: runtime evidence is post-deploy (03
+// §Evidence kinds), so this pre-merge job emits no per-test record for it.
+const goTestProducerRuntimeKindSource = "sync:go-test-producer-runtime-kind"
+
+func goTestProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure.Disclosure {
+	text := fmt.Sprintf("declares producer %q for a runtime-kind obligation; runtime evidence exists only post-deploy (03 §Evidence kinds), so this pre-merge job emitted no record for it", c.ProducerRef)
+	return disclosure.New(goTestProducerRuntimeKindSource, c.ObligationID, text)
+}
+
 // selectGoTestObligations narrows candidates to exactly this CI job's own
 // authoritative obligations (SI-229: authoritative_source.ref ==
-// jobName), then grammar-parses each survivor's producer ref and rejects a
+// jobName), excludes a runtime-kind obligation (03 §Evidence kinds: runtime
+// evidence is post-deploy), then grammar-parses each survivor's producer ref
+// and rejects a
 // package path that crosses into a nested module under root. jobName == ""
 // (not running in a named CI job at all) naturally selects nothing, since
 // an elaborated obligation's authoritative_source.ref is always non-blank
@@ -319,6 +358,10 @@ func selectGoTestObligations(root string, candidates []testProducerCandidate, jo
 	var discl []disclosure.Disclosure
 	for _, c := range candidates {
 		if jobName == "" || c.JobRef != jobName {
+			continue
+		}
+		if c.Kind == artifact.EvidenceRuntime {
+			discl = append(discl, goTestProducerRuntimeKindDisclosure(c))
 			continue
 		}
 		parsed, err := parseGoTestProducerRef(c.ProducerRef)
@@ -374,9 +417,20 @@ func (realNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkgArg, ru
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	_ = cmd.Run() // a failing/skipped test exits nonzero; the JSON stream is what matters
+	runErr := cmd.Run()
+	// A cancelled run is killed mid-stream; os/exec then reports the kill as
+	// an *exec.ExitError, not the context's error, so check it first.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("go test -json for package %s: %w", pkgArg, ctxErr)
+	}
+	// A nonzero exit is how go test reports a failing test or an unbuildable
+	// package; the stream says which. Any other error means go never ran.
+	var exitErr *exec.ExitError
+	if runErr != nil && !errors.As(runErr, &exitErr) {
+		return nil, fmt.Errorf("go test -json for package %s: %w (stderr: %s)", pkgArg, runErr, strings.TrimSpace(stderr.String()))
+	}
 	if stdout.Len() == 0 {
-		return nil, fmt.Errorf("go test -json produced no output for package %s: %s", pkgArg, stderr.String())
+		return nil, fmt.Errorf("go test -json for package %s produced no output (%v; stderr: %s)", pkgArg, runErr, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
@@ -673,6 +727,9 @@ func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, ru
 				discl = append(discl, goTestProducerNoModuleDisclosure(s))
 			}
 			selected = nil
+		}
+		if len(selected) > 0 && runner == nil {
+			return errors.New("go-test producer: no test runner is configured")
 		}
 		results, err := executeGoTestProducers(ctx, root, modulePath, runner, selected)
 		if err != nil {
