@@ -141,7 +141,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}{
 			{"hand-built value never validated", forge.EnvironmentReviewFacts{
 				Supported: true, RunAttempt: 1, GatedJobFound: true, GatedJobCreatedAt: "not-a-time",
-				Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved}},
+				Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}},
 			}},
 			{"zero value", forge.EnvironmentReviewFacts{}},
 		}
@@ -224,6 +224,86 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("facts carry canonical ids and rows from the observed environment only (m-1, m-2)", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			mutate func(*forge.EnvironmentReviewFacts)
+		}{
+			{"run id with a plus sign", func(f *forge.EnvironmentReviewFacts) { f.RunID = "+555" }},
+			{"run id with a leading zero", func(f *forge.EnvironmentReviewFacts) { f.RunID = "0555" }},
+			{"run id not a number", func(f *forge.EnvironmentReviewFacts) { f.RunID = "run-555" }},
+			{"environment id with a leading zero", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "09" }},
+			{"environment id zero", func(f *forge.EnvironmentReviewFacts) { f.EnvironmentID = "0" }},
+			{"review row for another environment", func(f *forge.EnvironmentReviewFacts) {
+				f.Reviews = []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "8"}}
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				draft := baseSupported()
+				tt.mutate(&draft)
+				if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
+					t.Fatalf("NewEnvironmentReviewFacts(%s): want error, got nil", tt.name)
+				}
+			})
+		}
+	})
+
+	t.Run("github refuses a non-canonical run id (m-1)", func(t *testing.T) {
+		for _, id := range []string{"+555", "0555", " 555", "555 ", "5.55e2", "0", "-555"} {
+			t.Run(id, func(t *testing.T) {
+				a := github.New(github.Config{BaseURL: "http://unused.invalid", Owner: "acme", Repo: "widgets", Clock: fixedClock})
+				query := envReviewQuery()
+				query.RunID = id
+				if facts, err := a.EnvironmentReview(context.Background(), query); err == nil {
+					t.Fatalf("EnvironmentReview(run id %q) = %+v, want a refusal before any request", id, facts)
+				}
+			})
+		}
+	})
+
+	t.Run("github binds review entries to the environment by id, not name (m-2)", func(t *testing.T) {
+		healthyJobs := envReviewJobsBody(envReviewJobJSON("close", "2026-08-26T09:00:00Z", "2026-08-26T15:00:00Z"))
+		tests := []struct {
+			name    string
+			env     string
+			history string
+			wantIDs []string
+			wantErr string
+		}{
+			{"an entry for another environment id sharing the name", envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 8, "close") + "]", nil, ""},
+			{"an entry for a renamed environment keeps its id", envReviewEnvHealthy, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "Close-renamed") + "]", []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
+			{"an entry covering two environments", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"id":8,"name":"staging"},{"id":9,"name":"close"}],"user":{"id":901}}]`, []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
+			{"the environment reports its name in another case", `{"id":9,"name":"Close"}`, "[" + envReviewHistoryEntryJSON("approved", 901, 9, "Close") + "]", []string{"github-environment-review:acme/widgets:555:1:9:901"}, ""},
+			{"an entry naming an environment with no id", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[{"name":"close"}],"user":{"id":901}}]`, nil, "no stable id"},
+			{"an entry naming no environment", envReviewEnvHealthy, `[{"state":"approved","comment":"","environments":[],"user":{"id":901}}]`, nil, "names no environment"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				a, closeServer := environmentReviewServer(t, envReviewRunHealthy, healthyJobs, tt.env, tt.history)
+				defer closeServer()
+				facts, err := a.EnvironmentReview(context.Background(), envReviewQuery())
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("EnvironmentReview error = %v, want %q", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("EnvironmentReview: %v", err)
+				}
+				rows, _ := normalizeEnvReview(t, facts)
+				var got []string
+				for _, row := range rows {
+					got = append(got, row.ApprovalID)
+				}
+				if strings.Join(got, ",") != strings.Join(tt.wantIDs, ",") {
+					t.Fatalf("approval ids = %v, want %v", got, tt.wantIDs)
+				}
+			})
+		}
+	})
+
 	t.Run("unsupported facts must carry no run job environment or review data", func(t *testing.T) {
 		draft := forge.EnvironmentReviewFacts{Supported: false, UnsupportedReason: "gitlab: unsupported", Repository: "42", RunID: "1"}
 		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
@@ -243,6 +323,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 		draft.Reviews = []forge.EnvironmentReviewRow{{
 			ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"},
 			ProviderState: forge.EnvironmentReviewState("mystery"),
+			EnvironmentID: "9",
 		}}
 		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
 			t.Fatal("NewEnvironmentReviewFacts with an out-of-vocabulary provider state: want error, got nil")
@@ -251,7 +332,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 
 	t.Run("duplicate reviewer state pair rejected", func(t *testing.T) {
 		draft := baseSupported()
-		row := forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved}
+		row := forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
 		draft.Reviews = []forge.EnvironmentReviewRow{row, row}
 		if _, err := forge.NewEnvironmentReviewFacts(draft, fixedClock()); err == nil {
 			t.Fatal("NewEnvironmentReviewFacts with a duplicate (reviewer, state) pair: want error, got nil")
@@ -259,7 +340,7 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 	})
 
 	approvedRow := func(subject string) forge.EnvironmentReviewRow {
-		return forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: subject}, ProviderState: forge.EnvironmentReviewApproved}
+		return forge.EnvironmentReviewRow{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: subject}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}
 	}
 
 	t.Run("normalize: unsupported forge yields no rows with a disclosure", func(t *testing.T) {
@@ -298,8 +379,8 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 			name    string
 			reviews []forge.EnvironmentReviewRow
 		}{
-			{"rejected", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewRejected}}},
-			{"pending", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewPending}}},
+			{"rejected", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewRejected, EnvironmentID: "9"}}},
+			{"pending", []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewPending, EnvironmentID: "9"}}},
 			{"absent", nil},
 		}
 		for _, tt := range tests {
@@ -808,7 +889,7 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 			Supported: true, Repository: "acme/widgets", RunID: "555", RunAttempt: 1,
 			RunHeadSHA: candidateA, RunURL: envReviewRunURL, EnvironmentID: "9", EnvironmentName: "close",
 			GatedJobFound: true, GatedJobCreatedAt: "2026-08-26T09:00:00Z",
-			Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved}},
+			Reviews: []forge.EnvironmentReviewRow{{ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: "901"}, ProviderState: forge.EnvironmentReviewApproved, EnvironmentID: "9"}},
 		}
 		seed, err := forge.NewEnvironmentReviewFacts(draft, fixedClock())
 		if err != nil {

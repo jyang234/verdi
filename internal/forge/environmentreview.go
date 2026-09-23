@@ -72,9 +72,14 @@ type EnvironmentReviewQuery struct {
 // EnvironmentReviewRow is one reviewer's decision on the query's
 // environment, exactly as the provider reports it — never yet reduced to a
 // forge.Approval (NormalizeEnvironmentReview does that; dc-5).
+// EnvironmentID is the environment id the review entry itself names (a
+// canonical decimal), so the composite identity's environment component
+// comes from the review, never from a later environment read (L2b review
+// m-2); Validate requires it to equal the facts' EnvironmentID.
 type EnvironmentReviewRow struct {
 	ReviewerActor ProviderActor          `json:"reviewer_actor"`
 	ProviderState EnvironmentReviewState `json:"provider_state"`
+	EnvironmentID string                 `json:"environment_id"`
 }
 
 // EnvironmentReviewFacts is one forge observation of one workflow run
@@ -141,7 +146,10 @@ func NewEnvironmentReviewFacts(draft EnvironmentReviewFacts, observedAt time.Tim
 		if rows[i].ReviewerActor.Subject != rows[j].ReviewerActor.Subject {
 			return rows[i].ReviewerActor.Subject < rows[j].ReviewerActor.Subject
 		}
-		return rows[i].ProviderState < rows[j].ProviderState
+		if rows[i].ProviderState != rows[j].ProviderState {
+			return rows[i].ProviderState < rows[j].ProviderState
+		}
+		return rows[i].EnvironmentID < rows[j].EnvironmentID
 	})
 	facts.Reviews = rows
 
@@ -193,7 +201,7 @@ func (f EnvironmentReviewFacts) Validate() error {
 	if f.UnsupportedReason != "" {
 		return fmt.Errorf("forge: supported environment review facts must carry no unsupported_reason")
 	}
-	if err := requireValue("environment_review.run_id", f.RunID); err != nil {
+	if err := validateCanonicalID("environment_review.run_id", f.RunID); err != nil {
 		return err
 	}
 	if f.RunAttempt < 1 {
@@ -205,7 +213,7 @@ func (f EnvironmentReviewFacts) Validate() error {
 	if err := requireValue("environment_review.run_url", f.RunURL); err != nil {
 		return err
 	}
-	if err := requireValue("environment_review.environment_id", f.EnvironmentID); err != nil {
+	if err := validateCanonicalID("environment_review.environment_id", f.EnvironmentID); err != nil {
 		return err
 	}
 	if err := requireValue("environment_review.environment_name", f.EnvironmentName); err != nil {
@@ -233,6 +241,9 @@ func (f EnvironmentReviewFacts) Validate() error {
 		}
 		if !row.ProviderState.valid() {
 			return fmt.Errorf("%s.provider_state: unknown state %q", prefix, row.ProviderState)
+		}
+		if row.EnvironmentID != f.EnvironmentID {
+			return fmt.Errorf("%s.environment_id %q is not the observed environment %q", prefix, row.EnvironmentID, f.EnvironmentID)
 		}
 		key := row.ReviewerActor.Subject + "\x00" + string(row.ProviderState)
 		if _, exists := seen[key]; exists {
@@ -335,7 +346,7 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 	rows := make([]Approval, 0, len(approved))
 	for _, row := range approved {
 		approvalID := fmt.Sprintf("github-environment-review:%s:%s:%d:%s:%s",
-			facts.Repository, facts.RunID, facts.RunAttempt, facts.EnvironmentID, row.ReviewerActor.Subject)
+			facts.Repository, facts.RunID, facts.RunAttempt, row.EnvironmentID, row.ReviewerActor.Subject)
 		approvalRef := fmt.Sprintf("%s environment=%s", facts.RunURL, facts.EnvironmentName)
 
 		witnesses := []ProviderWitness{
@@ -345,7 +356,7 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 			{Name: "run_attempt", Value: "1"},
 			{Name: "run_head_sha", Value: facts.RunHeadSHA},
 			{Name: "run_url", Value: facts.RunURL},
-			{Name: "environment_id", Value: facts.EnvironmentID},
+			{Name: "environment_id", Value: row.EnvironmentID},
 			{Name: "environment_name", Value: facts.EnvironmentName},
 			{Name: "gated_job_created_at", Value: facts.GatedJobCreatedAt},
 			{Name: "approval_id_derivation", Value: "composite of repository, run id, run attempt, environment id, and reviewer id (github's review history carries no review id)"},
@@ -370,4 +381,15 @@ func NormalizeEnvironmentReview(facts EnvironmentReviewFacts) ([]Approval, []str
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ApprovalID < rows[j].ApprovalID })
 	return rows, nil, nil
+}
+
+// validateCanonicalID requires a provider numeric id in canonical positive
+// base-10 form, so one provider object has exactly one textual identity
+// (L2b review m-1: "+555", "0555", and "555" must not name three reviews).
+func validateCanonicalID(field, value string) error {
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || number <= 0 || strconv.FormatInt(number, 10) != value {
+		return fmt.Errorf("forge: %s must be a canonical positive base-10 provider id, got %q", field, value)
+	}
+	return nil
 }

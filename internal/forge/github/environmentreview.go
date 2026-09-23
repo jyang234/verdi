@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/forge"
 )
@@ -110,8 +111,8 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: gated job name is empty")
 	}
 	runIDNum, err := strconv.ParseInt(query.RunID, 10, 64)
-	if err != nil || runIDNum <= 0 {
-		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run id %q is not a positive integer", query.RunID)
+	if err != nil || runIDNum <= 0 || strconv.FormatInt(runIDNum, 10) != query.RunID {
+		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: run id %q is not a canonical positive base-10 id", query.RunID)
 	}
 
 	runURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/attempts/%d", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runIDNum, query.RunAttempt)
@@ -169,7 +170,7 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 	if env.ID <= 0 {
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: environment %q carries no stable id", query.EnvironmentName)
 	}
-	if env.Name != query.EnvironmentName {
+	if !strings.EqualFold(env.Name, query.EnvironmentName) {
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: environment %q reported name %q", query.EnvironmentName, env.Name)
 	}
 	var preventSelfReview *bool
@@ -188,16 +189,25 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: reading run %d review history: %w", runIDNum, err)
 	}
 
+	// An entry belongs to this environment only when one of its own
+	// environments carries the environment's id (names are case-insensitive
+	// and renameable, ids are not; L2b review m-2), and the row's
+	// environment id is taken from that entry.
 	var rows []forge.EnvironmentReviewRow
-	for _, entry := range entries {
-		matches := false
+	for i, entry := range entries {
+		if len(entry.Environments) == 0 {
+			return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: review history entry %d names no environment", i)
+		}
+		matched := int64(0)
 		for _, e := range entry.Environments {
-			if e.Name == query.EnvironmentName {
-				matches = true
-				break
+			if e.ID <= 0 {
+				return forge.EnvironmentReviewFacts{}, fmt.Errorf("github: environment review: review history entry %d names an environment with no stable id", i)
+			}
+			if e.ID == env.ID {
+				matched = e.ID
 			}
 		}
-		if !matches {
+		if matched == 0 {
 			continue
 		}
 		if entry.User.ID <= 0 {
@@ -206,6 +216,7 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 		rows = append(rows, forge.EnvironmentReviewRow{
 			ReviewerActor: forge.ProviderActor{Scheme: "github-user-id", Subject: strconv.FormatInt(entry.User.ID, 10)},
 			ProviderState: entry.State,
+			EnvironmentID: strconv.FormatInt(matched, 10),
 		})
 	}
 
@@ -213,7 +224,7 @@ func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.Environment
 	facts, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
 		Supported:                    true,
 		Repository:                   repository,
-		RunID:                        query.RunID,
+		RunID:                        strconv.FormatInt(runIDNum, 10),
 		RunAttempt:                   query.RunAttempt,
 		RunHeadSHA:                   run.HeadSHA,
 		RunURL:                       run.HTMLURL,
