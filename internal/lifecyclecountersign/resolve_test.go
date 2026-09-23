@@ -1185,6 +1185,33 @@ func TestKernelSeparationRuleAuthorizedWithoutCollapseDisclosureKeepsSeparation(
 	}
 }
 
+// TestKernelSeparationRuleAsksWithAuthoritativePosture pins the probe's
+// posture (L2a re-review N-1): the separation question is asked with
+// authoritative posture, so an experimental-class profile, which the kernel
+// never lets produce an authoritative authorization, answers refused with
+// experimental-authority-forbidden. Asked with advisory posture instead, the
+// same profile would answer authorized and the witness would fall through
+// to class-not-solo, so this case fails if the probe's posture changes.
+func TestKernelSeparationRuleAsksWithAuthoritativePosture(t *testing.T) {
+	profile, err := loadSelectedProfile(kernelProbeSource("experimental", kernelProbeMappings(kernelProbeMapping("author", "900"), kernelProbeMapping("story-review", "900")), "[]"))
+	if err != nil {
+		t.Fatalf("loadSelectedProfile: %v", err)
+	}
+	if profile.Class != gp.ClassExperimental {
+		t.Fatalf("fixture profile class = %q, want %q", profile.Class, gp.ClassExperimental)
+	}
+	author := lifecycleAuthenticatedAuthor(t, profile, "900")
+
+	rule, witnesses := kernelSeparationRule(profile, "story-review", author)
+	if rule != countersign.SeparationDifferentFromAuthor {
+		t.Fatalf("rule = %q, want %q", rule, countersign.SeparationDifferentFromAuthor)
+	}
+	want := `kernel-separation-probe:author-as-approver:separation-required:kernel_answer="refused":reason="experimental-authority-forbidden":role="":roles=[]:detail="experimental profile \"lifecycle-probe\" cannot produce an authoritative authorization"`
+	if len(witnesses) != 1 || witnesses[0] != want {
+		t.Fatalf("witnesses = %v, want exactly [%s]", witnesses, want)
+	}
+}
+
 // TestAuthorApproverCollapse is authorApproverCollapse's own boundary:
 // only a solo role-collapse disclosure naming the author's principal for
 // exactly the author role and the approver role permits collapse.

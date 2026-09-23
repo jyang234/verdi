@@ -58,9 +58,11 @@ type Result struct {
 }
 
 // Resolver owns MR discovery, approval observation, selected-profile loading,
-// provider-fact authentication, candidate-author resolution, and countersign
-// reduction. Clock is an explicit deterministic test seam; its nil value
-// selects the live implementation. The selected profile has no seam at all:
+// provider-fact authentication, candidate-author resolution, the current
+// close run's environment-review observation under a collapse-permitting
+// solo profile (environmentreview.go), and countersign reduction. Clock is
+// an explicit deterministic test seam; its nil value selects the live
+// implementation. The selected profile has no seam at all:
 // it is decoded from Request.AcceptedProfileSource through the ONE
 // policyauthority decoder, so no caller can substitute profile bytes the
 // accepted tree does not carry.
@@ -163,6 +165,20 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 		return Result{}, fmt.Errorf("lifecycle countersign: resolve candidate author: %w", err)
 	}
 	separationRule, separationWitnesses := kernelSeparationRule(profile, role, author)
+	// Only when the kernel permitted the solo collapse is the owner's
+	// environment review of the current close run an approval source
+	// (SI-230, v2 ac-4 and dc-5); under every other answer it is never
+	// requested or counted. Its disclosures ride the reducer's one witness
+	// passthrough beside the kernel's collapse disclosure that allowed them.
+	reduced, disclosures := snapshot, separationWitnesses
+	if separationRule == countersign.SeparationNone {
+		withReviews, reviewWitnesses, err := r.currentRunEnvironmentReview(ctx, snapshot, request.LocalCandidateSHA)
+		if err != nil {
+			return Result{}, err
+		}
+		reduced = withReviews
+		disclosures = append(append([]string{}, separationWitnesses...), reviewWitnesses...)
+	}
 	clock := r.Clock
 	if clock == nil {
 		clock = time.Now
@@ -176,18 +192,20 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 		candidateAuthor = &author
 	}
 	record, err := countersign.Resolve(ctx, countersign.Request{
-		Snapshot: snapshot, LocalCandidateSHA: request.LocalCandidateSHA,
+		Snapshot: reduced, LocalCandidateSHA: request.LocalCandidateSHA,
 		Profile: profile, TrustSourceID: config.TrustSource,
 		Obligation: countersign.Obligation{
 			Transition: kernelCloseTransition, Scheme: countersign.SchemeAttestation,
 			Kind: countersign.KindCountersign, Role: role, RequiredCount: requiredCount,
 			SeparationRule: separationRule,
 		},
-		FreshnessPolicy:       policy,
-		EvaluatedAt:           clock().UTC().Format(time.RFC3339Nano),
-		CandidateAuthor:       candidateAuthor,
-		Resolver:              principalResolver,
-		SeparationDisclosures: separationWitnesses,
+		FreshnessPolicy: policy,
+		EvaluatedAt:     clock().UTC().Format(time.RFC3339Nano),
+		CandidateAuthor: candidateAuthor,
+		// Approval actors are authenticated against the facts the reducer
+		// sees, environment-review rows included.
+		Resolver:              gp.NewResolver(providerFacts{snapshot: reduced}),
+		SeparationDisclosures: disclosures,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: reduce approvals: %w", err)
