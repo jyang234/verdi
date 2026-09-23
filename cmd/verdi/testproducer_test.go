@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/gotestjson"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -209,126 +210,6 @@ func TestGoTestProducerSelection(t *testing.T) {
 	}
 }
 
-// --- reader table (contract 4) --------------------------------------------
-
-func TestReadNamedTestOutcomes(t *testing.T) {
-	const pkg = "pkg/a"
-
-	ev := func(action, test string) string {
-		if test == "" {
-			return fmt.Sprintf(`{"Action":%q,"Package":%q}`, action, pkg)
-		}
-		return fmt.Sprintf(`{"Action":%q,"Package":%q,"Test":%q}`, action, pkg, test)
-	}
-	out := func(test string) string {
-		return fmt.Sprintf(`{"Action":"output","Package":%q,"Test":%q,"Output":"ok\n"}`, pkg, test)
-	}
-
-	t.Run("pass", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestA"), ev("pass", "TestA"), ev("pass", "")}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if got["TestA"] != testOutcomePass {
-			t.Errorf("TestA outcome = %q, want pass", got["TestA"])
-		}
-	})
-
-	t.Run("fail", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestA"), ev("fail", "TestA"), ev("fail", "")}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if got["TestA"] != testOutcomeFail {
-			t.Errorf("TestA outcome = %q, want fail", got["TestA"])
-		}
-	})
-
-	t.Run("skip", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestA"), ev("skip", "TestA"), ev("pass", "")}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if got["TestA"] != testOutcomeSkip {
-			t.Errorf("TestA outcome = %q, want skip", got["TestA"])
-		}
-	})
-
-	t.Run("absent", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestB"), ev("pass", "TestB"), ev("pass", "")}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if _, present := got["TestA"]; present {
-			t.Errorf("TestA present in outcomes %+v, want absent (it never ran)", got)
-		}
-	})
-
-	t.Run("subtests present", func(t *testing.T) {
-		stream := strings.Join([]string{
-			ev("start", ""), ev("run", "TestA"), ev("run", "TestA/sub"),
-			ev("pass", "TestA/sub"), ev("pass", "TestA"), ev("pass", ""),
-		}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if got["TestA"] != testOutcomePass {
-			t.Errorf("TestA outcome = %q, want pass (its own terminal event, not the subtest's)", got["TestA"])
-		}
-		if got["TestA/sub"] != testOutcomePass {
-			t.Errorf("TestA/sub outcome = %q, want pass", got["TestA/sub"])
-		}
-	})
-
-	t.Run("output interleaving", func(t *testing.T) {
-		stream := strings.Join([]string{
-			ev("start", ""), ev("run", "TestA"), ev("run", "TestB"),
-			out("TestA"), out("TestB"), out("TestA"),
-			ev("pass", "TestB"), ev("pass", "TestA"), ev("pass", ""),
-		}, "\n")
-		got, err := readNamedTestOutcomes(strings.NewReader(stream), pkg)
-		if err != nil {
-			t.Fatalf("readNamedTestOutcomes: %v", err)
-		}
-		if got["TestA"] != testOutcomePass || got["TestB"] != testOutcomePass {
-			t.Errorf("outcomes = %+v, want both TestA and TestB pass despite interleaved output", got)
-		}
-	})
-
-	t.Run("duplicate terminal events", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestA"), ev("pass", "TestA"), ev("pass", "TestA")}, "\n")
-		if _, err := readNamedTestOutcomes(strings.NewReader(stream), pkg); err == nil {
-			t.Fatal("readNamedTestOutcomes: want error for duplicate terminal event, got nil")
-		}
-	})
-
-	t.Run("malformed line", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), "not json at all"}, "\n")
-		if _, err := readNamedTestOutcomes(strings.NewReader(stream), pkg); err == nil {
-			t.Fatal("readNamedTestOutcomes: want error for malformed line, got nil")
-		}
-	})
-
-	t.Run("truncated stream", func(t *testing.T) {
-		stream := strings.Join([]string{ev("start", ""), ev("run", "TestA")}, "\n")
-		if _, err := readNamedTestOutcomes(strings.NewReader(stream), pkg); err == nil {
-			t.Fatal("readNamedTestOutcomes: want error for truncated stream, got nil")
-		}
-	})
-
-	t.Run("unknown field is rejected", func(t *testing.T) {
-		stream := fmt.Sprintf(`{"Action":"start","Package":%q,"Surprise":true}`, pkg)
-		if _, err := readNamedTestOutcomes(strings.NewReader(stream), pkg); err == nil {
-			t.Fatal("readNamedTestOutcomes: want error for an unknown field, got nil (strict decode)")
-		}
-	})
-}
-
 // --- emission (contract 5) -------------------------------------------------
 
 // fakeNamedGoTestRunner returns canned output for a package, recording
@@ -339,12 +220,12 @@ type fakeNamedGoTestRunner struct {
 	calls  []struct{ pkg, pattern string }
 }
 
-func (f *fakeNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkg, runPattern string) ([]byte, error) {
-	f.calls = append(f.calls, struct{ pkg, pattern string }{pkg, runPattern})
-	if err, ok := f.err[pkg]; ok {
+func (f *fakeNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkgArg, runPattern string) ([]byte, error) {
+	f.calls = append(f.calls, struct{ pkg, pattern string }{pkgArg, runPattern})
+	if err, ok := f.err[pkgArg]; ok {
 		return nil, err
 	}
-	return f.output[pkg], nil
+	return f.output[pkgArg], nil
 }
 
 // fakeModulePath is the module path writeGoMod declares for a unit-test
@@ -362,7 +243,7 @@ func writeGoMod(t *testing.T, root string) {
 
 // testGoTestJSON renders a canned stream for relPkg, naming it by its full
 // import path under fakeModulePath as the real toolchain does.
-func testGoTestJSON(relPkg string, results map[string]testOutcome) []byte {
+func testGoTestJSON(relPkg string, results map[string]string) []byte {
 	pkg := fakeModulePath + "/" + relPkg
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `{"Action":"start","Package":%q}`+"\n", pkg)
@@ -371,12 +252,12 @@ func testGoTestJSON(relPkg string, results map[string]testOutcome) []byte {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	overall := "pass"
+	overall := gotestjson.ActionPass
 	for _, name := range names {
 		fmt.Fprintf(&b, `{"Action":"run","Package":%q,"Test":%q}`+"\n", pkg, name)
 		fmt.Fprintf(&b, `{"Action":%q,"Package":%q,"Test":%q}`+"\n", results[name], pkg, name)
-		if results[name] == testOutcomeFail {
-			overall = "fail"
+		if results[name] == gotestjson.ActionFail {
+			overall = gotestjson.ActionFail
 		}
 	}
 	fmt.Fprintf(&b, `{"Action":%q,"Package":%q}`+"\n", overall, pkg)
@@ -419,7 +300,7 @@ func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
 	}
 
 	runner := &fakeNamedGoTestRunner{output: map[string][]byte{
-		"pkg/a": testGoTestJSON("pkg/a", map[string]testOutcome{"TestPass": testOutcomePass, "TestFail": testOutcomeFail}),
+		"./pkg/a": testGoTestJSON("pkg/a", map[string]string{"TestPass": gotestjson.ActionPass, "TestFail": gotestjson.ActionFail}),
 	}}
 
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "7", JobName: "verify", Commit: commit}
@@ -429,7 +310,7 @@ func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
 		t.Fatalf("produceGoTestEvidence: %v", err)
 	}
 
-	if len(runner.calls) != 1 || runner.calls[0].pkg != "pkg/a" {
+	if len(runner.calls) != 1 || runner.calls[0].pkg != "./pkg/a" {
 		t.Fatalf("runner.calls = %+v, want exactly one call for pkg/a", runner.calls)
 	}
 	if runner.calls[0].pattern != "^(TestFail|TestPass)$" {
@@ -480,7 +361,7 @@ func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
 		}))
 	const commit = "dddddddddddddddddddddddddddddddddddddddd"
 	runner := &fakeNamedGoTestRunner{output: map[string][]byte{
-		"pkg/a": testGoTestJSON("pkg/a", map[string]testOutcome{"TestOther": testOutcomePass}),
+		"./pkg/a": testGoTestJSON("pkg/a", map[string]string{"TestOther": gotestjson.ActionPass}),
 	}}
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", JobName: "verify", Commit: commit}
 
@@ -512,7 +393,7 @@ func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
 			SourceKind: "ci-job", SourceRef: "verify",
 		}))
 	const commit = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	runner := &fakeNamedGoTestRunner{err: map[string]error{"pkg/a": fmt.Errorf("boom")}}
+	runner := &fakeNamedGoTestRunner{err: map[string]error{"./pkg/a": fmt.Errorf("boom")}}
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", JobName: "verify", Commit: commit}
 	var stdout bytes.Buffer
 	if err := produceGoTestEvidence(context.Background(), root, commit, "verify", runner, prov, &stdout); err == nil {
@@ -548,7 +429,7 @@ func TestProduceGoTestEvidence_EndToEndMatchesObligation(t *testing.T) {
 		}))
 
 	runner := &fakeNamedGoTestRunner{output: map[string][]byte{
-		"pkg/a": testGoTestJSON("pkg/a", map[string]testOutcome{"TestPass": testOutcomePass, "TestFail": testOutcomeFail}),
+		"./pkg/a": testGoTestJSON("pkg/a", map[string]string{"TestPass": gotestjson.ActionPass, "TestFail": gotestjson.ActionFail}),
 	}}
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", JobName: "verify", Commit: commit}
 	var stdout bytes.Buffer

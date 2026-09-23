@@ -66,6 +66,19 @@ func TestProduceGoTestEvidence_RealToolchain(t *testing.T) {
 		{"ac-2", "behavioral", "go-test:sample:TestFail", artifact.VerdictFail},
 		{"ac-3", "static", "go-test:sample:TestSkip", artifact.VerdictAbstain},
 		{"ac-4", "behavioral", "go-test:sample:TestAbsent", ""},
+		// Go 1.25 "attr" events (Key, Value) are part of a passing test's stream.
+		{"ac-5", "behavioral", "go-test:sample:TestAttr", artifact.VerdictPass},
+		// The parent's own terminal fail decides, not its passing subtest's.
+		{"ac-6", "behavioral", "go-test:sample:TestParentFails", artifact.VerdictFail},
+		// No test named TestPrefix exists; TestPrefixBar's pass is not its.
+		{"ac-7", "behavioral", "go-test:sample:TestPrefix", ""},
+		{"ac-8", "behavioral", "go-test:sample:TestPrefixBar", artifact.VerdictPass},
+		// An unbuildable package (build-output, build-fail, fail+FailedBuild)
+		// means its named test did not run.
+		{"ac-9", "behavioral", "go-test:nobuild:TestNeverBuilds", ""},
+		// A renamed or removed package directory: the go command reports the
+		// unresolved argument ./gone as Package, and nothing runs.
+		{"ac-10", "behavioral", "go-test:gone:TestGone", ""},
 	}
 	for _, c := range cases {
 		writeObligation(t, root, story, c.ac, c.kind, obligationMD(story, c.ac, c.kind, obligationQualityInput{

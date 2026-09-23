@@ -20,17 +20,18 @@
 // every OTHER story's obligations (03 §Declarations and binding's own
 // framing: "never as a silent pass" is about false positives, not about
 // making one story's authoring mistake block CI for everyone else) — both
-// are disclosed and skipped, exactly like an absent test. Only a runner
-// that produces no output at all, or a go test -json stream that is
-// malformed or ends before its package's own terminal event, is an
-// operational error (exit 2): at that point nothing read from this
-// invocation can be trusted.
+// are disclosed and skipped, exactly like an absent test. So is a named
+// package that does not build or that the go command cannot load (renamed,
+// removed, or broken): its named tests did not run. Only a runner that
+// produces no output at all, or a go test -json stream the shared reader
+// (internal/gotestjson) rejects — malformed, out of sequence, or ending
+// before its package's own terminal event — is an operational error (exit
+// 2): at that point nothing read from this invocation can be trusted.
 package main
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/gotestjson"
 )
 
 // --- Grammar (contract 1) ---------------------------------------------
@@ -269,35 +271,31 @@ func selectGoTestObligations(candidates []testProducerCandidate, jobName string)
 // --- Execution (contract 3) ---------------------------------------------
 
 // namedGoTestRunner abstracts one `go test -json -count=1 -run <pattern>
-// ./<pkg>` invocation, restricted to an explicit package and run pattern —
+// <pkgArg>` invocation, restricted to an explicit package and run pattern —
 // the per-test producer's own execution seam, distinct from goTestRunner's
 // whole-module `./...` run in sync_regen.go (CLAUDE.md: no exec in any
 // test; hermetic fakes only in unit tests, the real runner only in
-// production and in this file's own one hermetic integration test).
+// production and in testproducer_integration_test.go).
 type namedGoTestRunner interface {
 	// RunNamedGoTest runs `go test -json -count=1 -run <runPattern>
-	// ./<pkg>` with dir as the module root and returns its stdout. A
-	// failing or skipped test is not an error here — that is exactly the
-	// signal readNamedTestOutcomes reads; only a truly broken invocation
-	// (no output at all) is an error.
-	RunNamedGoTest(ctx context.Context, dir, pkg, runPattern string) ([]byte, error)
+	// <pkgArg>` with dir as the module root and returns its stdout. A
+	// failing or skipped test, or a package that fails to build, is not an
+	// error here — the stream reports it; only a truly broken invocation is.
+	RunNamedGoTest(ctx context.Context, dir, pkgArg, runPattern string) ([]byte, error)
 }
 
-// realNamedGoTestRunner execs the real toolchain. Never used by this
-// module's own tests (CLAUDE.md: no exec in any test) except the one
-// hermetic integration test this file documents, which runs it against a
-// tiny, dependency-free fixture module under testdata/.
+// realNamedGoTestRunner execs the real toolchain.
 type realNamedGoTestRunner struct{}
 
-func (realNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkg, runPattern string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "go", "test", "-json", "-count=1", "-run", runPattern, "./"+pkg)
+func (realNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkgArg, runPattern string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "go", "test", "-json", "-count=1", "-run", runPattern, pkgArg)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	_ = cmd.Run() // a failing/skipped test exits nonzero; the JSON stream is what matters
 	if stdout.Len() == 0 {
-		return nil, fmt.Errorf("go test -json produced no output for package %s: %s", pkg, stderr.String())
+		return nil, fmt.Errorf("go test -json produced no output for package %s: %s", pkgArg, stderr.String())
 	}
 	return stdout.Bytes(), nil
 }
@@ -312,6 +310,11 @@ func goTestRunPattern(tests []string) string {
 	sort.Strings(sorted)
 	return "^(" + strings.Join(sorted, "|") + ")$"
 }
+
+// goTestPackageArg is the go test argument for a package path relative to
+// the module root: the package's directory, as internal/publicrelease's
+// runner passes it.
+func goTestPackageArg(pkg string) string { return "./" + pkg }
 
 // goModulePath reports the module path root/go.mod declares, and whether
 // root is a Go module root at all. The go command reports every test2json
@@ -397,15 +400,14 @@ func parseModuleDirective(data []byte) (string, error) {
 
 // executeGoTestProducers groups selected by package, runs exactly one `go
 // test -json` per distinct package (restricted to the union of that
-// package's wanted top-level test names), and strict-decodes each run's
-// event stream against that package's full import path (modulePath joined
-// with the relative package path, as internal/publicrelease's runner joins
-// them). Returns outcomes keyed [package][test]; a wanted test
-// absent from its package's map means it never ran (readNamedTestOutcomes
-// still succeeded — the package reached its own terminal event — the named
-// test's own terminal event just never appeared). A runner or decode
-// failure is returned as an operational error, never swallowed.
-func executeGoTestProducers(ctx context.Context, root, modulePath string, runner namedGoTestRunner, selected []selectedGoTestObligation) (map[string]map[string]testOutcome, error) {
+// package's wanted top-level test names), and reads each run's stream with
+// the shared reader (internal/gotestjson) against that package's full import
+// path — modulePath joined with the relative package path, as
+// internal/publicrelease's runner joins them — or, when the go command
+// cannot load the package, the argument it was given. Returns each package's
+// Result keyed by the relative package path. A runner or read failure is
+// returned as an operational error, never swallowed.
+func executeGoTestProducers(ctx context.Context, root, modulePath string, runner namedGoTestRunner, selected []selectedGoTestObligation) (map[string]gotestjson.Result, error) {
 	byPkg := map[string]map[string]bool{}
 	var pkgOrder []string
 	for _, s := range selected {
@@ -417,150 +419,46 @@ func executeGoTestProducers(ctx context.Context, root, modulePath string, runner
 	}
 	sort.Strings(pkgOrder)
 
-	results := make(map[string]map[string]testOutcome, len(pkgOrder))
+	results := make(map[string]gotestjson.Result, len(pkgOrder))
 	for _, pkg := range pkgOrder {
 		tests := make([]string, 0, len(byPkg[pkg]))
 		for t := range byPkg[pkg] {
 			tests = append(tests, t)
 		}
-		out, err := runner.RunNamedGoTest(ctx, root, pkg, goTestRunPattern(tests))
+		arg := goTestPackageArg(pkg)
+		out, err := runner.RunNamedGoTest(ctx, root, arg, goTestRunPattern(tests))
 		if err != nil {
 			return nil, fmt.Errorf("go-test producer: %w", err)
 		}
-		outcomes, err := readNamedTestOutcomes(bytes.NewReader(out), modulePath+"/"+pkg)
+		res, err := gotestjson.ReadPackage(bytes.NewReader(out), gotestjson.Target{ImportPath: modulePath + "/" + pkg, Arg: arg})
 		if err != nil {
 			return nil, fmt.Errorf("go-test producer: %w", err)
 		}
-		results[pkg] = outcomes
+		results[pkg] = res
 	}
 	return results, nil
-}
-
-// --- Reading (contract 4): strict test2json decoding --------------------
-
-// testOutcome is one top-level (or subtest) Go test's own terminal
-// disposition, taken verbatim from its test2json Action.
-type testOutcome string
-
-const (
-	testOutcomePass testOutcome = "pass"
-	testOutcomeFail testOutcome = "fail"
-	testOutcomeSkip testOutcome = "skip"
-)
-
-// goTestJSONEvent is the complete `go test -json` (test2json) event shape
-// this reader accepts. Every field the toolchain emits is modeled so
-// DisallowUnknownFields rejects only a genuinely foreign shape, never a
-// legitimate event this reader simply does not use — mirroring
-// internal/publicrelease/events.go's own strict-decode precedent (this
-// file's own reader, not a shared import: publicrelease's is a per-package
-// completeness check with a fixed required-test list, never one that
-// accepts fail/skip as legitimate outcomes, which is exactly what this
-// reader must do — a different concern, not a copy-pasteable one).
-type goTestJSONEvent struct {
-	Time        string  `json:"Time,omitempty"`
-	Action      string  `json:"Action"`
-	Package     string  `json:"Package"`
-	Test        string  `json:"Test,omitempty"`
-	Elapsed     float64 `json:"Elapsed,omitempty"`
-	Output      string  `json:"Output,omitempty"`
-	FailedBuild string  `json:"FailedBuild,omitempty"`
-}
-
-// readNamedTestOutcomes strict-decodes one package's `go test -json`
-// stream and returns every test (top-level or subtest) whose own terminal
-// pass/fail/skip event appeared, keyed by its exact Test name. Output,
-// pause, and cont events are accepted and ignored (never inspected or
-// re-emitted — internal/publicrelease/events.go's own "private source text
-// must never enter the publishable report" discipline, applied here even
-// though this reader emits no prose at all). A run event without a
-// following terminal event, a terminal event without a preceding run
-// event, a duplicate terminal event for the same test, an unexpected
-// package, an unknown action, or a stream that ends before the package's
-// own terminal event (whether by malformed JSON or genuine truncation) is
-// a returned error — contract 4's "malformed or truncated stream is an
-// operational error, never a record".
-func readNamedTestOutcomes(r io.Reader, pkg string) (map[string]testOutcome, error) {
-	dec := json.NewDecoder(r)
-	dec.DisallowUnknownFields()
-
-	outcomes := map[string]testOutcome{}
-	running := map[string]bool{}
-	started, finished := false, false
-	eventNo := 0
-
-	for {
-		var e goTestJSONEvent
-		if err := dec.Decode(&e); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, fmt.Errorf("go test -json for package %s: malformed event %d: %w", pkg, eventNo+1, err)
-		}
-		eventNo++
-
-		if finished {
-			return nil, fmt.Errorf("go test -json for package %s: event %d (%s) after package completion", pkg, eventNo, e.Action)
-		}
-		if e.Package != pkg {
-			return nil, fmt.Errorf("go test -json for package %s: event %d names unexpected package %q", pkg, eventNo, e.Package)
-		}
-
-		switch e.Action {
-		case "start":
-			if started {
-				return nil, fmt.Errorf("go test -json for package %s: duplicate start event (event %d)", pkg, eventNo)
-			}
-			started = true
-		case "run":
-			if !started || e.Test == "" || running[e.Test] {
-				return nil, fmt.Errorf("go test -json for package %s: invalid run event for %q (event %d)", pkg, e.Test, eventNo)
-			}
-			if _, done := outcomes[e.Test]; done {
-				return nil, fmt.Errorf("go test -json for package %s: test %q ran again after its terminal event (event %d)", pkg, e.Test, eventNo)
-			}
-			running[e.Test] = true
-		case "pass", "fail", "skip":
-			if e.Test == "" {
-				if !started || len(running) > 0 {
-					return nil, fmt.Errorf("go test -json for package %s: package completed with %d test(s) still running (event %d)", pkg, len(running), eventNo)
-				}
-				finished = true
-				continue
-			}
-			if _, dup := outcomes[e.Test]; dup {
-				return nil, fmt.Errorf("go test -json for package %s: duplicate terminal event for %q (event %d)", pkg, e.Test, eventNo)
-			}
-			if !running[e.Test] {
-				return nil, fmt.Errorf("go test -json for package %s: terminal event for %q without a preceding run event (event %d)", pkg, e.Test, eventNo)
-			}
-			delete(running, e.Test)
-			outcomes[e.Test] = testOutcome(e.Action)
-		case "output", "pause", "cont":
-			if !started {
-				return nil, fmt.Errorf("go test -json for package %s: event %d (%s) before package start", pkg, eventNo, e.Action)
-			}
-		default:
-			return nil, fmt.Errorf("go test -json for package %s: unknown action %q (event %d)", pkg, e.Action, eventNo)
-		}
-	}
-
-	if !finished {
-		return nil, fmt.Errorf("go test -json for package %s: stream ended before the package's own terminal event (truncated)", pkg)
-	}
-	return outcomes, nil
 }
 
 // --- Emission (contract 5) ----------------------------------------------
 
 // goTestProducerAbsentSource is the disclosure source for a selected
-// obligation's named test that never appeared with its own terminal event
-// in its package's run (renamed, removed, or otherwise never executed) —
-// contract 1/4: no record, a disclosure naming the obligation, and the
-// obligation reads producer-missing at fold time, never a silent pass.
+// obligation's named test that did not run — renamed, removed, in a package
+// that did not build or load, or otherwise never reaching its own terminal
+// event — contract 1/4: no record, a disclosure naming the obligation, and
+// the obligation reads producer-missing at fold time, never a silent pass.
 const goTestProducerAbsentSource = "sync:go-test-producer-absent"
 
 func goTestProducerAbsentDisclosure(s selectedGoTestObligation) disclosure.Disclosure {
 	text := fmt.Sprintf("named test %s in package %s did not run (no terminal event); no evidence record was emitted for it", s.Test, s.Package)
+	return disclosure.New(goTestProducerAbsentSource, s.ObligationID, text)
+}
+
+func goTestProducerNotBuiltDisclosure(s selectedGoTestObligation, res gotestjson.Result) disclosure.Disclosure {
+	cause := "the go command could not load it"
+	if res.Loaded {
+		cause = "it failed to build"
+	}
+	text := fmt.Sprintf("named test %s did not run: package %s did not build or load (%s); no evidence record was emitted for it", s.Test, s.Package, cause)
 	return disclosure.New(goTestProducerAbsentSource, s.ObligationID, text)
 }
 
@@ -572,16 +470,16 @@ func goTestProducerNoModuleDisclosure(s selectedGoTestObligation) disclosure.Dis
 // verdictForOutcome maps a named test's own terminal test2json action to
 // an evidence verdict (contract 5: "pass only on that test's own terminal
 // pass event, fail on its fail event, abstain when it was skipped").
-func verdictForOutcome(o testOutcome) (artifact.EvidenceVerdict, error) {
-	switch o {
-	case testOutcomePass:
+func verdictForOutcome(action string) (artifact.EvidenceVerdict, error) {
+	switch action {
+	case gotestjson.ActionPass:
 		return artifact.VerdictPass, nil
-	case testOutcomeFail:
+	case gotestjson.ActionFail:
 		return artifact.VerdictFail, nil
-	case testOutcomeSkip:
+	case gotestjson.ActionSkip:
 		return artifact.VerdictAbstain, nil
 	default:
-		return "", fmt.Errorf("go-test producer: unrecognized test outcome %q", o)
+		return "", fmt.Errorf("go-test producer: unrecognized test outcome %q", action)
 	}
 }
 
@@ -604,17 +502,27 @@ func namedTestDigest(rec artifact.Evidence) (string, error) {
 	return digest, nil
 }
 
-// buildGoTestRecords turns each selected obligation's outcome (looked up
-// in results[pkg][test]) into its own evidence record, grouped by owning
-// spec — the shape writeSelfHostedEvidence already merges and writes
-// (contract 5: "merged into the owning spec's own derived/<...>/
-// verdicts.json through mergeEvidenceByProducer"). A selected obligation
-// whose test never ran is disclosed and excluded, never an error.
-func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]map[string]testOutcome, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []disclosure.Disclosure, error) {
+// buildGoTestRecords turns each selected obligation's outcome (its named
+// test's own terminal action in its package's Result) into its own evidence
+// record, grouped by owning spec — the shape writeSelfHostedEvidence already
+// merges and writes (contract 5: "merged into the owning spec's own
+// derived/<...>/verdicts.json through mergeEvidenceByProducer"). A selected
+// obligation whose test did not run — its package did not build or load, or
+// its test never reached a terminal event — is disclosed and excluded,
+// never an error.
+func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]gotestjson.Result, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []disclosure.Disclosure, error) {
 	bySpec := map[string][]artifact.Evidence{}
 	var discl []disclosure.Disclosure
 	for _, s := range selected {
-		outcome, ok := results[s.Package][s.Test]
+		res, ok := results[s.Package]
+		if !ok {
+			return nil, nil, fmt.Errorf("go-test producer: no run recorded for package %s", s.Package)
+		}
+		if !res.Built() {
+			discl = append(discl, goTestProducerNotBuiltDisclosure(s, res))
+			continue
+		}
+		outcome, ok := res.Tests[s.Test]
 		if !ok {
 			discl = append(discl, goTestProducerAbsentDisclosure(s))
 			continue
