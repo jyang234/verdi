@@ -66,6 +66,13 @@ type syncDeps struct {
 	// contract), which is also why existing tests constructing syncDeps
 	// without it keep printing byte-identical output.
 	Model *model.Model
+
+	// NamedGoTest is the per-test CI evidence producer's own execution seam
+	// (SI-228, testproducer.go) — distinct from GoTest's whole-module
+	// `./...` run. Only runProduce's --produce path uses it; every other
+	// syncDeps construction site leaves it nil, which is harmless since
+	// they never call produceGoTestEvidence.
+	NamedGoTest namedGoTestRunner
 }
 
 // cmdSync is `verdi sync`'s real entry point, invoked by dispatch.go. It
@@ -204,7 +211,7 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	}
 	runner := upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 
-	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr}
+	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, NamedGoTest: realNamedGoTestRunner{}, Stdout: stdout, Stderr: stderr}
 	return runSync(ctx, root, ref, commit, orRegen, produce, forceLocal, deps)
 }
 
@@ -427,6 +434,18 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 	// for the pass records this step binds, never a divergent re-run. A
 	// store with no root verdi.bindings.yaml yet is a silent no-op.
 	if err := produceSelfHostedEvidence(root, commit, prov); err != nil {
+		fmt.Fprintln(deps.Stderr, "sync:", err)
+		return 2
+	}
+
+	// The per-test CI evidence producer (SI-228, plan R-CM-2;
+	// testproducer.go): 03 §Declarations and binding's one sanctioned
+	// per-test exception, matching each elaborated go-test:<pkg>:<Test>
+	// obligation this job is authoritative for (SI-229's
+	// authoritative_source.ref == ciInfo.JobName) against its own named
+	// test's real result. jobName == "" (not a detected CI job at all)
+	// naturally selects nothing, so this is a no-op off the CI path.
+	if err := produceGoTestEvidence(ctx, root, commit, ciInfo.JobName, deps.NamedGoTest, prov, deps.Stdout); err != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2
 	}
