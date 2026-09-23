@@ -61,10 +61,18 @@ type mrtServer struct {
 	repoBody   string
 	pullStatus int
 	pullPages  []string // raw bodies; page n+1 is linked from page n
+	// links overrides the Link header of the 1-based page it names; "{self}"
+	// is replaced by the list route's absolute URL without a query.
+	links map[int]string
 
 	mu       sync.Mutex
 	requests []string
+	listHits int
 }
+
+// mrtMaxListHits bounds the list walk: a regression that loses the cycle
+// rule then fails fast with a named error instead of hanging the suite.
+const mrtMaxListHits = 20
 
 func newMRTServer(t *testing.T, pulls ...map[string]any) *mrtServer {
 	t.Helper()
@@ -101,6 +109,15 @@ func (s *mrtServer) adapter() *Adapter {
 				w.WriteHeader(s.pullStatus)
 				return
 			}
+			s.mu.Lock()
+			s.listHits++
+			hits := s.listHits
+			s.mu.Unlock()
+			if hits > mrtMaxListHits {
+				t.Errorf("the pull request list was walked more than %d times", mrtMaxListHits)
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
 			index := 0
 			if page := r.URL.Query().Get("page"); page != "" {
 				if _, err := fmt.Sscanf(page, "%d", &index); err != nil || index < 2 || index > len(s.pullPages) {
@@ -110,7 +127,9 @@ func (s *mrtServer) adapter() *Adapter {
 				}
 				index--
 			}
-			if index+1 < len(s.pullPages) {
+			if link, ok := s.links[index+1]; ok {
+				w.Header().Set("Link", strings.ReplaceAll(link, "{self}", server.URL+r.URL.Path))
+			} else if index+1 < len(s.pullPages) {
 				w.Header().Set("Link", fmt.Sprintf(`<%s%s?per_page=100&page=%d>; rel="next"`, server.URL, r.URL.Path, index+2))
 			}
 			_, _ = w.Write([]byte(s.pullPages[index]))
@@ -266,6 +285,63 @@ func TestGitHubMergeRecords_FailsClosedOnProviderShape(t *testing.T) {
 			}
 			if errors.Is(err, forge.ErrUnavailable) {
 				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; a provider shape or configuration fault is operational, never unavailability", err)
+			}
+		})
+	}
+}
+
+// TestGitHubMergeRecords_FailsClosedOnLinkPagination pins the strict Link
+// walk at this call site (lane EF review F5): a cycle, a malformed or
+// ambiguous rel="next", and a later page that is null or carries trailing
+// data are each an operational error, never a quietly truncated list. Each
+// row names the error it must fail with.
+func TestGitHubMergeRecords_FailsClosedOnLinkPagination(t *testing.T) {
+	merged := mrtEncode(t, []any{mrtPull(12, "closed", "2026-09-20T10:15:30Z", mrtCommit, "main")})
+	tests := []struct {
+		name    string
+		setup   func(*mrtServer)
+		wantErr string
+	}{
+		{"a Link cycle back to the first page", func(s *mrtServer) {
+			s.pullPages = []string{merged, `[]`}
+			s.links = map[int]string{2: `<{self}?per_page=100>; rel="next"`}
+		}, "pagination cycle detected"},
+		{"a Link naming the page it came from", func(s *mrtServer) {
+			s.pullPages = []string{merged}
+			s.links = map[int]string{1: `<{self}?per_page=100>; rel="next"`}
+		}, "pagination cycle detected"},
+		{"a rel=next Link without an angle-bracketed target", func(s *mrtServer) {
+			s.pullPages = []string{merged, `[]`}
+			s.links = map[int]string{1: `{self}?per_page=100&page=2; rel="next"`}
+		}, `malformed approval pagination Link claims rel="next"`},
+		{"a rel=next Link whose target is not a request URI", func(s *mrtServer) {
+			s.pullPages = []string{merged, `[]`}
+			s.links = map[int]string{1: `<page two>; rel="next"`}
+		}, "malformed approval pagination next URL"},
+		{"two distinct rel=next Links", func(s *mrtServer) {
+			s.pullPages = []string{merged, `[]`, `[]`}
+			s.links = map[int]string{1: `<{self}?per_page=100&page=2>; rel="next", <{self}?per_page=100&page=3>; rel="next"`}
+		}, "multiple distinct next continuations"},
+		{"a next page that is null", func(s *mrtServer) {
+			s.pullPages = []string{merged, `null`}
+		}, "page must be a non-null array"},
+		{"a next page with trailing data", func(s *mrtServer) {
+			s.pullPages = []string{merged, `[]` + "\n" + `[]`}
+		}, "trailing data after approval response"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newMRTServer(t)
+			tt.setup(s)
+			facts, err := s.adapter().MergeRecords(context.Background(), mrtCommit)
+			if err == nil {
+				t.Fatalf("MergeRecords = %+v, want an operational error naming %q", facts, tt.wantErr)
+			}
+			if errors.Is(err, forge.ErrUnavailable) {
+				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; ambiguous pagination is operational, never unavailability", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("MergeRecords error %q, want it to name %q", err, tt.wantErr)
 			}
 		})
 	}
