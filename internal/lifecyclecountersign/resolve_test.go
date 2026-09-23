@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/countersign"
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -381,5 +382,442 @@ func TestResolveMalformedAcceptedTreeIsOperational(t *testing.T) {
 
 	if _, err := resolver.Resolve(context.Background(), request); err == nil || !strings.Contains(err.Error(), lifecycleAcceptedCommit) {
 		t.Fatalf("Resolve error = %v, want an operational failure naming the pinned accepted commit", err)
+	}
+}
+
+// --- SI-227: kernel-consulted separation of duties -------------------------
+//
+// The lifecycle resolver no longer hard-wires SeparationDifferentFromAuthor.
+// It asks the governance kernel's authorization interpreter, using the
+// selected profile's own rules for the close transition, whether the
+// obligation's approver role must be filled by a principal different from
+// the resolved candidate author. These fixtures exercise the three
+// documented outcomes plus the local-operator refusal (SI-227's separately
+// narrowed second finding).
+
+// lifecycleSoloConstitution/lifecycleSoloProfile is a solo governance
+// profile whose close roles (story-review, feature-uat) both map the SAME
+// forge-authenticated subject ("900") and declare NO distinctness rule at
+// all — solo profiles are not required to declare one (validateClassCoverage).
+// The kernel's own role-collapse disclosure is therefore the only source of
+// "permitted with collapse", never profile.Class read in isolation.
+const lifecycleSoloConstitution = `---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Lifecycle countersign solo fixture constitution"
+owners: [platform-team]
+selected_profile: lifecycle-solo
+environments: [local, production]
+catalog:
+  roles: [feature-uat, story-review]
+  transitions: [close]
+  evidence_sources: []
+  escalation_metrics: []
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+# Lifecycle countersign solo fixture
+`
+
+const lifecycleSoloProfile = `---
+schema: verdi.governance-profile/v1
+id: lifecycle-solo
+class: solo
+applicable_transitions: [close]
+identity_trust_sources:
+  - {id: forge-live, kind: forge}
+role_mappings:
+  - {role: feature-uat, trust_source: forge-live, subjects: ["900"]}
+  - {role: story-review, trust_source: forge-live, subjects: ["900"]}
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - {transitions: [close], roles: [feature-uat, story-review], minimum: 1}
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+Hermetic solo lifecycle governance profile: the owner's principal fills
+both close roles, and the profile declares no distinctness rule at all.
+`
+
+func lifecycleSoloAcceptedSource() fstest.MapFS {
+	return fstest.MapFS{
+		".verdi/policy/constitution.md":            &fstest.MapFile{Data: []byte(lifecycleSoloConstitution), Mode: 0o444},
+		".verdi/policy/profiles/lifecycle-solo.md": &fstest.MapFile{Data: []byte(lifecycleSoloProfile), Mode: 0o444},
+	}
+}
+
+// lifecycleSoloEscalationProfile is otherwise identical to
+// lifecycleSoloProfile but ALSO declares an escalation threshold covering
+// close — a rule wholly unrelated to separation of duties, but one the
+// kernel-consulted probe cannot supply a metric value for. This is the
+// "kernel answer unproven" case: the kernel's decision is not cleanly
+// authorized, so the resolver fails closed to SeparationDifferentFromAuthor
+// and discloses why, exactly as it would for an unreachable or malformed
+// kernel operand.
+const lifecycleSoloEscalationConstitution = `---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Lifecycle countersign solo escalation fixture constitution"
+owners: [platform-team]
+selected_profile: lifecycle-solo-escalation
+environments: [local, production]
+catalog:
+  roles: [feature-uat, story-review]
+  transitions: [close]
+  evidence_sources: []
+  escalation_metrics: [risk]
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+# Lifecycle countersign solo escalation fixture
+`
+
+const lifecycleSoloEscalationProfile = `---
+schema: verdi.governance-profile/v1
+id: lifecycle-solo-escalation
+class: solo
+applicable_transitions: [close]
+identity_trust_sources:
+  - {id: forge-live, kind: forge}
+role_mappings:
+  - {role: feature-uat, trust_source: forge-live, subjects: ["900"]}
+  - {role: story-review, trust_source: forge-live, subjects: ["900"]}
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - {transitions: [close], roles: [feature-uat, story-review], minimum: 1}
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds:
+  - {transitions: [close], metric: risk, at_least: 0, required_roles: [story-review]}
+---
+Hermetic solo lifecycle governance profile declaring an unrelated
+escalation threshold the kernel-consulted probe cannot satisfy.
+`
+
+func lifecycleSoloEscalationAcceptedSource() fstest.MapFS {
+	return fstest.MapFS{
+		".verdi/policy/constitution.md":                       &fstest.MapFile{Data: []byte(lifecycleSoloEscalationConstitution), Mode: 0o444},
+		".verdi/policy/profiles/lifecycle-solo-escalation.md": &fstest.MapFile{Data: []byte(lifecycleSoloEscalationProfile), Mode: 0o444},
+	}
+}
+
+// lifecycleHighAssuranceProfile is a minimal valid high-assurance profile
+// (validateClassCoverage requires approval, distinctness, signature,
+// ownership, and evidence-source rules for every applicable transition).
+// It is never asked to prove those extra rules here — only that the
+// kernel-consulted separation decision still refuses self-approval.
+const lifecycleHighAssuranceConstitution = `---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Lifecycle countersign high-assurance fixture constitution"
+owners: [platform-team]
+selected_profile: lifecycle-ha
+environments: [local, production]
+catalog:
+  roles: [feature-uat, story-review]
+  transitions: [close]
+  evidence_sources: [forge]
+  escalation_metrics: []
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+# Lifecycle countersign high-assurance fixture
+`
+
+const lifecycleHighAssuranceProfile = `---
+schema: verdi.governance-profile/v1
+id: lifecycle-ha
+class: high-assurance
+applicable_transitions: [close]
+identity_trust_sources:
+  - {id: forge-live, kind: forge}
+  - {id: signed-1, kind: signed-commit}
+  - {id: owned-1, kind: ownership}
+role_mappings:
+  - {role: feature-uat, trust_source: forge-live, subjects: ["201", "202", "900"]}
+  - {role: story-review, trust_source: forge-live, subjects: ["101", "900"]}
+ownership_sources:
+  - {id: own-1, trust_source: owned-1, transitions: [close], roles: [story-review]}
+signature_requirements:
+  - {transitions: [close], roles: [story-review], trust_sources: [signed-1]}
+required_approvers:
+  - {transitions: [close], roles: [feature-uat, story-review], minimum: 1}
+distinctness_rules:
+  - {transitions: [close], left_role: feature-uat, right_role: story-review, relation: different-principal}
+evidence_source_restrictions:
+  - {transitions: [close], allowed_sources: [forge]}
+escalation_thresholds: []
+---
+Hermetic high-assurance lifecycle governance profile.
+`
+
+func lifecycleHighAssuranceAcceptedSource() fstest.MapFS {
+	return fstest.MapFS{
+		".verdi/policy/constitution.md":          &fstest.MapFile{Data: []byte(lifecycleHighAssuranceConstitution), Mode: 0o444},
+		".verdi/policy/profiles/lifecycle-ha.md": &fstest.MapFile{Data: []byte(lifecycleHighAssuranceProfile), Mode: 0o444},
+	}
+}
+
+// lifecycleLocalOperatorConstitution/lifecycleLocalOperatorProfile is a
+// solo profile whose ONLY identity trust source is local-operator — a bare
+// self-assertion, never independently verified (2026-09-05 local-operator
+// disposition design). SI-227: that alone can never prove a close
+// countersign.
+const lifecycleLocalOperatorConstitution = `---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Lifecycle countersign local-operator fixture constitution"
+owners: [platform-team]
+selected_profile: lifecycle-local
+environments: [local, production]
+catalog:
+  roles: [story-review]
+  transitions: [close]
+  evidence_sources: []
+  escalation_metrics: []
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+# Lifecycle countersign local-operator fixture
+`
+
+const lifecycleLocalOperatorProfile = `---
+schema: verdi.governance-profile/v1
+id: lifecycle-local
+class: solo
+applicable_transitions: [close]
+identity_trust_sources:
+  - {id: local-op, kind: local-operator}
+role_mappings:
+  - {role: story-review, trust_source: local-op, subjects: ["900"]}
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - {transitions: [close], roles: [story-review], minimum: 1}
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+Hermetic solo lifecycle governance profile whose only trust source is
+local-operator.
+`
+
+func lifecycleLocalOperatorFixture(t *testing.T) (Resolver, Request) {
+	t.Helper()
+	f := forgefake.New()
+	f.SeedOpenMR("main", forge.OpenMR{ID: "17", SourceBranch: "feature/candidate"})
+	snapshot, err := forge.NewApprovalSnapshot("github", "acme/widgets", "17", lifecycleCandidateSHA,
+		forge.ProviderActor{Scheme: "github-user-id", Subject: "900"}, lifecycleNow().Add(-time.Minute),
+		[]forge.Approval{lifecycleApproval("1", "900")})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	f.SeedApprovalSnapshot("17", snapshot)
+	mdl := &model.Model{Lifecycle: map[string]model.Lifecycle{
+		"story": {Transitions: []model.Transition{{Verb: "close", Obligations: []model.Obligation{{Scheme: "attestation", Kind: "countersign", Count: 1}}}}},
+	}}
+	manifest := &store.Manifest{Countersign: &store.CountersignConfig{
+		TrustSource: "local-op", FreshnessPolicyID: "forge-current",
+		MaximumObservationAgeSeconds: 300, MaximumApprovalAgeSeconds: 3600,
+	}}
+	resolver := Resolver{Forge: f, Clock: lifecycleNow}
+	request := Request{
+		Root: "/candidate", Manifest: manifest, Model: mdl, TargetClass: "story",
+		DefaultBranch: "main", SourceBranch: "feature/candidate", LocalCandidateSHA: lifecycleCandidateSHA,
+		AcceptedBranch: "main", AcceptedCommit: lifecycleAcceptedCommit,
+		AcceptedProfileSource: fstest.MapFS{
+			".verdi/policy/constitution.md":             &fstest.MapFile{Data: []byte(lifecycleLocalOperatorConstitution), Mode: 0o444},
+			".verdi/policy/profiles/lifecycle-local.md": &fstest.MapFile{Data: []byte(lifecycleLocalOperatorProfile), Mode: 0o444},
+		},
+	}
+	return resolver, request
+}
+
+// TestResolveKernelSeparationSoloCollapse is the "permitted with collapse"
+// outcome: a solo profile whose close roles map the author's own forge
+// principal — GitLab-shaped self-approval is a legitimate provider fact,
+// unlike GitHub's structural refusal. The kernel's solo role-collapse
+// disclosure must reach the countersign record's witnesses.
+func TestResolveKernelSeparationSoloCollapse(t *testing.T) {
+	resolver, request := lifecycleFixture(t, "story", "900", "900")
+	request.AcceptedProfileSource = lifecycleSoloAcceptedSource()
+
+	result, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.Verdict != countersign.VerdictProven || result.Record == nil {
+		t.Fatalf("result = %+v, want a proven solo-collapse record", result)
+	}
+	if result.Record.Obligation.SeparationRule != countersign.SeparationNone {
+		t.Fatalf("separation rule = %q, want %q", result.Record.Obligation.SeparationRule, countersign.SeparationNone)
+	}
+	if !containsLifecycleWitness(result.Record.Witnesses, "kernel-separation:solo-role-collapse:") {
+		t.Fatalf("record witnesses = %v, want a kernel solo-role-collapse disclosure", result.Record.Witnesses)
+	}
+}
+
+// TestResolveKernelSeparationTeamAndHighAssuranceRefuseSelfApproval is the
+// "required" outcome for the two profile classes the ledger names
+// explicitly: an author's own approval never counts, and the separation
+// verdict is violated with a witness — today's AC-3 behavior, unchanged.
+func TestResolveKernelSeparationTeamAndHighAssuranceRefuseSelfApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source fstest.MapFS
+	}{
+		{"team", lifecycleAcceptedSource(`"101", "900"`)},
+		{"high-assurance", lifecycleHighAssuranceAcceptedSource()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver, request := lifecycleFixture(t, "story", "900", "900")
+			request.AcceptedProfileSource = tc.source
+
+			result, err := resolver.Resolve(context.Background(), request)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if result.Verdict != countersign.VerdictViolated || result.Record == nil {
+				t.Fatalf("result = %+v, want a violated self-approval record", result)
+			}
+			if result.Record.Obligation.SeparationRule != countersign.SeparationDifferentFromAuthor {
+				t.Fatalf("separation rule = %q, want %q", result.Record.Obligation.SeparationRule, countersign.SeparationDifferentFromAuthor)
+			}
+			if !containsLifecycleWitness(result.Record.Witnesses, "approval-separation:") {
+				t.Fatalf("record witnesses = %v, want a self-approval separation witness", result.Record.Witnesses)
+			}
+		})
+	}
+}
+
+// TestResolveKernelSeparationUnavailableFailsClosed is the "unavailable or
+// unproven kernel answer" outcome: a solo profile whose OWN rules declare
+// an escalation threshold the kernel-consulted probe cannot satisfy, so the
+// decision is not cleanly authorized. The resolver keeps
+// SeparationDifferentFromAuthor and discloses why, and the downstream
+// self-approval refusal fires exactly as it does for team/high-assurance.
+func TestResolveKernelSeparationUnavailableFailsClosed(t *testing.T) {
+	resolver, request := lifecycleFixture(t, "story", "900", "900")
+	request.AcceptedProfileSource = lifecycleSoloEscalationAcceptedSource()
+
+	result, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.Verdict != countersign.VerdictViolated || result.Record == nil {
+		t.Fatalf("result = %+v, want a fail-closed violated record", result)
+	}
+	if result.Record.Obligation.SeparationRule != countersign.SeparationDifferentFromAuthor {
+		t.Fatalf("separation rule = %q, want the fail-closed %q", result.Record.Obligation.SeparationRule, countersign.SeparationDifferentFromAuthor)
+	}
+	if !containsLifecycleWitness(result.Record.Witnesses, "kernel-separation:") {
+		t.Fatalf("record witnesses = %v, want a kernel-separation disclosure explaining the fail-closed answer", result.Record.Witnesses)
+	}
+}
+
+// TestResolveLocalOperatorOnlyTrustSourceNeverProvesCountersign is SI-227's
+// separately narrowed second finding: a local-operator identity alone
+// never proves a close countersign, with its own witness.
+func TestResolveLocalOperatorOnlyTrustSourceNeverProvesCountersign(t *testing.T) {
+	resolver, request := lifecycleLocalOperatorFixture(t)
+
+	result, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.Verdict != countersign.VerdictUnproven || result.Record != nil {
+		t.Fatalf("result = %+v, want an unproven local-operator refusal", result)
+	}
+	if !containsLifecycleWitness(result.Witnesses, "principal-authentication") {
+		t.Fatalf("witnesses = %v, want a principal-authentication witness", result.Witnesses)
+	}
+	if !containsLifecycleWitness(result.Witnesses, "local-operator") {
+		t.Fatalf("witnesses = %v, want it to name local-operator", result.Witnesses)
+	}
+}
+
+// unprovenTrustFactReader always reports an unavailable trust fact — the
+// TestKernelSeparationRuleAuthorNotAuthenticated fixture below needs a
+// validly-sealed non-authenticated PrincipalResolution, which only
+// gp.Resolver.Resolve can mint.
+type unprovenTrustFactReader struct{}
+
+func (unprovenTrustFactReader) ReadTrustFact(_ context.Context, source gp.TrustSource, _ gp.PrincipalClaim) (gp.TrustFact, error) {
+	return gp.TrustFact{SourceID: source.ID, SourceKind: source.Kind, Available: false, Reason: "test: evidence unavailable"}, nil
+}
+
+// TestKernelSeparationRuleAuthorNotAuthenticated is kernelSeparationRule's
+// own unit boundary for an operand no lifecycle fixture's providerFacts
+// bridge can produce (the candidate author's claim.Subject is always
+// echoed back present by construction): a non-authenticated author makes
+// the kernel's answer unavailable outright, so the helper fails closed
+// without even calling gp.Authorize.
+func TestKernelSeparationRuleAuthorNotAuthenticated(t *testing.T) {
+	profile, err := loadSelectedProfile(lifecycleSoloAcceptedSource())
+	if err != nil {
+		t.Fatalf("loadSelectedProfile: %v", err)
+	}
+	resolver := gp.NewResolver(unprovenTrustFactReader{})
+	author, err := resolver.Resolve(context.Background(), profile, gp.PrincipalClaim{TrustSource: "forge-live", Subject: "900"})
+	if err != nil {
+		t.Fatalf("resolve author: %v", err)
+	}
+	if author.State != gp.ResolutionUnproven {
+		t.Fatalf("author.State = %q, want unproven", author.State)
+	}
+
+	rule, witnesses := kernelSeparationRule(profile, "story-review", author)
+	if rule != countersign.SeparationDifferentFromAuthor {
+		t.Fatalf("rule = %q, want the fail-closed %q", rule, countersign.SeparationDifferentFromAuthor)
+	}
+	if len(witnesses) != 1 || !strings.Contains(witnesses[0], "unavailable") {
+		t.Fatalf("witnesses = %v, want exactly one disclosed unavailable reason", witnesses)
 	}
 }

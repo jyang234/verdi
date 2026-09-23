@@ -142,15 +142,35 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 	if !profileHasTrustSource(profile, config.TrustSource) {
 		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is absent from the selected governance profile", config.TrustSource)), nil
 	}
+	// SI-227's second finding: a local-operator identity is a bare
+	// self-assertion (2026-09-05 local-operator disposition design §2.1)
+	// and can never itself prove a close countersign, which needs a
+	// forge-witnessed approval fact. Checked before any principal is
+	// resolved, using only the kernel's own exported trust-source-kind
+	// query — never internal/governanceprincipal edits.
+	if localOnly, err := gp.HasTrustSourceKind(profile, config.TrustSource, gp.TrustSourceLocalOperator); err != nil {
+		return Result{}, fmt.Errorf("lifecycle countersign: configured trust source kind: %w", err)
+	} else if localOnly {
+		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is local-operator only: a close countersign needs a forge-witnessed approval, never a bare self-assertion (SI-227)", config.TrustSource)), nil
+	}
 	facts := providerFacts{snapshot: snapshot}
 	principalResolver := gp.NewResolver(facts)
 	author, err := principalResolver.Resolve(ctx, profile, gp.PrincipalClaim{TrustSource: config.TrustSource, Subject: snapshot.CandidateAuthor.Subject})
 	if err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: resolve candidate author: %w", err)
 	}
+	separationRule, separationWitnesses := kernelSeparationRule(profile, role, author)
 	clock := r.Clock
 	if clock == nil {
 		clock = time.Now
+	}
+	// SeparationNone means the profile's own rules permit the author's
+	// principal to also fill the approver role (solo collapse); the
+	// candidate author is then meaningless to countersign.Resolve's
+	// per-approval separation check and validateRequest requires it absent.
+	var candidateAuthor *gp.PrincipalResolution
+	if separationRule == countersign.SeparationDifferentFromAuthor {
+		candidateAuthor = &author
 	}
 	record, err := countersign.Resolve(ctx, countersign.Request{
 		Snapshot: snapshot, LocalCandidateSHA: request.LocalCandidateSHA,
@@ -158,12 +178,13 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 		Obligation: countersign.Obligation{
 			Transition: "close", Scheme: countersign.SchemeAttestation,
 			Kind: countersign.KindCountersign, Role: role, RequiredCount: requiredCount,
-			SeparationRule: countersign.SeparationDifferentFromAuthor,
+			SeparationRule: separationRule,
 		},
-		FreshnessPolicy: policy,
-		EvaluatedAt:     clock().UTC().Format(time.RFC3339Nano),
-		CandidateAuthor: &author,
-		Resolver:        principalResolver,
+		FreshnessPolicy:       policy,
+		EvaluatedAt:           clock().UTC().Format(time.RFC3339Nano),
+		CandidateAuthor:       candidateAuthor,
+		Resolver:              principalResolver,
+		SeparationDisclosures: separationWitnesses,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: reduce approvals: %w", err)
@@ -274,4 +295,112 @@ func unproven(operand, detail string) Result {
 	witnesses := []string{fmt.Sprintf("lifecycle-countersign:%s:unproven:%s", operand, detail)}
 	sort.Strings(witnesses)
 	return Result{Verdict: countersign.VerdictUnproven, Witnesses: witnesses}
+}
+
+// kernelCloseTransition is the fixed transition name every kernel
+// separation probe evaluates — the same literal Resolve binds into
+// countersign.Obligation.Transition above.
+const kernelCloseTransition = "close"
+
+// kernelSeparationRule asks the governance kernel's authorization
+// interpreter (gp.Authorize), using the selected profile's own rules for
+// the close transition and the resolved candidate author's identity,
+// whether the obligation's approverRole must be filled by a principal
+// different from the author (SI-227, as narrowed by PR #345 finding F1).
+// It never decides from profile.Class alone: gp.Authorize is always
+// consulted, and Class only gates which POSITIVE answer (collapse) can be
+// honored.
+//
+// Outcomes:
+//   - required (team, high-assurance, or any profile whose own rules say
+//     so): countersign.SeparationDifferentFromAuthor, today's behavior,
+//     AC-3's self-approval refusal intact;
+//   - permitted with collapse under a solo profile whose kernel decision
+//     cleanly authorizes the author also filling approverRole, carrying a
+//     solo role-collapse disclosure for the author's own principal:
+//     countersign.SeparationNone, with that disclosure returned as a
+//     witness for the caller to carry into the countersign record;
+//   - unavailable or unproven kernel answer (an unauthenticated author, a
+//     kernel error, or any decision that is not a clean authorized solo
+//     collapse): countersign.SeparationDifferentFromAuthor (fail closed),
+//     with a witness disclosing why.
+func kernelSeparationRule(profile gp.Profile, approverRole string, author gp.PrincipalResolution) (countersign.SeparationRule, []string) {
+	if author.State != gp.ResolutionAuthenticated {
+		return countersign.SeparationDifferentFromAuthor, []string{
+			`kernel-separation:unavailable:reason="candidate author principal is not authenticated"`,
+		}
+	}
+	approvals := []gp.ApprovalRecord{{Role: approverRole, PrincipalID: author.PrincipalID}}
+	for _, otherRole := range otherProfileRoles(profile, approverRole) {
+		if holds, err := gp.HoldsRole(profile, author.Claim, otherRole); err == nil && holds {
+			approvals = append(approvals, gp.ApprovalRecord{Role: otherRole, PrincipalID: author.PrincipalID})
+		}
+	}
+	decision, err := gp.Authorize(profile, gp.AuthorizationRequest{
+		Transition:  kernelCloseTransition,
+		Posture:     gp.PostureAuthoritative,
+		Resolutions: []gp.PrincipalResolution{author},
+		Approvals:   approvals,
+	})
+	if err != nil {
+		return countersign.SeparationDifferentFromAuthor, []string{
+			fmt.Sprintf("kernel-separation:unavailable:reason=%q", err.Error()),
+		}
+	}
+	if profile.Class == gp.ClassSolo && decision.State == gp.AuthorizationAuthorized {
+		for _, d := range decision.Disclosures {
+			if d.Code == gp.ReasonSoloRoleCollapse && d.PrincipalID == author.PrincipalID {
+				return countersign.SeparationNone, []string{
+					fmt.Sprintf("kernel-separation:solo-role-collapse:principal_id=%q:roles=%q", d.PrincipalID, d.Roles),
+				}
+			}
+		}
+	}
+	return countersign.SeparationDifferentFromAuthor, kernelRequiredWitnesses(profile, decision)
+}
+
+// otherProfileRoles returns every distinct role name profile's own role
+// mappings declare besides approverRole, sorted for determinism — the
+// candidate "other" roles kernelSeparationRule probes the author's
+// membership against. It reads only the already-decoded, sealed profile's
+// public field; the actual membership question is answered by the
+// kernel's own exported gp.HoldsRole, never reimplemented here.
+func otherProfileRoles(profile gp.Profile, approverRole string) []string {
+	seen := map[string]bool{approverRole: true}
+	var roles []string
+	for _, m := range profile.RoleMappings {
+		if seen[m.Role] {
+			continue
+		}
+		seen[m.Role] = true
+		roles = append(roles, m.Role)
+	}
+	sort.Strings(roles)
+	return roles
+}
+
+// kernelRequiredWitnesses discloses why kernelSeparationRule kept
+// SeparationDifferentFromAuthor when the decision was not a clean
+// authorized solo collapse: every applicable kernel finding, or — when the
+// decision was itself authorized but collapse was not honored (not solo,
+// or no matching disclosure for this author) — a single witness naming
+// the reason.
+func kernelRequiredWitnesses(profile gp.Profile, decision gp.AuthorizationDecision) []string {
+	if decision.State != gp.AuthorizationAuthorized {
+		witnesses := make([]string, 0, len(decision.Findings))
+		for _, f := range decision.Findings {
+			witnesses = append(witnesses, fmt.Sprintf(
+				"kernel-separation:%s:code=%q:role=%q:principal_id=%q:detail=%q",
+				f.State, f.Code, f.Role, f.PrincipalID, f.Detail,
+			))
+		}
+		if len(witnesses) == 0 {
+			witnesses = append(witnesses, fmt.Sprintf("kernel-separation:%s:reason=\"kernel decision was not authorized\"", decision.State))
+		}
+		return witnesses
+	}
+	if profile.Class != gp.ClassSolo {
+		return []string{fmt.Sprintf("kernel-separation:required:class=%q", profile.Class)}
+	}
+	return []string{`kernel-separation:unavailable:reason="no solo role-collapse disclosure for this profile"`}
 }
