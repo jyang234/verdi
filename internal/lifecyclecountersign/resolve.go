@@ -151,6 +151,7 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 	if localOnly, err := gp.HasTrustSourceKind(profile, config.TrustSource, gp.TrustSourceLocalOperator); err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: configured trust source kind: %w", err)
 	} else if localOnly {
+		// vocab:identity — operating-model transition verb, not display prose.
 		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is local-operator only: a close countersign needs a forge-witnessed approval, never a bare self-assertion (SI-227)", config.TrustSource)), nil
 	}
 	facts := providerFacts{snapshot: snapshot}
