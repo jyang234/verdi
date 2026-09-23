@@ -535,6 +535,21 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 			{"gated job stamps without exactly one gated job", func(f *forge.EnvironmentReviewFacts) {
 				f.GatedJobCount, f.GatedJobID, f.GatedJobStatus, f.GatedJobConclusion = 0, "", "", ""
 			}},
+			{"gated job id alone without a gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobStatus, f.GatedJobConclusion, f.GatedJobCreatedAt, f.GatedJobStartedAt = 0, "", "", "", ""
+			}},
+			{"gated job status alone without a gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobID, f.GatedJobConclusion, f.GatedJobCreatedAt, f.GatedJobStartedAt = 0, "", "", "", ""
+			}},
+			{"gated job conclusion alone without a gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobID, f.GatedJobStatus, f.GatedJobCreatedAt, f.GatedJobStartedAt = 0, "", "", "", ""
+			}},
+			{"gated job creation stamp alone without a gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobID, f.GatedJobStatus, f.GatedJobConclusion, f.GatedJobStartedAt = 0, "", "", "", ""
+			}},
+			{"gated job start stamp alone without a gated job", func(f *forge.EnvironmentReviewFacts) {
+				f.GatedJobCount, f.GatedJobID, f.GatedJobStatus, f.GatedJobConclusion, f.GatedJobCreatedAt = 0, "", "", "", ""
+			}},
 			{"gated job details with two gated jobs", func(f *forge.EnvironmentReviewFacts) { f.GatedJobCount = 2 }},
 			{"missing gated job id", func(f *forge.EnvironmentReviewFacts) { f.GatedJobID = "" }},
 			{"unknown gated job status", func(f *forge.EnvironmentReviewFacts) { f.GatedJobStatus = "blocked" }},
