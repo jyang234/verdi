@@ -495,7 +495,12 @@ func TestEnvironmentReviewApprovalContract_Static(t *testing.T) {
 	t.Run("github refuses a non-canonical run id before any request (m-1)", func(t *testing.T) {
 		for _, id := range []string{"+30433642", "030433642", " 30433642", "30433642 ", "3.0433642e7", "0", "-30433642", ""} {
 			t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
-				a := github.New(github.Config{BaseURL: "http://unused.invalid", Owner: erOwner, Repo: erRepo, Clock: fixedClock})
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					t.Errorf("request for a non-canonical run id: %s %s", r.Method, r.URL.String())
+					http.NotFound(w, r)
+				}))
+				defer server.Close()
+				a := github.New(github.Config{BaseURL: server.URL, Owner: erOwner, Repo: erRepo, HTTPClient: server.Client(), Clock: fixedClock})
 				query := erQuery()
 				query.RunID = id
 				if facts, err := a.EnvironmentReview(context.Background(), query); err == nil {
