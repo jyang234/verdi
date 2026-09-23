@@ -81,34 +81,47 @@ func evaluateOneBehindReport(ctx context.Context, root, specName, head string) (
 		return oneBehindOutcome{Reason: fmt.Sprintf("%s is not a single-parent commit (a root commit or a merge) — SI-231 requires exactly one parent", head)}, nil
 	}
 
-	reportRelPath := store.DeviationReportRelPath(store.ZoneActive, specName)
+	// DiffNameStatus and Show answer in REPOSITORY-root-relative paths, and
+	// root is the STORE root, which sits below the git root whenever
+	// store.FindRoot found a nested .verdi (L3b review m-4). Compare in git's
+	// coordinates by re-basing the store-relative path through RepoPrefix,
+	// as requireCleanIndex relates the two (close.go): without it a nested
+	// store refuses its own report and accepts a root store's same-named
+	// one. Under diff.relative git reports only this directory's paths, and
+	// relative to it, so no entry can equal the re-based path: that
+	// configuration refuses, never accepts.
+	prefix, err := gitx.RepoPrefix(ctx, root)
+	if err != nil {
+		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
+	}
+	reportRepoPath := prefix + store.DeviationReportRelPath(store.ZoneActive, specName)
 	entries, err := gitx.DiffNameStatus(ctx, root, parent, head)
 	if err != nil {
 		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
 	}
 	if len(entries) != 1 {
-		return oneBehindOutcome{Reason: fmt.Sprintf("%s..%s changes %d path(s), not exactly one — SI-231 requires HEAD's sole change to be %s", parent, head, len(entries), reportRelPath)}, nil
+		return oneBehindOutcome{Reason: fmt.Sprintf("%s..%s changes %d path(s), not exactly one — SI-231 requires HEAD's sole change to be %s", parent, head, len(entries), reportRepoPath)}, nil
 	}
 	entry := entries[0]
-	if entry.Path != reportRelPath || (entry.Status != "A" && entry.Status != "M") {
-		return oneBehindOutcome{Reason: fmt.Sprintf("%s..%s's sole changed path is %s (status %s), not an added/modified %s", parent, head, entry.Path, entry.Status, reportRelPath)}, nil
+	if entry.Path != reportRepoPath || (entry.Status != "A" && entry.Status != "M") {
+		return oneBehindOutcome{Reason: fmt.Sprintf("%s..%s's sole changed path is %s (status %s), not an added/modified %s", parent, head, entry.Path, entry.Status, reportRepoPath)}, nil
 	}
 
-	raw, err := gitx.Show(ctx, root, head, reportRelPath)
+	raw, err := gitx.Show(ctx, root, head, reportRepoPath)
 	if err != nil {
-		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: reading %s at %s: %w", specName, reportRelPath, head, err)
+		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: reading %s at %s: %w", specName, reportRepoPath, head, err)
 	}
 	fm, body, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
-		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %s at %s: %w", specName, reportRelPath, head, err)
+		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %s at %s: %w", specName, reportRepoPath, head, err)
 	}
 	report, err := artifact.DecodeDeviation(fm)
 	if err != nil {
-		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %s at %s failed to decode: %w", specName, reportRelPath, head, err)
+		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %s at %s failed to decode: %w", specName, reportRepoPath, head, err)
 	}
 
 	if report.Frozen != nil {
-		return oneBehindOutcome{Reason: fmt.Sprintf("the committed report at %s (%s) is already frozen (at %s, commit %s)", head, reportRelPath, report.Frozen.At, report.Frozen.Commit)}, nil
+		return oneBehindOutcome{Reason: fmt.Sprintf("the committed report at %s (%s) is already frozen (at %s, commit %s)", head, reportRepoPath, report.Frozen.At, report.Frozen.Commit)}, nil
 	}
 	if report.Covers != parent {
 		return oneBehindOutcome{Reason: fmt.Sprintf("the committed report at %s covers %s, not HEAD's parent %s", head, report.Covers, parent)}, nil

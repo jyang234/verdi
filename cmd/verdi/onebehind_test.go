@@ -468,3 +468,80 @@ func writeOneBehindFile(t *testing.T, path, content string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+// TestEvaluateOneBehindReport_NestedStore is clause (2)'s coordinate system
+// (L3b review m-4): the store root may sit below the git root (store.FindRoot
+// walks up to the nearest .verdi), while DiffNameStatus and Show answer in
+// repository-root-relative paths, so the predicate re-bases the report's
+// store-relative path through gitx.RepoPrefix, as requireCleanIndex does.
+func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
+	ctx := context.Background()
+	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
+	const manifest = "schema: verdi.layout/v1\nforge: gitlab\n"
+
+	t.Run("a single nested store accepts its own committed report", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files:   map[string]string{"sub/.verdi/verdi.yaml": manifest},
+			Message: "nested store",
+		}})
+		sub := filepath.Join(repo.Dir, "sub")
+		writeOneBehindFile(t, filepath.Join(sub, filepath.FromSlash(rel)), oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+		head := commitAllOnCurrentBranch(t, repo.Dir, "R in the nested store")
+
+		got, err := evaluateOneBehindReport(ctx, sub, oneBehindReportSpecName, head)
+		if err != nil {
+			t.Fatalf("evaluateOneBehindReport: %v", err)
+		}
+		if !got.Accepted || got.Parent != repo.Head {
+			t.Fatalf("got Accepted=%v Parent=%q Reason=%q, want the nested store's own one-behind report accepted with parent %q", got.Accepted, got.Parent, got.Reason, repo.Head)
+		}
+	})
+
+	t.Run("a nested store refuses the root store's same-named report", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				".verdi/verdi.yaml":     manifest,
+				"sub/.verdi/verdi.yaml": manifest,
+			},
+			Message: "two stores",
+		}})
+		sub := filepath.Join(repo.Dir, "sub")
+		content := oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML)
+		writeOneBehindFile(t, filepath.Join(repo.Dir, filepath.FromSlash(rel)), content)
+		head := commitAllOnCurrentBranch(t, repo.Dir, "R in the ROOT store")
+		// The nested store's own working-tree file holds the very same
+		// bytes, so only the path clause can tell the two stores apart.
+		writeOneBehindFile(t, filepath.Join(sub, filepath.FromSlash(rel)), content)
+
+		got, err := evaluateOneBehindReport(ctx, sub, oneBehindReportSpecName, head)
+		if err != nil {
+			t.Fatalf("evaluateOneBehindReport: %v", err)
+		}
+		if got.Accepted {
+			t.Fatal("Accepted = true, want false: the nested store accepted the root store's report")
+		}
+		if want := "not an added/modified sub/" + rel; !strings.Contains(got.Reason, want) {
+			t.Fatalf("Reason = %q, want the path clause naming the nested store's own report (%q)", got.Reason, want)
+		}
+	})
+
+	t.Run("diff.relative never hides a change outside a nested store", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files:   map[string]string{"sub/.verdi/verdi.yaml": manifest},
+			Message: "nested store",
+		}})
+		runGitCmd(t, repo.Dir, "config", "diff.relative", "true")
+		sub := filepath.Join(repo.Dir, "sub")
+		writeOneBehindFile(t, filepath.Join(sub, filepath.FromSlash(rel)), oneBehindReportContent(repo.Head, oneBehindDispositionedFindingYAML))
+		writeOneBehindFile(t, filepath.Join(repo.Dir, "main.go"), "package main\n")
+		head := commitAllOnCurrentBranch(t, repo.Dir, "R plus code outside the nested store")
+
+		got, err := evaluateOneBehindReport(ctx, sub, oneBehindReportSpecName, head)
+		if err != nil {
+			t.Fatalf("evaluateOneBehindReport: %v", err)
+		}
+		if got.Accepted {
+			t.Fatal("Accepted = true, want false: a commit that also changes code outside the store is never SI-231's shape")
+		}
+	})
+}
