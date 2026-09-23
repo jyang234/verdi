@@ -62,6 +62,7 @@ func evaluateOneBehindReport(ctx context.Context, root, specName, head string) (
 		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
 	}
 	if !hasOneParent {
+		// vocab:identity — non-vocabulary homograph: git's own merge commit (two parents), never the `merge` lifecycle transition word
 		return oneBehindOutcome{Reason: fmt.Sprintf("%s is not a single-parent commit (a root commit or a merge) — SI-231 requires exactly one parent", head)}, nil
 	}
 
