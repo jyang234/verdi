@@ -251,33 +251,105 @@ func verifySelfHostedACDeclared(root, specRef, acID string) error {
 // closuregate) actually reads (see this file's package doc). Existing
 // records sharing a new record's producer id are replaced (idempotent
 // across same-commit CI re-runs); every other existing record is preserved.
+// It is writeManagedEvidence with no managed subset beyond the incoming
+// records' own producers.
 func writeSelfHostedEvidence(root, commit string, bySpec map[string][]artifact.Evidence) error {
-	specRefs := make([]string, 0, len(bySpec))
-	for s := range bySpec {
-		specRefs = append(specRefs, s)
+	_, err := writeManagedEvidence(root, commit, nil, bySpec)
+	return err
+}
+
+// writeManagedEvidence rewrites each affected spec's
+// derived/<spec-ref-slug>/<commit>/verdicts.json through
+// replaceManagedEvidence, with managed[specRef] as that spec's managed subset
+// and bySpec[specRef] as its incoming records (SI-238). A spec is affected when
+// it has a non-empty managed subset or at least one incoming record; no other
+// spec's file is read or written. Every affected file is read and decoded
+// before any is written, so an undecodable file writes nothing anywhere. A
+// spec whose file does not exist and that has nothing to add creates nothing,
+// and a file the replacement would leave unchanged (nothing dropped, nothing
+// added) is not rewritten. Every write is canonical JSON. It returns, per
+// spec ref, the records it withdrew: existing records dropped with no
+// incoming record for their producer.
+func writeManagedEvidence(root, commit string, managed map[string]map[string]bool, bySpec map[string][]artifact.Evidence) (map[string][]artifact.Evidence, error) {
+	affected := map[string]bool{}
+	for specRef, producers := range managed {
+		if len(producers) > 0 {
+			affected[specRef] = true
+		}
+	}
+	for specRef, records := range bySpec {
+		if len(records) > 0 {
+			affected[specRef] = true
+		}
+	}
+	specRefs := make([]string, 0, len(affected))
+	for specRef := range affected {
+		specRefs = append(specRefs, specRef)
 	}
 	sort.Strings(specRefs)
 
+	type pendingWrite struct {
+		dir, path string
+		records   []artifact.Evidence
+	}
+	var writes []pendingWrite
+	withdrawnBySpec := map[string][]artifact.Evidence{}
 	for _, specRef := range specRefs {
 		dir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug(specRef)), commit)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("self-hosted evidence: mkdir %s: %w", dir, err)
-		}
 		path := filepath.Join(dir, "verdicts.json")
 		existing, err := readExistingEvidenceRecords(path)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		merged := mergeEvidenceByProducer(existing, bySpec[specRef])
-		data, err := canonjson.Marshal(merged)
+		records, withdrawn := replaceManagedEvidence(existing, managed[specRef], bySpec[specRef])
+		if len(withdrawn) > 0 {
+			withdrawnBySpec[specRef] = withdrawn
+		}
+		if len(withdrawn) == 0 && len(bySpec[specRef]) == 0 {
+			continue
+		}
+		writes = append(writes, pendingWrite{dir: dir, path: path, records: records})
+	}
+
+	for _, w := range writes {
+		if err := os.MkdirAll(w.dir, 0o755); err != nil {
+			return nil, fmt.Errorf("derived evidence: mkdir %s: %w", w.dir, err)
+		}
+		data, err := canonjson.Marshal(w.records)
 		if err != nil {
-			return fmt.Errorf("self-hosted evidence: marshaling %s: %w", path, err)
+			return nil, fmt.Errorf("derived evidence: marshaling %s: %w", w.path, err)
 		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return fmt.Errorf("self-hosted evidence: writing %s: %w", path, err)
+		if err := os.WriteFile(w.path, data, 0o644); err != nil {
+			return nil, fmt.Errorf("derived evidence: writing %s: %w", w.path, err)
 		}
 	}
-	return nil
+	return withdrawnBySpec, nil
+}
+
+// replaceManagedEvidence is one spec's replacement at one commit (SI-238). It
+// drops every existing record whose Producer is in managed or is an incoming
+// record's Producer, keeps every other existing record unchanged and in its
+// order, then appends incoming. withdrawn is the dropped records with no
+// incoming record for their producer. With a nil managed subset this is
+// exactly mergeEvidenceByProducer. records is never nil, so a spec emptied by
+// the replacement is written as an empty array, never null.
+func replaceManagedEvidence(existing []artifact.Evidence, managed map[string]bool, incoming []artifact.Evidence) (records, withdrawn []artifact.Evidence) {
+	incomingProducers := make(map[string]bool, len(incoming))
+	for _, r := range incoming {
+		incomingProducers[r.Producer] = true
+	}
+	records = make([]artifact.Evidence, 0, len(existing)+len(incoming))
+	for _, r := range existing {
+		if !managed[r.Producer] && !incomingProducers[r.Producer] {
+			records = append(records, r)
+			continue
+		}
+		if !incomingProducers[r.Producer] {
+			withdrawn = append(withdrawn, r)
+		}
+	}
+	records = append(records, incoming...)
+	return records, withdrawn
 }
 
 // readExistingEvidenceRecords reads and strict-decodes an already present
@@ -317,7 +389,10 @@ func readExistingEvidenceRecords(path string) ([]artifact.Evidence, error) {
 // appends the incoming records — idempotent across same-commit CI re-runs
 // (03 §The fold already takes "the latest run's verdict" as authoritative;
 // this additionally keeps the FILE itself from growing unboundedly across
-// retries of the same job on the same commit).
+// retries of the same job on the same commit). runtimeprobe.go's
+// writeRuntimeRecord merges runtime.json through it; verdicts.json is
+// written through replaceManagedEvidence, which drops a managed producer's
+// earlier record even when no incoming record replaces it (SI-238).
 func mergeEvidenceByProducer(existing, incoming []artifact.Evidence) []artifact.Evidence {
 	replaced := make(map[string]bool, len(incoming))
 	for _, r := range incoming {
