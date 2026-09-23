@@ -101,8 +101,9 @@ family (SI-241):
   - `accepted_spec_digest`: the canonical content digest of that accepted spec;
   - `implementation`: `{ commit: H_e, tree: <H_e tree id> }`;
   - `inventory_entry`: the inventory entry id (§6);
-  - `landed_snapshot`: D, the default-branch commit the approver verified already
-    contains H_e (§5 Scope). The approvals sign the exemption including D.
+  - `landed_snapshot`: D, the merge commit the forge created when it merged a
+    change into the default branch, containing H_e (§5 Scope). The approvals sign
+    the exemption including D.
 
 An exemption carrying both families, more than one required-input witness, or a
 required-input witness with any other phase or input set fails strict decoding.
@@ -121,27 +122,36 @@ states as §5.5, each proven, violated-with-witness, or unproven (SI-242):
   (§3, W3); the inventory entry still names this story and H_e is admitted by it
   (§6, W11).
 - **Scope.** Eligibility at H_e, including the prior-landing witness (SI-249).
-  Let M_e be the first commit on the default branch's first-parent chain from which
-  the exemption's introducing commit is reachable — the issuance merge. Scope is
+  Commit parentage cannot show when the default-branch ref moved — merge commits
+  built elsewhere can be fast-forwarded onto it — so the order of landing,
+  approval, and issuance is proven only from forge-authenticated merge records,
+  read through the forge port by the close adapter and supplied to the evaluator
+  as facts, the same trust the countersign already places in the forge. Scope is
   proven only when all hold:
-  - M_e is a merge commit, the exemption's introducing commit is not an ancestor of
-    M_e's first parent, and it is an ancestor of M_e (issued by a merge, §9);
-  - H_e is an ancestor of D, D is on the default branch's first-parent chain, and
-    D is an ancestor of M_e's first parent — so H_e was part of a real default-branch
-    state that the approval bound and that preceded issuance;
+  - **Landing.** The forge reports a change request merged into the default branch
+    whose merge commit is D, created by the forge at merge time with two parents
+    (the default branch's head at that moment, and the change), and H_e is an
+    ancestor of D. Because the forge assigns D's identity when it merges, a
+    signature over D can only have been made after H_e was on the default branch.
+  - **Issuance.** The forge reports a second change request merged into the default
+    branch whose forge-created merge commit M_e introduces the exemption: the
+    exemption's introducing commit is an ancestor of M_e and not of M_e's first
+    parent, and D is an ancestor of M_e's first parent — the default branch's head
+    when the forge merged it (§9).
   - if a cutoff record exists, H_e is an ancestor of its cutoff commit (§7, W4);
   - the typed payload permits unsealed-provenance exemptions (§8, W12), and the
     governing profile is not high-assurance (W12).
 
-  A fast-forward or direct-push issuance (M_e not a merge commit), a D that is not
-  on the first-parent chain or does not precede M_e's first parent, and history
-  that is shallow or otherwise unavailable leave the order unknown: Scope is
-  unproven and the exemption is ineffective. In particular, an implementation and
-  its exemption that reach the default branch in the same merge fail, because
-  M_e's first parent does not contain H_e. The enforceable boundary is approval
-  (the signed D) and issuance (M_e), not the moment a person drafts the text,
-  which no repository fact can witness; this is an explicit rule the owner
-  ratifies with this design (SI-249).
+  A D or M_e for which the forge reports no merge into the default branch — a
+  commit pushed or fast-forwarded directly, merge commits built on another branch
+  and published by a fast-forward, a change merged into another branch, a merge
+  method that leaves no forge-created two-parent merge commit — and a forge that
+  cannot be read or an adapter that does not support the facts leave the order
+  unknown: Scope is unproven and the exemption is ineffective. The enforceable
+  boundary is approval (the signature over the forge-created D) and issuance (the
+  forge-merged M_e), not the moment a person drafts the text, which no repository
+  or forge fact witnesses; this is an explicit rule the owner ratifies with this
+  design (SI-249).
 - **Bound.** `expiry` is equal to or later than `evaluated_on`; a review
   condition alone is unproven.
 - **Authorization.** The kernel's result for the transition
@@ -211,15 +221,15 @@ formats.
 
 ## 9. The cap and escalation
 
-**Issuance, active, and the cap (W9).** An exemption is issued when the commit
-that introduces it is merged into the default branch; an exemption present only
+**Issuance, active, and the cap (W9).** An exemption is issued when the forge
+merges the change that introduces it into the default branch (§5 Scope); an exemption present only
 on another branch is not issued and is ineffective, so no two unmerged branches
 can each count as below the cap. An issued exemption is active until it expires,
 is consumed by a successful close, or is withdrawn by a governed constitution
 change that removes it. Issuance counts the
 candidate: a new exemption is refused when the active count including it would
 exceed `cap`, where the active count is read from the default-branch state at its
-own issuance merge's first parent — the canonical state it was issued into — so two
+own issuance merge's first parent — the head the forge merged it into — so two
 proposals drafted against the same old default-branch head are counted in the
 order they merge, and the second sees the first. An exemption already issued stays usable even when the active count
 equals `cap`. Consumed and expired exemptions remain listed permanently in the
@@ -295,7 +305,7 @@ unproven" whenever the block is present.
   `unproven` under any exemption; an exemption is applied by the conflict gate,
   never by the compiler".
 
-## 12. 03 ratification text (applied to origin and mirror after review)
+## 12. 03 ratification text (applied to origin and mirror in this change)
 
 §Closure ritual, step 3, after "generates `rollup.json` (schema
 `verdi.rollup/v1`: the final fold, per-AC statuses, evidence summaries,
@@ -316,8 +326,8 @@ Every wall has positive, boundary, and negative coverage in the composed hermeti
 built-binary close through the real conflict evaluator, or in a named lower-level
 test. The positive run is the real sequence: adopted fixture with the payload
 permitting one exemption → implementation merged onto the default branch at H_e →
-approval binding a default-branch snapshot D that contains H_e → merge the signed
-exemption into the default branch by a merge commit → cut the close branch there and commit the dispositions,
+approval binding the forge-created merge commit D that contains H_e → the forge
+merges the signed exemption's change into the default branch → cut the close branch there and commit the dispositions,
 ending at H → report-only R → CI records for R →
 artifact fetch → detached close with the environment approval → archive and
 rollup carrying the block → publication. Negative variants, each refusing with
@@ -326,8 +336,11 @@ condition only; permission off; high-assurance; missing or unauthorized approval
 another story; a feature; a stale accepted-spec digest; a story outside the
 inventory; claim and required-input witnesses mixed; an exemption authored before
 H_e landed; an implementation and its exemption merged together; both fast-forwarded
-onto the default branch together; a D not on the first-parent chain or not preceding
-the issuance merge; an exemption present only on an unmerged branch; two exemption
+onto the default branch together; merge commits built on another branch and
+fast-forwarded onto the default branch together (the closure check's graph); a D the
+forge did not create by merging into the default branch; a change merged into
+another branch; a squash or rebase issuance; an unreachable forge; a D not preceding
+the issuance merge's first parent; an exemption present only on an unmerged branch; two exemption
 proposals drafted against the same old default head, the second counted after the
 first merges; a non-allowlisted change between H_e and H (a source file, a rename, a
 mode change); an H not descending from H_e; H_e after the cutoff while the story
@@ -357,7 +370,7 @@ missing use history; and the label and `unproven` inputs present in every output
 | Plan A5 | §10, §12 | exact |
 | Plan A6 | §7, §8 | exact |
 | Closure-check note on manifest completeness | §3 | resolved by construction: no signer-declared list |
-| Phase A review PA-F1 (prior landing) | §2, §4 `landed_snapshot`, §5 Scope, §9 | added: approval binds a verified default-branch snapshot; issuance by a merge whose first parent contains H_e; unknown order blocks; drafting time explicitly not the boundary (SI-249) |
+| Phase A review PA-F1 and its closure check (prior landing) | §2, §4 `landed_snapshot`, §5 Scope, §9 | added: landing and issuance proven only from forge-authenticated merge records into the default branch; the approval signs the forge-created D; everything the forge cannot authenticate is unproven; drafting time explicitly not the boundary (SI-249) |
 | Phase A review notes (projection outputs; concurrent issuance) | §3, §9 | added |
 
 Coverage: 18 of 18 source items mapped; two refinements and one owner-ratified

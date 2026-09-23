@@ -104,9 +104,11 @@ family needs ratification before any of it is built.
   are kept distinct (SI-239). H_e is the eligible implementation commit: a
   default-branch commit at which the story's implementation is complete, chosen
   when the exemption is authored (after adoption). It must have landed before the
-  exemption is approved and issued: the approval binds a default-branch snapshot
-  that contains it, and issuance must be a merge whose first parent contains it;
-  an unknown order blocks (SI-249). H is the closed content and authority head — the commit the report
+  exemption is approved and issued, proven from forge-authenticated merge records:
+  the approval signs the forge-created merge commit that landed it on the default
+  branch, and issuance must be a later forge merge into the default branch whose
+  first parent contains that commit; anything the forge cannot authenticate, such
+  as a direct push or fast-forward, blocks (SI-249). H is the closed content and authority head — the commit the report
   covers — which comes later because the exemption and the other required
   committed governance records are committed after H_e. R is the report-only
   commit on H (SI-231, unchanged). The exempted implementation is the whole tree at
@@ -226,8 +228,9 @@ table), `spec/context-integrity-v3` (every v2 item carried; DC-25 and CO-7 added
 its supersession block is the v2→v3 coverage witness), the conflict record
 `conflict/context-integrity-unsealed-work-cannot-close`, the ledgered
 cross-references in the policy-conflict and compiler designs, and SI-239 through
-SI-248 (A4 resolved as a ledgered reading of GLG v3 AC-4, no supersession). The 08
-entry and the 03 origin/mirror edit are applied after review. One
+SI-248 (A4 resolved as a ledgered reading of GLG v3 AC-4, no supersession), and
+SI-249. The 03 origin/mirror sentence and the 08 entry are applied in the same
+change, before the ratification merge, after the review cycle. One
 independent Codex review of the exact head, at most one correction pass, one
 closure check (repository rules). The owner's merge ratifies. Nothing in phase B
 starts before that merge.
@@ -236,7 +239,7 @@ starts before that merge.
 
 | Lane | Scope | Tier |
 |---|---|---|
-| E1 | Exemption witness family, eligibility witnesses (H_e, cutoff ancestry, inventory), the H_e-to-H content-identity proof over the governance allowlist, evaluator resolution, report classes, close-time walls W2–W6 and W9–W11 (`internal/policyartifact`, `internal/policyconflict`) | 3 |
+| E1 | Exemption witness family, eligibility witnesses (H_e, cutoff ancestry, inventory, forge-authenticated landing and issuance merge records through the forge port), the H_e-to-H content-identity proof over the governance allowlist, evaluator resolution, report classes, close-time walls W2–W6 and W9–W11 (`internal/policyartifact`, `internal/policyconflict`) | 3 |
 | E2 | Authenticated approval reader: owner-signed payloads mapped through the governance kernel, for exemption, escalation, and disposition approvals (decision 5) | 3 |
 | E3 | Closure record, rollup, and archive label; the canonical use history; `verdi audit` listing; the escalation metric feed | 3 |
 | E3f | Board and journey presentation of the label (FABLE frontend lane) | 2 |
