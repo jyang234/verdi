@@ -369,7 +369,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("github rejects duplicate incomplete unknown and trailing facts", func(t *testing.T) {
+	t.Run("github rejects duplicate incomplete unknown-state and trailing facts", func(t *testing.T) {
 		tests := []struct {
 			name string
 			body string
@@ -378,7 +378,6 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 			{"missing stable actor", `[{"id":100,"node_id":"PRR_1","state":"APPROVED","submitted_at":"2026-08-26T15:00:00Z","commit_id":"` + candidateA + `","user":{"id":0,"login":"name-only"}}]`},
 			{"missing immutable ref", `[{"id":100,"node_id":"","state":"APPROVED","submitted_at":"2026-08-26T15:00:00Z","commit_id":"` + candidateA + `","user":{"id":901,"login":"one"}}]`},
 			{"unknown state", `[{"id":100,"node_id":"PRR_1","state":"MYSTERY","submitted_at":"2026-08-26T15:00:00Z","commit_id":"` + candidateA + `","user":{"id":901,"login":"one"}}]`},
-			{"unknown field", `[{"id":100,"node_id":"PRR_1","state":"APPROVED","submitted_at":"2026-08-26T15:00:00Z","commit_id":"` + candidateA + `","user":{"id":901,"login":"one"},"mystery":true}]`},
 			{"trailing data", `[] true`},
 		}
 		for _, tt := range tests {
@@ -389,6 +388,24 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 					t.Fatalf("ListApprovals(%s): want error, got nil", tt.name)
 				}
 			})
+		}
+	})
+
+	t.Run("github ignores response members it does not model (open provider contract)", func(t *testing.T) {
+		healthy, closeHealthy := githubFixture(t, `[`+githubReviewJSON(100, "PRR_1", "APPROVED", candidateA, 901, "one", "2026-08-26T15:00:00Z")+`]`)
+		defer closeHealthy()
+		want, err := healthy.ListApprovals(context.Background(), "17")
+		if err != nil {
+			t.Fatalf("ListApprovals healthy: %v", err)
+		}
+		extended, closeExtended := githubFixture(t, `[{"id":100,"node_id":"PRR_1","state":"APPROVED","submitted_at":"2026-08-26T15:00:00Z","commit_id":"`+candidateA+`","user":{"id":901,"login":"one","site_admin":false},"author_association":"COLLABORATOR","future_member":{"nested":[1,2]}}]`)
+		defer closeExtended()
+		got, err := extended.ListApprovals(context.Background(), "17")
+		if err != nil {
+			t.Fatalf("ListApprovals with additional provider members: %v", err)
+		}
+		if got.ProviderSnapshotID != want.ProviderSnapshotID {
+			t.Fatalf("additional provider members changed the facts: got %+v want %+v", got, want)
 		}
 	})
 
@@ -702,14 +719,112 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("gitlab rejects incomplete unknown and trailing facts", func(t *testing.T) {
+	t.Run("github decodes the published pull request and review examples", func(t *testing.T) {
+		pull := publishedFixture(t, "github/pull-request.json")
+		reviews := publishedFixture(t, "github/pull-request-review-items.json")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/octocat/Hello-World/pulls/1347":
+				writeJSON(t, w, string(pull))
+			case "/repos/octocat/Hello-World/pulls/1347/reviews":
+				writeJSON(t, w, string(reviews))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "octocat", Repo: "Hello-World", HTTPClient: server.Client(), Clock: fixedClock})
+		got, err := a.ListApprovals(context.Background(), "1347")
+		if err != nil {
+			t.Fatalf("ListApprovals over the published examples: %v", err)
+		}
+		if got.Repository != "octocat/Hello-World" || got.CandidateSHA != "6dcb09b5b57875f334f61aebed695e2e4193db5e" {
+			t.Fatalf("snapshot binding = %+v", got)
+		}
+		if got.CandidateAuthor != (forge.ProviderActor{Scheme: "github-user-id", Subject: "1"}) {
+			t.Fatalf("candidate author = %+v", got.CandidateAuthor)
+		}
+		if len(got.Approvals) != 1 {
+			t.Fatalf("approvals = %+v, want the published APPROVED review", got.Approvals)
+		}
+		row := got.Approvals[0]
+		if row.ApprovalID != "80" || row.ApprovalRef != "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=" || row.State != forge.ApprovalActive {
+			t.Fatalf("approval identity/state = %+v", row)
+		}
+		if row.ApprovedAt != "2019-11-17T17:43:43Z" || row.CandidateSHA != "ecdd80bb57125d7ba9641ffaa4d7d2c19d3f3091" {
+			t.Fatalf("approval time/candidate = %+v", row)
+		}
+		if row.Actor != (forge.ProviderActor{Scheme: "github-user-id", Subject: "1"}) {
+			t.Fatalf("approval actor = %+v", row.Actor)
+		}
+	})
+
+	t.Run("gitlab decodes the published merge request and approval examples", func(t *testing.T) {
+		mergeRequest := publishedFixture(t, "gitlab/merge-request.json")
+		approvals := publishedFixture(t, "gitlab/merge-request-approvals.json")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/projects/42/merge_requests/133":
+				writeJSON(t, w, string(mergeRequest))
+			case "/projects/42/merge_requests/133/approvals":
+				writeJSON(t, w, string(approvals))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: "42", HTTPClient: server.Client(), Clock: fixedClock})
+		got, err := a.ListApprovals(context.Background(), "133")
+		if err != nil {
+			t.Fatalf("ListApprovals over the published examples: %v", err)
+		}
+		if got.Repository != "15513260" || got.CandidateSHA != "e82eb4a098e32c796079ca3915e07487fc4db24c" {
+			t.Fatalf("snapshot binding = %+v", got)
+		}
+		if got.CandidateAuthor != (forge.ProviderActor{Scheme: "gitlab-user-id", Subject: "4155490"}) {
+			t.Fatalf("candidate author = %+v", got.CandidateAuthor)
+		}
+		if len(got.Approvals) != 1 {
+			t.Fatalf("approvals = %+v, want the published approver", got.Approvals)
+		}
+		row := got.Approvals[0]
+		if row.State != forge.ApprovalActive || row.ApprovedAt != "2016-06-09T01:45:21.72Z" || row.CandidateSHA != "e82eb4a098e32c796079ca3915e07487fc4db24c" {
+			t.Fatalf("approval = %+v", row)
+		}
+		if row.Actor != (forge.ProviderActor{Scheme: "gitlab-user-id", Subject: "1"}) {
+			t.Fatalf("approval actor = %+v", row.Actor)
+		}
+	})
+
+	t.Run("gitlab ignores response members it does not model (open provider contract)", func(t *testing.T) {
+		healthy, closeHealthy := gitlabFixture(t, `{"approved_by":[{"user":{"id":7,"username":"seven"},"approved_at":"2026-08-26T15:00:00Z"}]}`, "")
+		defer closeHealthy()
+		want, err := healthy.ListApprovals(context.Background(), "9")
+		if err != nil {
+			t.Fatalf("ListApprovals healthy: %v", err)
+		}
+		extended, closeExtended := gitlabFixture(t, `{"approvals_required":2,"approved_by":[{"user":{"id":7,"username":"seven","state":"active"},"approved_at":"2026-08-26T15:00:00Z"}],"future_member":true}`, "")
+		defer closeExtended()
+		got, err := extended.ListApprovals(context.Background(), "9")
+		if err != nil {
+			t.Fatalf("ListApprovals with additional provider members: %v", err)
+		}
+		if got.ProviderSnapshotID != want.ProviderSnapshotID {
+			t.Fatalf("additional provider members changed the facts: got %+v want %+v", got, want)
+		}
+	})
+
+	t.Run("gitlab rejects incomplete and trailing facts", func(t *testing.T) {
 		tests := []struct {
 			name string
 			body string
 		}{
 			{"missing stable actor", `{"approved_by":[{"user":{"id":0,"username":"name-only"},"approved_at":"2026-08-26T15:00:00Z"}]}`},
 			{"missing approval time", `{"approved_by":[{"user":{"id":7,"username":"seven"},"approved_at":""}]}`},
-			{"unknown field", `{"approved_by":[],"mystery":true}`},
 			{"trailing data", `{"approved_by":[]} true`},
 		}
 		for _, tt := range tests {
@@ -722,6 +837,51 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestDecodeApprovalJSON pins the provider approval decode seam's
+// tolerant-subset posture (ruling R-W1-8): declared members strictly typed,
+// undeclared members ignored, trailing data and unknown closed-vocabulary
+// values rejected.
+func TestDecodeApprovalJSON(t *testing.T) {
+	type row struct {
+		ID    int64               `json:"id"`
+		State forge.ApprovalState `json:"state"`
+	}
+	tests := []struct {
+		name    string
+		body    string
+		want    row
+		wantErr string
+	}{
+		{name: "declared members only", body: `{"id":7,"state":"active"}`, want: row{ID: 7, State: forge.ApprovalActive}},
+		{name: "undeclared members ignored", body: `{"id":7,"node_id":"x","state":"active","nested":{"a":[1,2]}}`, want: row{ID: 7, State: forge.ApprovalActive}},
+		{name: "trailing whitespace accepted", body: "{\"id\":7,\"state\":\"active\"}\n\t ", want: row{ID: 7, State: forge.ApprovalActive}},
+		{name: "declared member of the wrong type", body: `{"id":"7","state":"active"}`, wantErr: "decode approval response"},
+		{name: "unknown closed-vocabulary value", body: `{"id":7,"state":"approved"}`, wantErr: "unknown approval state"},
+		{name: "trailing value", body: `{"id":7,"state":"active"} true`, wantErr: "trailing data"},
+		{name: "trailing malformed data", body: `{"id":7,"state":"active"} }`, wantErr: "trailing data"},
+		{name: "empty body", body: ``, wantErr: "decode approval response"},
+		{name: "malformed body", body: `{"id":`, wantErr: "decode approval response"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got row
+			err := forge.DecodeApprovalJSON(strings.NewReader(tt.body), &got)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("DecodeApprovalJSON(%q) error = %v, want %q", tt.body, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeApprovalJSON(%q): %v", tt.body, err)
+			}
+			if got != tt.want {
+				t.Fatalf("DecodeApprovalJSON(%q) = %+v, want %+v", tt.body, got, tt.want)
+			}
+		})
+	}
 }
 
 func approvalFixture(id, candidate string) forge.Approval {
