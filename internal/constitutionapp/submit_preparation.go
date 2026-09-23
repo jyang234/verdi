@@ -54,6 +54,10 @@ type SubmitPreparationResult struct {
 //   - canonical registered-consumer coverage is not proven, including a
 //     missing inventory, empty changed universe, unavailable evaluator, or
 //     unknown applicability/conflict posture;
+//   - the accepted constitution records an unsealed-provenance cutoff and the
+//     proposal's is missing or differs (unsealed-provenance exemption design
+//     §7; SI-245, SI-255: the cutoff record is append-only). The reason
+//     begins with the closed code unsealedprovenance.CutoffChangedCode;
 //   - a canonical consumer's conflict evaluation reached
 //     policyconflict.VerdictBlockedViolated — a mechanically PROVEN conflict
 //     (AC-3: "A mechanically proven conflict cannot be dismissed as
@@ -141,6 +145,14 @@ func (s Service) SubmitPreparation(ctx context.Context, root string, req SubmitP
 	}
 	if review.Coverage.State != constitutionimpact.StateProven {
 		blocking = append(blocking, "canonical impact coverage is "+string(review.Coverage.State)+": "+coverageReasons(review.Coverage.Reasons))
+	}
+	cutoffReason, typed := unsealedProvenanceCutoffReason(review.Accepted, review.Proposed)
+	if typed != nil {
+		return nil, typed
+	}
+	if cutoffReason != "" {
+		ready = false
+		blocking = append(blocking, cutoffReason)
 	}
 	for _, evaluation := range review.Coverage.Evaluations {
 		switch {
