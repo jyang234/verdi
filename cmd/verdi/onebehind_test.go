@@ -285,27 +285,34 @@ func TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(t *testing.T, reportPath, parent string)
+		// detail is how the reason says the file differs, ahead of "the
+		// report HEAD <sha> commits".
+		detail string
 	}{
 		{
-			name: "a disposition amended after the report commit",
+			name:   "a disposition amended after the report commit",
+			detail: "is not byte-identical to",
 			mutate: func(t *testing.T, reportPath, parent string) {
 				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, artifact.FindingAcceptedDeviation, "not fixed after all"))
 			},
 		},
 		{
-			name: "a finding retracted to undispositioned after the report commit",
+			name:   "a finding retracted to undispositioned after the report commit",
+			detail: "is not byte-identical to",
 			mutate: func(t *testing.T, reportPath, parent string) {
 				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, "", ""))
 			},
 		},
 		{
-			name: "one byte appended to the committed report",
+			name:   "one byte appended to the committed report",
+			detail: "is not byte-identical to",
 			mutate: func(t *testing.T, reportPath, parent string) {
 				writeOneBehindFile(t, reportPath, oneBehindRenderedReport(t, parent, artifact.FindingFixed, "")+"\n")
 			},
 		},
 		{
-			name: "the report deleted from the working tree",
+			name:   "the report deleted from the working tree",
+			detail: "is absent, unlike",
 			mutate: func(t *testing.T, reportPath, _ string) {
 				if err := os.Remove(reportPath); err != nil {
 					t.Fatal(err)
@@ -338,6 +345,9 @@ func TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD(t *testing.T) {
 			}
 			if !strings.Contains(got.Reason, oneBehindWorkingTreeDivergence) {
 				t.Fatalf("Reason = %q, want it to name the working-tree clause %q", got.Reason, oneBehindWorkingTreeDivergence)
+			}
+			if want := reportPath + " " + tc.detail + " the report HEAD " + head + " commits"; !strings.Contains(got.Reason, want) {
+				t.Fatalf("Reason = %q, want it to say %q", got.Reason, want)
 			}
 		})
 	}

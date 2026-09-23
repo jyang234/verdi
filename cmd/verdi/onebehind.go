@@ -131,7 +131,7 @@ func evaluateOneBehindReport(ctx context.Context, root, specName, head string) (
 		return oneBehindOutcome{}, fmt.Errorf("align: evaluating SI-231 one-behind report for %s: %w", specName, err)
 	}
 	if divergence != "" {
-		return oneBehindOutcome{Reason: fmt.Sprintf("the working-tree report differs from the committed report; commit or discard the change (%s %s, the report HEAD %s commits) — to commit it, amend HEAD's own report commit, since a new commit on top would no longer cover its parent", workingPath, divergence, head)}, nil
+		return oneBehindOutcome{Reason: fmt.Sprintf("the working-tree report differs from the committed report; commit or discard the change (%s %s the report HEAD %s commits) — to commit it, amend HEAD's own report commit, since a new commit on top would no longer cover its parent", workingPath, divergence, head)}, nil
 	}
 
 	return oneBehindOutcome{Accepted: true, Parent: parent, Report: report, Body: body}, nil
