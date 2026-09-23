@@ -19,8 +19,10 @@ import (
 
 // mergeRecordRepositoryJSON is the subset of "Get a repository" (GET
 // /repos/{owner}/{repo}, the full-repository schema) the read needs: the
-// forge's own default branch.
+// repository's id (required in full-repository), which every listed pull
+// request's base repository must carry, and the forge's own default branch.
 type mergeRecordRepositoryJSON struct {
+	ID            int64  `json:"id"`
 	DefaultBranch string `json:"default_branch"`
 }
 
@@ -29,15 +31,21 @@ type mergeRecordRepositoryJSON struct {
 // /repos/{owner}/{repo}/commits/{commit_sha}/pulls) the read needs. The
 // simple object carries no `merged` boolean: a pull request is merged
 // exactly when its state is closed and merged_at is non-null. merged_at and
-// merge_commit_sha are nullable; Base is a pointer so a missing or null base
-// is refused rather than read as an empty branch.
+// merge_commit_sha are nullable; Base and Base.Repo are pointers so a
+// missing or null base, or base repository, is refused rather than read as
+// an empty branch or a zero id. base.repo is required in pull-request-simple;
+// its full_name is read only to name a foreign repository in the error.
 type mergeRecordPullJSON struct {
 	Number         int64   `json:"number"`
 	State          string  `json:"state"`
 	MergedAt       *string `json:"merged_at"`
 	MergeCommitSHA *string `json:"merge_commit_sha"`
 	Base           *struct {
-		Ref string `json:"ref"`
+		Ref  string `json:"ref"`
+		Repo *struct {
+			ID       int64  `json:"id"`
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"base"`
 }
 
@@ -65,6 +73,10 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: reading repository %s/%s: %w", a.cfg.Owner, a.cfg.Repo, err)
 	}
+	if repo.ID <= 0 {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
+		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: repository %s/%s reports no positive id", a.cfg.Owner, a.cfg.Repo)
+	}
 	if repo.DefaultBranch == "" {
 		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 		return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: repository %s/%s reports no default_branch", a.cfg.Owner, a.cfg.Repo)
@@ -83,7 +95,7 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 
 	changes := make([]forge.ChangeRequestMerge, 0, len(pulls))
 	for i, pull := range pulls {
-		change, err := pullChangeRequestMerge(pull)
+		change, err := pullChangeRequestMerge(pull, repo.ID)
 		if err != nil {
 			// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
 			return forge.MergeRecordFacts{}, fmt.Errorf("github: merge records: pull request entry %d for commit %s: %w", i, commit, err)
@@ -110,13 +122,31 @@ func (a *Adapter) MergeRecords(ctx context.Context, commit string) (forge.MergeR
 // merge_commit_sha is GitHub's test merge, and a closed unmerged one's is a
 // stale test merge, and neither is ever a merge commit. A state outside
 // {open, closed} fails closed.
-func pullChangeRequestMerge(pull mergeRecordPullJSON) (forge.ChangeRequestMerge, error) {
+//
+// The pull request's base repository must be the queried repository
+// (repoID, from "Get a repository"; lane EF review F2): the endpoint's
+// published description does not promise that every listed pull request is
+// based in it, and a merge into another repository's default branch is not a
+// merge into this one's. A missing base repository or id, or a different id,
+// is a provider contract violation — an operational error, never
+// unavailability and never a pull request silently dropped.
+func pullChangeRequestMerge(pull mergeRecordPullJSON, repoID int64) (forge.ChangeRequestMerge, error) {
 	if pull.Number <= 0 {
 		return forge.ChangeRequestMerge{}, fmt.Errorf("pull request carries no positive number")
 	}
 	id := strconv.FormatInt(pull.Number, 10)
 	if pull.Base == nil {
 		return forge.ChangeRequestMerge{}, fmt.Errorf("pull request %s carries no base", id)
+	}
+	if pull.Base.Repo == nil {
+		return forge.ChangeRequestMerge{}, fmt.Errorf("pull request %s carries no base repository", id)
+	}
+	if pull.Base.Repo.ID <= 0 {
+		return forge.ChangeRequestMerge{}, fmt.Errorf("pull request %s base repository carries no positive id", id)
+	}
+	if pull.Base.Repo.ID != repoID {
+		return forge.ChangeRequestMerge{}, fmt.Errorf("pull request %s targets base repository id %d (%s), not the queried repository id %d: a provider contract violation",
+			id, pull.Base.Repo.ID, pull.Base.Repo.FullName, repoID)
 	}
 	change := forge.ChangeRequestMerge{ChangeID: id, TargetBranch: pull.Base.Ref}
 	switch {

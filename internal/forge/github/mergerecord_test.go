@@ -25,16 +25,23 @@ import (
 const (
 	mrtCommit = "6dcb09b5b57875f334f61aebed695e2e4193db5e"
 	mrtOther  = "e5bd3914e2e596debea16f433f57875b5b90bcd6"
+	// mrtRepoID is the queried repository's id in "Get a repository"; every
+	// pull request's base repository carries it unless a row says otherwise.
+	mrtRepoID = 1296269
 )
 
 func mrtClock() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
 
 // mrtPull is a minimal pull-request-simple body carrying the members the
-// adapter reads plus one it does not (title), which must be ignored.
+// adapter reads plus some it does not (title, base.sha, base.repo.full_name),
+// which must be ignored. Its base repository is the queried repository.
 func mrtPull(number int64, state string, mergedAt, mergeSHA any, baseRef string) map[string]any {
 	return map[string]any{
 		"number": number, "state": state, "merged_at": mergedAt, "merge_commit_sha": mergeSHA,
-		"title": "unmodeled", "base": map[string]any{"ref": baseRef, "sha": mrtOther},
+		"title": "unmodeled", "base": map[string]any{
+			"ref": baseRef, "sha": mrtOther,
+			"repo": map[string]any{"id": mrtRepoID, "full_name": "acme/svcfix"},
+		},
 	}
 }
 
@@ -66,7 +73,7 @@ func newMRTServer(t *testing.T, pulls ...map[string]any) *mrtServer {
 		page = append(page, pull)
 	}
 	return &mrtServer{
-		t: t, repoStatus: http.StatusOK, repoBody: `{"default_branch":"main","full_name":"acme/svcfix"}`,
+		t: t, repoStatus: http.StatusOK, repoBody: `{"id":1296269,"default_branch":"main","full_name":"acme/svcfix"}`,
 		pullStatus: http.StatusOK, pullPages: []string{mrtEncode(t, page)},
 	}
 }
@@ -239,11 +246,11 @@ func TestGitHubMergeRecords_FailsClosedOnProviderShape(t *testing.T) {
 		{"an object page", func(s *mrtServer) { s.pullPages = []string{`{"pulls":[]}`} }},
 		{"trailing data after a page", func(s *mrtServer) { s.pullPages = []string{`[]` + "\n" + `[]`} }},
 		{"trailing data after the repository", func(s *mrtServer) {
-			s.repoBody = `{"default_branch":"main"} {"default_branch":"evil"}`
+			s.repoBody = `{"id":1296269,"default_branch":"main"} {"default_branch":"evil"}`
 		}},
-		{"repository without a default branch", func(s *mrtServer) { s.repoBody = `{"full_name":"acme/svcfix"}` }},
-		{"repository with a null default branch", func(s *mrtServer) { s.repoBody = `{"default_branch":null}` }},
-		{"repository default branch of the wrong type", func(s *mrtServer) { s.repoBody = `{"default_branch":7}` }},
+		{"repository without a default branch", func(s *mrtServer) { s.repoBody = `{"id":1296269,"full_name":"acme/svcfix"}` }},
+		{"repository with a null default branch", func(s *mrtServer) { s.repoBody = `{"id":1296269,"default_branch":null}` }},
+		{"repository default branch of the wrong type", func(s *mrtServer) { s.repoBody = `{"id":1296269,"default_branch":7}` }},
 		{"a 404 on the repository read", func(s *mrtServer) {
 			s.repoStatus = http.StatusNotFound
 			s.repoBody = `{"message":"Not Found"}`
@@ -259,6 +266,92 @@ func TestGitHubMergeRecords_FailsClosedOnProviderShape(t *testing.T) {
 			}
 			if errors.Is(err, forge.ErrUnavailable) {
 				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; a provider shape or configuration fault is operational, never unavailability", err)
+			}
+		})
+	}
+}
+
+// TestGitHubMergeRecords_RefusesAnotherRepositorysPullRequest pins lane EF
+// review F2: the endpoint's published description does not bind a listed
+// pull request's base repository to the queried one, so the adapter compares
+// base.repo.id (required in pull-request-simple) with the id of "Get a
+// repository" (required in full-repository). A mismatch is a provider
+// contract violation, reported as an operational error — never unavailability,
+// and never a pull request silently dropped — and a missing id on either side
+// is refused. Each row names the error it must fail with, so no row can pass
+// through another rule.
+func TestGitHubMergeRecords_RefusesAnotherRepositorysPullRequest(t *testing.T) {
+	foreign := func(number int64) map[string]any {
+		pull := mrtPull(number, "closed", "2026-09-20T10:15:30Z", mrtCommit, "main")
+		pull["base"] = map[string]any{"ref": "main", "sha": mrtOther, "repo": map[string]any{"id": 999, "full_name": "someone-else/fork"}}
+		return pull
+	}
+	baseRepo := func(pull map[string]any) map[string]any {
+		return pull["base"].(map[string]any)["repo"].(map[string]any)
+	}
+	tests := []struct {
+		name    string
+		setup   func(*mrtServer)
+		wantErr string
+	}{
+		{"review probe P1: a merged pull request based in another repository", func(s *mrtServer) {
+			s.pullPages = []string{mrtEncode(t, []any{foreign(99)})}
+		}, "pull request 99 targets base repository id 999 (someone-else/fork), not the queried repository id 1296269"},
+		{"a pull request of another repository beside one of this repository is not dropped", func(s *mrtServer) {
+			s.pullPages = []string{mrtEncode(t, []any{mrtPull(12, "closed", "2026-09-20T10:15:30Z", mrtCommit, "main"), foreign(99)})}
+		}, "not the queried repository id 1296269"},
+		{"a pull request of another repository on a later page", func(s *mrtServer) {
+			s.pullPages = []string{
+				mrtEncode(t, []any{mrtPull(12, "open", nil, nil, "main")}),
+				mrtEncode(t, []any{foreign(99)}),
+			}
+		}, "not the queried repository id 1296269"},
+		{"a pull request whose base has no repository", func(s *mrtServer) {
+			pull := mrtPull(5, "open", nil, nil, "main")
+			delete(pull["base"].(map[string]any), "repo")
+			s.pullPages = []string{mrtEncode(t, []any{pull})}
+		}, "pull request 5 carries no base repository"},
+		{"a pull request whose base repository is null", func(s *mrtServer) {
+			pull := mrtPull(5, "open", nil, nil, "main")
+			pull["base"].(map[string]any)["repo"] = nil
+			s.pullPages = []string{mrtEncode(t, []any{pull})}
+		}, "pull request 5 carries no base repository"},
+		{"a pull request whose base repository has no id", func(s *mrtServer) {
+			pull := mrtPull(5, "open", nil, nil, "main")
+			delete(baseRepo(pull), "id")
+			s.pullPages = []string{mrtEncode(t, []any{pull})}
+		}, "pull request 5 base repository carries no positive id"},
+		{"a pull request whose base repository id is of the wrong type", func(s *mrtServer) {
+			pull := mrtPull(5, "open", nil, nil, "main")
+			baseRepo(pull)["id"] = "1296269"
+			s.pullPages = []string{mrtEncode(t, []any{pull})}
+		}, "id of type int64"},
+		{"a repository without an id", func(s *mrtServer) {
+			s.repoBody = `{"default_branch":"main","full_name":"acme/svcfix"}`
+		}, "repository acme/svcfix reports no positive id"},
+		{"a repository with a null id", func(s *mrtServer) {
+			s.repoBody = `{"id":null,"default_branch":"main"}`
+		}, "repository acme/svcfix reports no positive id"},
+		{"a repository id of the wrong type", func(s *mrtServer) {
+			s.repoBody = `{"id":"1296269","default_branch":"main"}`
+		}, "id of type int64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newMRTServer(t)
+			tt.setup(s)
+			facts, err := s.adapter().MergeRecords(context.Background(), mrtCommit)
+			if err == nil {
+				t.Fatalf("MergeRecords = %+v, want an operational error naming %q", facts, tt.wantErr)
+			}
+			if errors.Is(err, forge.ErrUnavailable) {
+				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; a provider contract violation is operational, never unavailability", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("MergeRecords error %q, want it to name %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(facts, forge.MergeRecordFacts{}) {
+				t.Fatalf("MergeRecords returned facts %+v beside its error, want the zero value", facts)
 			}
 		})
 	}
