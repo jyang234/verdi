@@ -7,8 +7,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/forge"
 )
+
+// mrFactsDigest re-derives MergeRecordFacts' provider snapshot digest the way
+// the package documents it — the canonical digest of every field except
+// ObservedAt and ProviderSnapshotID — so a test can re-seal facts it
+// reshaped and reach a rule other than the digest check.
+func mrFactsDigest(t *testing.T, facts forge.MergeRecordFacts) string {
+	t.Helper()
+	facts.ObservedAt = ""
+	facts.ProviderSnapshotID = ""
+	digest, err := canonjson.Digest(facts)
+	if err != nil {
+		t.Fatalf("digest merge-record facts: %v", err)
+	}
+	return digest
+}
 
 // Merge-record facts fixtures (SI-249; plan R-PB-2). mrCommit is the commit
 // the forge is asked about; mrOtherCommit is any other commit.
@@ -283,11 +299,23 @@ func TestMergeRecordFactsRefusals(t *testing.T) {
 				}
 			})
 		}
+		// The unsorted row re-derives the digest for the swapped order, so the
+		// digest check passes and only the sort rule can refuse it (lane EF
+		// review F3: swapping alone also broke the digest, so the row passed
+		// with the sort rule disabled).
 		t.Run("unsorted changes", func(t *testing.T) {
+			if got := mrFactsDigest(t, sorted); got != sorted.ProviderSnapshotID {
+				t.Fatalf("mrFactsDigest(sorted) = %s, want the constructor's %s; the re-derivation below would prove nothing", got, sorted.ProviderSnapshotID)
+			}
 			facts := sorted
 			facts.Changes = []forge.ChangeRequestMerge{sorted.Changes[1], sorted.Changes[0]}
-			if err := facts.Validate(); err == nil {
+			facts.ProviderSnapshotID = mrFactsDigest(t, facts)
+			err := facts.Validate()
+			if err == nil {
 				t.Fatal("Validate(unsorted changes): want error, got nil")
+			}
+			if want := "not sorted by change_id"; !strings.Contains(err.Error(), want) {
+				t.Fatalf("Validate(unsorted changes) = %q, want the sort rule's error naming %q", err, want)
 			}
 		})
 		t.Run("zero value", func(t *testing.T) {
