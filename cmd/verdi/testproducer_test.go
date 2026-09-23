@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
@@ -813,35 +815,56 @@ func TestNamedTestDigest(t *testing.T) {
 
 // TestRealNamedGoTestRunner proves the real runner's error surface: a
 // failing test (nonzero go test exit) still returns the toolchain's stream,
-// while a cancelled context, a missing go binary, and a run with no output
-// are errors that say why.
+// while a context cancelled before or during the run, a missing go binary,
+// and a run with no output are errors that wrap why.
 func TestRealNamedGoTestRunner(t *testing.T) {
+	fixture := func(*testing.T) string { return "testdata/gotestfixture" }
+	cancelled := func(t *testing.T) context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	shortDeadline := func(t *testing.T) context.Context {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}
+	background := func(*testing.T) context.Context { return context.Background() }
 	cases := []struct {
-		name     string
-		dir      func(t *testing.T) string
-		ctx      func() context.Context
-		noGo     bool
-		wantErr  string // "" means success
-		wantOut  string
-		wantIsCt bool
+		name    string
+		dir     func(t *testing.T) string
+		ctx     func(t *testing.T) context.Context
+		goBin   string // non-empty: a fake `go` script put alone on PATH ("-" for none)
+		wantErr error  // nil means success
+		wantOut string
 	}{
-		{name: "failing test returns its stream", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: context.Background, wantOut: `"Package":"example.com/gotestfixture/sample"`},
-		{name: "cancelled context", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: func() context.Context {
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			return ctx
-		}, wantErr: "context canceled", wantIsCt: true},
-		{name: "no go binary", dir: func(*testing.T) string { return "testdata/gotestfixture" }, ctx: context.Background, noGo: true, wantErr: "executable file not found"},
-		{name: "no output outside any module", dir: func(t *testing.T) string { return t.TempDir() }, ctx: context.Background, wantErr: "produced no output"},
+		{name: "failing test returns its stream", dir: fixture, ctx: background, wantOut: `"Package":"example.com/gotestfixture/sample"`},
+		{name: "cancelled before the run", dir: fixture, ctx: cancelled, wantErr: context.Canceled},
+		// The fake go writes part of a stream, then blocks until killed: the
+		// kill surfaces as an ExitError, never as a usable stream.
+		{name: "killed mid-run by its context", dir: fixture, ctx: shortDeadline, goBin: "#!/bin/sh\nprintf '{\"Action\":\"start\",\"Package\":\"example.com/gotestfixture/sample\"}\\n'\nexec /bin/sleep 30\n", wantErr: context.DeadlineExceeded},
+		{name: "no go binary", dir: fixture, ctx: background, goBin: "-", wantErr: exec.ErrNotFound},
+		{name: "no output outside any module", dir: func(t *testing.T) string { return t.TempDir() }, ctx: background, wantErr: errNoOutput},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			hermeticGoEnv(t)
-			if c.noGo {
-				t.Setenv("PATH", t.TempDir())
+			if c.goBin != "" {
+				bin := t.TempDir()
+				if c.goBin != "-" {
+					if err := os.WriteFile(filepath.Join(bin, "go"), []byte(c.goBin), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("PATH", bin)
 			}
-			out, err := realNamedGoTestRunner{}.RunNamedGoTest(c.ctx(), c.dir(t), "./sample", goTestRunPattern([]string{"TestFail", "TestPass"}))
-			if c.wantErr == "" {
+			start := time.Now()
+			out, err := realNamedGoTestRunner{}.RunNamedGoTest(c.ctx(t), c.dir(t), "./sample", goTestRunPattern([]string{"TestFail", "TestPass"}))
+			// The fake go sleeps 30s: only a context-bound run returns sooner.
+			if elapsed := time.Since(start); elapsed > 20*time.Second {
+				t.Errorf("RunNamedGoTest returned after %v: the context never stopped the run", elapsed)
+			}
+			if c.wantErr == nil {
 				if err != nil {
 					t.Fatalf("RunNamedGoTest: %v", err)
 				}
@@ -850,15 +873,25 @@ func TestRealNamedGoTestRunner(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("RunNamedGoTest err = %v, want one containing %q", err, c.wantErr)
+			if out != nil {
+				t.Errorf("RunNamedGoTest returned a stream %q with its error", out)
 			}
-			if c.wantIsCt && !errors.Is(err, context.Canceled) {
-				t.Errorf("err %v does not wrap context.Canceled", err)
+			if c.wantErr == errNoOutput {
+				if err == nil || !strings.Contains(err.Error(), "produced no output") || !strings.Contains(err.Error(), "go.mod file not found") {
+					t.Fatalf("RunNamedGoTest err = %v, want a no-output error carrying go's stderr", err)
+				}
+				return
+			}
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("RunNamedGoTest err = %v, want one wrapping %v", err, c.wantErr)
 			}
 		})
 	}
 }
+
+// errNoOutput marks the runner case whose error is checked by text: go ran,
+// exited nonzero, and wrote only to stderr.
+var errNoOutput = errors.New("no output")
 
 // TestProduceGoTestEvidence_NilRunner proves a selected obligation with no
 // runner configured is an error, never a nil-interface panic.

@@ -416,20 +416,20 @@ func (realNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkgArg, ru
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// A nonzero exit is how go test reports a failing test or an unbuildable
+	// package, so runErr alone is not a failure: the stream says what ran.
 	runErr := cmd.Run()
-	// A cancelled run is killed mid-stream; os/exec then reports the kill as
-	// an *exec.ExitError, not the context's error, so check it first.
+	// A run killed by its context leaves a partial stream, and os/exec
+	// reports the kill as an *exec.ExitError rather than the context's
+	// error (Cmd.Wait prefers the process's own error), so check it first.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("go test -json for package %s: %w", pkgArg, ctxErr)
 	}
-	// A nonzero exit is how go test reports a failing test or an unbuildable
-	// package; the stream says which. Any other error means go never ran.
-	var exitErr *exec.ExitError
-	if runErr != nil && !errors.As(runErr, &exitErr) {
-		return nil, fmt.Errorf("go test -json for package %s: %w (stderr: %s)", pkgArg, runErr, strings.TrimSpace(stderr.String()))
-	}
 	if stdout.Len() == 0 {
-		return nil, fmt.Errorf("go test -json for package %s produced no output (%v; stderr: %s)", pkgArg, runErr, strings.TrimSpace(stderr.String()))
+		if runErr == nil {
+			runErr = errors.New("exit status 0")
+		}
+		return nil, fmt.Errorf("go test -json for package %s produced no output: %w (stderr: %s)", pkgArg, runErr, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
