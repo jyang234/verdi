@@ -57,6 +57,24 @@ func resolveModelDigest(root string) (string, error) {
 	return digest, nil
 }
 
+// resolveCIRefName reads the current ref name from forge-provided CI
+// environment variables, in the same preference order resolveRefCommit has
+// always used (GitLab's CI_COMMIT_REF_NAME, GitHub's GITHUB_HEAD_REF for a
+// PR run or GITHUB_REF_NAME for a push) — "" outside CI, or when none of
+// them is set. It exists as its own function so a caller with a detached,
+// non-CI-sync checkout (SI-227: lifecycle countersign's source-branch
+// resolution, cmd/verdi/countersign.go) can reuse exactly the same
+// dispatching-ref source `verdi sync` already reads below, rather than
+// re-reading these env vars independently.
+func resolveCIRefName() string {
+	for _, envVar := range []string{"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"} {
+		if v := os.Getenv(envVar); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // resolveRefCommit determines the current ref and commit sync operates
 // on. Ref resolution prefers forge-provided CI environment variables
 // (GitLab's CI_COMMIT_REF_NAME, GitHub's GITHUB_HEAD_REF for a PR run or
@@ -68,10 +86,8 @@ func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err
 		return "", "", fmt.Errorf("resolving current commit: %w", err)
 	}
 
-	for _, envVar := range []string{"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"} {
-		if v := os.Getenv(envVar); v != "" {
-			return v, commit, nil
-		}
+	if v := resolveCIRefName(); v != "" {
+		return v, commit, nil
 	}
 	branch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
