@@ -332,7 +332,7 @@ const kernelAuthorRole = "author"
 func kernelSeparationRule(profile gp.Profile, approverRole string, author gp.PrincipalResolution) (countersign.SeparationRule, []string) {
 	if author.State != gp.ResolutionAuthenticated {
 		return countersign.SeparationDifferentFromAuthor, []string{
-			`kernel-separation:unavailable:reason="candidate author principal is not authenticated"`,
+			separationRequiredWitness(kernelAnswerUnproven, "author-not-authenticated", "candidate author principal is not authenticated"),
 		}
 	}
 	decision, err := gp.Authorize(profile, gp.AuthorizationRequest{
@@ -346,17 +346,17 @@ func kernelSeparationRule(profile gp.Profile, approverRole string, author gp.Pri
 	})
 	if err != nil {
 		return countersign.SeparationDifferentFromAuthor, []string{
-			fmt.Sprintf("kernel-separation:unavailable:reason=%q", err.Error()),
+			separationRequiredWitness(kernelAnswerUnproven, "kernel-error", err.Error()),
 		}
 	}
 	if profile.Class == gp.ClassSolo && decision.State == gp.AuthorizationAuthorized {
 		if d, ok := authorApproverCollapse(decision, author.PrincipalID, approverRole); ok {
 			return countersign.SeparationNone, []string{
-				fmt.Sprintf("kernel-separation:solo-role-collapse:principal_id=%q:roles=%q", d.PrincipalID, d.Roles),
+				fmt.Sprintf(kernelProbeWitnessPrefix+"collapse-permitted:kernel_disclosure=%q:author_principal_id=%q:roles=%q", d.Code, d.PrincipalID, d.Roles),
 			}
 		}
 	}
-	return countersign.SeparationDifferentFromAuthor, kernelRequiredWitnesses(profile, decision)
+	return countersign.SeparationDifferentFromAuthor, separationRequiredWitnesses(profile, decision)
 }
 
 // authorApproverCollapse returns the kernel's solo role-collapse
@@ -378,28 +378,62 @@ func authorApproverCollapse(decision gp.AuthorizationDecision, principal gp.Prin
 	return gp.Disclosure{}, false
 }
 
-// kernelRequiredWitnesses discloses why kernelSeparationRule kept
-// SeparationDifferentFromAuthor when the decision was not a clean
-// authorized solo collapse: every applicable kernel finding, or — when the
-// decision was itself authorized but collapse was not honored (not solo,
-// or no matching disclosure for this author) — a single witness naming
-// the reason.
-func kernelRequiredWitnesses(profile gp.Profile, decision gp.AuthorizationDecision) []string {
-	if decision.State != gp.AuthorizationAuthorized {
-		witnesses := make([]string, 0, len(decision.Findings))
-		for _, f := range decision.Findings {
-			witnesses = append(witnesses, fmt.Sprintf(
-				"kernel-separation:%s:code=%q:role=%q:principal_id=%q:detail=%q",
-				f.State, f.Code, f.Role, f.PrincipalID, f.Detail,
-			))
-		}
-		if len(witnesses) == 0 {
-			witnesses = append(witnesses, fmt.Sprintf("kernel-separation:%s:reason=\"kernel decision was not authorized\"", decision.State))
-		}
+// kernelProbeWitnessPrefix leads every witness the separation probe
+// contributes to the countersign record. Each records the kernel's answer
+// to a hypothetical request — the candidate author's principal filling the
+// author role and the approver role — never this countersign's verdict,
+// never a violation by the author, and never a collapse that occurred
+// (SI-233, L2a review I-3).
+const kernelProbeWitnessPrefix = "kernel-separation-probe:author-as-approver:"
+
+// The kernel_answer values a separation-required probe witness carries: the
+// kernel's decision on the probe request, with a violated decision named
+// "refused" so no probe witness speaks the countersign verdict vocabulary.
+// An unavailable answer (no kernel decision at all) is unproven.
+const (
+	kernelAnswerAuthorized = "authorized"
+	kernelAnswerRefused    = "refused"
+	kernelAnswerUnproven   = "unproven"
+)
+
+// kernelProbeAnswer names decision's state as a kernel_answer value;
+// anything but an authorized or violated decision is unproven.
+func kernelProbeAnswer(state gp.AuthorizationState) string {
+	switch state {
+	case gp.AuthorizationAuthorized:
+		return kernelAnswerAuthorized
+	case gp.AuthorizationViolated:
+		return kernelAnswerRefused
+	}
+	return kernelAnswerUnproven
+}
+
+// separationRequiredWitness is one separation-required probe witness whose
+// reason is not a kernel finding.
+func separationRequiredWitness(answer, reason, detail string) string {
+	return fmt.Sprintf(kernelProbeWitnessPrefix+"separation-required:kernel_answer=%q:reason=%q:detail=%q", answer, reason, detail)
+}
+
+// separationRequiredWitnesses discloses why kernelSeparationRule kept
+// SeparationDifferentFromAuthor after the kernel answered: one witness per
+// kernel finding, each naming the finding's code as its reason; or, for an
+// authorized decision whose collapse was not honored, one witness naming
+// why (a profile class that is not solo, or no collapse disclosure for
+// exactly the author and approver roles).
+func separationRequiredWitnesses(profile gp.Profile, decision gp.AuthorizationDecision) []string {
+	answer := kernelProbeAnswer(decision.State)
+	witnesses := make([]string, 0, len(decision.Findings))
+	for _, f := range decision.Findings {
+		witnesses = append(witnesses, fmt.Sprintf(
+			kernelProbeWitnessPrefix+"separation-required:kernel_answer=%q:reason=%q:role=%q:roles=%q:detail=%q",
+			answer, f.Code, f.Role, f.Roles, f.Detail,
+		))
+	}
+	if len(witnesses) > 0 {
 		return witnesses
 	}
 	if profile.Class != gp.ClassSolo {
-		return []string{fmt.Sprintf("kernel-separation:required:class=%q", profile.Class)}
+		return []string{separationRequiredWitness(answer, "class-not-solo", fmt.Sprintf("profile class %q does not permit role collapse", profile.Class))}
 	}
-	return []string{`kernel-separation:unavailable:reason="no solo role-collapse disclosure for this profile"`}
+	return []string{separationRequiredWitness(answer, "collapse-not-disclosed", "the kernel disclosed no solo role collapse naming this principal for exactly the author role and the approver role")}
 }

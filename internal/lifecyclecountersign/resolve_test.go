@@ -704,8 +704,8 @@ func TestResolveKernelSeparationSoloCollapse(t *testing.T) {
 	if result.Record.Obligation.SeparationRule != countersign.SeparationNone {
 		t.Fatalf("separation rule = %q, want %q", result.Record.Obligation.SeparationRule, countersign.SeparationNone)
 	}
-	if !containsLifecycleWitness(result.Record.Witnesses, "kernel-separation:solo-role-collapse:") {
-		t.Fatalf("record witnesses = %v, want a kernel solo-role-collapse disclosure", result.Record.Witnesses)
+	if !containsLifecycleWitness(result.Record.Witnesses, `kernel-separation-probe:author-as-approver:collapse-permitted:kernel_disclosure="solo-role-collapse":`) {
+		t.Fatalf("record witnesses = %v, want the kernel's solo role-collapse disclosure on the collapse-permitted probe witness", result.Record.Witnesses)
 	}
 }
 
@@ -762,8 +762,8 @@ func TestResolveKernelSeparationUnavailableFailsClosed(t *testing.T) {
 	if result.Record.Obligation.SeparationRule != countersign.SeparationDifferentFromAuthor {
 		t.Fatalf("separation rule = %q, want the fail-closed %q", result.Record.Obligation.SeparationRule, countersign.SeparationDifferentFromAuthor)
 	}
-	if !containsLifecycleWitness(result.Record.Witnesses, "kernel-separation:") {
-		t.Fatalf("record witnesses = %v, want a kernel-separation disclosure explaining the fail-closed answer", result.Record.Witnesses)
+	if !containsLifecycleWitness(result.Record.Witnesses, `kernel-separation-probe:author-as-approver:separation-required:kernel_answer="unproven":`) {
+		t.Fatalf("record witnesses = %v, want a separation-required probe witness disclosing the unproven kernel answer", result.Record.Witnesses)
 	}
 }
 
@@ -822,8 +822,9 @@ func TestKernelSeparationRuleAuthorNotAuthenticated(t *testing.T) {
 	if rule != countersign.SeparationDifferentFromAuthor {
 		t.Fatalf("rule = %q, want the fail-closed %q", rule, countersign.SeparationDifferentFromAuthor)
 	}
-	if len(witnesses) != 1 || !strings.Contains(witnesses[0], "unavailable") {
-		t.Fatalf("witnesses = %v, want exactly one disclosed unavailable reason", witnesses)
+	want := `kernel-separation-probe:author-as-approver:separation-required:kernel_answer="unproven":reason="author-not-authenticated":detail="candidate author principal is not authenticated"`
+	if len(witnesses) != 1 || witnesses[0] != want {
+		t.Fatalf("witnesses = %v, want exactly [%s]", witnesses, want)
 	}
 }
 
@@ -845,6 +846,12 @@ const kernelProbeCatalogRoles = "author, feature-uat, policy-owner, story-review
 // the YAML fragments the case varies. Every profile trusts only the forge
 // source and requires one story-review approver for close.
 func kernelProbeSource(class, roleMappings, distinctness string) fstest.MapFS {
+	return kernelProbeSourceRequiring(class, roleMappings, distinctness, "story-review")
+}
+
+// kernelProbeSourceRequiring is kernelProbeSource with the one role the
+// profile's close approver rule requires named by requiredRole.
+func kernelProbeSourceRequiring(class, roleMappings, distinctness, requiredRole string) fstest.MapFS {
 	constitution := fmt.Sprintf(`---
 schema: verdi.policy-constitution/v1
 id: policy-constitution/constitution
@@ -885,13 +892,13 @@ role_mappings:
 ownership_sources: []
 signature_requirements: []
 required_approvers:
-  - {transitions: [close], roles: [story-review], minimum: 1}
+  - {transitions: [close], roles: [%s], minimum: 1}
 distinctness_rules: %s
 evidence_source_restrictions: []
 escalation_thresholds: []
 ---
 Hermetic kernel probe lifecycle governance profile.
-`, class, roleMappings, distinctness)
+`, class, roleMappings, requiredRole, distinctness)
 	return fstest.MapFS{
 		".verdi/policy/constitution.md":             &fstest.MapFile{Data: []byte(constitution), Mode: 0o444},
 		".verdi/policy/profiles/lifecycle-probe.md": &fstest.MapFile{Data: []byte(profile), Mode: 0o444},
@@ -1038,6 +1045,175 @@ func TestResolveKernelSeparationSoloRulesKeepSelfApprovalRefused(t *testing.T) {
 			}
 			if !containsLifecycleWitness(kernelSeparationLines(result.Record.Witnesses), tc.wantReason) {
 				t.Fatalf("kernel separation witnesses = %v, want one naming %s", kernelSeparationLines(result.Record.Witnesses), tc.wantReason)
+			}
+		})
+	}
+}
+
+// --- L2a review I-3: witnesses describe the probe, never a verdict ---------
+
+// lifecyclePrincipalID is the forge-live principal ID a subject derives.
+func lifecyclePrincipalID(t *testing.T, subject string) gp.PrincipalID {
+	t.Helper()
+	id, err := gp.CanonicalPrincipalID("forge-live", subject)
+	if err != nil {
+		t.Fatalf("principal id: %v", err)
+	}
+	return id
+}
+
+// TestResolveKernelSeparationWitnessesDescribeTheProbe pins the exact
+// witness lines the separation probe contributes to the canonical record
+// (and so to its digest and closure rollups). Each records the kernel's
+// answer to the hypothetical author-as-approver request: never led by the
+// countersign verdict vocabulary, never asserting a violation by the
+// author, and never reading as a collapse that occurred when a different
+// principal approved (L2a review I-3, probes P5 and P8). An unproven
+// kernel answer says so explicitly (L2a review m-3).
+func TestResolveKernelSeparationWitnessesDescribeTheProbe(t *testing.T) {
+	author := lifecyclePrincipalID(t, "900")
+	for _, tc := range []struct {
+		name        string
+		approver    string
+		source      fstest.MapFS
+		wantVerdict countersign.Verdict
+		wantRule    countersign.SeparationRule
+		wantLines   []string
+	}{
+		{
+			name:        "team record approved by an independent principal",
+			approver:    "101",
+			source:      lifecycleAcceptedSource(`"101", "900"`),
+			wantVerdict: countersign.VerdictProven,
+			wantRule:    countersign.SeparationDifferentFromAuthor,
+			wantLines: []string{
+				`kernel-separation-probe:author-as-approver:separation-required:kernel_answer="refused":reason="distinctness-unproven":role="feature-uat":roles=["feature-uat" "story-review"]:detail="different-principal rule between \"feature-uat\" and \"story-review\": role \"feature-uat\" has no authenticated filler"`,
+				`kernel-separation-probe:author-as-approver:separation-required:kernel_answer="refused":reason="role-not-authorized":role="author":roles=[]:detail="no role mapping grants role \"author\" to this principal"`,
+			},
+		},
+		{
+			name:        "solo record approved by a different principal",
+			approver:    "101",
+			source:      kernelProbeSource("solo", kernelProbeMappings(kernelProbeMapping("author", "900"), kernelProbeMapping("story-review", "101", "900")), "[]"),
+			wantVerdict: countersign.VerdictProven,
+			wantRule:    countersign.SeparationNone,
+			wantLines: []string{
+				fmt.Sprintf(`kernel-separation-probe:author-as-approver:collapse-permitted:kernel_disclosure="solo-role-collapse":author_principal_id=%q:roles=["author" "story-review"]`, author),
+			},
+		},
+		{
+			name:        "solo self-approval under a profile permitting collapse",
+			approver:    "900",
+			source:      lifecycleSoloAcceptedSource(),
+			wantVerdict: countersign.VerdictProven,
+			wantRule:    countersign.SeparationNone,
+			wantLines: []string{
+				fmt.Sprintf(`kernel-separation-probe:author-as-approver:collapse-permitted:kernel_disclosure="solo-role-collapse":author_principal_id=%q:roles=["author" "story-review"]`, author),
+			},
+		},
+		{
+			name:        "solo self-approval with an unproven kernel answer",
+			approver:    "900",
+			source:      lifecycleSoloEscalationAcceptedSource(),
+			wantVerdict: countersign.VerdictViolated,
+			wantRule:    countersign.SeparationDifferentFromAuthor,
+			wantLines: []string{
+				`kernel-separation-probe:author-as-approver:separation-required:kernel_answer="unproven":reason="escalation-metric-unavailable":role="":roles=[]:detail="no value supplied for escalation metric \"risk\""`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := resolveKernelProbe(t, tc.approver, "900", tc.source)
+			if result.Verdict != tc.wantVerdict || result.Record.Obligation.SeparationRule != tc.wantRule {
+				t.Errorf("verdict=%q rule=%q, want %q %q", result.Verdict, result.Record.Obligation.SeparationRule, tc.wantVerdict, tc.wantRule)
+			}
+			got := kernelSeparationLines(result.Record.Witnesses)
+			if strings.Join(got, "\n") != strings.Join(tc.wantLines, "\n") {
+				t.Errorf("kernel separation witnesses:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tc.wantLines, "\n"))
+			}
+			for _, line := range got {
+				if strings.Contains(line, string(countersign.VerdictViolated)) || strings.Contains(line, `"`+string(countersign.VerdictProven)+`"`) {
+					t.Errorf("probe witness %q speaks the countersign verdict vocabulary", line)
+				}
+			}
+		})
+	}
+}
+
+// lifecycleAuthenticatedAuthor mints the kernel's sealed, authenticated
+// resolution of the forge-live subject under profile, through the same
+// provider-fact bridge Resolve uses.
+func lifecycleAuthenticatedAuthor(t *testing.T, profile gp.Profile, subject string) gp.PrincipalResolution {
+	t.Helper()
+	snapshot, err := forge.NewApprovalSnapshot("github", "acme/widgets", "17", lifecycleCandidateSHA, forge.ProviderActor{Scheme: "github-user-id", Subject: subject}, lifecycleNow().Add(-time.Minute), []forge.Approval{})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	author, err := gp.NewResolver(providerFacts{snapshot: snapshot}).Resolve(context.Background(), profile, gp.PrincipalClaim{TrustSource: "forge-live", Subject: subject})
+	if err != nil {
+		t.Fatalf("resolve author: %v", err)
+	}
+	if author.State != gp.ResolutionAuthenticated {
+		t.Fatalf("author.State = %q, want authenticated", author.State)
+	}
+	return author
+}
+
+// TestKernelSeparationRuleAuthorizedWithoutCollapseDisclosureKeepsSeparation
+// is kernelSeparationRule's unit boundary for an authorized kernel decision
+// that carries no solo role-collapse disclosure: asked about the author
+// role alone (an approver role equal to the author role), the kernel
+// authorizes but discloses no collapse of two roles, so the decision alone
+// never permits collapse.
+func TestKernelSeparationRuleAuthorizedWithoutCollapseDisclosureKeepsSeparation(t *testing.T) {
+	profile, err := loadSelectedProfile(kernelProbeSourceRequiring("solo", kernelProbeMapping("author", "900"), "[]", "author"))
+	if err != nil {
+		t.Fatalf("loadSelectedProfile: %v", err)
+	}
+	author := lifecycleAuthenticatedAuthor(t, profile, "900")
+
+	rule, witnesses := kernelSeparationRule(profile, kernelAuthorRole, author)
+	if rule != countersign.SeparationDifferentFromAuthor {
+		t.Fatalf("rule = %q, want %q", rule, countersign.SeparationDifferentFromAuthor)
+	}
+	want := `kernel-separation-probe:author-as-approver:separation-required:kernel_answer="authorized":reason="collapse-not-disclosed":detail="the kernel disclosed no solo role collapse naming this principal for exactly the author role and the approver role"`
+	if len(witnesses) != 1 || witnesses[0] != want {
+		t.Fatalf("witnesses = %v, want [%s]", witnesses, want)
+	}
+}
+
+// TestAuthorApproverCollapse is authorApproverCollapse's own boundary:
+// only a solo role-collapse disclosure naming the author's principal for
+// exactly the author role and the approver role permits collapse.
+func TestAuthorApproverCollapse(t *testing.T) {
+	author := lifecyclePrincipalID(t, "900")
+	other := lifecyclePrincipalID(t, "101")
+	collapse := func(principal gp.PrincipalID, roles ...string) gp.Disclosure {
+		return gp.Disclosure{Code: gp.ReasonSoloRoleCollapse, PrincipalID: principal, Roles: roles}
+	}
+	for _, tc := range []struct {
+		name        string
+		disclosures []gp.Disclosure
+		want        bool
+	}{
+		{"exactly the author and approver roles", []gp.Disclosure{collapse(author, "author", "story-review")}, true},
+		{"the same two roles in another order", []gp.Disclosure{collapse(author, "story-review", "author")}, true},
+		{"the matching disclosure beside another principal's", []gp.Disclosure{collapse(other, "author", "story-review"), collapse(author, "author", "story-review")}, true},
+		{"no disclosure", nil, false},
+		{"an unrelated role pair", []gp.Disclosure{collapse(author, "policy-owner", "story-review")}, false},
+		{"the pair plus an unrelated role", []gp.Disclosure{collapse(author, "author", "policy-owner", "story-review")}, false},
+		{"another approver role", []gp.Disclosure{collapse(author, "author", "feature-uat")}, false},
+		{"another principal", []gp.Disclosure{collapse(other, "author", "story-review")}, false},
+		{"another disclosure code", []gp.Disclosure{{Code: gp.ReasonTrustSubjectVerified, PrincipalID: author, Roles: []string{"author", "story-review"}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := gp.AuthorizationDecision{State: gp.AuthorizationAuthorized, Disclosures: tc.disclosures}
+			d, ok := authorApproverCollapse(decision, author, "story-review")
+			if ok != tc.want {
+				t.Fatalf("authorApproverCollapse = %v, want %v", ok, tc.want)
+			}
+			if ok && d.PrincipalID != author {
+				t.Fatalf("disclosure principal = %q, want %q", d.PrincipalID, author)
 			}
 		})
 	}
