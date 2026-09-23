@@ -1,17 +1,19 @@
 # Closing-machinery wave 1 report: per-test evidence, the CI close workflow, the one-behind report, and the solo countersign
 
-Status: READY_FOR_OWNER_RISK_GATE on `agent/closing-machinery-wave-1`; not pushed. The wave's lanes are accepted and gated, but
-the program's next steps (L4 adoption, the pilot close) are HELD: the wave found that no close can pass under current
-authority (CF-1, below). That finding is the main item for the owner.
+Status: READY_FOR_OWNER_CLOSURE_CHECK on `agent/closing-machinery-wave-1`; not pushed. The owner risk gate at 5791b301
+requested one correction (F1, a retained evidence record on repeated production); it is fixed under SI-238 and gated at
+c366a834 (`verify OK`). See the owner risk-gate section at the end. The program's next steps (L4 adoption, the pilot close)
+stay HELD: no close can pass under current authority (CF-1).
 Risk tier: Tier 3 for every lane (evidence authority, required checks, a workflow with external side effects).
 Base..Head: b248c63d (main after PRs #345/#346) → nine `--no-ff` lane merges and eight ledger commits → L3d merge
-e59299ec → this docs-only close commit.
+e59299ec → wave report 5791b301 → owner risk gate → SI-238 21a5c35a → L1d merge c366a834 → this report update.
 Plan: `docs/superpowers/plans/2026-09-22-closing-machinery.md` (R-CM-1..5; lanes L1-L4; pilot).
 Ledger: SI-231 (a committed one-behind alignment report may be frozen at close; narrowed to a clean working tree, close and
 `--prepare` only), SI-232 (a missing gated-job creation stamp withholds the environment-review approval), SI-233 (the kernel is
 asked only whether the author holds the author and approver roles), SI-234 (a named test cut off by its package's end is an
 operational error), SI-235 (environment-review rows withheld on untrustworthy runs, jobs and stamps), SI-236 (the merged
-approval set's freshness identity), SI-237 (`GITHUB_API_URL`). Next free: SI-238.
+approval set's freshness identity), SI-237 (`GITHUB_API_URL`), SI-238 (a production run withdraws its unrecorded producers'
+earlier records). Next free: SI-239.
 
 ## Lanes and accepted ranges
 
@@ -138,4 +140,39 @@ Owner decisions:
 
 ## Next authorized action
 
-The owner risk gate: the CF-1 decisions, then push and pull-request authorization for this branch. Nothing is pushed.
+The owner's closure check of the F1 correction, the CF-1 decisions, then push and pull-request authorization for this branch.
+Nothing is pushed. Merging current main (which gained the backlog, PR #347) creates a new head that needs its own gate.
+
+## Owner risk gate (2026-09-23) and the F1 correction
+
+The owner relayed an independent review of b248c63d..5791b301: request one correction before accepting the wave; keep L4 and
+the pilot held; CF-1 confirmed (the review-input codes are deliberately staged in the compiler design §6, not a bug of this wave;
+the successful archival test injects a passing conflict provider and is seam evidence, not a composed production close).
+
+- F1 (P2): a repeated production run at the same commit kept an earlier attempt's `pass` when the later run of the same job did
+  not record that producer (for example under an inherited `GOFLAGS=-skip`): the run disclosed "did not run" but the old record
+  stayed and the obligation matcher still reported `matched`. Cause: the writer was skipped when a run had no records, and the
+  merge replaced only producers with a new record. The controller reproduced it with the reviewer's overlay (exit 1).
+- SI-238 (21a5c35a): each production run replaces its managed subset per spec at that commit — every selected obligation's
+  producer ref — so a producer the run did not record loses any earlier record there; other producers, the coarse records and
+  runtime-probe records are untouched; nothing is written unless every stream parsed and every file decoded; the disclosure
+  names each withdrawn record.
+- Lane L1d 21a5c35a..9f75405d, merge c366a834: fresh Opus 5.5 fixer; fresh Opus 5.5 re-review APPROVE. The reviewer's probe
+  now passes (and still fails on the base); the real-toolchain rerun test is permanent; withdrawal holds for did-not-run, an
+  inherited skip, a build failure, an unloaded package, no go.mod, a malformed sibling ref, a job switch, and shared producers;
+  coarse output is byte-identical to before on success; 16 mutants, 15 killed by named tests and one caught by a byte-identity
+  probe.
+- Gate at c366a834 (serial, `VERDI_E2E_PORT_BASE=4400 make verify`): `verify OK`, exit 0; test 917 s, spec-align 230 s, e2e 330
+  passed (817 s); 2000 s total. Recording-artifact scan 0 files.
+- Carried (Minor): a permanent test that the coarse writer keeps foreign producers (the re-review's N-1); the managed subset is
+  keyed by producer per spec, so another job's record for the same test ref in the same spec would also be withdrawn — not
+  reachable with one evidence job, and it fails toward producer-missing (key on producer and job name if multi-job trees are ever
+  supported); an operational error in a rerun keeps the earlier records, which never reach the authoritative path (upload runs
+  only on success; the fetch lists only successful runs).
+
+The reviewer also proposed answers to CF-1's eight decisions (an explicitly disclosed ordinary close for unsealed work through a
+reviewed amendment, with `vatc-machine-projections` as its pilot; `codex` as the adapter; a committed request template; a
+pinned CI judge; owner-signed disposition approvals through the kernel; a validated CI ref in the shared repository facts; L4
+held until those work together; `--prepare` able to write the report before an approval exists without claiming READY), and a
+required acceptance witness: one hermetic built-binary close through the real conflict evaluator, with negative variants. These
+are proposals awaiting the owner's decisions; none has been adopted.
