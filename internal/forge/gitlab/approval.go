@@ -126,21 +126,21 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	return snapshot, nil
 }
 
-// EnvironmentReview implements forge.Forge (v2 ac-4, dc-5): GitLab has no
-// environment-review concept analogous to GitHub's protected-environment
-// reviewer gate — environment reviews are a GitHub-only approval source by
-// construction (dc-5: "environment reviews are not a countersign source
-// under team or high-assurance profiles", and the mapping itself is keyed
-// "github-environment-review"). This is co-1's "unsupported source": no
-// network call is made, and NormalizeEnvironmentReview turns the disclosed
-// result into a zero-row outcome, never an error that would break a close.
+// EnvironmentReview implements forge.Forge (v2 ac-4, dc-5). This adapter
+// does not support environment reviews as an approval source: v2 ac-4 and
+// dc-5 name only GitHub environment reviews (the mapping is keyed
+// "github-environment-review"), and GitLab's own protected-environment
+// deployment approvals are not a v2 ac-4 source (L2b review m-6). This is
+// co-1's "unsupported source": no network call is made, and
+// NormalizeEnvironmentReview turns the disclosed result into a zero-row
+// outcome, never an error that would break a close.
 func (a *Adapter) EnvironmentReview(ctx context.Context, query forge.EnvironmentReviewQuery) (forge.EnvironmentReviewFacts, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.EnvironmentReviewFacts{}, err
 	}
 	facts, err := forge.NewEnvironmentReviewFacts(forge.EnvironmentReviewFacts{
 		Supported:         false,
-		UnsupportedReason: "gitlab: environment reviews are a GitHub-only approval source (v2 dc-5); gitlab has no forge-recorded review of a protected-environment workflow run to report",
+		UnsupportedReason: "gitlab: this adapter does not support environment reviews as an approval source; spec/vatc-forge-countersign-v2 ac-4 and dc-5 name only GitHub environment reviews, and GitLab protected-environment deployment approvals are not a v2 ac-4 source",
 		Repository:        a.cfg.ProjectID,
 	}, a.cfg.Clock())
 	if err != nil {

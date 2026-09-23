@@ -1046,8 +1046,8 @@ func TestEnvironmentReviewApprovalContract_Behavioral(t *testing.T) {
 		if facts.Supported {
 			t.Fatalf("Supported = true, want false (unsupported source)")
 		}
-		if facts.UnsupportedReason == "" {
-			t.Fatal("UnsupportedReason is empty, want a disclosed reason")
+		if !strings.Contains(facts.UnsupportedReason, "this adapter does not support") || strings.Contains(facts.UnsupportedReason, "gitlab has no") {
+			t.Fatalf("UnsupportedReason = %q, want it to say this adapter does not support the source, not that GitLab lacks the concept (m-6)", facts.UnsupportedReason)
 		}
 		rows, disclosures := normalizeEnvReview(t, facts)
 		if len(rows) != 0 {
