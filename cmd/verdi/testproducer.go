@@ -336,7 +336,7 @@ func goTestProducerMalformedRefDisclosure(c testProducerCandidate, reason error)
 const goTestProducerRuntimeKindSource = "sync:go-test-producer-runtime-kind"
 
 func goTestProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure.Disclosure {
-	text := fmt.Sprintf("declares producer %q for a runtime-kind obligation; runtime evidence exists only post-deploy (03 §Evidence kinds), so this pre-merge job emitted no record for it", c.ProducerRef)
+	text := fmt.Sprintf("declares producer %q for a runtime-kind obligation; runtime evidence exists only after deployment (03 §Evidence kinds), so this CI job emitted no record for it", c.ProducerRef)
 	return disclosure.New(goTestProducerRuntimeKindSource, c.ObligationID, text)
 }
 
