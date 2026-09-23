@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -641,5 +642,233 @@ func TestProduceGoTestEvidence_NoGoModDisclosesWithoutExec(t *testing.T) {
 	}
 	if recs := readVerdicts(t, root, "spec/story-a", commit); len(recs) != 0 {
 		t.Errorf("records = %+v, want none", recs)
+	}
+}
+
+// --- emission guards (contract 5) ------------------------------------------
+
+// TestVerdictForOutcome proves the one mapping from a named test's own
+// terminal action to a verdict: pass is pass, fail is fail, and a skipped
+// test abstains — never pass. Anything else is an error, never a verdict.
+func TestVerdictForOutcome(t *testing.T) {
+	cases := []struct {
+		action  string
+		want    artifact.EvidenceVerdict
+		wantErr bool
+	}{
+		{gotestjson.ActionPass, artifact.VerdictPass, false},
+		{gotestjson.ActionFail, artifact.VerdictFail, false},
+		{gotestjson.ActionSkip, artifact.VerdictAbstain, false},
+		{gotestjson.ActionBench, "", true},
+		{gotestjson.ActionOutput, "", true},
+		{"", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.action, func(t *testing.T) {
+			got, err := verdictForOutcome(c.action)
+			if (err != nil) != c.wantErr || got != c.want {
+				t.Errorf("verdictForOutcome(%q) = (%q, %v), want (%q, err %v)", c.action, got, err, c.want, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestBuildGoTestRecords proves each record carries its own obligation's
+// kind, acceptance criterion, exact producer ref, and exactly the provenance
+// passed in (source, pipeline, job, job_name, commit — never re-stamped);
+// that the outcome is looked up by the exact top-level name only (never a
+// prefix or a subtest); and that a package that did not build or load yields
+// a disclosure, not a record.
+func TestBuildGoTestRecords(t *testing.T) {
+	sel := func(ac, kind, test string) selectedGoTestObligation {
+		return selectedGoTestObligation{
+			testProducerCandidate: testProducerCandidate{SpecName: "story-a", ACID: ac, Kind: artifact.EvidenceKind(kind), ProducerRef: "go-test:pkg/a:" + test, JobRef: "verify", ObligationID: "obligation/story-a--" + ac + "--" + kind},
+			Package:               "pkg/a",
+			Test:                  test,
+		}
+	}
+	built := func(tests map[string]string) gotestjson.Result {
+		return gotestjson.Result{Package: fakeModulePath + "/pkg/a", Loaded: true, Outcome: gotestjson.ActionPass, Tests: tests}
+	}
+	localProv := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Pipeline: "913", Job: "7", JobName: "verify", Commit: "c0ffee"}
+	ciProv := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "914", Job: "2", JobName: "verify", Commit: "c0ffee"}
+
+	cases := []struct {
+		name        string
+		sel         selectedGoTestObligation
+		res         *gotestjson.Result // nil: no run recorded for the package
+		prov        artifact.EvidenceProvenance
+		wantVerdict artifact.EvidenceVerdict // "": no record
+		wantWhy     string                   // disclosure text when no record
+		wantErr     bool
+	}{
+		{"static pass under local provenance", sel("ac-1", "static", "TestA"), ptrResult(built(map[string]string{"TestA": gotestjson.ActionPass})), localProv, artifact.VerdictPass, "", false},
+		{"behavioral fail under ci provenance", sel("ac-2", "behavioral", "TestA"), ptrResult(built(map[string]string{"TestA": gotestjson.ActionFail})), ciProv, artifact.VerdictFail, "", false},
+		{"skip abstains", sel("ac-3", "behavioral", "TestA"), ptrResult(built(map[string]string{"TestA": gotestjson.ActionSkip})), ciProv, artifact.VerdictAbstain, "", false},
+		{"exact name, never a same-prefix test", sel("ac-4", "behavioral", "TestA"), ptrResult(built(map[string]string{"TestAB": gotestjson.ActionPass})), ciProv, "", "did not run (no terminal event)", false},
+		{"a subtest is not its parent", sel("ac-5", "behavioral", "TestA"), ptrResult(built(map[string]string{"TestA/sub": gotestjson.ActionPass})), ciProv, "", "did not run (no terminal event)", false},
+		{"package failed to build", sel("ac-6", "behavioral", "TestA"), &gotestjson.Result{Package: fakeModulePath + "/pkg/a", Loaded: true, Outcome: gotestjson.ActionFail, BuildFailed: true, FailedBuild: "x"}, ciProv, "", "it failed to build", false},
+		{"package could not be loaded", sel("ac-7", "behavioral", "TestA"), &gotestjson.Result{Package: "./pkg/a", Outcome: gotestjson.ActionFail}, ciProv, "", "the go command could not load it", false},
+		{"a benchmark outcome is no verdict", sel("ac-8", "behavioral", "TestA"), ptrResult(built(map[string]string{"TestA": gotestjson.ActionBench})), ciProv, "", "", true},
+		{"no run recorded for the package", sel("ac-9", "behavioral", "TestA"), nil, ciProv, "", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			results := map[string]gotestjson.Result{}
+			if c.res != nil {
+				results["pkg/a"] = *c.res
+			}
+			bySpec, discl, err := buildGoTestRecords([]selectedGoTestObligation{c.sel}, results, c.prov)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("buildGoTestRecords err = %v, wantErr %v", err, c.wantErr)
+			}
+			if c.wantErr {
+				return
+			}
+			recs := bySpec["spec/story-a"]
+			if c.wantVerdict == "" {
+				if len(recs) != 0 || len(discl) != 1 {
+					t.Fatalf("records %+v, disclosures %+v; want no record and one disclosure", recs, discl)
+				}
+				if r := disclosure.Render(discl[0]); !strings.Contains(r, c.sel.ObligationID) || !strings.Contains(r, c.wantWhy) {
+					t.Errorf("disclosure %q, want it to name %s and say %q", r, c.sel.ObligationID, c.wantWhy)
+				}
+				return
+			}
+			if len(recs) != 1 || len(discl) != 0 {
+				t.Fatalf("records %+v, disclosures %+v; want one record", recs, discl)
+			}
+			rec := recs[0]
+			if rec.Verdict != c.wantVerdict || rec.Kind != c.sel.Kind || rec.Producer != c.sel.ProducerRef ||
+				len(rec.EvidenceFor) != 1 || rec.EvidenceFor[0] != c.sel.ACID || rec.Schema != "verdi.evidence/v1" {
+				t.Errorf("record = %+v, want verdict %s kind %s producer %s evidence_for [%s]", rec, c.wantVerdict, c.sel.Kind, c.sel.ProducerRef, c.sel.ACID)
+			}
+			if rec.Provenance != c.prov {
+				t.Errorf("provenance = %+v, want exactly %+v", rec.Provenance, c.prov)
+			}
+			if want, err := namedTestDigest(rec); err != nil || rec.Digest != want {
+				t.Errorf("digest = %q, want namedTestDigest %q (err %v)", rec.Digest, want, err)
+			}
+		})
+	}
+}
+
+func ptrResult(r gotestjson.Result) *gotestjson.Result { return &r }
+
+// TestNamedTestDigest proves the digest content-addresses every declared
+// fact a record asserts — its verdict included — so a pass and a fail for
+// the same obligation never share a digest, and equal inputs always do.
+func TestNamedTestDigest(t *testing.T) {
+	base := artifact.Evidence{Kind: artifact.EvidenceBehavioral, Producer: "go-test:pkg/a:TestA", EvidenceFor: []string{"ac-1"}, Verdict: artifact.VerdictPass}
+	baseDigest, err := namedTestDigest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := namedTestDigest(base); again != baseDigest {
+		t.Fatalf("digest not stable: %q vs %q", again, baseDigest)
+	}
+	cases := []struct {
+		name   string
+		change func(*artifact.Evidence)
+	}{
+		{"verdict", func(e *artifact.Evidence) { e.Verdict = artifact.VerdictFail }},
+		{"abstain verdict", func(e *artifact.Evidence) { e.Verdict = artifact.VerdictAbstain }},
+		{"kind", func(e *artifact.Evidence) { e.Kind = artifact.EvidenceStatic }},
+		{"producer", func(e *artifact.Evidence) { e.Producer = "go-test:pkg/a:TestB" }},
+		{"evidence_for", func(e *artifact.Evidence) { e.EvidenceFor = []string{"ac-2"} }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			changed := base
+			changed.EvidenceFor = append([]string(nil), base.EvidenceFor...)
+			c.change(&changed)
+			got, err := namedTestDigest(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got == baseDigest {
+				t.Errorf("changing %s left the digest %q unchanged", c.name, got)
+			}
+		})
+	}
+}
+
+// --- wiring into sync --produce --------------------------------------------
+
+// TestRunSync_Produce_GoTestEmitter proves runProduce calls the per-test
+// producer with the CI job's declared name (CIInfo.JobName, SI-229 — here
+// deliberately different from CIInfo.Job, the ordering id), with the same
+// provenance the coarse bundle gets (source ci only in a genuine CI run,
+// source local under --force-local), and that a producer failure is the
+// verb's operational exit 2, never swallowed.
+func TestRunSync_Produce_GoTestEmitter(t *testing.T) {
+	cases := []struct {
+		name       string
+		inCI       bool
+		forceLocal bool
+		runnerErr  bool
+		wantExit   int
+		wantSource artifact.ProvenanceSource
+	}{
+		{"ci run", true, false, false, 0, artifact.SourceCI},
+		{"force-local run", false, true, false, 0, artifact.SourceLocal},
+		{"producer failure", true, false, true, 2, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.inCI {
+				t.Setenv("CI", "true")
+			} else {
+				t.Setenv("CI", "")
+				t.Setenv("GITHUB_ACTIONS", "")
+			}
+			root, deps := buildProduceDeps(t) // CIInfo{Pipeline: "913", Job: "7", JobName: "verify"}
+			writeGoMod(t, root)
+			for _, o := range []struct{ ac, kind, test string }{{"ac-1", "static", "TestA"}, {"ac-2", "behavioral", "TestB"}} {
+				writeObligation(t, root, "story-w", o.ac, o.kind, obligationMD("story-w", o.ac, o.kind, obligationQualityInput{
+					State: "elaborated", ProducerKind: "test", ProducerRef: "go-test:pkg/a:" + o.test,
+					SourceKind: "ci-job", SourceRef: "verify",
+				}))
+			}
+			runner := &fakeNamedGoTestRunner{output: map[string][]byte{
+				"./pkg/a": testGoTestJSON("pkg/a", map[string]string{"TestA": gotestjson.ActionPass, "TestB": gotestjson.ActionFail}),
+			}}
+			if c.runnerErr {
+				runner.err = map[string]error{"./pkg/a": errors.New("boom")}
+			}
+			deps.NamedGoTest = runner
+
+			code := runSync(context.Background(), root, testRef, testCommit, false, true, c.forceLocal, deps)
+			if code != c.wantExit {
+				t.Fatalf("runSync(--produce) exit = %d, want %d; stderr=%s", code, c.wantExit, deps.Stderr.(*bytes.Buffer).String())
+			}
+			if len(runner.calls) != 1 || runner.calls[0].pkg != "./pkg/a" || runner.calls[0].pattern != "^(TestA|TestB)$" {
+				t.Fatalf("runner calls = %+v, want one run of ./pkg/a for ^(TestA|TestB)$", runner.calls)
+			}
+			if c.wantExit != 0 {
+				if !strings.Contains(deps.Stderr.(*bytes.Buffer).String(), "boom") {
+					t.Errorf("stderr = %q, want the producer's error", deps.Stderr.(*bytes.Buffer).String())
+				}
+				return
+			}
+			wantProv := artifact.EvidenceProvenance{Source: c.wantSource, Pipeline: "913", Job: "7", JobName: "verify", Commit: testCommit}
+			got := map[string]artifact.Evidence{}
+			for _, r := range readVerdicts(t, root, "spec/story-w", testCommit) {
+				got[r.EvidenceFor[0]] = r
+			}
+			for ac, want := range map[string]struct {
+				kind    artifact.EvidenceKind
+				verdict artifact.EvidenceVerdict
+			}{"ac-1": {artifact.EvidenceStatic, artifact.VerdictPass}, "ac-2": {artifact.EvidenceBehavioral, artifact.VerdictFail}} {
+				r, ok := got[ac]
+				if !ok {
+					t.Errorf("%s: no per-test record; got %+v", ac, got)
+					continue
+				}
+				if r.Kind != want.kind || r.Verdict != want.verdict || r.Provenance != wantProv {
+					t.Errorf("%s: record = %+v, want kind %s verdict %s provenance %+v", ac, r, want.kind, want.verdict, wantProv)
+				}
+			}
+		})
 	}
 }
