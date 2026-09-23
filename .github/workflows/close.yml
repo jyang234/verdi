@@ -15,8 +15,11 @@
 # sequence produces: HEAD has exactly one parent, HEAD's commit changes
 # nothing but that spec's deviation-report.md, the report's `covers` is
 # HEAD's parent, it is not frozen, every finding is dispositioned, and the
-# working-tree report is byte-identical to the committed one (always true
-# in a CI checkout). Close then freezes that committed report in place.
+# working-tree report is byte-identical to the committed one. A CI checkout
+# meets that last clause unless .gitattributes applies eol or smudge
+# conversion to the report; in that case close stops at condition 4 naming
+# the clause (it fails closed). When every clause holds, close freezes that
+# committed report in place.
 #
 # PREREQUISITES STILL LANDING. This workflow cannot complete a close until
 # two other lanes of the closing-machinery program land:
