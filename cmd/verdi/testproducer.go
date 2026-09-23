@@ -14,10 +14,12 @@
 //
 // HONESTY. A renamed or removed test must surface as a missing producer, a
 // closure blocker, never a silent pass — so a named test absent from the
-// run emits no record, only a disclosure. But a malformed producer ref, or
-// an obligation elsewhere in the store this reader cannot even decode,
-// must never turn this shared CI step into an operational failure for
-// every OTHER story's obligations (03 §Declarations and binding's own
+// run emits no record, only a disclosure, and withdraws any earlier record
+// for its producer at the same commit (SI-238; see produceGoTestEvidence's
+// REPEAT PRODUCTION). But a malformed producer ref, or an obligation
+// elsewhere in the store this reader cannot even decode, must never turn
+// this shared CI step into an operational failure for every OTHER story's
+// obligations (03 §Declarations and binding's own
 // framing: "never as a silent pass" is about false positives, not about
 // making one story's authoring mistake block CI for everyone else) — both
 // are disclosed and skipped, exactly like an absent test. So is a named
@@ -582,7 +584,9 @@ func executeGoTestProducers(ctx context.Context, root, modulePath string, runner
 // obligation's named test that did not run — renamed, removed, in a package
 // that did not build or load, or otherwise never reaching its own terminal
 // event — contract 1/4: no record, a disclosure naming the obligation, and
-// the obligation reads producer-missing at fold time, never a silent pass.
+// the obligation reads producer-missing at fold time, never a silent pass. An
+// earlier record for its producer at the same commit is withdrawn, and the
+// disclosure says so (SI-238, discloseGoTestAbsence).
 const goTestProducerAbsentSource = "sync:go-test-producer-absent"
 
 func goTestProducerAbsentDisclosure(s selectedGoTestObligation) disclosure.Disclosure {
@@ -602,6 +606,57 @@ func goTestProducerNotBuiltDisclosure(s selectedGoTestObligation, res gotestjson
 func goTestProducerNoModuleDisclosure(s selectedGoTestObligation) disclosure.Disclosure {
 	text := fmt.Sprintf("named test %s in package %s did not run: the store root has no go.mod, so it is not the Go module root the package path is relative to; no evidence record was emitted for it", s.Test, s.Package)
 	return disclosure.New(goTestProducerAbsentSource, s.ObligationID, text)
+}
+
+// goTestAbsence is one selected obligation this run recorded nothing for, with
+// the disclosure that says why. The disclosure is final only once the write
+// has reported what it withdrew (discloseGoTestAbsence).
+type goTestAbsence struct {
+	obligation selectedGoTestObligation
+	disclosed  disclosure.Disclosure
+}
+
+// discloseGoTestAbsence returns a's disclosure, adding a note naming the
+// earlier records this run withdrew for a's own producer in a's own spec
+// (SI-238); withdrawn is writeManagedEvidence's report, keyed by spec ref. It
+// adds nothing when no such record was withdrawn.
+func discloseGoTestAbsence(a goTestAbsence, withdrawn map[string][]artifact.Evidence) disclosure.Disclosure {
+	var verdicts []string
+	for _, r := range withdrawn[goTestSpecRef(a.obligation.SpecName)] {
+		if r.Producer == a.obligation.ProducerRef {
+			verdicts = append(verdicts, string(r.Verdict))
+		}
+	}
+	var note string
+	switch len(verdicts) {
+	case 0:
+		return a.disclosed
+	case 1:
+		note = fmt.Sprintf("the earlier %s record for this producer at this commit was withdrawn", verdicts[0])
+	default:
+		note = fmt.Sprintf("the %d earlier records for this producer at this commit (%s) were withdrawn", len(verdicts), strings.Join(verdicts, ", "))
+	}
+	return disclosure.New(a.disclosed.Source, a.disclosed.Scope, a.disclosed.Text+"; "+note)
+}
+
+// goTestSpecRef is the owning spec ref of an obligation's story slug: the
+// "spec/" + name form writeManagedEvidence keys on (store.RefSlug) and
+// evidence.AssessObligation's own wantVerifies uses.
+func goTestSpecRef(specName string) string { return "spec/" + specName }
+
+// goTestManagedSubset is one production run's managed subset (SI-238): per
+// owning spec ref, the producer ref of every obligation selected for this job
+// at this commit, whether or not the run records anything for it.
+func goTestManagedSubset(selected []selectedGoTestObligation) map[string]map[string]bool {
+	managed := map[string]map[string]bool{}
+	for _, s := range selected {
+		specRef := goTestSpecRef(s.SpecName)
+		if managed[specRef] == nil {
+			managed[specRef] = map[string]bool{}
+		}
+		managed[specRef][s.ProducerRef] = true
+	}
+	return managed
 }
 
 // verdictForOutcome maps a named test's own terminal test2json action to
@@ -641,27 +696,26 @@ func namedTestDigest(rec artifact.Evidence) (string, error) {
 
 // buildGoTestRecords turns each selected obligation's outcome (its named
 // test's own terminal action in its package's Result) into its own evidence
-// record, grouped by owning spec — the shape writeSelfHostedEvidence already
-// merges and writes (contract 5: "merged into the owning spec's own
-// derived/<...>/verdicts.json through mergeEvidenceByProducer"). A selected
+// record, grouped by owning spec ref — the shape writeManagedEvidence writes
+// into the owning spec's own derived/<...>/verdicts.json. A selected
 // obligation whose test did not run — its package did not build or load, or
-// its test never reached a terminal event — is disclosed and excluded,
-// never an error.
-func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]gotestjson.Result, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []disclosure.Disclosure, error) {
+// its test never reached a terminal event — is returned as an absence with
+// its disclosure, never an error.
+func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]gotestjson.Result, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []goTestAbsence, error) {
 	bySpec := map[string][]artifact.Evidence{}
-	var discl []disclosure.Disclosure
+	var absent []goTestAbsence
 	for _, s := range selected {
 		res, ok := results[s.Package]
 		if !ok {
 			return nil, nil, fmt.Errorf("go-test producer: no run recorded for package %s", s.Package)
 		}
 		if !res.Built() {
-			discl = append(discl, goTestProducerNotBuiltDisclosure(s, res))
+			absent = append(absent, goTestAbsence{obligation: s, disclosed: goTestProducerNotBuiltDisclosure(s, res)})
 			continue
 		}
 		outcome, ok := res.Tests[s.Test]
 		if !ok {
-			discl = append(discl, goTestProducerAbsentDisclosure(s))
+			absent = append(absent, goTestAbsence{obligation: s, disclosed: goTestProducerAbsentDisclosure(s)})
 			continue
 		}
 		verdict, err := verdictForOutcome(outcome)
@@ -682,14 +736,12 @@ func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]
 			return nil, nil, err
 		}
 		rec.Digest = digest
-		// writeSelfHostedEvidence (and its own store.RefSlug keying) expects
-		// a full spec ref, not the bare story slug SplitObligationName
-		// returns — the same "spec/" + name convention
-		// evidence.AssessObligation's own wantVerifies uses.
-		specRef := "spec/" + s.SpecName
+		// writeManagedEvidence (and its own store.RefSlug keying) expects a
+		// full spec ref, not the bare story slug SplitObligationName returns.
+		specRef := goTestSpecRef(s.SpecName)
 		bySpec[specRef] = append(bySpec[specRef], rec)
 	}
-	return bySpec, discl, nil
+	return bySpec, absent, nil
 }
 
 // --- Orchestration --------------------------------------------------------
@@ -707,8 +759,17 @@ func buildGoTestRecords(selected []selectedGoTestObligation, results map[string]
 // obligation elsewhere in the store; a store root that is not a module
 // root; a package that did not build or load; or a named test that never
 // ran) is rendered to stdout. Only a missing runner, a runner or stream
-// failure, an unreadable go.mod, or a failed write returns an error (the
-// caller's exit 2).
+// failure, an unreadable go.mod, an undecodable existing verdicts.json, or a
+// failed write returns an error (the caller's exit 2), and every error but a
+// failed write returns before anything is written.
+//
+// REPEAT PRODUCTION (SI-238). 03 §The fold takes the latest run's verdict per
+// (kind, producer), so each run replaces its managed subset at this commit
+// (goTestManagedSubset): in every spec with a selected obligation, every
+// existing record whose producer is a selected obligation's producer ref is
+// dropped and this run's records are added. A selected producer this run did
+// not record therefore loses any earlier record at this commit, and its
+// disclosure says what was withdrawn; every other record stays unchanged.
 func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, runner namedGoTestRunner, prov artifact.EvidenceProvenance, stdout io.Writer) error {
 	candidates, discl, err := discoverTestProducerObligations(root)
 	if err != nil {
@@ -718,15 +779,17 @@ func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, ru
 	discl = append(discl, selectDiscl...)
 
 	if len(selected) > 0 {
+		managed := goTestManagedSubset(selected)
 		modulePath, isModuleRoot, err := goModulePath(root)
 		if err != nil {
 			return err
 		}
+		var absent []goTestAbsence
 		if !isModuleRoot {
 			// A producer ref's package path is relative to the module root; a
 			// store root with no go.mod has none, so no named test can run.
 			for _, s := range selected {
-				discl = append(discl, goTestProducerNoModuleDisclosure(s))
+				absent = append(absent, goTestAbsence{obligation: s, disclosed: goTestProducerNoModuleDisclosure(s)})
 			}
 			selected = nil
 		}
@@ -737,15 +800,17 @@ func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, ru
 		if err != nil {
 			return err
 		}
-		bySpec, buildDiscl, err := buildGoTestRecords(selected, results, prov)
+		bySpec, buildAbsent, err := buildGoTestRecords(selected, results, prov)
 		if err != nil {
 			return err
 		}
-		discl = append(discl, buildDiscl...)
-		if len(bySpec) > 0 {
-			if err := writeSelfHostedEvidence(root, commit, bySpec); err != nil {
-				return err
-			}
+		absent = append(absent, buildAbsent...)
+		withdrawn, err := writeManagedEvidence(root, commit, managed, bySpec)
+		if err != nil {
+			return err
+		}
+		for _, a := range absent {
+			discl = append(discl, discloseGoTestAbsence(a, withdrawn))
 		}
 	}
 

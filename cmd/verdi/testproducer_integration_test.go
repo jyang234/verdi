@@ -164,3 +164,74 @@ func disclosureLineFor(stdout, id string) string {
 	}
 	return ""
 }
+
+// TestProduceGoTestEvidence_RealToolchain_RerunWithdrawsAbsentPass is the
+// owner risk-gate review's F1 reproduction, made permanent (SI-238). Attempt
+// 1 at commit C records a pass for go-test:sample:TestPass through the real
+// toolchain. Attempt 2 runs at the same C, in the same derived tree, and
+// inherits an ordinary GOFLAGS=-skip=^TestPass$, so the real go test runs
+// nothing and the named test did not run. Attempt 2 must leave no record for
+// that producer, so the obligation reads producer-missing and never matched,
+// and its disclosure must say the earlier pass was withdrawn.
+func TestProduceGoTestEvidence_RealToolchain_RerunWithdrawsAbsentPass(t *testing.T) {
+	hermeticGoEnv(t)
+	root := copyGoTestFixture(t)
+	const story = "story-real"
+	const commit = "abababababababababababababababababababab"
+	const ref = "go-test:sample:TestPass"
+	const obligationID = "obligation/" + story + "--ac-1--behavioral"
+	writeObligation(t, root, story, "ac-1", "behavioral", obligationMD(story, "ac-1", "behavioral", obligationQualityInput{
+		State: "elaborated", ProducerKind: "test", ProducerRef: ref, SourceKind: "ci-job", SourceRef: "verify",
+	}))
+	ctx := context.Background()
+	assess := func(rec *artifact.Evidence) evidence.ObligationAssessment {
+		t.Helper()
+		got, err := evidence.AssessObligation(ctx, evidence.ObligationAssessmentInput{
+			StoreRoot: root, SpecName: story, ACID: "ac-1", Kind: artifact.EvidenceBehavioral,
+			Record: rec, EvaluationCommit: commit,
+		})
+		if err != nil {
+			t.Fatalf("AssessObligation: %v", err)
+		}
+		return got
+	}
+
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "1", JobName: "verify", Commit: commit}
+	var first bytes.Buffer
+	if err := produceGoTestEvidence(ctx, root, commit, "verify", realNamedGoTestRunner{}, prov, &first); err != nil {
+		t.Fatalf("attempt 1: %v", err)
+	}
+	before := readVerdicts(t, root, "spec/"+story, commit)
+	if len(before) != 1 || before[0].Producer != ref || before[0].Verdict != artifact.VerdictPass {
+		t.Fatalf("attempt 1 records = %+v, want one pass for %s", before, ref)
+	}
+	if got := assess(&before[0]); got.MatchState != evidence.ObligationMatched {
+		t.Fatalf("attempt 1's pass assesses %q (reason %q), want matched", got.MatchState, got.Reason)
+	}
+
+	t.Setenv("GOFLAGS", "-skip=^TestPass$")
+	prov.Job = "2"
+	var second bytes.Buffer
+	if err := produceGoTestEvidence(ctx, root, commit, "verify", realNamedGoTestRunner{}, prov, &second); err != nil {
+		t.Fatalf("attempt 2: %v", err)
+	}
+
+	after := readVerdicts(t, root, "spec/"+story, commit)
+	for i := range after {
+		if after[i].Producer == ref {
+			t.Errorf("attempt %s's %s record for %s survived attempt 2, which did not run the test", after[i].Provenance.Job, after[i].Verdict, ref)
+		}
+		if got := assess(&after[i]); got.MatchState == evidence.ObligationMatched {
+			t.Errorf("record %+v still matches %s after attempt 2 disclosed the test did not run", after[i], obligationID)
+		}
+	}
+	if got := assess(nil); got.MatchState != evidence.ObligationUnproven || got.Reason != evidence.ObligationReasonProducerMissing {
+		t.Errorf("with no current record, %s assesses (%q, %q), want (unproven, producer-missing)", obligationID, got.MatchState, got.Reason)
+	}
+	line := disclosureLineFor(second.String(), obligationID)
+	for _, want := range []string{"[" + goTestProducerAbsentSource + "]", whyAbsent, "the earlier pass record for this producer at this commit was withdrawn"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("attempt 2's disclosure for %s = %q, want it to contain %q; stdout=%q", obligationID, line, want, second.String())
+		}
+	}
+}
