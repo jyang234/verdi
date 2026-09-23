@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,19 +36,21 @@ type GatherInput struct {
 type Gatherer struct {
 	git                  GitReader
 	resolveDefaultBranch DefaultBranchResolver
+	getenv               EnvReader
 }
 
-// NewGatherer returns a Gatherer backed by real git plumbing and
-// specstate.ResolveDefaultBranch — the only constructor production
-// callers may use.
+// NewGatherer returns a Gatherer backed by real git plumbing,
+// specstate.ResolveDefaultBranch, and the process environment (os.Getenv)
+// — the only constructor production callers may use.
 func NewGatherer() Gatherer {
-	return Gatherer{git: NewGitReader(), resolveDefaultBranch: specstate.ResolveDefaultBranch}
+	return Gatherer{git: NewGitReader(), resolveDefaultBranch: specstate.ResolveDefaultBranch, getenv: os.Getenv}
 }
 
 // newGatherer is the test-only seam: this package's own tests construct a
-// Gatherer over in-process fakes (see gather_test.go).
-func newGatherer(git GitReader, resolveDefaultBranch DefaultBranchResolver) Gatherer {
-	return Gatherer{git: git, resolveDefaultBranch: resolveDefaultBranch}
+// Gatherer over in-process fakes (see gather_test.go) and an injected
+// environment.
+func newGatherer(git GitReader, resolveDefaultBranch DefaultBranchResolver, getenv EnvReader) Gatherer {
+	return Gatherer{git: git, resolveDefaultBranch: resolveDefaultBranch, getenv: getenv}
 }
 
 // Gather computes in's repository-identity Snapshot: remote origin,
@@ -63,7 +66,7 @@ func newGatherer(git GitReader, resolveDefaultBranch DefaultBranchResolver) Gath
 // constructed Gatherer) — the "keep the zero value fail closed" contract
 // — never for an ordinary unprovable repository fact.
 func (g Gatherer) Gather(ctx context.Context, in GatherInput) (Snapshot, error) {
-	if g.git == nil || g.resolveDefaultBranch == nil {
+	if g.git == nil || g.resolveDefaultBranch == nil || g.getenv == nil {
 		return Snapshot{}, fmt.Errorf("repositoryfacts: zero-value Gatherer cannot Gather (construct one with NewGatherer)")
 	}
 
@@ -171,11 +174,16 @@ func (g Gatherer) Gather(ctx context.Context, in GatherInput) (Snapshot, error) 
 		}
 	}
 
+	// The CI ref (SI-257) is recorded beside Facts, never folded into
+	// Facts.Branch: a detached checkout stays detached there. Its own
+	// failures carry their reason on the fact, never a DisclosureCode.
+	ciRef := gatherCIRef(ctx, g.git, g.getenv, in.Root, f.Head)
+
 	sort.Slice(codes, func(i, j int) bool { return codes[i] < codes[j] })
 	if codes == nil {
 		codes = []DisclosureCode{}
 	}
-	return Snapshot{Facts: f, Disclosures: codes}, nil
+	return Snapshot{Facts: f, Disclosures: codes, CIRef: ciRef}, nil
 }
 
 // relationship classifies HEAD against the default branch's HEAD: "equal"

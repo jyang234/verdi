@@ -73,6 +73,37 @@ func TestCIRefReasons_ClosedAndDistinct(t *testing.T) {
 	}
 }
 
+// invalidBranchNameCases holds one name per git check-ref-format rule a
+// branch name can break (git-check-ref-format(1), with --branch's own
+// additions), each violating exactly that rule. TestGather_CIRef reuses it
+// to prove none of these names ever reaches rev-parse.
+var invalidBranchNameCases = []struct{ rule, name string }{
+	{"empty", ""},
+	{"tilde", "main~1"},
+	{"caret", "main^"},
+	{"colon", "a:b"},
+	{"question mark", "a?b"},
+	{"asterisk", "a*b"},
+	{"open bracket", "a[b"},
+	{"backslash", `a\b`},
+	{"space", "a b"},
+	{"control character", "a\tb"},
+	{"DEL", "a\x7fb"},
+	{"double dot", "a..b"},
+	{"at-brace", "a@{b"},
+	{"leading dash", "-main"},
+	{"leading slash", "/main"},
+	{"trailing slash", "main/"},
+	{"trailing dot", "main."},
+	{"trailing .lock", "main.lock"},
+	{"empty component", "a//b"},
+	{"single at", "@"},
+	{"component beginning with a dot", "a/.b"},
+	{"leading dot", ".main"},
+	{"component ending with .lock", "a.lock/b"},
+	{"HEAD", "HEAD"},
+}
+
 // TestValidBranchName pins git's check-ref-format rules for a branch name
 // (git-check-ref-format(1), with --branch's own additions): one invalid row
 // per rule, each violating exactly that rule, plus the ordinary shapes a
@@ -96,33 +127,7 @@ func TestValidBranchName(t *testing.T) {
 			}
 		})
 	}
-	invalid := []struct{ rule, name string }{
-		{"empty", ""},
-		{"tilde", "main~1"},
-		{"caret", "main^"},
-		{"colon", "a:b"},
-		{"question mark", "a?b"},
-		{"asterisk", "a*b"},
-		{"open bracket", "a[b"},
-		{"backslash", `a\b`},
-		{"space", "a b"},
-		{"control character", "a\tb"},
-		{"DEL", "a\x7fb"},
-		{"double dot", "a..b"},
-		{"at-brace", "a@{b"},
-		{"leading dash", "-main"},
-		{"leading slash", "/main"},
-		{"trailing slash", "main/"},
-		{"trailing dot", "main."},
-		{"trailing .lock", "main.lock"},
-		{"empty component", "a//b"},
-		{"single at", "@"},
-		{"component beginning with a dot", "a/.b"},
-		{"leading dot", ".main"},
-		{"component ending with .lock", "a.lock/b"},
-		{"HEAD", "HEAD"},
-	}
-	for _, tt := range invalid {
+	for _, tt := range invalidBranchNameCases {
 		t.Run("invalid/"+tt.rule, func(t *testing.T) {
 			if validBranchName(tt.name) {
 				t.Fatalf("validBranchName(%q) = true, want false (%s)", tt.name, tt.rule)
@@ -141,7 +146,7 @@ func validFactsDetached() Facts {
 
 func TestSnapshot_BranchBeingClosed(t *testing.T) {
 	knownCIRef := CIRefFact{Known: true, Provider: CIProviderGitHub, Name: "close/spec-x"}
-	unknownCIRef := CIRefFact{Reason: CIRefReasonRemoteTrackingNotHead}
+	unprovenCIRef := CIRefFact{Reason: CIRefReasonRemoteTrackingNotHead}
 	tests := []struct {
 		name string
 		snap Snapshot
@@ -164,7 +169,7 @@ func TestSnapshot_BranchBeingClosed(t *testing.T) {
 		},
 		{
 			name: "detached with an unknown CI ref",
-			snap: Snapshot{Facts: validFactsDetached(), Disclosures: []DisclosureCode{DisclosureBranchDetached}, CIRef: unknownCIRef},
+			snap: Snapshot{Facts: validFactsDetached(), Disclosures: []DisclosureCode{DisclosureBranchDetached}, CIRef: unprovenCIRef},
 			want: StringFact{},
 		},
 		{

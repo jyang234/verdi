@@ -87,3 +87,10 @@ func (gitxReader) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bo
 // for a single free function (mirrors internal/journey/port.go's
 // identically shaped DefaultBranchResolver).
 type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Branch, bool)
+
+// EnvReader is the func-value shape of os.Getenv: the one seam through
+// which Gather reads the CI provider's environment for the CI-ref fact
+// (SI-257). NewGatherer wires it to os.Getenv; this package's own tests
+// substitute a fake or pair os.Getenv with t.Setenv. An unset variable and
+// an empty one read identically, as "".
+type EnvReader func(key string) string

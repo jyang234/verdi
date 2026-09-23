@@ -439,7 +439,7 @@ func TestGather_RemoteOrigin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			git := baseGitReader()
 			git.remoteURLFn = tt.remoteURL
-			g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+			g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 			if err != nil {
@@ -474,7 +474,7 @@ func TestGather_RemoteOriginNeverCarriesCredentials(t *testing.T) {
 		t.Run(raw, func(t *testing.T) {
 			git := baseGitReader()
 			git.remoteURLFn = func(context.Context, string, string) (string, error) { return raw, nil }
-			g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+			g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 			if err != nil {
@@ -508,7 +508,7 @@ func TestGather_Branch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			git := baseGitReader()
 			git.currentBranchFn = tt.currentBranch
-			g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+			g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 			if err != nil {
@@ -538,7 +538,7 @@ func TestGather_Head(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			git := baseGitReader()
 			git.revParseFn = tt.revParse
-			g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+			g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 			if err != nil {
@@ -653,7 +653,7 @@ func TestGather_DefaultBranchAndRelationship(t *testing.T) {
 			if tt.isAncestor != nil {
 				git.isAncestorFn = tt.isAncestor
 			}
-			g := newGatherer(git, tt.resolveDB)
+			g := newGatherer(git, tt.resolveDB, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 			if err != nil {
@@ -685,7 +685,7 @@ func TestGather_DefaultBranchRevParseFails(t *testing.T) {
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	g := newGatherer(git, resolveDB)
+	g := newGatherer(git, resolveDB, noCIEnv)
 
 	snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 	if err != nil {
@@ -710,7 +710,7 @@ func TestGather_NoDefaultBranchNeverDisclosed(t *testing.T) {
 	git := baseGitReader()
 	git.remoteURLFn = func(context.Context, string, string) (string, error) { return "https://example.com/x/y.git", nil }
 	git.showFn = func(context.Context, string, string, string) ([]byte, error) { return []byte("x"), nil }
-	g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+	g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 	snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 	if err != nil {
@@ -728,7 +728,7 @@ func TestGather_DirtyStaged(t *testing.T) {
 	git := baseGitReader()
 	git.statusDirtyFn = func(context.Context, string) (bool, error) { return true, nil }
 	git.stagedPathsFn = func(context.Context, string) ([]string, error) { return []string{"a", "b"}, nil }
-	g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+	g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 	snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 	if err != nil {
@@ -744,7 +744,7 @@ func TestGather_DirtyStaged(t *testing.T) {
 	git2 := baseGitReader()
 	git2.statusDirtyFn = func(context.Context, string) (bool, error) { return false, errors.New("boom") }
 	git2.stagedPathsFn = func(context.Context, string) ([]string, error) { return nil, errors.New("boom") }
-	g2 := newGatherer(git2, alwaysUnresolvedDefaultBranch)
+	g2 := newGatherer(git2, alwaysUnresolvedDefaultBranch, noCIEnv)
 	snap2, err := g2.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
@@ -798,7 +798,7 @@ func TestGather_Source(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			git := baseGitReader()
 			git.showFn = tt.showFn
-			g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+			g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 			snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: tt.content, TargetFoundOnDisk: tt.foundOnDisk})
 			if err != nil {
@@ -841,7 +841,7 @@ func TestGather_HappyPath_FullyKnown(t *testing.T) {
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	g := newGatherer(git, resolveDB)
+	g := newGatherer(git, resolveDB, noCIEnv)
 
 	snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("same"), TargetFoundOnDisk: true})
 	if err != nil {
@@ -869,7 +869,7 @@ func TestGather_DisclosuresSortedAndDeduped(t *testing.T) {
 	git.revParseFn = func(context.Context, string, string) (string, error) { return "", errors.New("boom") }
 	git.statusDirtyFn = func(context.Context, string) (bool, error) { return false, errors.New("boom") }
 	git.stagedPathsFn = func(context.Context, string) ([]string, error) { return nil, errors.New("boom") }
-	g := newGatherer(git, alwaysUnresolvedDefaultBranch)
+	g := newGatherer(git, alwaysUnresolvedDefaultBranch, noCIEnv)
 
 	snap, err := g.Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
 	if err != nil {

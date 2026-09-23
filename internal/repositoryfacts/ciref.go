@@ -1,6 +1,7 @@
 package repositoryfacts
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -102,6 +103,78 @@ func (f CIRefFact) Validate() error {
 		return fmt.Errorf("repositoryfacts: unknown CI ref reason %q", f.Reason)
 	}
 	return nil
+}
+
+// The provider environment variables gatherCIRef reads. GITHUB_HEAD_REF
+// (a pull-request run's head branch) is deliberately absent: SI-257 never
+// consults it.
+const (
+	envGitHubActions   = "GITHUB_ACTIONS"
+	envGitHubRefName   = "GITHUB_REF_NAME"
+	envGitHubRefType   = "GITHUB_REF_TYPE"
+	envGitLabCI        = "GITLAB_CI"
+	envGitLabRefName   = "CI_COMMIT_REF_NAME"
+	envGitLabBranch    = "CI_COMMIT_BRANCH"
+	envGitLabCommitTag = "CI_COMMIT_TAG"
+)
+
+// remoteTrackingPrefix is the one remote-tracking namespace a CI ref name
+// is resolved in: the full refname refs/remotes/origin/<name>, which git's
+// rev-parse matches as that exact ref before any other lookup rule.
+const remoteTrackingPrefix = "refs/remotes/origin/"
+
+// gatherCIRef computes the CI-ref fact (SI-257). A run is a CI run for
+// this purpose only when exactly one of GITHUB_ACTIONS and GITLAB_CI is
+// "true"; neither is the outside-CI zero value, and both is refused. The
+// provider's ref must name a branch (GitHub: GITHUB_REF_TYPE is "branch";
+// GitLab: no CI_COMMIT_TAG, and CI_COMMIT_REF_NAME equals
+// CI_COMMIT_BRANCH), the name must pass validBranchName before anything
+// reaches git, and refs/remotes/origin/<name> must resolve to head. Every
+// failure is Known == false with its own closed reason; a git failure
+// resolving the remote-tracking ref is such a failure, never an error.
+func gatherCIRef(ctx context.Context, git GitReader, getenv EnvReader, root string, head StringFact) CIRefFact {
+	github := getenv(envGitHubActions) == "true"
+	gitlab := getenv(envGitLabCI) == "true"
+	var provider, name string
+	switch {
+	case github && gitlab:
+		return CIRefFact{Reason: CIRefReasonProvidersAmbiguous}
+	case github:
+		provider = CIProviderGitHub
+		if getenv(envGitHubRefType) != "branch" {
+			return CIRefFact{Reason: CIRefReasonRefTypeNotBranch}
+		}
+		if name = getenv(envGitHubRefName); name == "" {
+			return CIRefFact{Reason: CIRefReasonNameMissing}
+		}
+	case gitlab:
+		provider = CIProviderGitLab
+		if getenv(envGitLabCommitTag) != "" {
+			return CIRefFact{Reason: CIRefReasonTagPipeline}
+		}
+		if name = getenv(envGitLabRefName); name == "" {
+			return CIRefFact{Reason: CIRefReasonNameMissing}
+		}
+		if name != getenv(envGitLabBranch) {
+			return CIRefFact{Reason: CIRefReasonBranchMismatch}
+		}
+	default:
+		return CIRefFact{}
+	}
+	if !validBranchName(name) {
+		return CIRefFact{Reason: CIRefReasonNameInvalid}
+	}
+	if !head.Known {
+		return CIRefFact{Reason: CIRefReasonHeadUnresolved}
+	}
+	tracking, err := git.RevParse(ctx, root, remoteTrackingPrefix+name)
+	if err != nil {
+		return CIRefFact{Reason: CIRefReasonRemoteTrackingUnresolved}
+	}
+	if tracking != head.Value {
+		return CIRefFact{Reason: CIRefReasonRemoteTrackingNotHead}
+	}
+	return CIRefFact{Known: true, Provider: provider, Name: name}
 }
 
 // BranchBeingClosed is SI-257's one reading of the branch a lifecycle
