@@ -34,6 +34,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -42,6 +43,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -51,15 +54,6 @@ import (
 
 // --- Grammar (contract 1) ---------------------------------------------
 
-// goTestProducerRefRe is the SI-228 grammar: "go-test:" then a package path
-// relative to the module root (anything but a colon — a real Go package
-// path never contains one), then a top-level test name (anything but a
-// colon or a slash — a slash would name a subtest path, never top-level).
-// Anchored full-match: a producer ref with an extra colon, an empty
-// package, or an empty/subtest test segment is rejected as malformed
-// rather than silently mis-split.
-var goTestProducerRefRe = regexp.MustCompile(`^go-test:([^:]+):([^:/]+)$`)
-
 // goTestProducerRef is a producer ref's parsed (package, top-level test)
 // pair.
 type goTestProducerRef struct {
@@ -68,15 +62,95 @@ type goTestProducerRef struct {
 }
 
 // parseGoTestProducerRef strictly parses a producer ref against the SI-228
-// grammar. ok is false for anything not of the exact "go-test:<pkg>:<Test>"
-// shape (wrong scheme, missing test, empty package, a subtest path, or an
-// extra colon).
-func parseGoTestProducerRef(ref string) (goTestProducerRef, bool) {
-	m := goTestProducerRefRe.FindStringSubmatch(ref)
-	if m == nil {
-		return goTestProducerRef{}, false
+// grammar `go-test:<package path relative to the module root>:<top-level
+// TestName>`, returning why a ref does not match. The package segment is one
+// or more canonical import-path elements (checkGoTestPackagePath); the test
+// segment is one Go identifier that is a test function name (isGoTestName),
+// so it can name neither a subtest, an example, a benchmark, nor a fuzz
+// target, and can never carry a regexp metacharacter into `-run`.
+func parseGoTestProducerRef(ref string) (goTestProducerRef, error) {
+	rest, ok := strings.CutPrefix(ref, "go-test:")
+	if !ok {
+		return goTestProducerRef{}, errors.New(`the scheme is not "go-test:"`)
 	}
-	return goTestProducerRef{Package: m[1], Test: m[2]}, true
+	pkg, test, ok := strings.Cut(rest, ":")
+	if !ok {
+		return goTestProducerRef{}, errors.New("there is no test segment")
+	}
+	if strings.Contains(test, ":") {
+		return goTestProducerRef{}, errors.New("there is more than one test segment")
+	}
+	if err := checkGoTestPackagePath(pkg); err != nil {
+		return goTestProducerRef{}, err
+	}
+	if !isGoTestName(test) {
+		return goTestProducerRef{}, fmt.Errorf("the test segment %q is not a top-level Go test function name", test)
+	}
+	return goTestProducerRef{Package: pkg, Test: test}, nil
+}
+
+// checkGoTestPackagePath accepts a package path relative to the module root
+// made of canonical import-path elements: no empty element (so no leading,
+// trailing, or doubled slash), no element beginning or ending with a dot (so
+// no ".", "..", or "..." and no hidden directory), and only the characters
+// Go permits in an import-path element (golang.org/x/mod/module's
+// importPathOK and checkElem, vendored in Go 1.25.5 at
+// cmd/vendor/golang.org/x/mod/module/module.go; the leading-dot rule is
+// stricter than import paths require). Such a path is always path.Clean's
+// fixed point and never escapes the module root.
+func checkGoTestPackagePath(pkg string) error {
+	if pkg == "" {
+		return errors.New("the package path is empty")
+	}
+	for _, elem := range strings.Split(pkg, "/") {
+		if elem == "" {
+			return fmt.Errorf("the package path %q has an empty element", pkg)
+		}
+		if elem[0] == '.' || elem[len(elem)-1] == '.' {
+			return fmt.Errorf("the package path element %q begins or ends with a dot", elem)
+		}
+		for _, r := range elem {
+			if !importPathElementRune(r) {
+				return fmt.Errorf("the package path element %q has the character %q, which is not allowed in a Go import path", elem, r)
+			}
+		}
+	}
+	return nil
+}
+
+// importPathElementRune is x/mod's importPathOK: ASCII letters and digits,
+// and - . _ ~ +.
+func importPathElementRune(r rune) bool {
+	return r == '-' || r == '.' || r == '_' || r == '~' || r == '+' ||
+		'0' <= r && r <= '9' || 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z'
+}
+
+// isGoTestName reports whether name is a Go identifier (go/token) that go
+// test runs as a test function: "Test", or "Test" followed by a rune that is
+// not lower-case (cmd/go/internal/load's isTest, Go 1.25.5).
+func isGoTestName(name string) bool {
+	if !token.IsIdentifier(name) || !strings.HasPrefix(name, "Test") {
+		return false
+	}
+	if len(name) == len("Test") {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(name[len("Test"):])
+	return !unicode.IsLower(r)
+}
+
+// nestedModuleDir reports the first directory on pkg's path below root that
+// holds its own go.mod: a package there belongs to another module, never to
+// the module root the producer ref's package path is relative to.
+func nestedModuleDir(root, pkg string) (string, bool) {
+	elems := strings.Split(pkg, "/")
+	for i := range elems {
+		dir := strings.Join(elems[:i+1], "/")
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dir), "go.mod")); err == nil {
+			return dir, true
+		}
+	}
+	return "", false
 }
 
 // --- Discovery (contract 2, part 1: find every candidate) --------------
@@ -220,34 +294,41 @@ type selectedGoTestObligation struct {
 
 // goTestProducerMalformedRefSource is the disclosure source for an
 // elaborated test-producer obligation whose producer ref fails the SI-228
-// grammar (contract 1: "never an operational error that breaks CI for
-// every story").
+// grammar, or names a package inside a nested module (contract 1: "never an
+// operational error that breaks CI for every story").
 const goTestProducerMalformedRefSource = "sync:go-test-producer-malformed-ref"
 
-func goTestProducerMalformedRefDisclosure(c testProducerCandidate) disclosure.Disclosure {
-	text := fmt.Sprintf("declares producer %q, which does not match the go-test:<package>:<TopLevelTestName> grammar; no evidence record was emitted for it", c.ProducerRef)
+func goTestProducerMalformedRefDisclosure(c testProducerCandidate, reason error) disclosure.Disclosure {
+	text := fmt.Sprintf("declares producer %q, which does not match the go-test:<package>:<TopLevelTestName> grammar (%v); no evidence record was emitted for it", c.ProducerRef, reason)
 	return disclosure.New(goTestProducerMalformedRefSource, c.ObligationID, text)
 }
 
 // selectGoTestObligations narrows candidates to exactly this CI job's own
 // authoritative obligations (SI-229: authoritative_source.ref ==
-// jobName), then grammar-parses each survivor's producer ref. jobName ==
-// "" (not running in a named CI job at all) naturally selects nothing,
-// since an elaborated obligation's authoritative_source.ref is always
-// non-blank (internal/artifact/obligation.go's Validate). A grammar
-// failure is disclosed and excluded, never returned as an error. The
+// jobName), then grammar-parses each survivor's producer ref and rejects a
+// package path that crosses into a nested module under root. jobName == ""
+// (not running in a named CI job at all) naturally selects nothing, since
+// an elaborated obligation's authoritative_source.ref is always non-blank
+// (internal/artifact/obligation.go's Validate). A rejected ref is disclosed
+// on its own obligation and excluded, never returned as an error, and never
+// reaches the `-run` expression another obligation's test shares. The
 // returned slice is sorted (package, test, spec, ac) for deterministic
 // execution grouping and emission order.
-func selectGoTestObligations(candidates []testProducerCandidate, jobName string) ([]selectedGoTestObligation, []disclosure.Disclosure) {
+func selectGoTestObligations(root string, candidates []testProducerCandidate, jobName string) ([]selectedGoTestObligation, []disclosure.Disclosure) {
 	var selected []selectedGoTestObligation
 	var discl []disclosure.Disclosure
 	for _, c := range candidates {
 		if jobName == "" || c.JobRef != jobName {
 			continue
 		}
-		parsed, ok := parseGoTestProducerRef(c.ProducerRef)
-		if !ok {
-			discl = append(discl, goTestProducerMalformedRefDisclosure(c))
+		parsed, err := parseGoTestProducerRef(c.ProducerRef)
+		if err == nil {
+			if dir, nested := nestedModuleDir(root, parsed.Package); nested {
+				err = fmt.Errorf("the package path enters the nested module at %s", dir)
+			}
+		}
+		if err != nil {
+			discl = append(discl, goTestProducerMalformedRefDisclosure(c, err))
 			continue
 		}
 		selected = append(selected, selectedGoTestObligation{testProducerCandidate: c, Package: parsed.Package, Test: parsed.Test})
@@ -300,15 +381,18 @@ func (realNamedGoTestRunner) RunNamedGoTest(ctx context.Context, dir, pkgArg, ru
 	return stdout.Bytes(), nil
 }
 
-// goTestRunPattern builds the `-run` alternation from a package's wanted
-// top-level test names: "^(A|B|...)$", sorted for a deterministic,
-// reproducible command line. Every name here already passed
-// parseGoTestProducerRef, so it is a plain Go identifier — never a regex
-// metacharacter that would need escaping.
+// goTestRunPattern builds the `-run` expression from a package's wanted
+// top-level test names: "^(A|B|...)$", each name regexp-quoted and the
+// whole alternation anchored at both ends so each name matches only itself,
+// sorted for a deterministic, reproducible command line. Every name already
+// passed parseGoTestProducerRef, so quoting is defence in depth.
 func goTestRunPattern(tests []string) string {
-	sorted := append([]string(nil), tests...)
-	sort.Strings(sorted)
-	return "^(" + strings.Join(sorted, "|") + ")$"
+	quoted := make([]string, len(tests))
+	for i, t := range tests {
+		quoted[i] = regexp.QuoteMeta(t)
+	}
+	sort.Strings(quoted)
+	return "^(" + strings.Join(quoted, "|") + ")$"
 }
 
 // goTestPackageArg is the go test argument for a package path relative to
@@ -574,7 +658,7 @@ func produceGoTestEvidence(ctx context.Context, root, commit, jobName string, ru
 	if err != nil {
 		return err
 	}
-	selected, selectDiscl := selectGoTestObligations(candidates, jobName)
+	selected, selectDiscl := selectGoTestObligations(root, candidates, jobName)
 	discl = append(discl, selectDiscl...)
 
 	if len(selected) > 0 {

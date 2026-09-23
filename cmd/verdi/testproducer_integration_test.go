@@ -42,11 +42,19 @@ func copyGoTestFixture(t *testing.T) string {
 
 // realToolchainCase is one obligation the real-toolchain test authors, and
 // the outcome the production path must reach for it: a record with
-// wantVerdict, or (wantVerdict == "") no record and a disclosure naming it.
+// wantVerdict, or (wantVerdict == "") no record and a disclosure naming it
+// whose rendered line contains wantWhy.
 type realToolchainCase struct {
 	ac, kind, ref string
 	wantVerdict   artifact.EvidenceVerdict
+	wantWhy       string
 }
+
+const (
+	whyAbsent    = "did not run (no terminal event)"
+	whyNotBuilt  = "did not build or load"
+	whyMalformed = "does not match the go-test:<package>:<TopLevelTestName> grammar"
+)
 
 // TestProduceGoTestEvidence_RealToolchain drives the REAL production path —
 // produceGoTestEvidence with realNamedGoTestRunner, exactly as runProduce
@@ -62,23 +70,28 @@ func TestProduceGoTestEvidence_RealToolchain(t *testing.T) {
 	const commit = "abababababababababababababababababababab"
 
 	cases := []realToolchainCase{
-		{"ac-1", "behavioral", "go-test:sample:TestPass", artifact.VerdictPass},
-		{"ac-2", "behavioral", "go-test:sample:TestFail", artifact.VerdictFail},
-		{"ac-3", "static", "go-test:sample:TestSkip", artifact.VerdictAbstain},
-		{"ac-4", "behavioral", "go-test:sample:TestAbsent", ""},
+		{"ac-1", "behavioral", "go-test:sample:TestPass", artifact.VerdictPass, ""},
+		{"ac-2", "behavioral", "go-test:sample:TestFail", artifact.VerdictFail, ""},
+		{"ac-3", "static", "go-test:sample:TestSkip", artifact.VerdictAbstain, ""},
+		{"ac-4", "behavioral", "go-test:sample:TestAbsent", "", whyAbsent},
 		// Go 1.25 "attr" events (Key, Value) are part of a passing test's stream.
-		{"ac-5", "behavioral", "go-test:sample:TestAttr", artifact.VerdictPass},
+		{"ac-5", "behavioral", "go-test:sample:TestAttr", artifact.VerdictPass, ""},
 		// The parent's own terminal fail decides, not its passing subtest's.
-		{"ac-6", "behavioral", "go-test:sample:TestParentFails", artifact.VerdictFail},
+		{"ac-6", "behavioral", "go-test:sample:TestParentFails", artifact.VerdictFail, ""},
 		// No test named TestPrefix exists; TestPrefixBar's pass is not its.
-		{"ac-7", "behavioral", "go-test:sample:TestPrefix", ""},
-		{"ac-8", "behavioral", "go-test:sample:TestPrefixBar", artifact.VerdictPass},
+		{"ac-7", "behavioral", "go-test:sample:TestPrefix", "", whyAbsent},
+		{"ac-8", "behavioral", "go-test:sample:TestPrefixBar", artifact.VerdictPass, ""},
 		// An unbuildable package (build-output, build-fail, fail+FailedBuild)
 		// means its named test did not run.
-		{"ac-9", "behavioral", "go-test:nobuild:TestNeverBuilds", ""},
+		{"ac-9", "behavioral", "go-test:nobuild:TestNeverBuilds", "", whyNotBuilt},
 		// A renamed or removed package directory: the go command reports the
 		// unresolved argument ./gone as Package, and nothing runs.
-		{"ac-10", "behavioral", "go-test:gone:TestGone", ""},
+		{"ac-10", "behavioral", "go-test:gone:TestGone", "", whyNotBuilt},
+		// A malformed sibling ref (a regexp metacharacter) is disclosed on its
+		// own obligation only; it must not change TestPass's outcome above.
+		{"ac-11", "behavioral", "go-test:sample:Test(", "", whyMalformed},
+		// A package path into a nested module is malformed, never run.
+		{"ac-12", "behavioral", "go-test:nested/inner:TestInner", "", whyMalformed},
 	}
 	for _, c := range cases {
 		writeObligation(t, root, story, c.ac, c.kind, obligationMD(story, c.ac, c.kind, obligationQualityInput{
@@ -104,8 +117,8 @@ func TestProduceGoTestEvidence_RealToolchain(t *testing.T) {
 				t.Errorf("%s: got record %+v, want none (the named test does not exist)", c.ref, rec)
 			}
 			id := "obligation/" + story + "--" + c.ac + "--" + c.kind
-			if !strings.Contains(stdout.String(), id) {
-				t.Errorf("%s: stdout %q has no disclosure naming %s", c.ref, stdout.String(), id)
+			if line := disclosureLineFor(stdout.String(), id); !strings.Contains(line, c.wantWhy) {
+				t.Errorf("%s: disclosure for %s = %q, want one containing %q", c.ref, id, line, c.wantWhy)
 			}
 			continue
 		}
@@ -139,4 +152,15 @@ func TestProduceGoTestEvidence_RealToolchain(t *testing.T) {
 			t.Errorf("AssessObligation(%s) = %q, want %q (reason %q)", c.ac, got.MatchState, c.want, got.Reason)
 		}
 	}
+}
+
+// disclosureLineFor returns the one stdout line that names obligation id
+// (followed by the ": " a rendered disclosure puts after its subject), or "".
+func disclosureLineFor(stdout, id string) string {
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, " "+id+": ") {
+			return line
+		}
+	}
+	return ""
 }

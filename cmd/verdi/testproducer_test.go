@@ -36,14 +36,44 @@ func TestParseGoTestProducerRef(t *testing.T) {
 		{"wrong scheme", "checker:cmd/verdi:TestFoo", "", "", false},
 		{"empty test", "go-test:cmd/verdi:", "", "", false},
 		{"empty ref", "", "", "", false},
+		// Go's test-function naming rule (cmd/go/internal/load isTest):
+		// "Test", or "Test" followed by a rune that is not lower-case.
+		{"bare Test", "go-test:a:Test", "a", "Test", true},
+		{"digit after Test", "go-test:a:Test1", "a", "Test1", true},
+		{"underscore after Test", "go-test:a:Test_x", "a", "Test_x", true},
+		{"upper-case Unicode after Test", "go-test:a:TestÜber", "a", "TestÜber", true},
+		{"import-path characters", "go-test:x-y/z_w.v~1+2:TestA", "x-y/z_w.v~1+2", "TestA", true},
+		{"lower-case after Test", "go-test:a:Testfoo", "", "", false},
+		{"regexp metacharacter", "go-test:sample:Test(", "", "", false},
+		{"regexp wildcard", "go-test:sample:.*", "", "", false},
+		{"example function", "go-test:ex:ExampleFoo", "", "", false},
+		{"fuzz target", "go-test:f:FuzzFoo", "", "", false},
+		{"benchmark", "go-test:b:BenchmarkFoo", "", "", false},
+		{"not an identifier", "go-test:a:TestFoo-Bar", "", "", false},
+		{"space in test", "go-test:a:Test Foo", "", "", false},
+		{"ellipsis package", "go-test:...:TestFoo", "", "", false},
+		{"parent directory", "go-test:../x:TestFoo", "", "", false},
+		{"dot-slash package", "go-test:./sample:TestFoo", "", "", false},
+		{"dot package", "go-test:.:TestFoo", "", "", false},
+		{"trailing slash", "go-test:sample/:TestFoo", "", "", false},
+		{"leading slash", "go-test:/sample:TestFoo", "", "", false},
+		{"empty segment", "go-test:a//b:TestFoo", "", "", false},
+		{"dot segment", "go-test:a/./b:TestFoo", "", "", false},
+		{"dot-dot segment", "go-test:a/../b:TestFoo", "", "", false},
+		{"ellipsis segment", "go-test:a/...:TestFoo", "", "", false},
+		{"leading-dot segment", "go-test:a/.hidden:TestFoo", "", "", false},
+		{"trailing-dot segment", "go-test:a/b.:TestFoo", "", "", false},
+		{"space in package", "go-test:a b:TestFoo", "", "", false},
+		{"at sign in package", "go-test:a@v1:TestFoo", "", "", false},
+		{"backslash in package", "go-test:a\\b:TestFoo", "", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := parseGoTestProducerRef(c.ref)
-			if ok != c.wantOK {
-				t.Fatalf("parseGoTestProducerRef(%q) ok = %v, want %v", c.ref, ok, c.wantOK)
+			got, err := parseGoTestProducerRef(c.ref)
+			if (err == nil) != c.wantOK {
+				t.Fatalf("parseGoTestProducerRef(%q) err = %v, want ok %v", c.ref, err, c.wantOK)
 			}
-			if !ok {
+			if err != nil {
 				return
 			}
 			if got.Package != c.wantPkg || got.Test != c.wantTst {
@@ -186,7 +216,7 @@ func TestGoTestProducerSelection(t *testing.T) {
 		}
 	}
 
-	selected, selectDiscl := selectGoTestObligations(candidates, "verify")
+	selected, selectDiscl := selectGoTestObligations(root, candidates, "verify")
 	if len(selected) != 1 {
 		t.Fatalf("selected = %d, want 1; got %+v", len(selected), selected)
 	}
@@ -204,7 +234,7 @@ func TestGoTestProducerSelection(t *testing.T) {
 	// jobName == "" (not in a named CI job at all) selects nothing, with no
 	// disclosures — an elaborated obligation's authoritative_source.ref is
 	// never blank, so nothing can ever match an empty job name.
-	emptyJobSelected, emptyJobDiscl := selectGoTestObligations(candidates, "")
+	emptyJobSelected, emptyJobDiscl := selectGoTestObligations(root, candidates, "")
 	if len(emptyJobSelected) != 0 || len(emptyJobDiscl) != 0 {
 		t.Errorf("selectGoTestObligations(candidates, \"\") = (%d selected, %d disclosures), want (0, 0)", len(emptyJobSelected), len(emptyJobDiscl))
 	}
@@ -472,11 +502,64 @@ func TestProduceGoTestEvidence_EndToEndMatchesObligation(t *testing.T) {
 	}
 }
 
-// TestGoTestRunPattern proves the -run alternation is sorted and anchored.
+// TestGoTestRunPattern proves the -run expression is sorted, anchored at
+// both ends, and regexp-quotes every name (defence in depth behind the
+// grammar), so no name can widen or break another's match.
 func TestGoTestRunPattern(t *testing.T) {
-	got := goTestRunPattern([]string{"TestB", "TestA"})
-	if got != "^(TestA|TestB)$" {
-		t.Errorf("goTestRunPattern = %q, want ^(TestA|TestB)$", got)
+	cases := []struct {
+		name  string
+		tests []string
+		want  string
+	}{
+		{"sorted and anchored", []string{"TestB", "TestA"}, "^(TestA|TestB)$"},
+		{"single name", []string{"TestA"}, "^(TestA)$"},
+		{"metacharacters quoted", []string{"Test(", "Test.*"}, `^(Test\(|Test\.\*)$`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := goTestRunPattern(c.tests); got != c.want {
+				t.Errorf("goTestRunPattern(%q) = %q, want %q", c.tests, got, c.want)
+			}
+		})
+	}
+}
+
+// TestSelectGoTestObligations_NestedModule proves a package path that
+// crosses into a nested module (a go.mod below the module root, at the
+// package or any directory above it) is disclosed as malformed on its own
+// obligation and never selected, while a sibling in the root module is.
+func TestSelectGoTestObligations_NestedModule(t *testing.T) {
+	root := t.TempDir()
+	writeGoMod(t, root)
+	for _, dir := range []string{"nested", "deep/er/mod"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "go.mod"), []byte("module example.com/other\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cand := func(id, ref string) testProducerCandidate {
+		return testProducerCandidate{SpecName: "s", ACID: id, Kind: artifact.EvidenceBehavioral, ProducerRef: ref, JobRef: "verify", ObligationID: "obligation/s--" + id + "--behavioral"}
+	}
+	candidates := []testProducerCandidate{
+		cand("ac-1", "go-test:nested:TestA"),
+		cand("ac-2", "go-test:nested/inner:TestA"),
+		cand("ac-3", "go-test:deep/er/mod/pkg:TestA"),
+		cand("ac-4", "go-test:deep/er:TestA"),
+	}
+	selected, discl := selectGoTestObligations(root, candidates, "verify")
+	if len(selected) != 1 || selected[0].ACID != "ac-4" {
+		t.Fatalf("selected = %+v, want only ac-4 (deep/er is in the root module)", selected)
+	}
+	if len(discl) != 3 {
+		t.Fatalf("disclosures = %+v, want 3", discl)
+	}
+	for i, d := range discl {
+		r := disclosure.Render(d)
+		if !strings.Contains(r, goTestProducerMalformedRefSource) || !strings.Contains(r, "nested module") || !strings.Contains(r, candidates[i].ObligationID) {
+			t.Errorf("disclosure %d = %q, want a malformed-ref disclosure naming %s and the nested module", i, r, candidates[i].ObligationID)
+		}
 	}
 }
 
