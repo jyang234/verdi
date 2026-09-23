@@ -285,6 +285,31 @@ func TestGitLabMergeRecords_FailsClosedOnProviderShape(t *testing.T) {
 	}
 }
 
+// TestGitLabMergeRecords_RefusesNonCanonicalXNextPage pins the strict walk's
+// X-Next-Page rule (lane EF review F4): the header must be the canonical
+// decimal of a page number of at least 1. "+2" and "02" parse as 2 but are
+// not canonical, so only the canonical-form check refuses them. Each row
+// names the error it must fail with.
+func TestGitLabMergeRecords_RefusesNonCanonicalXNextPage(t *testing.T) {
+	for _, next := range []string{"two", "+2", "02", "0", "-1", "2.0"} {
+		t.Run(next, func(t *testing.T) {
+			s := newMRTServer(t)
+			s.mrPages = []string{`[]`, `[]`}
+			s.nextPage = map[int]string{1: next}
+			facts, err := s.adapter().MergeRecords(context.Background(), mrtCommit)
+			if err == nil {
+				t.Fatalf("MergeRecords with X-Next-Page %q = %+v, want an operational error", next, facts)
+			}
+			if errors.Is(err, forge.ErrUnavailable) {
+				t.Fatalf("MergeRecords error %v wraps ErrUnavailable; ambiguous pagination is operational, never unavailability", err)
+			}
+			if want := "malformed X-Next-Page " + strconv.Quote(next); !strings.Contains(err.Error(), want) {
+				t.Fatalf("MergeRecords error %q, want it to name %q", err, want)
+			}
+		})
+	}
+}
+
 // TestGitLabMergeRecords_RefusesAnotherProjectsMergeRequest mirrors the
 // GitHub base-repository check (lane EF review F2, for symmetry; review
 // probe G1): each merge request's target_project_id must be the id of
