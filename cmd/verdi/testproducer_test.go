@@ -425,9 +425,14 @@ func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
 	if !disclosure.IsRendered(strings.TrimRight(stdout.String(), "\n")) {
 		t.Errorf("stdout = %q, want a recognized disclosure line", stdout.String())
 	}
-	path := filepath.Join(store.DerivedSpecDir(root, store.RefSlug("spec/story-a")), commit, "verdicts.json")
-	if _, err := os.Stat(path); err == nil {
-		t.Errorf("verdicts.json was written at %s, want none (the named test never ran)", path)
+	// Nothing existed at this commit, so nothing was withdrawn (SI-238).
+	if strings.Contains(stdout.String(), "withdrawn") {
+		t.Errorf("stdout = %q, want no withdrawal: no earlier record existed", stdout.String())
+	}
+	// No record to add and no file to rewrite: not even the directory is made.
+	dir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug("spec/story-a")), commit)
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("%s: stat err = %v, want nothing created (the named test never ran)", dir, err)
 	}
 }
 
@@ -790,7 +795,7 @@ func TestBuildGoTestRecords(t *testing.T) {
 			if c.res != nil {
 				results["pkg/a"] = *c.res
 			}
-			bySpec, discl, err := buildGoTestRecords([]selectedGoTestObligation{c.sel}, results, c.prov)
+			bySpec, absent, err := buildGoTestRecords([]selectedGoTestObligation{c.sel}, results, c.prov)
 			if (err != nil) != c.wantErr {
 				t.Fatalf("buildGoTestRecords err = %v, wantErr %v", err, c.wantErr)
 			}
@@ -799,16 +804,19 @@ func TestBuildGoTestRecords(t *testing.T) {
 			}
 			recs := bySpec["spec/story-a"]
 			if c.wantVerdict == "" {
-				if len(recs) != 0 || len(discl) != 1 {
-					t.Fatalf("records %+v, disclosures %+v; want no record and one disclosure", recs, discl)
+				if len(recs) != 0 || len(absent) != 1 {
+					t.Fatalf("records %+v, absences %+v; want no record and one absence", recs, absent)
 				}
-				if r := disclosure.Render(discl[0]); !strings.Contains(r, c.sel.ObligationID) || !strings.Contains(r, c.wantWhy) {
+				if !reflect.DeepEqual(absent[0].obligation, c.sel) {
+					t.Errorf("absence names %+v, want %+v", absent[0].obligation, c.sel)
+				}
+				if r := disclosure.Render(absent[0].disclosed); !strings.Contains(r, c.sel.ObligationID) || !strings.Contains(r, c.wantWhy) {
 					t.Errorf("disclosure %q, want it to name %s and say %q", r, c.sel.ObligationID, c.wantWhy)
 				}
 				return
 			}
-			if len(recs) != 1 || len(discl) != 0 {
-				t.Fatalf("records %+v, disclosures %+v; want one record", recs, discl)
+			if len(recs) != 1 || len(absent) != 0 {
+				t.Fatalf("records %+v, absences %+v; want one record", recs, absent)
 			}
 			rec := recs[0]
 			if rec.Verdict != c.wantVerdict || rec.Kind != c.sel.Kind || rec.Producer != c.sel.ProducerRef ||

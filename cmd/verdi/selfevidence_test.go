@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/store"
@@ -225,4 +228,239 @@ func TestProduceSelfHostedEvidence_IdempotentAcrossReruns(t *testing.T) {
 	if aRecs[0].Provenance.Job != "2" {
 		t.Fatalf("spec/story-a record job = %q, want the retry's job %q to have replaced the first", aRecs[0].Provenance.Job, "2")
 	}
+}
+
+// evRec is a minimal valid record for producer, attesting ac, told apart from
+// its siblings by witness.
+func evRec(producer, ac, witness string, verdict artifact.EvidenceVerdict) artifact.Evidence {
+	return artifact.Evidence{
+		Schema: "verdi.evidence/v1", EvidenceFor: []string{ac}, Kind: artifact.EvidenceBehavioral,
+		Verdict: verdict, Witness: witness, Producer: producer,
+		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Commit: "c0ffee0"},
+		Digest:     "sha256:" + strings.Repeat("0", 64),
+	}
+}
+
+// witnesses lists recs' witnesses in order, for comparing record sequences.
+func witnesses(recs []artifact.Evidence) []string {
+	out := make([]string, len(recs))
+	for i, r := range recs {
+		out[i] = r.Witness
+	}
+	return out
+}
+
+// TestMergeEvidenceByProducer pins the merge helper runtimeprobe.go's
+// writeRuntimeRecord uses, unchanged by SI-238: an existing record is replaced
+// only by an incoming record with its producer; one whose producer has no
+// incoming record is kept, in order, ahead of the incoming records.
+func TestMergeEvidenceByProducer(t *testing.T) {
+	pass := artifact.VerdictPass
+	cases := []struct {
+		name               string
+		existing, incoming []artifact.Evidence
+		want               []string
+	}{
+		{"nothing existing", nil, []artifact.Evidence{evRec("p1", "ac-1", "new-p1", pass)}, []string{"new-p1"}},
+		{"same producer replaced", []artifact.Evidence{evRec("p1", "ac-1", "old-p1", pass)}, []artifact.Evidence{evRec("p1", "ac-1", "new-p1", pass)}, []string{"new-p1"}},
+		{"a producer with no incoming record is kept", []artifact.Evidence{evRec("p1", "ac-1", "old-p1", pass), evRec("p2", "ac-2", "old-p2", pass)}, []artifact.Evidence{evRec("p2", "ac-2", "new-p2", pass)}, []string{"old-p1", "new-p2"}},
+		{"nothing incoming keeps everything", []artifact.Evidence{evRec("p1", "ac-1", "old-p1", pass)}, nil, []string{"old-p1"}},
+		{"every existing record of a replaced producer goes", []artifact.Evidence{evRec("p1", "ac-1", "old-p1a", pass), evRec("p3", "ac-3", "old-p3", pass), evRec("p1", "ac-2", "old-p1b", pass)}, []artifact.Evidence{evRec("p1", "ac-1", "new-p1", pass)}, []string{"old-p3", "new-p1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := witnesses(mergeEvidenceByProducer(c.existing, c.incoming)); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("mergeEvidenceByProducer = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestRuntimeProbe_WriteRuntimeRecordKeepsOtherProducers proves the runtime
+// producer's write is unchanged by SI-238: a record for one check replaces
+// only that check's earlier record in runtime.json, and another check's
+// record, which this write did not mention, stays.
+func TestRuntimeProbe_WriteRuntimeRecordKeepsOtherProducers(t *testing.T) {
+	root := t.TempDir()
+	const commit = "c0ffee0"
+	rt := func(producer, ac, witness string) artifact.Evidence {
+		r := evRec(producer, ac, witness, artifact.VerdictPass)
+		r.Kind = artifact.EvidenceRuntime
+		return r
+	}
+	for _, rec := range []artifact.Evidence{rt("probe:ac-1", "ac-1", "first ac-1"), rt("probe:ac-2", "ac-2", "only ac-2"), rt("probe:ac-1", "ac-1", "second ac-1")} {
+		if err := writeRuntimeRecord(root, commit, "spec/story-r", rec); err != nil {
+			t.Fatalf("writeRuntimeRecord: %v", err)
+		}
+	}
+	recs, err := readExistingEvidenceRecords(filepath.Join(store.DerivedSpecDir(root, store.RefSlug("spec/story-r")), commit, "runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := witnesses(recs), []string{"only ac-2", "second ac-1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("runtime.json witnesses = %q, want %q", got, want)
+	}
+}
+
+// TestReplaceManagedEvidence proves SI-238's per-spec replacement: every
+// existing record whose producer is in the managed subset, or is an incoming
+// record's producer, is dropped; every other existing record is kept in order
+// ahead of the incoming records; and a dropped record whose producer has no
+// incoming record is reported withdrawn. The result is never nil, so an
+// emptied file is written as an empty array.
+func TestReplaceManagedEvidence(t *testing.T) {
+	pass, fail := artifact.VerdictPass, artifact.VerdictFail
+	managed := func(ps ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, p := range ps {
+			m[p] = true
+		}
+		return m
+	}
+	cases := []struct {
+		name               string
+		existing           []artifact.Evidence
+		managed            map[string]bool
+		incoming           []artifact.Evidence
+		want, wantWithdraw []string
+	}{
+		{"no managed subset is the merge helper's rule",
+			[]artifact.Evidence{evRec("p1", "ac-1", "old-p1", pass), evRec("p2", "ac-2", "old-p2", pass)}, nil,
+			[]artifact.Evidence{evRec("p1", "ac-1", "new-p1", fail)},
+			[]string{"old-p2", "new-p1"}, nil},
+		{"a managed producer with no incoming record is withdrawn",
+			[]artifact.Evidence{evRec("coarse", "ac-1", "coarse", pass), evRec("pA", "ac-1", "old-pA", pass)}, managed("pA"), nil,
+			[]string{"coarse"}, []string{"old-pA"}},
+		{"a replaced managed producer is not withdrawn",
+			[]artifact.Evidence{evRec("pA", "ac-1", "old-pA", pass)}, managed("pA"),
+			[]artifact.Evidence{evRec("pA", "ac-1", "new-pA", fail)},
+			[]string{"new-pA"}, nil},
+		{"mixed: one replaced, one withdrawn, unmanaged kept in order",
+			[]artifact.Evidence{evRec("c1", "ac-9", "c1", pass), evRec("pA", "ac-1", "old-pA", pass), evRec("c2", "ac-9", "c2", fail), evRec("pB", "ac-2", "old-pB", pass)}, managed("pA", "pB"),
+			[]artifact.Evidence{evRec("pA", "ac-1", "new-pA", pass)},
+			[]string{"c1", "c2", "new-pA"}, []string{"old-pB"}},
+		{"every earlier record of a withdrawn producer",
+			[]artifact.Evidence{evRec("pA", "ac-1", "old-pA-1", pass), evRec("pA", "ac-2", "old-pA-2", fail)}, managed("pA"), nil,
+			[]string{}, []string{"old-pA-1", "old-pA-2"}},
+		{"a managed producer with no earlier record withdraws nothing",
+			[]artifact.Evidence{evRec("coarse", "ac-1", "coarse", pass)}, managed("pA"), nil,
+			[]string{"coarse"}, nil},
+		{"nothing existing and nothing incoming", nil, managed("pA"), nil, []string{}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, withdrawn := replaceManagedEvidence(c.existing, c.managed, c.incoming)
+			if out == nil {
+				t.Fatal("replaceManagedEvidence returned a nil record set, which would marshal as null")
+			}
+			if got := witnesses(out); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("records = %q, want %q", got, c.want)
+			}
+			if got := witnesses(withdrawn); len(got) != len(c.wantWithdraw) || (len(got) > 0 && !reflect.DeepEqual(got, c.wantWithdraw)) {
+				t.Errorf("withdrawn = %q, want %q", got, c.wantWithdraw)
+			}
+		})
+	}
+}
+
+// TestWriteManagedEvidence proves the writer around replaceManagedEvidence:
+// it reads every affected spec's verdicts.json before writing any, so an
+// undecodable file writes nothing anywhere; it creates nothing for a spec with
+// no file and nothing to add; it leaves a file it would not change untouched;
+// it writes an emptied file as an empty array; and it reports each spec's
+// withdrawn records.
+func TestWriteManagedEvidence(t *testing.T) {
+	const commit = "c0ffee0"
+	pass := artifact.VerdictPass
+	pathOf := func(root, spec string) string {
+		return filepath.Join(store.DerivedSpecDir(root, store.RefSlug(spec)), commit, "verdicts.json")
+	}
+	put := func(t *testing.T, root, spec, content string) {
+		t.Helper()
+		p := pathOf(root, spec)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	canon := func(t *testing.T, recs ...artifact.Evidence) string {
+		t.Helper()
+		b, err := canonjson.Marshal(recs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	t.Run("no file and nothing to add creates nothing", func(t *testing.T) {
+		root := t.TempDir()
+		withdrawn, err := writeManagedEvidence(root, commit, map[string]map[string]bool{"spec/a": {"pA": true}}, nil)
+		if err != nil || len(withdrawn) != 0 {
+			t.Fatalf("writeManagedEvidence = (%v, %v), want nothing withdrawn and no error", withdrawn, err)
+		}
+		if _, err := os.Stat(filepath.Dir(pathOf(root, "spec/a"))); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat err = %v, want no directory created", err)
+		}
+	})
+	t.Run("an unchanged file is not rewritten", func(t *testing.T) {
+		root := t.TempDir()
+		const hand = "[ {\"schema\":\"verdi.evidence/v1\",\"evidence_for\":[\"ac-1\"],\"kind\":\"behavioral\",\"verdict\":\"pass\",\"witness\":\"w\",\"producer\":\"coarse\",\"provenance\":{\"source\":\"ci\",\"commit\":\"c0ffee0\"},\"digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"} ]"
+		put(t, root, "spec/a", hand)
+		if _, err := writeManagedEvidence(root, commit, map[string]map[string]bool{"spec/a": {"pA": true}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(pathOf(root, "spec/a")); string(got) != hand {
+			t.Errorf("file = %q, want it untouched: %q", got, hand)
+		}
+	})
+	t.Run("an emptied file is an empty array and its records are withdrawn", func(t *testing.T) {
+		root := t.TempDir()
+		put(t, root, "spec/a", canon(t, evRec("pA", "ac-1", "old-pA", pass)))
+		withdrawn, err := writeManagedEvidence(root, commit, map[string]map[string]bool{"spec/a": {"pA": true}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := witnesses(withdrawn["spec/a"]); !reflect.DeepEqual(got, []string{"old-pA"}) {
+			t.Errorf("withdrawn[spec/a] = %q, want [old-pA]", got)
+		}
+		if got, _ := os.ReadFile(pathOf(root, "spec/a")); string(got) != "[]\n" {
+			t.Errorf("file = %q, want %q", got, "[]\n")
+		}
+	})
+	t.Run("an undecodable file writes nothing anywhere", func(t *testing.T) {
+		root := t.TempDir()
+		aBefore := canon(t, evRec("pA", "ac-1", "old-pA", pass))
+		put(t, root, "spec/a", aBefore)
+		put(t, root, "spec/b", "not json")
+		_, err := writeManagedEvidence(root, commit,
+			map[string]map[string]bool{"spec/a": {"pA": true}, "spec/b": {"pB": true}},
+			map[string][]artifact.Evidence{"spec/a": {evRec("pA", "ac-1", "new-pA", pass)}})
+		if err == nil || !strings.Contains(err.Error(), "verdicts.json") {
+			t.Fatalf("err = %v, want one naming the undecodable verdicts.json", err)
+		}
+		if got, _ := os.ReadFile(pathOf(root, "spec/a")); string(got) != aBefore {
+			t.Errorf("spec/a = %q, want it untouched: %q", got, aBefore)
+		}
+	})
+	t.Run("specs are written per their own subset", func(t *testing.T) {
+		root := t.TempDir()
+		put(t, root, "spec/a", canon(t, evRec("pA", "ac-1", "old-a-pA", pass), evRec("coarse", "ac-1", "coarse", pass)))
+		bBefore := canon(t, evRec("pA", "ac-1", "old-b-pA", pass))
+		put(t, root, "spec/b", bBefore)
+		withdrawn, err := writeManagedEvidence(root, commit, map[string]map[string]bool{"spec/a": {"pA": true}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(withdrawn) != 1 || len(withdrawn["spec/a"]) != 1 {
+			t.Errorf("withdrawn = %+v, want only spec/a's pA record", withdrawn)
+		}
+		if got := witnesses(readVerdicts(t, root, "spec/a", commit)); !reflect.DeepEqual(got, []string{"coarse"}) {
+			t.Errorf("spec/a = %q, want [coarse]", got)
+		}
+		if got, _ := os.ReadFile(pathOf(root, "spec/b")); string(got) != bBefore {
+			t.Errorf("spec/b = %q, want it untouched", got)
+		}
+	})
 }
