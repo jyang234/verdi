@@ -119,9 +119,16 @@ type ConflictPolicyIdentity struct {
 // operands were resolved from (authority design §3). Exactly one of
 // ManifestDigest (accepted-context) or CandidateDigest plus CandidateBlob
 // (acceptance-candidate) is set, matching TargetKind.
+//
+// CIRef is the CI ref that supplied the branch being closed (SI-257): set
+// only on an accepted-context snapshot whose checkout is detached and whose
+// CI ref is known, which is exactly when repositoryfacts.Snapshot's
+// BranchBeingClosed resolved from the CI ref, and nil otherwise. Repository
+// is unchanged by it and keeps recording the detached checkout.
 type SnapshotIdentity struct {
 	TargetKind                                string
 	Repository                                repositoryfacts.Facts
+	CIRef                                     *repositoryfacts.CIRefFact
 	ManifestDigest, CandidateDigest           string
 	CandidateBlob                             string
 	EffectivePolicyDigest, ConstitutionDigest string
@@ -263,6 +270,7 @@ func (c Compiler) CompileConflict(ctx context.Context, root string, request Requ
 	snapshot, err := buildSnapshotIdentity(snapshotBuildInput{
 		targetKind:     snapshotTargetAcceptedContext,
 		repository:     outcome.snapshot.Facts,
+		ciRef:          sealedCIRef(outcome.snapshot),
 		manifestDigest: outcome.result.Manifest.Digest,
 		authority:      outcome.authority,
 		adapter:        AdapterRef{ID: outcome.authority.Adapter.ID, Version: outcome.authority.Adapter.Version},
@@ -494,6 +502,7 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 type snapshotBuildInput struct {
 	targetKind                      string
 	repository                      repositoryfacts.Facts
+	ciRef                           *repositoryfacts.CIRefFact // accepted-context only; see sealedCIRef
 	manifestDigest, candidateDigest string
 	authority                       PolicyAuthority
 	adapter                         AdapterRef
@@ -606,10 +615,66 @@ func validateSnapshotIdentityTransport(snapshot SnapshotIdentity) error {
 	if err := validateSnapshotIdentityCandidateBlob(snapshot.TargetKind, snapshot.CandidateBlob); err != nil {
 		return err
 	}
+	if err := validateSnapshotIdentityCIRef(snapshot.TargetKind, snapshot.Repository, snapshot.CIRef); err != nil {
+		return err
+	}
 	if err := validateConflictPolicyIdentities(snapshot.PolicyEntries); err != nil {
 		return err
 	}
 	return validateDisclosures("conflict snapshot disclosures", snapshot.Disclosures)
+}
+
+// sealedCIRef returns the CI ref that supplied snapshot's branch being
+// closed (SI-257), or nil when none did: the checkout is on a branch, or it
+// is not detached, or its CI ref is unknown or invalid.
+func sealedCIRef(snapshot repositoryfacts.Snapshot) *repositoryfacts.CIRefFact {
+	if snapshot.Facts.Branch.Known || !snapshot.BranchBeingClosed().Known {
+		return nil
+	}
+	ciRef := snapshot.CIRef
+	return &ciRef
+}
+
+// validateSnapshotIdentityCIRef enforces the sealed pair's invariant
+// (SI-257): a CI ref rides only on an accepted-context snapshot whose
+// recorded branch is unknown, and only as a known, valid CI ref. nil is
+// always legal.
+func validateSnapshotIdentityCIRef(targetKind string, repository repositoryfacts.Facts, ciRef *repositoryfacts.CIRefFact) error {
+	switch {
+	case ciRef == nil:
+		return nil
+	case targetKind != snapshotTargetAcceptedContext:
+		return fmt.Errorf("contextcompile: conflict snapshot ci ref: target kind %q cannot carry one", targetKind)
+	case repository.Branch.Known:
+		return fmt.Errorf("contextcompile: conflict snapshot ci ref: recorded branch %q is known, so a CI ref cannot stand in for it", repository.Branch.Value)
+	case !ciRef.Known:
+		return fmt.Errorf("contextcompile: conflict snapshot ci ref: an unknown CI ref is never sealed")
+	}
+	if err := ciRef.Validate(); err != nil {
+		return fmt.Errorf("contextcompile: conflict snapshot ci ref: %w", err)
+	}
+	return nil
+}
+
+// BranchBeingClosed is the sealed pair's reading of the branch being closed
+// (SI-257): Repository.Branch when known, else the sealed CI ref's name when
+// that is known and valid, else unknown.
+func (s SnapshotIdentity) BranchBeingClosed() repositoryfacts.StringFact {
+	if s.Repository.Branch.Known {
+		return s.Repository.Branch
+	}
+	if s.CIRef == nil || !s.CIRef.Known || s.CIRef.Validate() != nil {
+		return repositoryfacts.StringFact{}
+	}
+	return repositoryfacts.StringFact{Known: true, Value: s.CIRef.Name}
+}
+
+func cloneCIRef(in *repositoryfacts.CIRefFact) *repositoryfacts.CIRefFact {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
@@ -620,6 +685,9 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: policy authority is not resolved")
 	}
 	if err := validateSnapshotIdentityDigests(in.targetKind, in.manifestDigest, in.candidateDigest); err != nil {
+		return SnapshotIdentity{}, err
+	}
+	if err := validateSnapshotIdentityCIRef(in.targetKind, in.repository, in.ciRef); err != nil {
 		return SnapshotIdentity{}, err
 	}
 	candidateBlob := ""
@@ -649,6 +717,7 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	snapshot := SnapshotIdentity{
 		TargetKind:            in.targetKind,
 		Repository:            in.repository,
+		CIRef:                 cloneCIRef(in.ciRef),
 		ManifestDigest:        in.manifestDigest,
 		CandidateDigest:       in.candidateDigest,
 		CandidateBlob:         candidateBlob,
@@ -1131,6 +1200,7 @@ func cloneConflictView(in ConflictView) ConflictView {
 
 func cloneSnapshotIdentity(in SnapshotIdentity) SnapshotIdentity {
 	out := in
+	out.CIRef = cloneCIRef(in.CIRef)
 	out.Scope = cloneScope(in.Scope)
 	out.PolicyEntries = append([]ConflictPolicyIdentity{}, in.PolicyEntries...)
 	out.Disclosures = append([]DisclosureCode{}, in.Disclosures...)

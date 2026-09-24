@@ -40,6 +40,18 @@ import (
 //     repository snapshot (the branch being closed: the checked-out branch,
 //     else a detached checkout's validated CI ref) instead of
 //     ResolveExpectedRepository on its Facts, and nothing else.
+//   - SI-257, as amended (unsealed-exemption phase B wave 1, lane E4c):
+//     contextcompile's conflict.go, whose accepted-context SnapshotIdentity
+//     gains CIRef — the CI ref that supplied the branch being closed, nil
+//     unless a detached checkout's known CI ref did — with its builder,
+//     transport validation, clone and BranchBeingClosed reading; and
+//     policyconflict's schema.go, codec.go, validate.go and report.go, whose
+//     report InputIdentity carries that CI ref as the additive input.ci_ref,
+//     omitted when absent and validated when present; and policyconflict's
+//     service.go, re-pinned over its readiness-recovery successor with both
+//     deltas in one inverse, whose accepted-context reverification compares
+//     the expected branch with the sealed pair's BranchBeingClosed instead of
+//     Repository.Branch alone, and nothing else.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -122,8 +134,12 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 	},
 	"internal/policyconflict/service.go": {
 		Historical: "c9bccee4f99c1b1b22b17e1e19451d7254d70504fd5cc1029209aaa013a2bc54",
-		Successor:  "1c3ae85440649b240d2cc8970224e100b00781e9181ccf44d0b54c77e5ebbb61",
+		Successor:  "0d6babc257c51f9364ab4f7c73c1ee4220300d3c4401fae604e670482bcc0eff",
 		Inverse: []consolidationVerdiEdit{
+			{From: "\t\t\t// SI-257: the branch being closed, read from the sealed pair\n" +
+				"\t\t\t// (Repository, CIRef), never from Repository.Branch alone.\n" +
+				"\t\t\tif branch := snapshot.BranchBeingClosed(); !branch.Known || branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {\n",
+				To: "\t\t\tif !snapshot.Repository.Branch.Known || snapshot.Repository.Branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {\n"},
 			{From: "\t\tcase cacheOnlyJudge:\n" +
 				"\t\t\tadapters = append(adapters, adapter.adapter)\n"},
 			{From: "\tcase cacheOnlyJudge:\n" +
@@ -362,6 +378,168 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 		Inverse: []consolidationVerdiEdit{
 			{From: "\tif err := ResolveExpectedRepositorySnapshot(request.Expected, snapshot); err != nil {\n",
 				To: "\tif err := ResolveExpectedRepository(request.Expected, snapshot.Facts); err != nil {\n"},
+		},
+	},
+	"internal/contextcompile/conflict.go": {
+		Historical: "cff0e7996c600e348275649e8034469a90656c0dd4410c20d9aa6643332b5201",
+		Successor:  "50948c8424809e57a3f9251dc227c8960ea79f12512f2f9060e3a8eeb7f8bb33",
+		Inverse: []consolidationVerdiEdit{
+			{From: "//\n" +
+				"// CIRef is the CI ref that supplied the branch being closed (SI-257): set\n" +
+				"// only on an accepted-context snapshot whose checkout is detached and whose\n" +
+				"// CI ref is known, which is exactly when repositoryfacts.Snapshot's\n" +
+				"// BranchBeingClosed resolved from the CI ref, and nil otherwise. Repository\n" +
+				"// is unchanged by it and keeps recording the detached checkout.\n"},
+			{From: "\tCIRef                                     *repositoryfacts.CIRefFact\n"},
+			{From: "\t\tciRef:          sealedCIRef(outcome.snapshot),\n"},
+			{From: "\tciRef                           *repositoryfacts.CIRefFact // accepted-context only; see sealedCIRef\n"},
+			{From: "\tif err := validateSnapshotIdentityCIRef(snapshot.TargetKind, snapshot.Repository, snapshot.CIRef); err != nil {\n" +
+				"\t\treturn err\n" +
+				"\t}\n"},
+			{From: "// sealedCIRef returns the CI ref that supplied snapshot's branch being\n" +
+				"// closed (SI-257), or nil when none did: the checkout is on a branch, or it\n" +
+				"// is not detached, or its CI ref is unknown or invalid.\n" +
+				"func sealedCIRef(snapshot repositoryfacts.Snapshot) *repositoryfacts.CIRefFact {\n" +
+				"\tif snapshot.Facts.Branch.Known || !snapshot.BranchBeingClosed().Known {\n" +
+				"\t\treturn nil\n" +
+				"\t}\n" +
+				"\tciRef := snapshot.CIRef\n" +
+				"\treturn &ciRef\n" +
+				"}\n" +
+				"\n" +
+				"// validateSnapshotIdentityCIRef enforces the sealed pair's invariant\n" +
+				"// (SI-257): a CI ref rides only on an accepted-context snapshot whose\n" +
+				"// recorded branch is unknown, and only as a known, valid CI ref. nil is\n" +
+				"// always legal.\n" +
+				"func validateSnapshotIdentityCIRef(targetKind string, repository repositoryfacts.Facts, ciRef *repositoryfacts.CIRefFact) error {\n" +
+				"\tswitch {\n" +
+				"\tcase ciRef == nil:\n" +
+				"\t\treturn nil\n" +
+				"\tcase targetKind != snapshotTargetAcceptedContext:\n" +
+				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: target kind %q cannot carry one\", targetKind)\n" +
+				"\tcase repository.Branch.Known:\n" +
+				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: recorded branch %q is known, so a CI ref cannot stand in for it\", repository.Branch.Value)\n" +
+				"\tcase !ciRef.Known:\n" +
+				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: an unknown CI ref is never sealed\")\n" +
+				"\t}\n" +
+				"\tif err := ciRef.Validate(); err != nil {\n" +
+				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: %w\", err)\n" +
+				"\t}\n" +
+				"\treturn nil\n" +
+				"}\n" +
+				"\n" +
+				"// BranchBeingClosed is the sealed pair's reading of the branch being closed\n" +
+				"// (SI-257): Repository.Branch when known, else the sealed CI ref's name when\n" +
+				"// that is known and valid, else unknown.\n" +
+				"func (s SnapshotIdentity) BranchBeingClosed() repositoryfacts.StringFact {\n" +
+				"\tif s.Repository.Branch.Known {\n" +
+				"\t\treturn s.Repository.Branch\n" +
+				"\t}\n" +
+				"\tif s.CIRef == nil || !s.CIRef.Known || s.CIRef.Validate() != nil {\n" +
+				"\t\treturn repositoryfacts.StringFact{}\n" +
+				"\t}\n" +
+				"\treturn repositoryfacts.StringFact{Known: true, Value: s.CIRef.Name}\n" +
+				"}\n" +
+				"\n" +
+				"func cloneCIRef(in *repositoryfacts.CIRefFact) *repositoryfacts.CIRefFact {\n" +
+				"\tif in == nil {\n" +
+				"\t\treturn nil\n" +
+				"\t}\n" +
+				"\tout := *in\n" +
+				"\treturn &out\n" +
+				"}\n" +
+				"\n"},
+			{From: "\tif err := validateSnapshotIdentityCIRef(in.targetKind, in.repository, in.ciRef); err != nil {\n" +
+				"\t\treturn SnapshotIdentity{}, err\n" +
+				"\t}\n"},
+			{From: "\t\tCIRef:                 cloneCIRef(in.ciRef),\n"},
+			{From: "\tout.CIRef = cloneCIRef(in.CIRef)\n"},
+		},
+	},
+	"internal/policyconflict/schema.go": {
+		Historical: "6868f62debbb1f0bfe17ebc19a60fc676fd82399adf2be838cf237c1f5346415",
+		Successor:  "4e8389c530dc53de0e06c36d927fb5c9fd226f2529e1d007a8fcff71d9b5240b",
+		Inverse: []consolidationVerdiEdit{
+			{From: "//\n" +
+				"// CIRef is the sealed CI ref that supplied the branch being closed (SI-257;\n" +
+				"// contextcompile.SnapshotIdentity.CIRef), wire field input.ci_ref beside\n" +
+				"// repository: present only on an accepted-context report whose repository\n" +
+				"// branch is unknown, as a known, valid CI ref, and omitted otherwise, so a\n" +
+				"// report without one keeps its exact bytes and digest.\n"},
+			{From: "\tCIRef                 *repositoryfacts.CIRefFact\n"},
+		},
+	},
+	"internal/policyconflict/codec.go": {
+		Historical: "d1e975f78dd47c1b7d7b605fd9c9c16e33419da0c1b4897476c115446b216a57",
+		Successor:  "cc7fd00cbfdc289d58bee8906e05011413ff87cbb51db45095755a1ba37ad6b6",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tCIRef                 json.RawMessage          `json:\"ci_ref,omitempty\"`\n"},
+			{From: "\tciRef, err := inputCIRefFromDoc(d.CIRef)\n" +
+				"\tif err != nil {\n" +
+				"\t\treturn InputIdentity{}, err\n" +
+				"\t}\n"},
+			{From: "\t\tCIRef:                 ciRef,\n"},
+			{From: "\tvar ciRefRaw json.RawMessage\n" +
+				"\tif i.CIRef != nil {\n" +
+				"\t\tif ciRefRaw, err = canonjson.Marshal(*i.CIRef); err != nil {\n" +
+				"\t\t\treturn inputIdentityDoc{}, fmt.Errorf(\"encoding input.ci_ref: %w\", err)\n" +
+				"\t\t}\n" +
+				"\t}\n"},
+			{From: "\t\tCIRef:                 ciRefRaw,\n"},
+			{From: "// inputCIRefFromDoc strictly decodes input.ci_ref the way input.repository\n" +
+				"// is decoded. An absent key is nil; any present value, null included,\n" +
+				"// decodes to a CI ref that InputIdentity.validate then judges.\n" +
+				"func inputCIRefFromDoc(raw json.RawMessage) (*repositoryfacts.CIRefFact, error) {\n" +
+				"\tif raw == nil {\n" +
+				"\t\treturn nil, nil\n" +
+				"\t}\n" +
+				"\tcanonical, err := canonjson.Marshal(raw)\n" +
+				"\tif err != nil {\n" +
+				"\t\treturn nil, fmt.Errorf(\"re-encoding input.ci_ref: %w\", err)\n" +
+				"\t}\n" +
+				"\tvar ciRef repositoryfacts.CIRefFact\n" +
+				"\tif err := artifact.DecodeExactJSON(canonical, &ciRef); err != nil {\n" +
+				"\t\treturn nil, fmt.Errorf(\"input.ci_ref: %w\", err)\n" +
+				"\t}\n" +
+				"\treturn &ciRef, nil\n" +
+				"}\n" +
+				"\n"},
+		},
+	},
+	"internal/policyconflict/validate.go": {
+		Historical: "def2aaba7bbeb6ffb307ba781f04dcb340b78b52f0621047442f298bb96adc51",
+		Successor:  "48ae63075444f8df8cd05c1d6cf7c8eae31581ce2ac819928f4b1193ee621394",
+		Inverse: []consolidationVerdiEdit{
+			{From: "// validateInputCIRef enforces input.ci_ref's rule (SI-257): absent, or the\n" +
+				"// known, valid CI ref that supplied the branch being closed, which only an\n" +
+				"// accepted-context report whose repository branch is unknown can carry.\n" +
+				"func (i InputIdentity) validateInputCIRef() error {\n" +
+				"\tswitch {\n" +
+				"\tcase i.CIRef == nil:\n" +
+				"\t\treturn nil\n" +
+				"\tcase i.Target.Kind != TargetAcceptedContext:\n" +
+				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: target kind %q cannot carry one\", i.Target.Kind)\n" +
+				"\tcase i.Repository.Branch.Known:\n" +
+				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: repository branch %q is known, so a CI ref cannot stand in for it\", i.Repository.Branch.Value)\n" +
+				"\tcase !i.CIRef.Known:\n" +
+				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: a present CI ref must be known\")\n" +
+				"\t}\n" +
+				"\tif err := i.CIRef.Validate(); err != nil {\n" +
+				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: %w\", err)\n" +
+				"\t}\n" +
+				"\treturn nil\n" +
+				"}\n" +
+				"\n"},
+			{From: "\tif err := i.validateInputCIRef(); err != nil {\n" +
+				"\t\treturn err\n" +
+				"\t}\n"},
+		},
+	},
+	"internal/policyconflict/report.go": {
+		Historical: "a152d57423ce61fa1bba9b635d7adecbe20079f43f4ff49a1c24cb4974c02eda",
+		Successor:  "bee57f259d73150a44dafeaf5efd406b61d314f46cc16304dfa285f84589e4b1",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\t\tCIRef:                 snapshot.CIRef,\n"},
 		},
 	},
 }

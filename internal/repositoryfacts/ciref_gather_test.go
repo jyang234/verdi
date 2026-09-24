@@ -40,11 +40,13 @@ func setCIEnv(t *testing.T, env map[string]string) {
 func noCIEnv(string) string { return "" }
 
 // recordingGitReader delegates to a real GitReader and records every
-// RevParse argument, so a test can prove which revisions reached git.
+// RevParse and ResolveExactRef argument, so a test can prove which
+// revisions reached git, and through which read.
 type recordingGitReader struct {
 	GitReader
-	mu   sync.Mutex
-	revs []string
+	mu    sync.Mutex
+	revs  []string // RevParse arguments
+	exact []string // ResolveExactRef arguments
 }
 
 func (r *recordingGitReader) RevParse(ctx context.Context, dir, rev string) (string, error) {
@@ -54,7 +56,30 @@ func (r *recordingGitReader) RevParse(ctx context.Context, dir, rev string) (str
 	return r.GitReader.RevParse(ctx, dir, rev)
 }
 
+func (r *recordingGitReader) ResolveExactRef(ctx context.Context, dir, ref string) (string, error) {
+	r.mu.Lock()
+	r.exact = append(r.exact, ref)
+	r.mu.Unlock()
+	return r.GitReader.ResolveExactRef(ctx, dir, ref)
+}
+
+// remoteTrackingRevs returns every refs/remotes/origin/... argument that
+// reached git through either read.
 func (r *recordingGitReader) remoteTrackingRevs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, rev := range append(append([]string{}, r.revs...), r.exact...) {
+		if strings.HasPrefix(rev, "refs/remotes/origin/") {
+			out = append(out, rev)
+		}
+	}
+	return out
+}
+
+// remoteTrackingRevParses returns the refs/remotes/origin/... arguments
+// that reached RevParse, whose lookup rules must never resolve a CI ref.
+func (r *recordingGitReader) remoteTrackingRevParses() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []string
@@ -211,6 +236,48 @@ func TestGather_CIRef(t *testing.T) {
 			if revs := git.remoteTrackingRevs(); tt.neverRevParsed && len(revs) != 0 {
 				t.Fatalf("remote-tracking revisions reached git: %v", revs)
 			}
+			if revs := git.remoteTrackingRevParses(); len(revs) != 0 {
+				t.Fatalf("remote-tracking revisions reached RevParse's lookup rules: %v", revs)
+			}
+		})
+	}
+}
+
+// TestGather_CIRefReadsOnlyTheExactRemoteTrackingRef is the E4a review's
+// M-1 probe as a regression test: with refs/remotes/origin/<name> absent,
+// a tag or a branch literally named refs/remotes/origin/<name> at HEAD
+// would satisfy `git rev-parse --verify` through its lookup rules. SI-257
+// requires "the exact ref", so each decoy leaves the CI ref unknown, while
+// the exact ref at HEAD (the control) is known.
+func TestGather_CIRefReadsOnlyTheExactRemoteTrackingRef(t *testing.T) {
+	tests := []struct {
+		name  string
+		decoy []string // git arguments creating the decoy at HEAD; nil for the control
+		want  CIRefFact
+	}{
+		{name: "exact ref at HEAD (control)", want: CIRefFact{Known: true, Provider: CIProviderGitHub, Name: "close/spec-x"}},
+		{name: "tag decoy", decoy: []string{"tag", "refs/remotes/origin/feature/decoy"}, want: unknownCIRef(CIRefReasonRemoteTrackingUnresolved)},
+		{name: "branch decoy", decoy: []string{"branch", "refs/remotes/origin/feature/decoy"}, want: unknownCIRef(CIRefReasonRemoteTrackingUnresolved)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, head := ciRefRepo(t)
+			name := "close/spec-x"
+			if tt.decoy != nil {
+				name = "feature/decoy"
+				runTestGit(t, dir, append(tt.decoy, head)...)
+			}
+			setCIEnv(t, githubEnv(name))
+			snap, err := newGatherer(NewGitReader(), alwaysUnresolvedDefaultBranch, os.Getenv).Gather(context.Background(), GatherInput{Root: dir})
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			if snap.CIRef != tt.want {
+				t.Fatalf("CIRef = %+v, want %+v", snap.CIRef, tt.want)
+			}
+			if tt.decoy != nil && snap.BranchBeingClosed().Known {
+				t.Fatalf("BranchBeingClosed() = %+v, want unknown: a decoy must never name the branch being closed", snap.BranchBeingClosed())
+			}
 		})
 	}
 }
@@ -261,36 +328,61 @@ func TestNewGatherer_ReadsProcessEnvironment(t *testing.T) {
 // TestGather_CIRefGitFailures covers the two git failures a real repository
 // cannot stage on demand: HEAD itself unresolvable (today's behavior kept —
 // an unknown HEAD with its disclosure, never a Gather error, and the
-// remote-tracking ref is never consulted), and an operational rev-parse
-// failure on the remote-tracking ref (unknown, never a Gather error).
+// remote-tracking ref is never consulted), and an operational failure of
+// the exact remote-tracking read (unknown, never a Gather error). The
+// remote-tracking ref is read only through ResolveExactRef, never RevParse.
 func TestGather_CIRefGitFailures(t *testing.T) {
 	env := githubEnv("close/spec-x")
 	getenv := func(key string) string { return env[key] }
+	headOnly := func(head string, err error) func(context.Context, string, string) (string, error) {
+		return func(_ context.Context, _, rev string) (string, error) {
+			if rev == "HEAD" {
+				return head, err
+			}
+			panic("RevParse consulted for a non-HEAD revision: " + rev)
+		}
+	}
 	tests := []struct {
 		name     string
 		revParse func(context.Context, string, string) (string, error)
+		exactRef func(context.Context, string, string) (string, error)
 		want     CIRefFact
 		wantHead bool
 	}{
 		{
-			name: "HEAD unresolved",
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "", errors.New("boom")
-				}
-				panic("remote-tracking ref consulted with HEAD unresolved: " + rev)
+			name:     "HEAD unresolved",
+			revParse: headOnly("", errors.New("boom")),
+			exactRef: func(_ context.Context, _, ref string) (string, error) {
+				panic("remote-tracking ref consulted with HEAD unresolved: " + ref)
 			},
 			want: unknownCIRef(CIRefReasonHeadUnresolved),
 		},
 		{
-			name: "remote-tracking rev-parse errors",
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "headsha", nil
-				}
-				return "", errors.New("fatal: bad object")
+			name:     "exact remote-tracking read errors",
+			revParse: headOnly("headsha", nil),
+			exactRef: func(context.Context, string, string) (string, error) {
+				return "", errors.New("fatal: 'refs/remotes/origin/close/spec-x' - not a valid ref")
 			},
 			want:     unknownCIRef(CIRefReasonRemoteTrackingUnresolved),
+			wantHead: true,
+		},
+		{
+			name:     "exact remote-tracking ref at another commit",
+			revParse: headOnly("headsha", nil),
+			exactRef: func(context.Context, string, string) (string, error) { return "othersha", nil },
+			want:     unknownCIRef(CIRefReasonRemoteTrackingNotHead),
+			wantHead: true,
+		},
+		{
+			name:     "exact remote-tracking ref at HEAD",
+			revParse: headOnly("headsha", nil),
+			exactRef: func(_ context.Context, _, ref string) (string, error) {
+				if ref != "refs/remotes/origin/close/spec-x" {
+					return "", errors.New("unexpected ref " + ref)
+				}
+				return "headsha", nil
+			},
+			want:     CIRefFact{Known: true, Provider: CIProviderGitHub, Name: "close/spec-x"},
 			wantHead: true,
 		},
 	}
@@ -299,6 +391,7 @@ func TestGather_CIRefGitFailures(t *testing.T) {
 			git := baseGitReader()
 			git.currentBranchFn = func(context.Context, string) (string, error) { return "", nil }
 			git.revParseFn = tt.revParse
+			git.exactRefFn = tt.exactRef
 			snap, err := newGatherer(git, alwaysUnresolvedDefaultBranch, getenv).Gather(context.Background(), GatherInput{Root: t.TempDir()})
 			if err != nil {
 				t.Fatalf("Gather: %v", err)
