@@ -51,6 +51,13 @@ unless a chosen journey demonstrably needs one of its capabilities.
   `boardspec.js` does not grow.
 - **D-WR-11 — build through the story process.** The redesign feature's stories are instantiated from its stubs and built on
   `verdi build start` branches (as the process-hardening plan's D-PH-1).
+- **D-WR-12 — the index has four status columns (option A).** The columns On the desk, Accepted, Built, and On the shelf are
+  workbench-directory dc-2's four status groups, in that order. "In review" is not a column. It is a forge-sourced chip on a draft
+  whose branch has an open pull request, plus an "in review" filter over the same data. The forge never moves a card between
+  columns: an unreachable forge leaves every card where its status puts it, and the chip and the filter disclose that review status
+  is unavailable, never reporting zero reviews. The list view uses the same four groups and labels. This follows the plan review's
+  WR-F1 follow-up. The controller and the independent reviewer both recommended it (2026-09-24); the owner's merge of this plan
+  confirms it.
 
 ## Binding constraints that the design does not show
 
@@ -81,8 +88,37 @@ unless a chosen journey demonstrably needs one of its capabilities.
 
 | Unit | Content |
 |---|---|
-| A1 `spec/workbench-redesign` (feature) and the amendments it needs | Acceptance criteria for the five screens and the global chrome, including the decisions above and the binding constraints; stubs aligned to the stories below; the handoff's source manifest cited. It resolves each conflicting source through the route the ratification flow allows for it, with a source-to-successor mapping that states, for each, which presentation properties are retained and which are replaced: (1) the closed child stories home-status-glance (ac-2, dc-5), directory-home (ac-1, dc-1, dc-4), badge-computes (ac-5, dc-4 presentation), and case-file-flags (ac-1, dc-3, dc-4 presentation) by story supersession; (2) the frozen parent features' index rules — workbench-legibility ac-3 and dc-4 (the leading, status-only taxonomy; the exhaustive sections kept below with no information lost) and workbench-directory dc-2 (four status groups) and dc-5 (the forge-sourced in-review chip, disclosed and degradable) — by a superseding revision of each parent that carries every unrelated object unchanged and amends only its grouping objects (a ledger entry records the decision but does not by itself override a frozen parent); the mapping keeps grouping derived from refs and the fold's status with no evidence-bearing state, keeps the in-review signal forge-sourced, disclosed, and degradable (an unreachable forge leaves a draft on the desk with the absence disclosed, never a dead link or a blocked index), and keeps the parents' no-information-loss obligation — every archived spec, record kind, service, and board the old directory listed stays reachable through the columns and the other-records strip; it replaces the leading taxonomy's order and labels with the five pipeline columns; (3) the Wave 6 design's §3.1 and §8.2 readiness rule by a ledgered design amendment; spec-documents ac-12 and readiness-recovery ac-5 are kept, not superseded. Ambiguities the survey found (the scoping band's handwritten sticky, the trash refusal for declared stubs, pins on stub cards, the attribution and obligation yarn outside the typed picker) are decided and recorded here, not in a lane |
-| A2 the story batch | Stories instantiated from the merged feature's stubs (`verdi design start --from-stub workbench-redesign <stub>`), reviewed once, merged; then `verdi build start` for each |
+| A1 `spec/workbench-redesign` (feature) and the records it needs | Acceptance criteria for the five screens and the global chrome, including the decisions above and the binding constraints; stubs aligned to the stories below; the handoff's source manifest cited. Conflicting accepted text is resolved per the source-to-successor mapping below. Every compatible parent and child object is kept. Only an object the design cannot honor is overridden, through 03 §Challenging closed decisions: a conflict record challenging that spec, resolved by `spec/workbench-redesign` carrying a fragment `supersedes` edge to exactly that object. This repository has one maintainer, so the two-approval quorum is waived (03 step 3), but every conflict is still filed. A fragment edge overrides the whole object, so the redesign spec restates the object's kept properties in its own criteria. A ledger entry records each decision; it does not by itself override a frozen spec. The Wave 6 design's §3.1 and §8.2 readiness rule changes by a ledgered design amendment; spec-documents ac-12 and readiness-recovery ac-5 are kept. Ambiguities the survey found (the scoping band's handwritten sticky, the trash refusal for declared stubs, pins on stub cards, the attribution and obligation yarn outside the typed picker) are decided and recorded here, not in a lane |
+| A2 the stories | Each story is instantiated from the merged feature's stubs with `verdi design start --from-stub workbench-redesign <stub>`, which cuts its own `design/<stub>` branch, so each story is its own pull request, reviewed once and merged; then `verdi build start` for each |
+
+**No precedent for the route.** No store yet carries a fragment `supersedes` edge onto an archived, closed spec. Before filing
+anything, A1 proves that `verdi lint` accepts such an edge and that each challenged spec's projection shows the override. If the
+tooling refuses the edge or misprojects it, A1 stops and returns to the owner; no gate is weakened to let it pass.
+
+### A1 source-to-successor mapping
+
+Index (D-WR-12):
+
+| Source object | Kept | Replaced | Route |
+|---|---|---|---|
+| workbench-directory dc-2 (four status groups) | All of it: the four columns are its groups in its order, keyed off each index entry's status, from refs only | — | none |
+| workbench-directory dc-5 (remote design branches; source disclosure; the forge-sourced, degradable in-review chip) | All of it: a source chip on every card; the in-review chip and the new filter read the same per-render forge consultation; an unreachable forge is disclosed, never a dead link or a blocked index | — | none |
+| directory-home, closed story (ac-1..ac-3, dc-1..dc-5, co-1, co-2) | All of it: every entry exactly once, with its status chip, its board link, and today's link grammar; the disclosed entry for a branch with no draft spec, and the notice page for a deleted branch; the disclosures pointer becomes the bar's Disclosures toggle; services and boards stay sections in the other-records strip, collapsed, listing every entry, usable without JavaScript; columns and cards carry the `dir-group-*` and `dir-entry-*` test ids | — | none |
+| workbench-legibility ac-3 (status first; badges and working links; exhaustive sections below; nothing lost) | All of it: the columns lead the page; each card shows its status badge and its working links (board; matrix and verdict for a default-branch feature with stories, home-status-glance dc-3's condition); archived specs, artifacts by kind, services, and boards stay below the columns, each expandable to its full listing | — | none |
+| workbench-legibility dc-4 (actionable-first, status-only taxonomy; no evidence-bearing state) | The order (drafts, then accepted-pending-build, then the rest), status-only grouping, badges, working links, and the no-evidence bar | Its single trailing "settling" group becomes two columns, Built (active components) and On the shelf (terminal), as workbench-directory dc-2 already groups them | Conflict against `spec/workbench-legibility`; fragment edge to `#dc-4` |
+| home-status-glance, closed story (ac-1..ac-3, dc-1..dc-5: a separate three-bucket glance above an unchanged directory) | Its intent: actionable-first order; archived specs never lead the page (On the shelf shows terminal specs still in the active zone and folds archive-zone specs into a collapsed "archived n" list at its foot); every column always renders its count and an explicit empty state; one index computation per render; nothing persisted. co-1 and co-2 are kept whole | The separate glance and its three buckets, merged with the directory into the four columns; its lean entries (cards carry the directory's source and in-review chips); the directory staying "in the same place" (it becomes the columns and the strip); the `glance-group-*` and `glance-entry-*` test ids | Conflict against `spec/home-status-glance`; fragment edges to ac-1, ac-2, ac-3, dc-1, dc-2, dc-3, dc-4, dc-5 |
+
+The D-WR-5 call to action counts acceptance criteria with no implementing stub or story. That is family structure from
+`implements` edges (the projection workbench-legibility ac-2 already renders on boards), not evidence-bearing state, so it stays
+within dc-4's no-evidence bar. A1 records this reading. If review rejects it, the call to action is dropped (D-WR-5's fallback);
+dc-4 is not overridden for it.
+
+Wall (D-WR-6):
+
+| Source object | Kept | Replaced | Route |
+|---|---|---|---|
+| badge-computes, closed story, ac-5 and dc-4 | Chips on cards in the receipt-row vocabulary; badges in every board mode; badges never block a write; every badge is a button carrying `data-badge-source` and its derivation record | Case-file badges as stamps on the case-file lockup become chips in the case-file strip | Conflict against `spec/badge-computes`; fragment edges to ac-5 and dc-4 |
+| case-file-flags, closed story, ac-1, dc-3, and dc-4 | The computation (the same entry points, three-valued); which walls carry which flags; one flag vocabulary across surfaces; an unproven value never presented as a verdict (the disclosure chip is drawn in the disclosure style, distinct from a flag) | Stamps on the case file, their placement and register, and the disclosure line become chips in the case-file strip | Conflict against `spec/case-file-flags`; fragment edges to ac-1, dc-3, and dc-4 |
 
 ## Step 2 — lanes
 
@@ -99,9 +135,9 @@ independent review; integration only when the integrated patch equals the review
 | F4 | readiness-page | The readiness page per D-WR-2 and D-WR-8 | F1 |
 | F5 | document-page | Temporal stamp, identity card, id chips deep-linking to the selected wall card, contents rail; Refresh kept | F1 |
 | F6 | new-story-dialog | The dialog per the design, prefilled from the index call to action | F3 |
-| F7 | index | Pipeline and list views, filter row, the "other records" strip, keyboard; the D-WR-5 flags and call to action | B1, B3, F1 |
+| F7 | index | The four-column pipeline and the list view (D-WR-12); the filter row with the in-review filter; the other-records strip with its collapsed sections and On the shelf's archived list; keyboard; the D-WR-5 flags and call to action | B1, B3, F1 |
 | B1 | index-data | Last commit date per design branch through the refindex port, test doubles, and the e2e harness; a clock seam for "quiet 14 d" | A2 |
-| B3 | index-data | AC coverage per accepted feature as a pure function extracted from the wall projection; the disclosures count | A2 |
+| B3 | index-coverage | AC coverage per accepted feature as a pure function extracted from the wall projection; the disclosures count | A2 |
 | B4 | wall-changes | The uncommitted changes on the wall snapshot, in three distinct states: typed changes (semantic diff from HEAD to the working tree), unclassified changes (prose, layout, another staged path, an untracked file), and an unreadable comparison. A semantic diff with zero recognized operations never clears the dirty indicator while any other change remains; the branch-switch guard stays independent of the popover's count | A2 |
 
 **Order and concurrency.** At most three lanes in flight. F1 first. Then F2, F4, F5, B1, B3, and B4 in parallel within the cap.
@@ -172,7 +208,9 @@ d1438d9a889a058289b23993152b68ff7ff02c97d0723a642f4c434855a7474a  screenshots/wa
 | Impact survey: Playwright evidence producers and the showcase map | Binding constraints; shared-files rules |
 | Impact survey: data gaps | D-WR-3, D-WR-4, D-WR-5; B1, B3, B4 |
 | Owner decisions 2026-09-24 (eleven defaults) | D-WR-1..D-WR-11 |
-| Plan review of d2ea5327: WR-F1 (the parent features' grouping rules) | A1 item (2) |
+| Plan review of d2ea5327: WR-F1 (the parent features' grouping rules) | A1 source-to-successor mapping (index) |
+| Index option A, recommended by the controller and the independent reviewer (2026-09-24): four status columns, in-review as a chip and a filter, unavailable review status disclosed, every compatible parent and child object kept, the closed-decision challenge route for what remains | D-WR-12; A1 row; A1 source-to-successor mapping |
+| Controller follow-ups: B1 and B3 shared a story name; `--from-stub` cuts one branch per stub | B3 renamed `index-coverage`; A2 row |
 | Plan review recommendations (pinned handoff identity; B4/F3 change states; bounded first release) | Design source and manifest; B4; "What this plan does not claim" |
 
 Coverage: every item mapped. Intentional omissions: the items under "Out of scope".
