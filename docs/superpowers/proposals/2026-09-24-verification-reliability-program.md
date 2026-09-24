@@ -24,40 +24,48 @@ read-only assessment of origin/main on 2026-09-23 found Verdi strong on the audi
 
 ## Target
 
-For every accepted criterion of a change, a reader can see one of three honest answers, each backed by something the reader can
-re-check:
+Two questions stay separate, as in the evidence model (03, Declarations and binding and The fold; `internal/evidence/fold.go`):
 
-1. **proven** — a named, reviewed test that fails when the behaviour is absent passed in CI at the delivered commit;
-2. **judged** — an independent, bounded judgment with cited witnesses in the delivered diff, re-verifiable, with its reliability
-   measured and disclosed;
-3. **attested** — an authenticated human claim bound to the exact artifact, from someone other than the author where the profile
-   requires it.
+- **Result — does the criterion hold?** The governed states are kept: evidenced, violated, pending, no-signal, waived, with
+  unknown or unavailable inputs disclosed. Nothing in this program replaces them.
+- **Basis — what supports the result?** A named test with its semantic falsifier; a judged finding with cited witnesses; an
+  authenticated attestation; suite-level coarse evidence. A criterion may require several kinds together.
 
-A deviation — a criterion not met, a constraint or decision contradicted — stops the change at merge until an authenticated
-person dispositions it. "Coarse suite passed" is never presented as evidence for a particular criterion.
+The target is that every result rests on a basis a reader can re-check, and that the basis is shown honestly:
+
+1. a criterion declaring behavioral evidence and an attestation stays incomplete while its test passes and its attestation is
+   absent — it never becomes "proven" by fitting one basis;
+2. a failing test stays visible even where a governed waiver changes eligibility;
+3. a judge's "cannot determine" is never alignment, and an "aligned" judgment never clears a failing test, a missing required
+   proof, an authentication failure, or incomplete judge coverage;
+4. suite-level coarse evidence is labelled as a suite result and never presented as evidence for a particular criterion;
+5. a deviation — a criterion not met, a constraint or decision contradicted — requires an authenticated person's disposition.
+
+The evidence model's merge/close distinction is kept: the merge gate does not require all evidence to exist, because runtime
+evidence can land after merge; closure does.
 
 ## Workstreams
 
 | # | Workstream | What it adds | Depends on |
 |---|---|---|---|
-| W1 | **Judge contract** | The judge becomes a bounded instrument: a pinned model recorded in the report; input = accepted criteria, constraints, decisions, and the base..head diff; output = a verdict per criterion, constraint, and decision (aligned / deviates with cited witnesses / cannot determine), completeness enforced (every item answered); the raw result re-verified against the recorded findings at gate and close; judge absence blocks where the profile says so. | W0 |
-| W0 | **Judge reliability measurement (spike)** | Before W1 claims anything: a fixture corpus of known-aligned and known-deviating changes, the judge run repeatedly, precision and recall and run-to-run agreement measured and published. Decides whether one judgment is enough, whether two must agree, and which verdict classes are trustworthy enough to block. | — |
+| W1 | **Judge contract** | The judge becomes a bounded instrument using W0's measured configuration: a pinned model, prompt, context construction, and tools, recorded in the report; input = accepted criteria, constraints, decisions, and the base..head diff; output = a verdict per criterion, constraint, and decision (aligned / deviates with cited witnesses / cannot determine), completeness enforced (every item answered); the raw result re-verified against the recorded findings at gate and close; judge absence fails closed where the profile requires the judge. Any change to the configuration requires re-measurement. | W0 |
+| W0 | **Judge reliability measurement (spike)** | Before W1 claims anything: a pinned configuration (model, prompt, context construction, tools) measured against independently adjudicated labels on a held-out set, including realistic multi-file changes and missing or contradictory context; per-class false-positive and false-negative rates, abstentions, and failures, with the uncertainty of each estimate; acceptance thresholds fixed before the held-out answers are inspected. Run-to-run agreement is reported as a stability observation, never as evidence of correctness. W0 owns its corpus, runner, and results and touches no production user interface or shared gate wiring. | — |
 | W2 | **Per-criterion evidence** | Replace coarse bindings with elaborated obligations that name real tests per criterion (the many legacy obligations without a quality block, BL-10); the rollup and the board show the evidence strength of each criterion (proven by a named test / judged / attested / coarse only). | — |
-| W3 | **Test-quality guard** | Evidence that a named test can fail: a falsifier witness per behavioural obligation (the test is shown failing against a recorded mutation of the behaviour it claims), or a targeted mutation check on the named tests only (a narrower revival of BL-32). The owner chooses the mechanism. | W2 |
-| W4 | **Authenticated human acts** | Dispositions, attestations, and waivers authenticated the way phase B authenticates exemption approvals (`internal/signedapproval`: a forge-verified signed commit introducing the exact row, bound to the artifact's content); role mappings in the adopted profile; a second person for an accepted deviation under a team profile, with the solo profile's collapse disclosed. | adoption (L4-like) |
-| W5 | **Alignment at merge** | `verdi align` and `verdi gate` (or their required subset) run in the merge gate for implementation pull requests, so a deviation forces its conversation before the code lands, not at close. | W1 (a blocking judge needs W0's evidence) |
+| W3 | **Test-quality guard** | A reviewed semantic falsifier per behavioural obligation: the named test passes on the candidate and fails, for the claimed behavioural reason, against the recorded mutation of the behaviour (a compiler error or a broken fixture is not that witness); the test, implementation and spec identities, the mutation, and both outcomes are recorded. Targeted mutation may generate candidates and supplement it; a mutation score alone does not show the test checks the criterion. W3 establishes test sensitivity, a different property from W0's judge reliability. | W2 |
+| W4 | **Authenticated human acts** | Waivers and accepted deviations first (waivers first if they must be ordered, since a waiver can override a failing record in today's fold), then attestations and the other human acts that clear blockers — authenticated the way phase B authenticates exemption approvals (`internal/signedapproval`: a forge-verified signed commit introducing the exact row, bound to the artifact's content, invalidated by any later content change), keeping the distinction between a verified signer and an authorized principal and the profile's separation rules; a second person for an accepted deviation under a team profile, with the solo profile's collapse disclosed. A display name or a CODEOWNERS entry never substitutes for authentication. | adoption (L4-like) |
+| W5 | **Alignment at merge** | The alignment check runs in the merge gate for implementation pull requests, so a deviation forces its conversation before the code lands. It needs an explicit protocol — the candidate commit, evidence acquisition (today's merge workflow does not produce the evidence bundle), the CI branch identity, and the report's freshness and commit rule — not just today's local commands invoked in CI. The judge starts advisory (shadow mode); later, measured finding classes may require a human disposition. | W1, W4 |
 | W6 | **Verification rules per criterion** | The process-hardening feature `spec/verification-rules`: clauses per criterion and constraint, each clause citing its evidence kind; the under-enumeration lint; required fields enforced. | its own plan (PR #351) |
-| W7 | **A close that completes** | The close ritual working end to end in CI for a change built through the story process — the choice between the sealed review path and a governed decision for work built outside sealed execution (BL-44, BL-64). | owner decision |
+| W7 | **A close that completes** | The close ritual working end to end in CI for a change built through the story process — the choice between the sealed review path and a governed decision for work built outside sealed execution (BL-44, BL-64). The path and a pilot are chosen early; one successful end-to-end close is an exit criterion of the whole program. | owner decision |
 
-## Owner decisions this scope needs
+## Owner decisions this scope needs (with the independent review's recommendations)
 
-1. **Ordering.** Recommended: W0 first (it decides how much to trust any judge), then W2 and W4 in parallel, then W1, W3, W5; W6
-   on its own plan; W7 decided separately.
-2. **The test-quality mechanism (W3):** falsifier witnesses per obligation, or a targeted mutation check.
-3. **Whether the judge may block a merge (W5),** and at which verdict classes — to be informed by W0's measurements.
-4. **Which human acts must be authenticated first (W4):** accepted deviations first is the strongest single step.
-5. **Whether coarse evidence remains allowed at all** once per-criterion evidence exists, and how the historical closes are
-   labelled.
+| Decision | Recommendation |
+|---|---|
+| Ordering | The redesign and a bounded W0 run first, together (W0 touches no user interface); then W2 and W4; W1 informed by W0; W3 after W2; W5 after W1 and W4; W6 on its own plan; W7's path and pilot chosen early, with one successful close required before the program is called complete |
+| Test quality (W3) | Reviewed semantic falsifiers per behavioural obligation; targeted mutation as a supplement |
+| The judge and merges (W5) | Advisory first; measured finding classes may later require a human disposition; "aligned" never overrides failing tests or missing required proof |
+| Authentication first (W4) | Waivers and accepted deviations together (waivers first if ordered); then attestations and the other blocker-clearing acts |
+| Coarse evidence | Kept as labelled suite evidence and historical provenance; never a substitute for the direct evidence new or migrated obligations require; frozen historical records preserved and labelled in current views, not rewritten; the forward migration boundary specified in authority |
 
 ## Sizing
 
