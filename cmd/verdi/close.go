@@ -99,6 +99,7 @@ import (
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -439,8 +440,13 @@ func runCloseConflictGate(ctx context.Context, root, storyArg, requestPath strin
 	return runCloseConflictGateForSpec(ctx, root, spec, requestPath, provider, stdout, stderr)
 }
 
+// runCloseConflictGateForSpec runs the conflict gate with its computed
+// expected branch taken from resolveBranchBeingClosed (SI-257), so a
+// detached CI checkout with a validated CI ref is evaluated for that
+// branch. An unknown branch stays "", which the request's own validation
+// refuses operationally before any evaluation, as it always has.
 func runCloseConflictGateForSpec(ctx context.Context, root string, spec *artifact.SpecFrontmatter, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
-	branch, err := gitx.CurrentBranch(ctx, root)
+	branch, err := resolveBranchBeingClosed(ctx, root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
@@ -469,6 +475,20 @@ func runCloseConflictGateForSpec(ctx context.Context, root string, spec *artifac
 		return 1
 	}
 	return 0
+}
+
+// resolveBranchBeingClosed is the one reading of the branch a close acts
+// for that every close consumer shares (SI-257, plan R-PB-3): one
+// repositoryfacts gather of root, read through Snapshot.BranchBeingClosed
+// — the checked-out branch, else a detached checkout's validated CI ref.
+// It returns "" when that branch is unknown; callers treat "" as unproven,
+// never as a name. The error is Gather's own operational failure only.
+func resolveBranchBeingClosed(ctx context.Context, root string) (string, error) {
+	snapshot, err := repositoryfacts.NewGatherer().Gather(ctx, repositoryfacts.GatherInput{Root: root})
+	if err != nil {
+		return "", fmt.Errorf("gathering repository facts: %w", err)
+	}
+	return snapshot.BranchBeingClosed().Value, nil
 }
 
 // closureStatusMode names how the archive step must treat the target

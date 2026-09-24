@@ -469,9 +469,16 @@ type ProfileIdentity struct {
 // the injected evaluation date (authority design §10). These facts occur
 // exactly once — the report carries no second context_manifest, exemption
 // ledger, or disposition ledger.
+//
+// CIRef is the sealed CI ref that supplied the branch being closed (SI-257;
+// contextcompile.SnapshotIdentity.CIRef), wire field input.ci_ref beside
+// repository: present only on an accepted-context report whose repository
+// branch is unknown, as a known, valid CI ref, and omitted otherwise, so a
+// report without one keeps its exact bytes and digest.
 type InputIdentity struct {
 	Target                TargetIdentity
 	Repository            repositoryfacts.Facts
+	CIRef                 *repositoryfacts.CIRefFact
 	ConstitutionDigest    string
 	EffectivePolicyDigest string
 	PolicyEntries         []PolicyEntryIdentity

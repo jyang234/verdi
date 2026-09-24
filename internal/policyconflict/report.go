@@ -52,6 +52,7 @@ func reportInput(view contextcompile.ConflictView, req Request, evaluatedOn stri
 	return InputIdentity{
 		Target:                target,
 		Repository:            snapshot.Repository,
+		CIRef:                 snapshot.CIRef,
 		ConstitutionDigest:    snapshot.ConstitutionDigest,
 		EffectivePolicyDigest: snapshot.EffectivePolicyDigest,
 		PolicyEntries:         entries,

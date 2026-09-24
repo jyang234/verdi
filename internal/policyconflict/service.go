@@ -571,7 +571,9 @@ func reverifyConflictView(view contextcompile.ConflictView, request Request) err
 			return fmt.Errorf("accepted phase %q does not match sealed phase %q", accepted.Phase, snapshot.Phase)
 		}
 		if accepted.Expected != nil {
-			if !snapshot.Repository.Branch.Known || snapshot.Repository.Branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {
+			// SI-257: the branch being closed, read from the sealed pair
+			// (Repository, CIRef), never from Repository.Branch alone.
+			if branch := snapshot.BranchBeingClosed(); !branch.Known || branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {
 				return fmt.Errorf("accepted expected repository identity does not match sealed snapshot")
 			}
 		}
