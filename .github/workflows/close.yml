@@ -26,9 +26,10 @@
 # SI-235, SI-236). `verdi close` resolves the countersign at HEAD before it
 # cuts its branch (cmd/verdi/close.go). On this detached checkout it takes
 # the pull request's source branch from the shared validated CI ref
-# (SI-257, lane E4a, internal/repositoryfacts): GITHUB_REF_NAME, accepted
-# only with GITHUB_REF_TYPE=branch and only when refs/remotes/origin/<name>
-# equals HEAD, which the fetch-depth: 0 checkout provides. That is
+# (SI-257, lanes E4a and E4c, internal/repositoryfacts): GITHUB_REF_NAME,
+# accepted only with GITHUB_REF_TYPE=branch and only when the exact ref
+# refs/remotes/origin/<name> (read with `git show-ref --verify`) equals
+# HEAD, which the fetch-depth: 0 checkout provides. That is
 # close/<name> when the operator dispatches from that branch (L2a).
 # Under a solo profile whose kernel permits the author/approver collapse
 # (SI-233), it also reads THIS run's review in the `close` environment as
@@ -71,16 +72,20 @@
 #       countersign is unconfigured;
 #   (b) the starter constitution registers no harness adapter that a
 #       request could name;
-#   (c) PARTLY RESOLVED by SI-257 (lane E4a; this workflow change is
-#       integrated after it). The compiler's stage-3 check, the conflict
-#       gate's expected branch and the countersign read the branch being
-#       closed from the validated CI-ref fact, not from this detached
-#       checkout, which has no current branch. The conflict evaluator's
+#   (c) this detached checkout has no current branch. RESOLVED for the
+#       branch checks by SI-257 (lanes E4a and E4c): the conflict gate's
+#       expected branch, the compiler's stage-3 comparison, the
+#       countersign's source branch and the conflict evaluator's
 #       reverification (internal/policyconflict, reverifyConflictView)
-#       still compares the expected branch with the checkout's branch,
-#       which is unknown on this detached checkout, so a close on an
-#       adopted store still stops there (exit 2) until lane E4c seals the
-#       CI ref for that check;
+#       all read the branch being closed from the validated CI-ref fact.
+#       When that fact supplies the branch, the compiler seals it with the
+#       operands it compiles, and the reverification reads it from there.
+#       The fact's remote-tracking check reads exactly the ref
+#       refs/remotes/origin/<name> (`git show-ref --verify`), never through
+#       rev-parse's lookup rules. Only the branch reading is resolved: the
+#       review-phase conflict gate is still held by (f). Every review-phase
+#       report discloses (f)'s three review inputs as unproven, and those
+#       disclosures block, so the gate's verdict is never pass;
 #   (d) the conflict gate's judge (`align.judge_cmd`) would run on the CI
 #       runner (THE JUDGE below);
 #   (e) disposition approvers cannot be authenticated in CI;
@@ -174,14 +179,12 @@
 # close`'s own `git checkout -b close/<name>` branch cut (git refuses `-b`
 # on an existing branch name); pinning to the commit SHA checks out
 # detached instead, avoiding the collision entirely. The detached HEAD has
-# no current branch, which is why the countersign and the conflict gate's
-# expected branch read the branch being closed from the validated CI ref
-# (LANDED above). That is PARTLY RESOLVED (PREREQUISITES (c)): the
-# conflict evaluator's reverification still reads this checkout's unknown
-# branch, so a close on an adopted store stops there (exit 2) until lane
-# E4c seals the CI ref for that check. fetch-depth: 0 fetches all history
-# for all branches (actions/checkout's README; documented, no live run has
-# exercised it yet), which gives the runner the
+# no current branch, which is why the countersign, the conflict gate's
+# expected branch, the compiler's stage-3 comparison and the conflict
+# evaluator's reverification read the branch being closed from the
+# validated CI ref (LANDED above; PREREQUISITES (c)). fetch-depth: 0
+# fetches all history for all branches (actions/checkout's README;
+# documented, no live run has exercised it yet), which gives the runner the
 # refs/remotes/origin/close/<name> that the CI-ref validation compares
 # with HEAD.
 #
