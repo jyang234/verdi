@@ -58,7 +58,7 @@ The features are independent, but they share surfaces. These rules make parallel
 | Spec v2s, ratifications (02, 05, 01), 08 entries, origin-and-mirror edits | SLT, SG, VR | Controller-authored; one ratification in flight at a time (an origin edit reds every other branch's fidelity check until it merges) |
 | Invention ledger and backlog | all | Controller only; re-read origin/main's tail before every push |
 | CLI-verb and MCP-tool registries | SG (lane G2) | Only lane G2 changes them, isolated |
-| `internal/lint` rule list and VL numbers | VR, SG | Numbers assigned here: VR takes VL-023 and VL-024, SG takes VL-025 if it needs one |
+| `internal/lint` rule list and VL numbers | VR, SG | Numbers assigned here: VR takes VL-023 and VL-024, SG takes VL-025 if it needs one. VL-026 is taken by closed-spec object supersession (its design of 2026-09-24, SI-264); the next free number is VL-027 |
 | Consolidation successor map (`internal/sealedexec/public_consolidation_import_test.go`) | X-1, VR (V1), RWS (R5, if it edits pinned `cmd/verdi/context*.go`) | One editing lane at a time, in the order X-1 → V1 → R5 |
 | `cmd/verdi`, broadly | RWS (R5 observer threading, ~43 files) | R5 runs alone in `cmd/verdi`; no other lane edits `cmd/verdi` during it |
 | Strict-lint baseline | every later lane | Milestone M-SLT: SLT's whole-feature review, risk gate, and pull request merge before any other feature's pull request merges. Lanes may run beside SLT, but each lane integrated after M-SLT must pass `make lint-strict` against the committed baseline (new findings are fixed, never added to the baseline) |
