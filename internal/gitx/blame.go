@@ -29,8 +29,9 @@ type BlameLine struct {
 	Filename string
 }
 
-// blameObjectIDRe is a full lowercase SHA-1 or SHA-256 object id.
-var blameObjectIDRe = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+// fullObjectIDRe is a full lowercase SHA-1 or SHA-256 object id, the form
+// git prints in blame porcelain and rev-list output.
+var fullObjectIDRe = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // Blame attributes lines start..end (1-based, inclusive) of path as of rev
 // with `git blame --line-porcelain`. path is repo-relative.
@@ -112,7 +113,7 @@ func parseBlameEntry(raw [][]byte, i int) (BlameLine, int, error) {
 	if len(header) != 3 && len(header) != 4 {
 		return BlameLine{}, 0, fmt.Errorf("malformed blame header %q", raw[i])
 	}
-	if !blameObjectIDRe.MatchString(header[0]) {
+	if !fullObjectIDRe.MatchString(header[0]) {
 		return BlameLine{}, 0, fmt.Errorf("malformed blame object id %q", header[0])
 	}
 	orig, err := positiveLineNumber(header[1])
