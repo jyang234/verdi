@@ -25,8 +25,11 @@
 # LANDED: lanes L2a, L2b and L2c, the close countersign (SI-230, SI-233,
 # SI-235, SI-236). `verdi close` resolves the countersign at HEAD before it
 # cuts its branch (cmd/verdi/close.go). On this detached checkout it takes
-# the pull request's source branch from GITHUB_REF_NAME, close/<name> when
-# the operator dispatches from that branch (cmd/verdi/countersign.go; L2a).
+# the pull request's source branch from the shared validated CI ref
+# (SI-257, lane E4a, internal/repositoryfacts): GITHUB_REF_NAME, accepted
+# only with GITHUB_REF_TYPE=branch and only when refs/remotes/origin/<name>
+# equals HEAD, which the fetch-depth: 0 checkout provides. That is
+# close/<name> when the operator dispatches from that branch (L2a).
 # Under a solo profile whose kernel permits the author/approver collapse
 # (SI-233), it also reads THIS run's review in the `close` environment as
 # the solo approval (L2c, through L2b's GitHub environment-review adapter
@@ -52,13 +55,32 @@
 # `countersign:` block. L4 is HELD by ruling R-W1-12, because adoption
 # turns on the constitutional conflict gate for every close, and under
 # current authority that gate cannot pass here:
-#   (a) `verdi close` then requires `--context-request`, which this job
-#       does not pass;
+#   (a) `verdi close` then requires `--context-request`. RESOLVED by
+#       SI-252 and SI-258: this job always passes it. The step before the
+#       close fills the committed, reviewed template
+#       .github/verdi/close-context-request.json (adapter codex version 1,
+#       phase review, the empty grant set, scope phases [review]) with the
+#       validated spec ref and nothing else, into
+#       .build/close-context-request.json. Dispatch inputs cannot supply
+#       the adapter, grants or scope, and `verdi close` computes the
+#       expected repository itself. On a store that is not adopted, which
+#       this one is today, `verdi close` refuses `--context-request`
+#       (cmd/verdi/conflictgate.go, probeConflictGate) and exits 2 before
+#       any gate, branch cut or publication, so this job fails at its close
+#       step there; no close can pass there today in any case, because the
+#       countersign is unconfigured;
 #   (b) the starter constitution registers no harness adapter that a
 #       request could name;
-#   (c) the conflict gate reads its branch from the checkout, which is
-#       empty on this detached checkout (the countersign's GITHUB_REF_NAME
-#       reading does not apply to it);
+#   (c) PARTLY RESOLVED by SI-257 (lane E4a; this workflow change is
+#       integrated after it). The compiler's stage-3 check, the conflict
+#       gate's expected branch and the countersign read the branch being
+#       closed from the validated CI-ref fact, not from this detached
+#       checkout, which has no current branch. The conflict evaluator's
+#       reverification (internal/policyconflict, reverifyConflictView)
+#       still compares the expected branch with the checkout's branch,
+#       which is unknown on this detached checkout, so a close on an
+#       adopted store still stops there (exit 2) until lane E4c seals the
+#       CI ref for that check;
 #   (d) the conflict gate's judge (`align.judge_cmd`) would run on the CI
 #       runner (THE JUDGE below);
 #   (e) disposition approvers cannot be authenticated in CI;
@@ -112,7 +134,10 @@
 #   4. After the close-evidence.yml run for R has completed successfully,
 #      dispatch this workflow from close/<name>: `gh workflow run close.yml
 #      --ref close/<name> -f spec_ref=spec/<name>`, or "Run workflow" on
-#      that branch in the Actions UI. Dispatching from that branch is what
+#      that branch in the Actions UI. spec_ref must be exactly spec/<name>:
+#      a tracker ref such as jira:LOAN-1482 is no longer accepted, because
+#      the context request the close step passes binds a spec ref (SI-258).
+#      Dispatching from that branch is what
 #      makes github.sha equal R. The job's `verdi sync` lists only
 #      completed, successful runs, so an earlier dispatch finds no bundle
 #      for R and falls back to the nearest ancestor's bundle, if any,
@@ -121,7 +146,8 @@
 #      `environment: close`, a protected environment the owner configures
 #      with required reviewers; GitHub holds the job before its first step
 #      until a reviewer approves. The job then validates the input, checks
-#      out R detached, pulls R's evidence with `verdi sync`, runs `verdi
+#      out R detached, pulls R's evidence with `verdi sync`, fills the
+#      context-request template with the spec ref, runs `verdi
 #      close` (the gate, the freeze in place, the archive move, the archive
 #      commit on a local close/<name>, and the publication), and pushes
 #      close/<name> to origin. The push fast-forwards close/<name> from R to
@@ -148,9 +174,16 @@
 # close`'s own `git checkout -b close/<name>` branch cut (git refuses `-b`
 # on an existing branch name); pinning to the commit SHA checks out
 # detached instead, avoiding the collision entirely. The detached HEAD has
-# no current branch, which is why the countersign reads its source branch
-# from GITHUB_REF_NAME (LANDED above); the conflict gate has no such
-# reading (PREREQUISITES (c)).
+# no current branch, which is why the countersign and the conflict gate's
+# expected branch read the branch being closed from the validated CI ref
+# (LANDED above). That is PARTLY RESOLVED (PREREQUISITES (c)): the
+# conflict evaluator's reverification still reads this checkout's unknown
+# branch, so a close on an adopted store stops there (exit 2) until lane
+# E4c seals the CI ref for that check. fetch-depth: 0 fetches all history
+# for all branches (actions/checkout's README; documented, no live run has
+# exercised it yet), which gives the runner the
+# refs/remotes/origin/close/<name> that the CI-ref validation compares
+# with HEAD.
 #
 # permissions: is the least-privilege set this exact sequence needs, and
 # nothing else (unlisted scopes default to "none" once permissions: is
@@ -184,7 +217,9 @@
 #
 # THE JUDGE. `align.judge_cmd` (.verdi/verdi.yaml) runs in step 1's local
 # report refresh. While the store is not adopted, this job never calls it:
-# `verdi close` freezes the committed report in place (SI-231, lane L3b),
+# there `verdi close` refuses the job's `--context-request` before any
+# gate (PREREQUISITES (a)). Nor does the close's own report step: it
+# freezes the committed report in place (SI-231, lane L3b),
 # and the freeze-in-place path (cmd/verdi/align.go, runAlignForSpec)
 # returns before any judge call. Any other report shape stops the job at
 # condition 4, before any freeze. The runner therefore needs no judge
@@ -215,12 +250,13 @@ on:
     inputs:
       spec_ref:
         description: >-
-          The exact ref to close: spec/<name>, or a scheme-prefixed story
-          ref such as jira:LOAN-1482 (the two forms
-          internal/storyresolve.Resolve accepts, I-30). Anything else is
-          rejected before any verdi verb runs. Dispatch this workflow FROM
-          the close/<name> branch the operator already pushed and waited
-          for evidence on (see this file's header comment).
+          The exact spec ref to close: spec/<name>, and nothing else. A
+          scheme-prefixed tracker ref such as jira:LOAN-1482 is refused,
+          because the context request this job passes to the close binds a
+          spec ref (SI-258); any other value is refused too, before any
+          verdi verb runs. Dispatch this workflow FROM the close/<name>
+          branch the operator already pushed and waited for evidence on
+          (see this file's header comment).
         required: true
         type: string
 
@@ -230,9 +266,9 @@ on:
 # pending one. cancel-in-progress: false means a running close is never
 # cancelled, because it may already have published and not yet pushed
 # (see PUBLICATION PRECEDES THE PUSH above). The group is keyed on the
-# input text, so a spec/<name> dispatch and a tracker-ref dispatch naming
-# the same spec do not share a group; the approval step is where an
-# approver refuses such a duplicate.
+# input text. Only an exact spec/<name> value passes validation (tracker
+# refs are refused, SI-258), so every run that gets past validation for a
+# spec is in that spec's one group.
 concurrency:
   group: close-${{ inputs.spec_ref }}
   cancel-in-progress: false
@@ -251,17 +287,18 @@ jobs:
       # an expression into the script before the shell starts, so an
       # interpolated input would run as code before this check. printf %q
       # prints a rejected value with any newline escaped, so it cannot
-      # start a workflow command of its own.
+      # start a workflow command of its own. Only spec/<name> is accepted
+      # (SI-258): the context request the close step passes binds a spec
+      # ref, which a tracker ref cannot fill.
       - name: Validate spec_ref before running any verdi verb
         env:
           SPEC_REF: ${{ inputs.spec_ref }}
         run: |
           spec_re='^spec/[a-z0-9]+(-[a-z0-9]+)*$'
-          story_re='^[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*$'
-          if [[ "$SPEC_REF" =~ $spec_re ]] || [[ "$SPEC_REF" =~ $story_re ]]; then
+          if [[ "$SPEC_REF" =~ $spec_re ]]; then
             exit 0
           fi
-          printf '::error::spec_ref %q is neither a spec ref (spec/<name>) nor a scheme-prefixed story ref (scheme:key, e.g. jira:LOAN-1482); refusing before running any verdi verb\n' "$SPEC_REF"
+          printf '::error::spec_ref %q is not a spec ref (spec/<name>); a tracker ref such as jira:LOAN-1482 is refused because the context request the close step passes to the conflict gate binds a spec ref (SI-258); refusing before running any verdi verb\n' "$SPEC_REF"
           exit 1
       - uses: actions/checkout@v4
         with:
@@ -290,6 +327,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./.build/verdi sync
+      # SI-252, SI-258: the context request comes from the committed,
+      # reviewed template .github/verdi/close-context-request.json, which
+      # holds the adapter, the grants, the phase and the scope. This step
+      # sets its spec, and nothing else, from the validated input, which
+      # reaches it only as env SPEC_REF, so a dispatch input cannot supply
+      # the adapter, grants or scope. jq -c -S writes the canonical encoding
+      # `verdi close` requires (internal/specalign pins the template and
+      # explains why). The output lands in .build/, which is git-ignored and
+      # lies under the checkout root, so the request-path check stops at the
+      # store root. jq is preinstalled on GitHub-hosted Ubuntu runner images
+      # (documented; no live run has exercised this step yet).
+      - name: Fill the committed context-request template with the validated spec ref
+        env:
+          SPEC_REF: ${{ inputs.spec_ref }}
+        run: jq -c -S --arg spec "$SPEC_REF" '.spec = $spec' .github/verdi/close-context-request.json > .build/close-context-request.json
       # `verdi close` commits the archive move with a bare `git commit`
       # (internal/gitx.CreateCommit), and a runner has no global git
       # identity, so this step gives git the GitHub Actions bot identity
@@ -304,6 +356,6 @@ jobs:
           GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
-        run: ./.build/verdi close "$SPEC_REF"
+        run: ./.build/verdi close "$SPEC_REF" --context-request .build/close-context-request.json
       - name: "Push the close/<name> branch verdi close committed to (dc-3: the verb stops at the branch; this job's own push is what makes the closure MR possible)"
         run: git push origin HEAD
