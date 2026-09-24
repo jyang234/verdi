@@ -119,8 +119,10 @@ const (
 )
 
 // remoteTrackingPrefix is the one remote-tracking namespace a CI ref name
-// is resolved in: the full refname refs/remotes/origin/<name>, which git's
-// rev-parse matches as that exact ref before any other lookup rule.
+// is resolved in: the full refname refs/remotes/origin/<name>, read as that
+// exact ref through GitReader.ResolveExactRef. rev-parse would not do:
+// with the exact ref absent, its lookup rules go on to a tag or branch
+// literally named refs/remotes/origin/<name> (E4a review M-1).
 const remoteTrackingPrefix = "refs/remotes/origin/"
 
 // gatherCIRef computes the CI-ref fact (SI-257). A run is a CI run for
@@ -129,9 +131,10 @@ const remoteTrackingPrefix = "refs/remotes/origin/"
 // provider's ref must name a branch (GitHub: GITHUB_REF_TYPE is "branch";
 // GitLab: no CI_COMMIT_TAG, and CI_COMMIT_REF_NAME equals
 // CI_COMMIT_BRANCH), the name must pass validBranchName before anything
-// reaches git, and refs/remotes/origin/<name> must resolve to head. Every
-// failure is Known == false with its own closed reason; a git failure
-// resolving the remote-tracking ref is such a failure, never an error.
+// reaches git, and the exact ref refs/remotes/origin/<name> must resolve to
+// head. Every failure is Known == false with its own closed reason; an
+// absent remote-tracking ref, or a git failure reading it, is such a
+// failure, never an error.
 func gatherCIRef(ctx context.Context, git GitReader, getenv EnvReader, root string, head StringFact) CIRefFact {
 	github := getenv(envGitHubActions) == "true"
 	gitlab := getenv(envGitLabCI) == "true"
@@ -167,7 +170,7 @@ func gatherCIRef(ctx context.Context, git GitReader, getenv EnvReader, root stri
 	if !head.Known {
 		return CIRefFact{Reason: CIRefReasonHeadUnresolved}
 	}
-	tracking, err := git.RevParse(ctx, root, remoteTrackingPrefix+name)
+	tracking, err := git.ResolveExactRef(ctx, root, remoteTrackingPrefix+name)
 	if err != nil {
 		return CIRefFact{Reason: CIRefReasonRemoteTrackingUnresolved}
 	}

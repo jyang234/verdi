@@ -24,6 +24,10 @@ import (
 type GitReader interface {
 	// RevParse resolves rev to its object id (gitx.RevParse).
 	RevParse(ctx context.Context, dir, rev string) (string, error)
+	// ResolveExactRef resolves exactly the full refname ref to its object
+	// id (gitx.ResolveExactRef). No rev-parse lookup rule applies: an
+	// absent ref is an error, never another ref of a similar name.
+	ResolveExactRef(ctx context.Context, dir, ref string) (string, error)
 	// CurrentBranch returns dir's checked-out branch short name, or ("",
 	// nil) for a detached HEAD (gitx.CurrentBranch's own documented
 	// contract — not an error).
@@ -54,6 +58,10 @@ func NewGitReader() GitReader { return gitxReader{} }
 
 func (gitxReader) RevParse(ctx context.Context, dir, rev string) (string, error) {
 	return gitx.RevParse(ctx, dir, rev)
+}
+
+func (gitxReader) ResolveExactRef(ctx context.Context, dir, ref string) (string, error) {
+	return gitx.ResolveExactRef(ctx, dir, ref)
 }
 
 func (gitxReader) CurrentBranch(ctx context.Context, dir string) (string, error) {

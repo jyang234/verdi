@@ -306,6 +306,7 @@ func TestSnapshot_Validate(t *testing.T) {
 // dependency fails loudly.
 type fakeGitReader struct {
 	revParseFn      func(ctx context.Context, dir, rev string) (string, error)
+	exactRefFn      func(ctx context.Context, dir, ref string) (string, error)
 	currentBranchFn func(ctx context.Context, dir string) (string, error)
 	remoteURLFn     func(ctx context.Context, dir, name string) (string, error)
 	statusDirtyFn   func(ctx context.Context, dir string) (bool, error)
@@ -316,6 +317,10 @@ type fakeGitReader struct {
 
 func (f *fakeGitReader) RevParse(ctx context.Context, dir, rev string) (string, error) {
 	return f.revParseFn(ctx, dir, rev)
+}
+
+func (f *fakeGitReader) ResolveExactRef(ctx context.Context, dir, ref string) (string, error) {
+	return f.exactRefFn(ctx, dir, ref)
 }
 
 func (f *fakeGitReader) CurrentBranch(ctx context.Context, dir string) (string, error) {
@@ -352,6 +357,7 @@ func baseGitReader() *fakeGitReader {
 		remoteURLFn:     func(context.Context, string, string) (string, error) { return "", gitx.ErrNoSuchRemote },
 		currentBranchFn: func(context.Context, string) (string, error) { return "main", nil },
 		revParseFn:      func(context.Context, string, string) (string, error) { return "sha", nil },
+		exactRefFn:      func(context.Context, string, string) (string, error) { return "", errors.New("no such ref") },
 		statusDirtyFn:   func(context.Context, string) (bool, error) { return false, nil },
 		stagedPathsFn:   func(context.Context, string) ([]string, error) { return nil, nil },
 		showFn:          func(context.Context, string, string, string) ([]byte, error) { return nil, errors.New("not found") },
