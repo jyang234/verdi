@@ -128,6 +128,7 @@ func TestCmdBoardCommit_Negative(t *testing.T) {
 
 // TestRunBoardVerb_UnknownSubcommand mirrors TestRunDesignVerb_UnknownSubcommand.
 func TestRunBoardVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runBoardVerb([]string{"bogus"}, &stdout, &stderr); got != 2 {
 		t.Fatalf("runBoardVerb(bogus) = %d, want 2", got)

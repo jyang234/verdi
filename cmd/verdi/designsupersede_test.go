@@ -393,6 +393,7 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 // contract: every flag in any position, the incompatible-flag list, and
 // leftover positional arguments.
 func TestExtractSupersedeFlags(t *testing.T) {
+	t.Parallel()
 	t.Run("happy: canonical order", func(t *testing.T) {
 		ref, kind, name, incompat, rest, err := extractSupersedeFlags([]string{"--supersedes", "spec/lockbox", "--name", "lockbox-v2"})
 		if err != nil {
@@ -499,6 +500,7 @@ func TestExtractSupersedeFlags(t *testing.T) {
 // ac-11 states — the untouched scaffold raises no finding AGAINST itself,
 // VL-015 included.
 func TestDesignStartSupersedeE2E_Happy(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildSupersedeRepo(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
@@ -599,6 +601,7 @@ a.
 // malformed --supersedes ref. Every case: exit 2, no branch/spec-dir left
 // behind beyond what the case itself set up.
 func TestDesignStartSupersedeE2E_Negative(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -718,6 +721,7 @@ Body.
 // pins the refusal to ONE "internal error" prefix: the CLI relays
 // Compose's own classified message rather than prefixing it a second time.
 func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -770,6 +774,7 @@ func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testin
 // plain --kind/--name path, where it surfaced as an unrelated story-ref
 // complaint.
 func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildSupersedeRepo(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
@@ -898,6 +903,7 @@ func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 // gitx.AddPaths (UAT-033), never gitx.AddAll's blanket `git add -A` sweep
 // of the rest of the working tree.
 func TestDesignSupersedeGo_NoAddAll(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("designsupersede.go")
 	if err != nil {
 		t.Fatalf("reading designsupersede.go: %v", err)

@@ -20,6 +20,7 @@ import (
 // stdout, nothing on stderr, starting with "verdi " (never empty, never
 // a bare fabricated string).
 func TestVersion_PrintsIdentificationLine(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -47,6 +48,7 @@ func TestVersion_PrintsIdentificationLine(t *testing.T) {
 // back to the exact build that produced it, so the two spellings of "ask
 // the build who it is" can never disagree).
 func TestVersion_BothFormsAgree(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -66,6 +68,7 @@ func TestVersion_BothFormsAgree(t *testing.T) {
 // report, the same posture several already-stubbed verbs take toward
 // trailing arguments (dispatch_test.go's TestRun_KnownVerbs_ExtraArgs).
 func TestVersion_IgnoresExtraArguments(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -82,6 +85,7 @@ func TestVersion_IgnoresExtraArguments(t *testing.T) {
 // root (unlike almost every real verb) — it must succeed identically run
 // from a directory with no .verdi/ ancestor at all.
 func TestVersion_RunsOutsideAnyStore(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir() // deliberately not a verdi store
 

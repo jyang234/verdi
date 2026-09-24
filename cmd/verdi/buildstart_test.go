@@ -19,6 +19,7 @@ import (
 )
 
 func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		quality   string
@@ -74,6 +75,7 @@ func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml":                        phase7ManifestYAML,
 		".verdi/specs/active/widget-story/spec.md": obligationSeamStoryCleanMD,
@@ -96,6 +98,7 @@ func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityMissingDimensionsOperational(t *testing.T) {
+	t.Parallel()
 	full := buildQualityBlock()
 	tests := []struct {
 		name    string
@@ -127,6 +130,7 @@ func TestRunBuildStart_ObligationQualityMissingDimensionsOperational(t *testing.
 }
 
 func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml":                        phase7ManifestYAML,
 		".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
@@ -145,6 +149,7 @@ func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityMisbindingIsOperationalBeforeMutation(t *testing.T) {
+	t.Parallel()
 	doc := buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock())
 	doc = strings.Replace(doc, "obligation/widget-story--", "obligation/other-story--", 1)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
@@ -249,6 +254,7 @@ func buildBirdsEyeFeatureRepo(t *testing.T) *fixturegit.Repo {
 // a round-four class: feature spec: it has no code of its own to build
 // against.
 func TestRunBuildStart_RefusesBirdsEyeFeature(t *testing.T) {
+	t.Parallel()
 	repo := buildBirdsEyeFeatureRepo(t)
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -274,6 +280,7 @@ func TestRunBuildStart_RefusesBirdsEyeFeature(t *testing.T) {
 // TestCmdBuildStart_UsageNegative proves cmdBuildStart's own
 // argument-count check.
 func TestCmdBuildStart_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdBuildStart(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdBuildStart(no args) = %d, want 2", got)
@@ -288,6 +295,7 @@ func TestCmdBuildStart_UsageNegative(t *testing.T) {
 // TestRunBuildVerb_UnknownSubcommand mirrors design/feature's own
 // subcommand dispatch tests.
 func TestRunBuildVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runBuildVerb([]string{"bogus"}, &stdout, &stderr); got != 2 {
 		t.Fatalf("runBuildVerb(bogus) = %d, want 2", got)

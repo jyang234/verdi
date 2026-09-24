@@ -165,6 +165,7 @@ func TestGatherArchivedRulings_UnresolvableDefaultBranch_OperationalError(t *tes
 // The archived ruling and this confirmed feature reaffirmation are thereby the
 // same deviation; carried-from is the durable signal the union collapse reads.
 func TestRunDisposition_ConfirmsArchivedCandidate_StampsCarriedFrom(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	covers := strings.Repeat("a", 40)
 
@@ -215,6 +216,7 @@ func TestRunDisposition_ConfirmsArchivedCandidate_StampsCarriedFrom(t *testing.T
 // L-N14 union collapse the two reworded texts would count twice; the tally shows
 // count 1.
 func TestCheckFeatureSpecStaleCondition_ConfirmedCrossLevelReaffirmation_CountsOnce(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 

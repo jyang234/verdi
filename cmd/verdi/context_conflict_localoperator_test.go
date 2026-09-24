@@ -119,6 +119,7 @@ func TestNewLocalContextConflictProvider_NoLocalOperatorSource_NilActors(t *test
 // failure (exit 2) that would regress TestContextConflictBuiltBinary's
 // "absent constitution is typed exit one" real-binary proof.
 func TestNewLocalContextConflictProvider_NotAdopted_NilActorsNoError(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 	}, Message: "no policy store at all"}})
@@ -138,6 +139,7 @@ func TestNewLocalContextConflictProvider_NotAdopted_NilActorsNoError(t *testing.
 // resolveLocalActors would produce standalone, through the same factory
 // every lifecycle surface shares.
 func TestNewLocalContextConflictProvider_LocalOperatorSource_ResolvesActor(t *testing.T) {
+	t.Parallel()
 	repo := buildLocalOperatorWiringRepo(t)
 	// fixturegit.Build always configures this exact repo-local identity.
 	provider, err := readinessload.NewConflictProvider(context.Background(), repo.Dir, policyconflict.Request{}, readinessload.JudgeRun, resolveConflictActors)

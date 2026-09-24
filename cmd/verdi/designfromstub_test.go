@@ -289,6 +289,7 @@ func TestRunDesignStartFromStub_Negative(t *testing.T) {
 // TestCmdDesignStartFromStub_UsageArgs proves the argument-count guard at
 // the real entry point: exactly two positional args (feature, stub).
 func TestCmdDesignStartFromStub_UsageArgs(t *testing.T) {
+	t.Parallel()
 	cases := [][]string{nil, {"one-arg"}, {"one", "two", "three"}}
 	for _, args := range cases {
 		var stdout, stderr strings.Builder

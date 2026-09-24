@@ -64,6 +64,7 @@ func TestForgeOpenMRs_UnresolvableDefaultBranch(t *testing.T) {
 // TestHTTPOpenMRFeed_Table drives the harness double's strict decode:
 // happy path, unknown fields, trailing data, non-200, unreachable.
 func TestHTTPOpenMRFeed_Table(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		body    string
@@ -110,6 +111,7 @@ func TestHTTPOpenMRFeed_Table(t *testing.T) {
 // TestHTTPOpenMRFeed_Unreachable: a closed server errors — the shape the
 // home page degrades to its disclosed notice.
 func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
@@ -120,6 +122,7 @@ func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
 
 // TestUnavailableOpenMRs always errors with the disclosed reason.
 func TestUnavailableOpenMRs(t *testing.T) {
+	t.Parallel()
 	_, err := unavailableOpenMRs{reason: "forge \"gitlab\" is configured but unreachable"}.OpenMRSourceBranches(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "unreachable") {
 		t.Fatalf("err = %v, want the disclosed reason", err)
@@ -132,6 +135,7 @@ func TestUnavailableOpenMRs(t *testing.T) {
 // is up, and the disclosed "MR status unavailable" notice — with the
 // refs-computed directory still complete — after the double goes away.
 func TestDirectoryHome_Integration_HTTPFeed(t *testing.T) {
+	t.Parallel()
 	entries := []refindex.Entry{
 		{Ref: "spec/mr-draft", Source: refindex.SourceBoth, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},
 		{Ref: "spec/quiet-draft", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},

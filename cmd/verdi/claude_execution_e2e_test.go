@@ -50,6 +50,7 @@ import (
 // through the built verdi binary. Each sub-test isolates one concern from the
 // Task 6 adverse matrix.
 func TestClaudeExecutionE2EContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	// -----------------------------------------------------------------------

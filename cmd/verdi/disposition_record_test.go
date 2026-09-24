@@ -265,6 +265,7 @@ func dispositionRecordBaseArgs(root, reportPath, id string) []string {
 // and whose remaining members come from the operands — then decodes and
 // validates the written file through the frozen policyartifact decoder.
 func TestCmdDispositionRecord_Positive(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeDispositionRecordStoreRoot(t)
 	reportPath := filepath.Join(root, "report.json")
@@ -365,6 +366,7 @@ func TestCmdDispositionRecord_Positive(t *testing.T) {
 // --target-digest operands only select and verify which digest counts as
 // "the target's own"; they never filter witness.claims itself).
 func TestCmdDispositionRecord_TargetWithParentClaims(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeDispositionRecordStoreRoot(t)
 	reportPath := filepath.Join(root, "report.json")
@@ -410,6 +412,7 @@ func TestCmdDispositionRecord_TargetWithParentClaims(t *testing.T) {
 // decodes, is sorted, and equals reconstructApplicableExemptions's own
 // aggregation over the same report.
 func TestCmdDispositionRecord_ExemptionRoundTrips(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeDispositionRecordStoreRoot(t)
 	reportPath := filepath.Join(root, "report.json")
@@ -465,6 +468,7 @@ func TestCmdDispositionRecord_ExemptionRoundTrips(t *testing.T) {
 // --approver, and --owner each accept more than one occurrence and every
 // occurrence lands in the written artifact.
 func TestCmdDispositionRecord_MultipleRepeatables(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeDispositionRecordStoreRoot(t)
 	reportPath := filepath.Join(root, "report.json")
@@ -511,6 +515,7 @@ func TestCmdDispositionRecord_MultipleRepeatables(t *testing.T) {
 // refusal (Task 3 contract): each is an operational exit (2), names the
 // offending operand, and never writes a file.
 func TestCmdDispositionRecord_Refusals(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	// mutateReport returns the fixture bytes with fn applied — used by the
@@ -947,6 +952,7 @@ func snapshotDir(t *testing.T, dir string) []string {
 // --- direct unit tests for disposition_record.go's pure helper functions ---
 
 func TestDispositionOrigin(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		row  policyconflict.SemanticEvaluation
@@ -965,6 +971,7 @@ func TestDispositionOrigin(t *testing.T) {
 }
 
 func TestFindSemanticRow(t *testing.T) {
+	t.Parallel()
 	t.Run("found: unique match", func(t *testing.T) {
 		report := policyconflict.Report{Semantic: []policyconflict.SemanticEvaluation{
 			{InputID: "sha256:aaaa"},
@@ -998,6 +1005,7 @@ func TestFindSemanticRow(t *testing.T) {
 }
 
 func TestTargetRefFromReport(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		report  policyconflict.Report
@@ -1040,6 +1048,7 @@ func TestTargetRefFromReport(t *testing.T) {
 }
 
 func TestTargetClaimAuthorityDigests(t *testing.T) {
+	t.Parallel()
 	digestA := "sha256:" + strings.Repeat("1", 64) // the target's own
 	digestB := "sha256:" + strings.Repeat("2", 64) // a governing parent feature's
 	digestC := "sha256:" + strings.Repeat("3", 64) // a policy's
@@ -1114,6 +1123,7 @@ func TestTargetClaimAuthorityDigests(t *testing.T) {
 }
 
 func TestValidDispositionID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		id   string
 		want bool
@@ -1142,6 +1152,7 @@ func TestValidDispositionID(t *testing.T) {
 }
 
 func TestReconstructApplicableExemptions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		mechanical []policyconflict.MechanicalEvaluation
@@ -1206,6 +1217,7 @@ func TestReconstructApplicableExemptions(t *testing.T) {
 }
 
 func TestParseApprover(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		in         string

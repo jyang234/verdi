@@ -26,6 +26,7 @@ var forbiddenDiagramSweepReferences = []string{
 // badge-computes, the one precedent this codebase has for a static claim
 // with no compiler-enforced witness).
 func TestDiagramSweepStatic_GateSourceNeverReferencesTheSweepReport(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("gate.go")
 	if err != nil {
 		t.Fatalf("reading gate.go: %v", err)
@@ -42,6 +43,7 @@ func TestDiagramSweepStatic_GateSourceNeverReferencesTheSweepReport(t *testing.T
 // spec/judged-sweep ac-1's STATIC obligation, lint half: every source file
 // under internal/lint carries no reference to the sweep report either.
 func TestDiagramSweepStatic_LintSourceNeverReferencesTheSweepReport(t *testing.T) {
+	t.Parallel()
 	const lintDir = "../../internal/lint"
 	entries, err := os.ReadDir(lintDir)
 	if err != nil {
@@ -76,6 +78,7 @@ func TestDiagramSweepStatic_LintSourceNeverReferencesTheSweepReport(t *testing.T
 // both the existing build-branch (runAlign) and design-branch
 // (runDesignAlign) modes.
 func TestDiagramSweepStatic_AlignDispatchesANewMode(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("align.go")
 	if err != nil {
 		t.Fatalf("reading align.go: %v", err)

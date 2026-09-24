@@ -86,6 +86,7 @@ func storySpecForCascade(t *testing.T) *artifact.SpecFrontmatter {
 // TestCheckCascadeReaffirmation covers 03 §The amendment ladder rung 4's
 // three verdicts and the re-affirmation resolution path.
 func TestCheckCascadeReaffirmation(t *testing.T) {
+	t.Parallel()
 	t.Run("no merged supersession at all: unaffected", func(t *testing.T) {
 		repo := fixturegit.Build(t, []fixturegit.Layer{{
 			Files: map[string]string{
@@ -210,6 +211,7 @@ func TestCheckCascadeReaffirmation(t *testing.T) {
 // would let a permission error mask as a clean, exit-0 pass at the
 // build-start/gate verb level, co-2's witness-scoped 0->2 fix).
 func TestCheckCascadeReaffirmation_Negative_UnreadableSpec(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-spec path under this user")
 	}
