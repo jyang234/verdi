@@ -646,7 +646,7 @@ func validateSnapshotIdentityCIRef(targetKind string, repository repositoryfacts
 	case targetKind != snapshotTargetAcceptedContext:
 		return fmt.Errorf("contextcompile: conflict snapshot ci ref: target kind %q cannot carry one", targetKind)
 	case repository.Branch.Known:
-		return fmt.Errorf("contextcompile: conflict snapshot ci ref: recorded branch %q is known, so no CI ref supplied the branch being closed", repository.Branch.Value)
+		return fmt.Errorf("contextcompile: conflict snapshot ci ref: recorded branch %q is known, so a CI ref cannot stand in for it", repository.Branch.Value)
 	case !ciRef.Known:
 		return fmt.Errorf("contextcompile: conflict snapshot ci ref: an unknown CI ref is never sealed")
 	}

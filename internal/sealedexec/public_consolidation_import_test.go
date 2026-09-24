@@ -382,7 +382,7 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 	},
 	"internal/contextcompile/conflict.go": {
 		Historical: "cff0e7996c600e348275649e8034469a90656c0dd4410c20d9aa6643332b5201",
-		Successor:  "b8074727a984504d0cdf017f199659d3f32184790d0befc9bfa93e07b91500c1",
+		Successor:  "50948c8424809e57a3f9251dc227c8960ea79f12512f2f9060e3a8eeb7f8bb33",
 		Inverse: []consolidationVerdiEdit{
 			{From: "//\n" +
 				"// CIRef is the CI ref that supplied the branch being closed (SI-257): set\n" +
@@ -418,7 +418,7 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 				"\tcase targetKind != snapshotTargetAcceptedContext:\n" +
 				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: target kind %q cannot carry one\", targetKind)\n" +
 				"\tcase repository.Branch.Known:\n" +
-				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: recorded branch %q is known, so no CI ref supplied the branch being closed\", repository.Branch.Value)\n" +
+				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: recorded branch %q is known, so a CI ref cannot stand in for it\", repository.Branch.Value)\n" +
 				"\tcase !ciRef.Known:\n" +
 				"\t\treturn fmt.Errorf(\"contextcompile: conflict snapshot ci ref: an unknown CI ref is never sealed\")\n" +
 				"\t}\n" +
@@ -508,7 +508,7 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 	},
 	"internal/policyconflict/validate.go": {
 		Historical: "def2aaba7bbeb6ffb307ba781f04dcb340b78b52f0621047442f298bb96adc51",
-		Successor:  "53f68d2073078e983c381a239bbee5bc06d14b90d8271a983abdbdca296e204d",
+		Successor:  "48ae63075444f8df8cd05c1d6cf7c8eae31581ce2ac819928f4b1193ee621394",
 		Inverse: []consolidationVerdiEdit{
 			{From: "// validateInputCIRef enforces input.ci_ref's rule (SI-257): absent, or the\n" +
 				"// known, valid CI ref that supplied the branch being closed, which only an\n" +
@@ -520,7 +520,7 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 				"\tcase i.Target.Kind != TargetAcceptedContext:\n" +
 				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: target kind %q cannot carry one\", i.Target.Kind)\n" +
 				"\tcase i.Repository.Branch.Known:\n" +
-				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: repository branch %q is known, so no CI ref supplied the branch being closed\", i.Repository.Branch.Value)\n" +
+				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: repository branch %q is known, so a CI ref cannot stand in for it\", i.Repository.Branch.Value)\n" +
 				"\tcase !i.CIRef.Known:\n" +
 				"\t\treturn fmt.Errorf(\"policyconflict: input.ci_ref: a present CI ref must be known\")\n" +
 				"\t}\n" +

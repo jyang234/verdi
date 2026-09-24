@@ -530,7 +530,7 @@ func (i InputIdentity) validateInputCIRef() error {
 	case i.Target.Kind != TargetAcceptedContext:
 		return fmt.Errorf("policyconflict: input.ci_ref: target kind %q cannot carry one", i.Target.Kind)
 	case i.Repository.Branch.Known:
-		return fmt.Errorf("policyconflict: input.ci_ref: repository branch %q is known, so no CI ref supplied the branch being closed", i.Repository.Branch.Value)
+		return fmt.Errorf("policyconflict: input.ci_ref: repository branch %q is known, so a CI ref cannot stand in for it", i.Repository.Branch.Value)
 	case !i.CIRef.Known:
 		return fmt.Errorf("policyconflict: input.ci_ref: a present CI ref must be known")
 	}
