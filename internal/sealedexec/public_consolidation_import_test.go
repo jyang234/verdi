@@ -34,6 +34,12 @@ import (
 //     canonical record's witnesses — carrying the kernel-consulted
 //     separation-of-duties decision's disclosure (or fail-closed reason) into
 //     evidence, with no change to Record's wire schema.
+//   - SI-257 / plan R-PB-3 (unsealed-exemption phase B wave 1, lane E4a):
+//     contextcompile's compiler.go, whose stage-3 expected-repository
+//     comparison calls ResolveExpectedRepositorySnapshot on the whole
+//     repository snapshot (the branch being closed: the checked-out branch,
+//     else a detached checkout's validated CI ref) instead of
+//     ResolveExpectedRepository on its Facts, and nothing else.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -348,6 +354,14 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 				"\twitnesses = append(witnesses, request.SeparationDisclosures...)\n",
 				To: "\twitnesses := make([]string, 0, 4+len(authorFacts)+len(evaluations)*6)\n" +
 					"\twitnesses = append(witnesses, authorFacts...)\n"},
+		},
+	},
+	"internal/contextcompile/compiler.go": {
+		Historical: "8c97844e2742de719f4d0c562d8097fabe67cc8db796c6e5483ec2c3a257089b",
+		Successor:  "e2fac0fed31bdacfe76ab4fa6b576f782961dd8f4abbeae310a3f9c79ecdf754",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tif err := ResolveExpectedRepositorySnapshot(request.Expected, snapshot); err != nil {\n",
+				To: "\tif err := ResolveExpectedRepository(request.Expected, snapshot.Facts); err != nil {\n"},
 		},
 	},
 }

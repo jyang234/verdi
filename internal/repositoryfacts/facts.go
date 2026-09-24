@@ -271,17 +271,26 @@ func (c DisclosureCode) Validate() error {
 // and duplicate rejected"); a consumer that additionally merges these
 // codes with disclosures from other sources still re-sorts the merged
 // set itself.
+//
+// CIRef is the validated CI ref (SI-257), carried beside Facts rather than
+// inside it so Facts's pinned wire shape is unchanged; BranchBeingClosed
+// combines the two. Its zero value is the correct reading outside CI.
 type Snapshot struct {
 	Facts       Facts            `json:"facts"`
 	Disclosures []DisclosureCode `json:"disclosures"`
+	CIRef       CIRefFact        `json:"ci_ref"`
 }
 
-// Validate reports the first rule s violates: an invalid Facts value, a
-// nil Disclosures slice, an unknown disclosure code, or a Disclosures
-// slice that is not strictly ascending (sorted, duplicate-free).
+// Validate reports the first rule s violates: an invalid Facts value, an
+// inconsistent CIRef, a nil Disclosures slice, an unknown disclosure code,
+// or a Disclosures slice that is not strictly ascending (sorted,
+// duplicate-free).
 func (s Snapshot) Validate() error {
 	if err := s.Facts.Validate(); err != nil {
 		return err
+	}
+	if err := s.CIRef.Validate(); err != nil {
+		return fmt.Errorf("repositoryfacts: ci_ref: %w", err)
 	}
 	if s.Disclosures == nil {
 		return fmt.Errorf("repositoryfacts: disclosures must be non-nil (an explicitly empty set is [])")

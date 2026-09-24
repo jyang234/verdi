@@ -236,7 +236,7 @@ func (c Compiler) compilePipeline(ctx context.Context, root string, request Requ
 	if err != nil {
 		return compileOutcome{}, fmt.Errorf("contextcompile: stage 3 gather repository facts: %w", err)
 	}
-	if err := ResolveExpectedRepository(request.Expected, snapshot.Facts); err != nil {
+	if err := ResolveExpectedRepositorySnapshot(request.Expected, snapshot); err != nil {
 		return compileOutcome{}, fmt.Errorf("contextcompile: stage 3 compare expected repository: %w", err)
 	}
 	if !snapshot.Facts.Head.Known {
