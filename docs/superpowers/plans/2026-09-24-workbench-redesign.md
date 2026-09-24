@@ -51,13 +51,15 @@ unless a chosen journey demonstrably needs one of its capabilities.
   `boardspec.js` does not grow.
 - **D-WR-11 — build through the story process.** The redesign feature's stories are instantiated from its stubs and built on
   `verdi build start` branches (as the process-hardening plan's D-PH-1).
-- **D-WR-12 — the index has four status columns (option A).** The columns On the desk, Accepted, Built, and On the shelf are
-  workbench-directory dc-2's four status groups, in that order. "In review" is not a column. It is a forge-sourced chip on a draft
+- **D-WR-12 — the index has four status columns (option A).** The columns On the desk, Accepted, Active components, and On the
+  shelf are workbench-directory dc-2's four status groups, in that order. The third column is labelled "Active components", not the
+  design's "Built": the group comes from a component's authored `active` status (`internal/refindex/status.go`), which does not
+  establish that anything was built, and a merged implementation can stay in Accepted while closure is blocked (owner correction,
+  2026-09-24). "In review" is not a column. It is a forge-sourced chip on a draft
   whose branch has an open pull request, plus an "in review" filter over the same data. The forge never moves a card between
   columns: an unreachable forge leaves every card where its status puts it, and the chip and the filter disclose that review status
   is unavailable, never reporting zero reviews. The list view uses the same four groups and labels. This follows the plan review's
-  WR-F1 follow-up. The controller and the independent reviewer both recommended it (2026-09-24); the owner's merge of this plan
-  confirms it.
+  WR-F1 follow-up. The owner chose it on 2026-09-24, on the controller's and the independent reviewer's recommendation.
 
 ## Binding constraints that the design does not show
 
@@ -105,7 +107,7 @@ Index (D-WR-12):
 | workbench-directory dc-5 (remote design branches; source disclosure; the forge-sourced, degradable in-review chip) | All of it: a source chip on every card; the in-review chip and the new filter read the same per-render forge consultation; an unreachable forge is disclosed, never a dead link or a blocked index | — | none |
 | directory-home, closed story (ac-1..ac-3, dc-1..dc-5, co-1, co-2) | All of it: every entry exactly once, with its status chip, its board link, and today's link grammar; the disclosed entry for a branch with no draft spec, and the notice page for a deleted branch; the disclosures pointer becomes the bar's Disclosures toggle; services and boards stay sections in the other-records strip, collapsed, listing every entry, usable without JavaScript; columns and cards carry the `dir-group-*` and `dir-entry-*` test ids | — | none |
 | workbench-legibility ac-3 (status first; badges and working links; exhaustive sections below; nothing lost) | All of it: the columns lead the page; each card shows its status badge and its working links (board; matrix and verdict for a default-branch feature with stories, home-status-glance dc-3's condition); archived specs, artifacts by kind, services, and boards stay below the columns, each expandable to its full listing | — | none |
-| workbench-legibility dc-4 (actionable-first, status-only taxonomy; no evidence-bearing state) | The order (drafts, then accepted-pending-build, then the rest), status-only grouping, badges, working links, and the no-evidence bar | Its single trailing "settling" group becomes two columns, Built (active components) and On the shelf (terminal), as workbench-directory dc-2 already groups them | Conflict against `spec/workbench-legibility`; fragment edge to `#dc-4` |
+| workbench-legibility dc-4 (actionable-first, status-only taxonomy; no evidence-bearing state) | The order (drafts, then accepted-pending-build, then the rest), status-only grouping, badges, working links, and the no-evidence bar | Its single trailing "settling" group becomes two columns, Active components and On the shelf (terminal), as workbench-directory dc-2 already groups them | Conflict against `spec/workbench-legibility`; fragment edge to `#dc-4` |
 | home-status-glance, closed story (ac-1..ac-3, dc-1..dc-5: a separate three-bucket glance above an unchanged directory) | Its intent: actionable-first order; archived specs never lead the page (On the shelf shows terminal specs still in the active zone and folds archive-zone specs into a collapsed "archived n" list at its foot); every column always renders its count and an explicit empty state; one index computation per render; nothing persisted. co-1 and co-2 are kept whole | The separate glance and its three buckets, merged with the directory into the four columns; its lean entries (cards carry the directory's source and in-review chips); the directory staying "in the same place" (it becomes the columns and the strip); the `glance-group-*` and `glance-entry-*` test ids | Conflict against `spec/home-status-glance`; fragment edges to ac-1, ac-2, ac-3, dc-1, dc-2, dc-3, dc-4, dc-5 |
 
 The D-WR-5 call to action counts acceptance criteria with no implementing stub or story. That is family structure from
@@ -209,8 +211,9 @@ d1438d9a889a058289b23993152b68ff7ff02c97d0723a642f4c434855a7474a  screenshots/wa
 | Impact survey: data gaps | D-WR-3, D-WR-4, D-WR-5; B1, B3, B4 |
 | Owner decisions 2026-09-24 (eleven defaults) | D-WR-1..D-WR-11 |
 | Plan review of d2ea5327: WR-F1 (the parent features' grouping rules) | A1 source-to-successor mapping (index) |
-| Index option A, recommended by the controller and the independent reviewer (2026-09-24): four status columns, in-review as a chip and a filter, unavailable review status disclosed, every compatible parent and child object kept, the closed-decision challenge route for what remains | D-WR-12; A1 row; A1 source-to-successor mapping |
+| Index option A, chosen by the owner on 2026-09-24 as the controller and the independent reviewer recommended: four status columns, in-review as a chip and a filter, unavailable review status disclosed, every compatible parent and child object kept, the closed-decision challenge route for what remains | D-WR-12; A1 row; A1 source-to-successor mapping |
 | Controller follow-ups: B1 and B3 shared a story name; `--from-stub` cuts one branch per stub | B3 renamed `index-coverage`; A2 row |
+| Owner correction 2026-09-24: the third column is "Active components", not "Built" | D-WR-12; A1 mapping (workbench-legibility dc-4 row) |
 | Plan review recommendations (pinned handoff identity; B4/F3 change states; bounded first release) | Design source and manifest; B4; "What this plan does not claim" |
 
 Coverage: every item mapped. Intentional omissions: the items under "Out of scope".
