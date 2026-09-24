@@ -1,9 +1,9 @@
 # Closed-spec Object Supersession — Authority Design
 
-Status: authority text for review. It is ratified by the owner's merge of the pull request that carries it. At ratification, the
-02, 03, and 08 text of §9 is applied to the workspace origins (`docs/design/specs/`) and to the self-hosted mirrors
-(`spec/verdi-artifact-contract`, `spec/verdi-evidence-model`) in the same change. Ledger: SI-259 through SI-265. Backlog: BL-66,
-BL-67.
+Status: reviewed authority text (one independent review of `235b3729`, one correction pass at `0ba9b8e5`, closure check passed,
+2026-09-24). It is ratified by the owner's merge of the pull request that carries it. That pull request applies the 02, 03, and 08
+text of §9 to the workspace origins (`docs/design/specs/`) and to the self-hosted mirrors (`spec/verdi-artifact-contract`,
+`spec/verdi-evidence-model`). Ledger: SI-259 through SI-265. Backlog: BL-66, BL-67.
 
 This is a bounded prerequisite of the workbench redesign (plan PR #353, unit A1). The redesign's supersession edges and conflict
 records wait until this route is ratified and its tooling proves the route end to end. It reopens no closed work.
