@@ -47,7 +47,11 @@ import (
 //     transport validation, clone and BranchBeingClosed reading; and
 //     policyconflict's schema.go, codec.go, validate.go and report.go, whose
 //     report InputIdentity carries that CI ref as the additive input.ci_ref,
-//     omitted when absent and validated when present, and nothing else.
+//     omitted when absent and validated when present; and policyconflict's
+//     service.go, re-pinned over its readiness-recovery successor with both
+//     deltas in one inverse, whose accepted-context reverification compares
+//     the expected branch with the sealed pair's BranchBeingClosed instead of
+//     Repository.Branch alone, and nothing else.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -130,8 +134,12 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 	},
 	"internal/policyconflict/service.go": {
 		Historical: "c9bccee4f99c1b1b22b17e1e19451d7254d70504fd5cc1029209aaa013a2bc54",
-		Successor:  "1c3ae85440649b240d2cc8970224e100b00781e9181ccf44d0b54c77e5ebbb61",
+		Successor:  "0d6babc257c51f9364ab4f7c73c1ee4220300d3c4401fae604e670482bcc0eff",
 		Inverse: []consolidationVerdiEdit{
+			{From: "\t\t\t// SI-257: the branch being closed, read from the sealed pair\n" +
+				"\t\t\t// (Repository, CIRef), never from Repository.Branch alone.\n" +
+				"\t\t\tif branch := snapshot.BranchBeingClosed(); !branch.Known || branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {\n",
+				To: "\t\t\tif !snapshot.Repository.Branch.Known || snapshot.Repository.Branch.Value != accepted.Expected.Branch || !snapshot.Repository.Head.Known || snapshot.Repository.Head.Value != accepted.Expected.Head {\n"},
 			{From: "\t\tcase cacheOnlyJudge:\n" +
 				"\t\t\tadapters = append(adapters, adapter.adapter)\n"},
 			{From: "\tcase cacheOnlyJudge:\n" +
