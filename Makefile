@@ -38,9 +38,14 @@ CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./int
 # serve them a stale cached PASS, so -count=1 re-executes exactly those
 # packages against the freshly built binary. `./...` semantics are otherwise
 # unchanged — honest caching stands for every provably-not-blind package.
+# -parallel 4 caps how many t.Parallel() tests/subtests run at once, matching
+# GitHub Actions' 4-core runners (lane T1 test-speed contract step 4): local
+# machines with more cores must not oversubscribe memory beyond what CI
+# itself tolerates, and CI parity means the local gate should hit the same
+# scheduling ceiling CI does rather than a wider, machine-dependent one.
 test:
-	go test -race ./...
-	go test -race -count=1 $(CROSS_BINARY_PKGS)
+	go test -race -parallel 4 ./...
+	go test -race -count=1 -parallel 4 $(CROSS_BINARY_PKGS)
 
 vet:
 	go vet ./...
