@@ -72,12 +72,14 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 	// gateRepoTemplate is built once (bound to the top-level t, so its
 	// t.TempDir() lives for this whole test's run) and cloned by every
 	// subtest below that used to call buildCountersignGateRepo(t)
-	// independently — five identical `git init` + five commits + five
-	// branch checkouts collapsed to one build and five cheap directory
-	// copies (lane T1 test-speed contract step 2; evidence: profiling
-	// showed this test's time is 90%+ blocked on subprocess exec/wait, not
-	// CPU, and these five call sites built byte-identical fixturegit
-	// output by construction — same zero-argument helper, same files).
+	// independently — 5 static call sites (4 single t.Run subtests plus
+	// one 14-row table-driven subtest, so 18 runtime calls in total) each
+	// running an identical `git init` + commit + branch checkout,
+	// collapsed to one build and 18 cheap directory copies (lane T1
+	// test-speed contract step 2; evidence: profiling showed this test's
+	// time is 90%+ blocked on subprocess exec/wait, not CPU, and these
+	// call sites built byte-identical fixturegit output by construction —
+	// same zero-argument helper, same files).
 	gateRepoTemplate := buildCountersignGateRepo(t)
 
 	t.Run("build gate blocks disclosed-unproven missing countersign config without mutation", func(t *testing.T) {
@@ -630,12 +632,20 @@ func cloneCountersignGateRepo(t *testing.T, template *fixturegit.Repo) *fixtureg
 }
 
 // cloneFixtureRepoDir copies template's entire working directory —
-// including its .git object store — into a fresh t.TempDir() and returns a
-// *fixturegit.Repo over the copy with the same Head/Heads (a plain `git
-// init` fixturegit repo records no absolute-path state — no core.worktree,
-// no hooksPath — so a byte-for-byte directory copy is exactly as valid a
-// repository as the original, and the commit SHAs are unchanged by
-// copying content-addressed objects).
+// objects, refs, config, HEAD, and the working tree, via .git along with
+// every other file — into a fresh t.TempDir() and returns a *fixturegit.Repo
+// over the copy with the same Head/Heads. A plain `git init` fixturegit
+// repo records no absolute-path state (no core.worktree, no hooksPath), so
+// that copy is exactly as valid a repository as the original and its
+// commit SHAs are unchanged (content-addressed objects). What the copy does
+// NOT carry over validly is .git/index's stat cache: each entry there
+// records the ORIGINAL file's mtime/size/inode, so in the copy — same
+// content, different filesystem metadata — plumbing that trusts the cache
+// without refreshing it (`git diff-files`, `git diff-index`) reports every
+// tracked file as modified even though nothing changed. `git update-index
+// -q --refresh` re-stats the index against the copy's own working tree
+// once, up front, so every later git command run against the clone sees a
+// genuinely clean tree.
 func cloneFixtureRepoDir(t *testing.T, template *fixturegit.Repo) *fixturegit.Repo {
 	t.Helper()
 	dir := t.TempDir()
@@ -672,7 +682,78 @@ func cloneFixtureRepoDir(t *testing.T, template *fixturegit.Repo) *fixturegit.Re
 	if err != nil {
 		t.Fatalf("cloneFixtureRepoDir: copying %s to %s: %v", template.Dir, dir, err)
 	}
+	refresh := exec.Command("git", "update-index", "-q", "--refresh")
+	refresh.Dir = dir
+	if out, err := refresh.CombinedOutput(); err != nil {
+		t.Fatalf("cloneFixtureRepoDir: git update-index -q --refresh in %s: %v\n%s", dir, err, out)
+	}
 	return &fixturegit.Repo{Dir: dir, Head: template.Head, Heads: append([]string(nil), template.Heads...)}
+}
+
+// TestCloneFixtureRepoDir proves cloneFixtureRepoDir's copy is a genuinely
+// clean working tree from git's own perspective, not merely byte-identical
+// content, and that the check used to prove that can see a real change
+// (never a check that would pass vacuously). buildCountersignGateRepo
+// calls t.Setenv, so this test (like TestCountersignLifecycleContract_
+// Behavioral itself) stays serial.
+func TestCloneFixtureRepoDir(t *testing.T) {
+	template := buildCountersignGateRepo(t)
+
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, dir string)
+		want   func(t *testing.T, diffFiles, diffIndex string)
+	}{
+		{
+			name: "happy path: a fresh clone reports no diff and the template's own HEAD",
+			want: func(t *testing.T, diffFiles, diffIndex string) {
+				if diffFiles != "" {
+					t.Fatalf("git diff-files --name-only = %q, want empty on a freshly cloned, unmodified working tree", diffFiles)
+				}
+				if diffIndex != "" {
+					t.Fatalf("git diff-index --name-only HEAD = %q, want empty on a freshly cloned, unmodified working tree", diffIndex)
+				}
+			},
+		},
+		{
+			name: "negative: a tracked file modified after cloning is reported",
+			mutate: func(t *testing.T, dir string) {
+				path := filepath.Join(dir, ".verdi", "verdi.yaml")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("reading %s: %v", path, err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("# mutated\n")...), 0o644); err != nil {
+					t.Fatalf("writing %s: %v", path, err)
+				}
+			},
+			want: func(t *testing.T, diffFiles, diffIndex string) {
+				if !strings.Contains(diffFiles, ".verdi/verdi.yaml") {
+					t.Fatalf("git diff-files --name-only = %q, want it to report the modified .verdi/verdi.yaml — proving the check can see a real change", diffFiles)
+				}
+				if !strings.Contains(diffIndex, ".verdi/verdi.yaml") {
+					t.Fatalf("git diff-index --name-only HEAD = %q, want it to report the modified .verdi/verdi.yaml", diffIndex)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := cloneFixtureRepoDir(t, template)
+			if clone.Head != template.Head {
+				t.Fatalf("clone.Head = %q, want the template's own %q", clone.Head, template.Head)
+			}
+			if got := strings.TrimSpace(gitOutput(t, clone.Dir, "rev-parse", "HEAD")); got != template.Head {
+				t.Fatalf("git rev-parse HEAD in the clone = %q, want the template's own %q", got, template.Head)
+			}
+			if tc.mutate != nil {
+				tc.mutate(t, clone.Dir)
+			}
+			diffFiles := strings.TrimSpace(gitOutput(t, clone.Dir, "diff-files", "--name-only"))
+			diffIndex := strings.TrimSpace(gitOutput(t, clone.Dir, "diff-index", "--name-only", "HEAD"))
+			tc.want(t, diffFiles, diffIndex)
+		})
+	}
 }
 
 func writeCountersignGateReport(t *testing.T, root, head string) {
