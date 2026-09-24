@@ -77,7 +77,7 @@ func Authenticate(ctx context.Context, in Input) (Artifact, error) {
 		}
 		blames[i] = lines
 	}
-	a := authenticator{in: in, headDoc: headDoc, rows: rows, blames: blames}
+	a := authenticator{in: in, headDoc: headDoc, rows: rows, blames: blames, sources: signedCommitSources(in.Profile)}
 	out := make([]Row, 0, len(rows))
 	for i := range rows {
 		row, err := a.determine(ctx, i)
@@ -106,6 +106,8 @@ type authenticator struct {
 	headDoc []byte
 	rows    []approvalRow
 	blames  [][]gitx.BlameLine
+	// sources are the governing profile's signed-commit trust source ids.
+	sources []string
 
 	// shallowKnown and isShallow cache whether the repository is a
 	// shallow clone, read at most once.
@@ -134,6 +136,9 @@ func (a *authenticator) determine(ctx context.Context, i int) (Row, error) {
 		out.Commit = commits[0]
 	}
 
+	if ambiguity := sourceAmbiguity(a.in.Profile.ID, a.sources); ambiguity != "" {
+		return unproven(ReasonSignedCommitSourceAmbiguous, ambiguity)
+	}
 	if j, ok := a.sharedLineWith(i); ok {
 		return unproven(ReasonRowLinesShared, fmt.Sprintf("a line of this row is also a line of the row (%s, %s)", a.rows[j].role, a.rows[j].principal))
 	}
@@ -192,7 +197,7 @@ func (a *authenticator) determine(ctx context.Context, i int) (Row, error) {
 		return unproven(ReasonSignatureUnverified, fmt.Sprintf("the forge does not report a verified signature on %s", c))
 	}
 	out.SignerAccountID = v.SignerAccountID
-	source, ok, err := signedCommitSource(a.in.Profile, v.SignerAccountID, r.principal)
+	source, ok, err := signerSource(a.sources, v.SignerAccountID, r.principal)
 	if err != nil {
 		return Row{}, err
 	}
@@ -269,21 +274,43 @@ func carriesRow(commitRows []approvalRow, r approvalRow, lines []gitx.BlameLine)
 	return false
 }
 
-// signedCommitSource finds the signed-commit trust source of profile under
-// which the signer's canonical principal is principal. Source ids are
-// unique within a decoded profile and CanonicalPrincipalID is injective, so
-// at most one source can match.
-func signedCommitSource(profile gp.Profile, signer, principal string) (string, bool, error) {
+// signedCommitSources lists the ids of profile's signed-commit trust
+// sources.
+func signedCommitSources(profile gp.Profile) []string {
+	var ids []string
 	for _, s := range profile.IdentityTrustSources {
-		if s.Kind != gp.TrustSourceSignedCommit {
-			continue
+		if s.Kind == gp.TrustSourceSignedCommit {
+			ids = append(ids, s.ID)
 		}
-		id, err := gp.CanonicalPrincipalID(s.ID, signer)
+	}
+	return ids
+}
+
+// sourceAmbiguity explains why a profile with more than one signed-commit
+// trust source authenticates no row, and is empty otherwise. The forge's
+// verification names only an account id, never which source's account
+// space it belongs to, so under two sources one account id could name two
+// different people (SI-256).
+func sourceAmbiguity(profileID string, sources []string) string {
+	if len(sources) <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("profile %q declares %d signed-commit trust sources (%s), and a forge account id cannot name the one it belongs to",
+		profileID, len(sources), strings.Join(sources, ", "))
+}
+
+// signerSource finds the signed-commit trust source, among sources, under
+// which the signer's canonical principal is principal. Callers pass at
+// most one source (sourceAmbiguity refuses more); with none, nothing
+// matches.
+func signerSource(sources []string, signer, principal string) (string, bool, error) {
+	for _, id := range sources {
+		p, err := gp.CanonicalPrincipalID(id, signer)
 		if err != nil {
-			return "", false, fmt.Errorf("signedapproval: principal for signer %s under %s: %w", signer, s.ID, err)
+			return "", false, fmt.Errorf("signedapproval: principal for signer %s under %s: %w", signer, id, err)
 		}
-		if string(id) == principal {
-			return s.ID, true, nil
+		if string(p) == principal {
+			return id, true, nil
 		}
 	}
 	return "", false, nil

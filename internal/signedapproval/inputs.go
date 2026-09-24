@@ -29,7 +29,9 @@ type AuthorizationInputs struct {
 }
 
 // AuthorizationInputs builds the kernel inputs for this artifact alone
-// (SI-256), never store-wide. For each principal with authenticated rows,
+// (SI-256), never store-wide. A profile that declares more than one
+// signed-commit trust source drops every row with a disclosure, as
+// Authenticate would under it. For each principal with authenticated rows,
 // a trust-fact reader scoped to exactly those rows answers for the rows'
 // signed-commit source with the verified signer as the one subject, and
 // the kernel resolves the signer claim. Only a resolution that comes back
@@ -61,9 +63,16 @@ func (a Artifact) AuthorizationInputs(ctx context.Context, profile gp.Profile) (
 		principals = append(principals, p)
 	}
 	sort.Strings(principals)
+	ambiguity := sourceAmbiguity(profile.ID, signedCommitSources(profile))
 
 	for _, p := range principals {
 		rows := byPrincipal[p]
+		if ambiguity != "" {
+			for _, r := range rows {
+				out.Disclosures = append(out.Disclosures, a.disclosure(r, ReasonSignedCommitSourceAmbiguous, ambiguity))
+			}
+			continue
+		}
 		// Every authenticated row of one principal carries the same source
 		// and signer: Principal = CanonicalPrincipalID(source, signer),
 		// which is injective.

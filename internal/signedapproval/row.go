@@ -65,6 +65,11 @@ const (
 	// ReasonSignatureUnverified: the forge does not report a verified
 	// signature on the introducing commit.
 	ReasonSignatureUnverified = "signature-unverified"
+	// ReasonSignedCommitSourceAmbiguous: the governing profile declares
+	// more than one signed-commit trust source. The forge's verification
+	// names only an account id, never the source it belongs to, so every
+	// row is unproven.
+	ReasonSignedCommitSourceAmbiguous = "signed-commit-source-ambiguous"
 	// ReasonSignerNotPrincipal: no signed-commit trust source of the
 	// profile maps the verified signer to the row's principal. This covers
 	// an approval attributed to another account and a row whose principal

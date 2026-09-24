@@ -23,8 +23,10 @@
 //     operational error);
 //   - the forge, read through the consumer-defined CommitVerifier port,
 //     reports C's signature verified and attributes it to an account whose
-//     canonical principal under a signed-commit trust source of the
-//     governing profile equals the row's principal.
+//     canonical principal under the governing profile's signed-commit
+//     trust source equals the row's principal. The forge names only an
+//     account id, so a profile with more than one signed-commit source
+//     authenticates no row.
 //
 // Every other row is unproven with a closed reason code. The only identity
 // this package reads is the verifier's signer account id; it never reads
