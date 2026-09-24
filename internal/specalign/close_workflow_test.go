@@ -616,21 +616,52 @@ func TestCloseDispatchSpecRefReachesTheShellOnlyThroughEnvAfterValidation(t *tes
 	}
 }
 
+// closeValidationScript is the validation step's whole run: block, byte for
+// byte. Pinning the whole block (lane E4b review finding 3) means no line
+// can be added, dropped or reordered unseen: an early `exit 0` before the
+// refusal, for example, would accept every input while each narrower check
+// in TestCloseDispatchValidationAcceptsOnlySpecRefs still passed.
+const closeValidationScript = "spec_re='" + specRefValidationPattern + "'\n" +
+	`if [[ "$SPEC_REF" =~ $spec_re ]]; then` + "\n" +
+	"  exit 0\n" +
+	"fi\n" +
+	`printf '::error::spec_ref %q is not a spec ref (spec/<name>); a tracker ref such as jira:LOAN-1482 is refused because the context request the close step passes to the conflict gate binds a spec ref (SI-258); refusing before running any verdi verb\n' "$SPEC_REF"` + "\n" +
+	"exit 1\n"
+
 // TestCloseDispatchValidationAcceptsOnlySpecRefs proves the validation step
-// (SI-258) accepts exactly the spec/<name> shape: it declares one pattern,
+// (SI-258) accepts exactly the spec/<name> shape: its run: block is exactly
+// closeValidationScript, which declares one pattern,
 // specRefValidationPattern, tests $SPEC_REF against it once, and on refusal
 // prints the value with printf %q (a newline in the input cannot start a
-// workflow command) and exits 1. The pattern read from the workflow is then
-// evaluated in Go against accepted and refused inputs. For this pattern
-// (anchors, ASCII bracket ranges, one group, + and *) bash's POSIX ERE and
-// Go's RE2 accept the same strings, and both anchor $ at the end of the
-// input, not at an embedded newline.
+// workflow command) and exits 1. The narrower checks after the exact
+// comparison stay for their more specific failure messages. The pattern
+// read from the workflow is then evaluated in Go against accepted and
+// refused inputs.
+//
+// That Go evaluation speaks for bash only under a locale condition. Both
+// anchor $ at the end of the input, not at an embedded newline, but bash's
+// `=~` hands the pattern to the system regcomp, whose bracket ranges depend
+// on the locale, while RE2 reads [a-z0-9] as ASCII in every locale. Tested
+// (lane E4b review and fix probes, 47 inputs including non-ASCII
+// look-alikes): macOS bash 3.2.57 and 5.1.12 under C, C.UTF-8,
+// en_US.UTF-8, sv_SE.UTF-8 and et_EE.UTF-8, and glibc 2.41 with bash
+// 5.2.37 under C, C.UTF-8 and POSIX; in each, bash accepted exactly the
+// inputs RE2 accepts. Untested: glibc under en_US.UTF-8, and the runner's
+// own locale. A mismatch in another locale fails closed. If bash refuses a
+// value RE2 accepts, the job stops at this step. If bash accepts a value
+// RE2 refuses, `verdi close` exits 2 when it resolves the ref, before any
+// gate: cmd/verdi/close.go runClose calls storyresolve.Resolve, whose
+// artifact.ParseRef checks the name against the ASCII-only grammar
+// [a-z0-9]+(-[a-z0-9]+)*.
 func TestCloseDispatchValidationAcceptsOnlySpecRefs(t *testing.T) {
 	job := closeJob(t)
 	if len(job.Steps) == 0 {
 		t.Fatalf("close.yml: the close job has no steps")
 	}
 	run := job.Steps[0].Run
+	if run != closeValidationScript {
+		t.Errorf("close.yml: the validation step's run: block must be exactly\n%q\ngot\n%q", closeValidationScript, run)
+	}
 	var patterns []string
 	for _, line := range strings.Split(run, "\n") {
 		line = strings.TrimSpace(line)
