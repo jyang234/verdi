@@ -775,8 +775,9 @@ var contextRequestOperandRE = regexp.MustCompile(`--context-request\s+(\S+)`)
 // filled request lives at closeRequestFilledPath, relative to the checkout
 // root and inside the git-ignored .build/, and nowhere else. No step names
 // RUNNER_TEMP or /tmp, every redirect that writes a context request targets
-// closeRequestFilledPath, every --context-request operand is that path, and
-// the committed template is only ever read.
+// closeRequestFilledPath, and every --context-request operand is that path.
+// TestCloseDispatchOnlyTheFillStepWritesTheRequest pins that no other step
+// writes, edits or reads the filled request or the committed template.
 func TestCloseDispatchWritesTheRequestOnlyUnderBuild(t *testing.T) {
 	job := closeJob(t)
 	operands := 0
@@ -803,6 +804,211 @@ func TestCloseDispatchWritesTheRequestOnlyUnderBuild(t *testing.T) {
 	}
 	if !strings.HasPrefix(closeRequestFilledPath, ".build/") || strings.Contains(closeRequestFilledPath, "..") {
 		t.Errorf("closeRequestFilledPath %q must be a relative path inside .build/", closeRequestFilledPath)
+	}
+}
+
+// closeRequestFileMarker is the name both close context-request files
+// share: the committed template (closeRequestTemplateRel) and the filled
+// request (closeRequestFilledPath).
+const closeRequestFileMarker = "close-context-request"
+
+// closeBuildBinaryPath is the built verdi binary. It is the one other file
+// under .build/ that a close.yml step may name.
+const closeBuildBinaryPath = ".build/verdi"
+
+// stepTexts returns every value a step gives the runner or the shell that
+// can name a file: its uses:, its run: text, and its env: and with: values.
+func stepTexts(step workflowStep) []string {
+	texts := []string{step.Uses, step.Run}
+	for _, name := range slices.Sorted(maps.Keys(step.Env)) {
+		texts = append(texts, step.Env[name])
+	}
+	for _, name := range slices.Sorted(maps.Keys(step.With)) {
+		texts = append(texts, step.With[name])
+	}
+	return texts
+}
+
+// unlistedBuildReferences returns each reference to .build in text that is
+// not a whole mention of closeBuildBinaryPath or closeRequestFilledPath. A
+// whole mention ends the text or is followed by whitespace or a quote. So a
+// bare .build (cd .build), a directory target (.build/), a glob
+// (.build/*.json), a longer name (.build/verdi.bak) and any other file under
+// .build/ are each returned, as the whitespace-delimited field they start.
+func unlistedBuildReferences(text string) []string {
+	var out []string
+	for rest := text; ; rest = rest[len(".build"):] {
+		i := strings.Index(rest, ".build")
+		if i < 0 {
+			return out
+		}
+		rest = rest[i:]
+		whole := false
+		for _, allowed := range []string{closeBuildBinaryPath, closeRequestFilledPath} {
+			if tail, ok := strings.CutPrefix(rest, allowed); ok && (tail == "" || strings.ContainsRune(" \t\n\"'", rune(tail[0]))) {
+				whole = true
+			}
+		}
+		if !whole {
+			out = append(out, strings.Fields(rest)[0])
+		}
+	}
+}
+
+func TestUnlistedBuildReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{"no reference", "git push origin HEAD", nil},
+		{"empty text", "", nil},
+		{"the build step", "go build -o .build/verdi ./cmd/verdi", nil},
+		{"the sync step", "./.build/verdi sync", nil},
+		{"the fill step", closeRequestInstantiateCommand, nil},
+		{"the close step", closeStepCommand, nil},
+		{"quoted mentions", `"./.build/verdi" '` + closeRequestFilledPath + `'`, nil},
+		{"a bare directory", "cd .build && ls", []string{".build"}},
+		{"a directory target", "cp -R overrides/. .build/", []string{".build/"}},
+		{"a glob", "sed -i 's/a/b/' .build/*.json", []string{".build/*.json"}},
+		{"a longer binary name", "cp x .build/verdi.bak", []string{".build/verdi.bak"}},
+		{"a path through the binary", "cat .build/verdi/../close-context-request.json", []string{".build/verdi/../close-context-request.json"}},
+		{"another file", "touch .build/other.json", []string{".build/other.json"}},
+		{"a longer directory name", "ls .builder", []string{".builder"}},
+		{"one listed and one unlisted", "./.build/verdi sync > .build/sync.log", []string{".build/sync.log"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unlistedBuildReferences(tt.text); !slices.Equal(got, tt.want) {
+				t.Errorf("unlistedBuildReferences(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// closeRequestFileViolations reports each way steps break the rule that
+// exactly one step writes the close context request and exactly one reads
+// it (lane E4b review finding 2).
+//   - Exactly one step runs closeRequestInstantiateCommand. That is the fill,
+//     the only writer, which reads the template and writes the request with
+//     one > redirect.
+//   - Exactly one step runs closeStepCommand. That is the close, the only
+//     reader, through --context-request.
+//   - No other step's uses:, run:, env: or with: text names
+//     closeRequestFileMarker. So no other step can write the filled request
+//     or the template through >, >>, tee, cp, mv, install, ln, dd of=,
+//     sed -i or anything else that names the file, and none can read it.
+//   - No step names anything under .build/ except closeBuildBinaryPath and
+//     closeRequestFilledPath (unlistedBuildReferences). So a glob, a
+//     directory target or a cd cannot reach the request without naming it.
+func closeRequestFileViolations(steps []workflowStep) []string {
+	var violations []string
+	fills := findExactRunSteps(steps, closeRequestInstantiateCommand)
+	closes := findExactRunSteps(steps, closeStepCommand)
+	if len(fills) != 1 {
+		violations = append(violations, fmt.Sprintf("%d steps run the fill command %q, want exactly 1", len(fills), closeRequestInstantiateCommand))
+	}
+	if len(closes) != 1 {
+		violations = append(violations, fmt.Sprintf("%d steps run the close command %q, want exactly 1", len(closes), closeStepCommand))
+	}
+	for i, step := range steps {
+		owner := slices.Contains(fills, i) || slices.Contains(closes, i)
+		for _, text := range stepTexts(step) {
+			if !owner && strings.Contains(text, closeRequestFileMarker) {
+				violations = append(violations, fmt.Sprintf("step %d (name %q) names %s in %q: only the fill step writes the request and only the close step reads it", i, step.Name, closeRequestFileMarker, text))
+			}
+			for _, ref := range unlistedBuildReferences(text) {
+				violations = append(violations, fmt.Sprintf("step %d (name %q) names %q under .build/: a step may name only %s and %s there", i, step.Name, ref, closeBuildBinaryPath, closeRequestFilledPath))
+			}
+		}
+	}
+	return violations
+}
+
+// TestCloseDispatchOnlyTheFillStepWritesTheRequest pins lane E4b review
+// finding 2. The fill step is the only step that writes, copies, moves or
+// edits the filled request, and the close step is the only step that reads
+// it (closeRequestFileViolations). No step other than the fill names the
+// committed template, so none can change what the fill reads. SI-252 (a):
+// "the workflow fills only `spec`".
+//
+// The table inserts steps into the decoded close job, most of them between
+// the fill and the close, where the review's mutations M16 (sed -i) and M17
+// (cp) went. It requires a violation for each writer or reader form, and
+// none for a step that names neither file nor .build/.
+//
+// This pins the workflow's text. It cannot see a step that reaches the
+// request without naming it or .build in uses:, run:, env: or with:, for
+// example through a working-directory: key, a committed script, or a path
+// assembled from pieces. The workflow is committed, reviewed text, and
+// such a step would be a reviewed change that goes around this pin.
+func TestCloseDispatchOnlyTheFillStepWritesTheRequest(t *testing.T) {
+	job := closeJob(t)
+	if violations := closeRequestFileViolations(job.Steps); len(violations) != 0 {
+		t.Fatalf("close.yml: %v", violations)
+	}
+	fills := findExactRunSteps(job.Steps, closeRequestInstantiateCommand)
+	closes := findExactRunSteps(job.Steps, closeStepCommand)
+	if len(fills) != 1 || len(closes) != 1 {
+		t.Fatalf("close.yml: expected one fill step and one close step, found %d and %d", len(fills), len(closes))
+	}
+	insert := func(at int, extra workflowStep) []workflowStep {
+		return slices.Insert(slices.Clone(job.Steps), at, extra)
+	}
+	// Inserting at the close step's index puts the new step after the fill
+	// and before the close.
+	between := func(extra workflowStep) []workflowStep { return insert(closes[0], extra) }
+	run := func(script string) workflowStep {
+		return workflowStep{Name: "inserted", Run: script, Keys: []string{"name", "run"}}
+	}
+	replaceClose := slices.Clone(job.Steps)
+	replaceClose[closes[0]].Run = `./.build/verdi close "$SPEC_REF" --context-request .build/other.json`
+
+	const (
+		namesTheFile = "names " + closeRequestFileMarker
+		underBuild   = "under .build/"
+	)
+	tests := []struct {
+		name  string
+		steps []workflowStep
+		want  string // a substring of one violation; "" wants none
+	}{
+		{"the workflow as committed", job.Steps, ""},
+		{"a step naming neither file", between(run("echo ok")), ""},
+		{"a step running the built binary", between(run("./.build/verdi version")), ""},
+		{"M16: sed -i edits the filled request", between(run(`sed -i 's/"grants":\[\]/"grants":[{"id":"x"}]/' .build/close-context-request.json`)), namesTheFile},
+		{"M17: cp overwrites the filled request", between(run("cp .github/verdi/other.json .build/close-context-request.json")), namesTheFile},
+		{">> appends to it", between(run(`echo '{}' >> .build/close-context-request.json`)), namesTheFile},
+		{"tee writes it", between(run("jq -c . other.json | tee .build/close-context-request.json")), namesTheFile},
+		{"mv replaces it", between(run("mv other.json .build/close-context-request.json")), namesTheFile},
+		{"install replaces it", between(run("install -m 0644 other.json .build/close-context-request.json")), namesTheFile},
+		{"ln points it elsewhere", between(run("ln -sf /etc/hosts .build/close-context-request.json")), namesTheFile},
+		{"dd writes it", between(run("dd if=other.json of=.build/close-context-request.json")), namesTheFile},
+		{"another step reads it", between(run("cat .build/close-context-request.json")), namesTheFile},
+		{"an env value names it", between(workflowStep{Name: "inserted", Env: map[string]string{"REQUEST": closeRequestFilledPath}, Run: `cp other.json "$REQUEST"`}), namesTheFile},
+		{"a with value names it", between(workflowStep{Name: "inserted", Uses: "actions/download-artifact@v4", With: map[string]string{"path": closeRequestFilledPath}}), namesTheFile},
+		{"the template is edited before the fill", insert(fills[0], run(`sed -i 's/"review"/"build"/' .github/verdi/close-context-request.json`)), namesTheFile},
+		{"the template is replaced before the fill", insert(fills[0], run("cp other.json .github/verdi/close-context-request.json")), namesTheFile},
+		{"a glob under .build", between(run("sed -i 's/a/b/' .build/*.json")), underBuild},
+		{"a directory copied into .build", between(run("cp -R overrides/. .build/")), underBuild},
+		{"a cd into .build", between(run("cd .build && cp ../other.json ./request.json")), underBuild},
+		{"an artifact downloaded into .build", between(workflowStep{Name: "inserted", Uses: "actions/download-artifact@v4", With: map[string]string{"path": ".build"}}), underBuild},
+		{"a second fill step", between(run(closeRequestInstantiateCommand)), "2 steps run the fill command"},
+		{"the close step passes another request", replaceClose, "0 steps run the close command"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			violations := closeRequestFileViolations(tt.steps)
+			if tt.want == "" {
+				if len(violations) != 0 {
+					t.Fatalf("violations = %v, want none", violations)
+				}
+				return
+			}
+			if !slices.ContainsFunc(violations, func(v string) bool { return strings.Contains(v, tt.want) }) {
+				t.Fatalf("violations = %v, want one containing %q", violations, tt.want)
+			}
+		})
 	}
 }
 
