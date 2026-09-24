@@ -2,7 +2,9 @@ package gitx
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -110,4 +112,95 @@ func TestResolveExactRef_Negative(t *testing.T) {
 			t.Fatalf("ResolveExactRef with a cancelled context = %q, nil; want an error", got)
 		}
 	})
+}
+
+func TestIsFullObjectID(t *testing.T) {
+	sha1 := strings.Repeat("0123456789abcdef", 2) + "01234567" // 40 lowercase hex
+	sha256 := strings.Repeat("0123456789abcdef", 4)            // 64 lowercase hex
+	tests := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{name: "40 lowercase hex (SHA-1)", id: sha1, want: true},
+		{name: "64 lowercase hex (SHA-256)", id: sha256, want: true},
+		{name: "show-ref line after the caller trims its newline", id: strings.TrimSuffix(sha1+"\n", "\n"), want: true},
+		{name: "empty", id: ""},
+		{name: "39 characters", id: sha1[:39]},
+		{name: "41 characters", id: sha1 + "a"},
+		{name: "63 characters", id: sha256[:63]},
+		{name: "65 characters", id: sha256 + "a"},
+		{name: "upper-case hex", id: strings.ToUpper(sha1)},
+		{name: "one upper-case digit", id: "A" + sha1[1:]},
+		{name: "non-hex letter", id: "g" + sha1[1:]},
+		{name: "non-hex punctuation", id: sha1[:39] + "-"},
+		{name: "non-ASCII rune", id: sha1[:38] + "é"},
+		{name: "untrimmed show-ref line", id: sha1 + "\n"},
+		{name: "leading space", id: " " + sha1[1:]},
+		{name: "trailing space", id: sha1[:39] + " "},
+		{name: "surrounded by whitespace", id: " " + sha1 + " "},
+		{name: "two lines", id: sha1[:20] + "\n" + sha1[:19]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isFullObjectID(tt.id); got != tt.want {
+				t.Fatalf("isFullObjectID(%q) = %v, want %v", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveExactRef_ChecksPrintedObjectID drives ResolveExactRef's guard
+// over what git prints. Real git's show-ref --verify --hash prints exactly
+// one object id, so a stand-in git on PATH supplies the output: the one
+// trimmed newline is accepted, and anything else is refused, never returned
+// as an object id.
+func TestResolveExactRef_ChecksPrintedObjectID(t *testing.T) {
+	ctx := context.Background()
+	sha1 := strings.Repeat("0123456789abcdef", 2) + "01234567"
+	tests := []struct {
+		name, output, want string
+		ok                 bool
+	}{
+		{name: "one id and its newline", output: sha1 + "\n", want: sha1, ok: true},
+		{name: "one id without a newline", output: sha1, want: sha1, ok: true},
+		{name: "empty output", output: ""},
+		{name: "only a newline", output: "\n"},
+		{name: "upper-case hex", output: strings.ToUpper(sha1) + "\n"},
+		{name: "39 characters", output: sha1[:39] + "\n"},
+		{name: "41 characters", output: sha1 + "a\n"},
+		{name: "two ids on two lines", output: sha1 + "\n" + sha1 + "\n"},
+		{name: "two newlines", output: sha1 + "\n\n"},
+		{name: "carriage return before the newline", output: sha1 + "\r\n"},
+		{name: "trailing space", output: sha1 + " \n"},
+		{name: "a ref name beside the id", output: sha1 + " refs/remotes/origin/main\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shimDir := t.TempDir()
+			outputPath := filepath.Join(shimDir, "output")
+			if err := os.WriteFile(outputPath, []byte(tt.output), 0o644); err != nil {
+				t.Fatalf("writing stand-in output: %v", err)
+			}
+			script := "#!/bin/sh\ncat '" + outputPath + "'\n"
+			if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+				t.Fatalf("writing stand-in git: %v", err)
+			}
+			t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			got, err := ResolveExactRef(ctx, t.TempDir(), "refs/remotes/origin/main")
+			if tt.ok {
+				if err != nil || got != tt.want {
+					t.Fatalf("ResolveExactRef over %q = %q, %v; want %q, nil", tt.output, got, err, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ResolveExactRef over %q = %q, nil; want an error (not one full object id)", tt.output, got)
+			}
+			if !strings.Contains(err.Error(), "not one full object id") {
+				t.Fatalf("ResolveExactRef over %q: err = %v, want the object-id refusal", tt.output, err)
+			}
+		})
+	}
 }
