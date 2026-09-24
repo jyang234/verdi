@@ -2,7 +2,7 @@
 
 Status: authority text for review. It is ratified by the owner's merge of the pull request that carries it. At ratification, the
 02, 03, and 08 text of §9 is applied to the workspace origins (`docs/design/specs/`) and to the self-hosted mirrors
-(`spec/verdi-artifact-contract`, `spec/verdi-evidence-model`) in the same change. Ledger: SI-259 through SI-264. Backlog: BL-66,
+(`spec/verdi-artifact-contract`, `spec/verdi-evidence-model`) in the same change. Ledger: SI-259 through SI-265. Backlog: BL-66,
 BL-67.
 
 This is a bounded prerequisite of the workbench redesign (plan PR #353, unit A1). The redesign's supersession edges and conflict
@@ -63,12 +63,30 @@ step 3's single-maintainer exemption waives it but not the filing.
 
 **Acceptance.** The successor's spec pull request merges into the default branch, and merging is acceptance (02 §Kind registry).
 
-**The match.** For a successor S and a closed spec T, the records match when all of these hold:
-- every `supersedes` edge on a decision of S that targets an object of T has exactly one conflict with `status: superseded`,
-  `resolved_by: spec/S`, and a `challenges` fragment naming that object;
+**The match.** For a successor S that issues replacements of objects of a closed spec T, the records match when all of these
+hold:
+- every edge on a decision of S that issues a new replacement of an object of T (see below) has exactly one conflict with `status:
+  superseded`, `resolved_by: spec/S`, and a `challenges` fragment naming that object;
 - every fragment that such a conflict challenges has a matching edge on S;
 - T exists, has status `closed`, and declares each targeted object as an acceptance criterion or a decision;
-- no targeted object is already superseded under this route (supersede the standing successor's decision instead).
+- no object that S newly replaces is already superseded under this route (amend the standing successor's decision instead).
+
+**Carrying an established replacement, and issuing a new one (SI-265).** Let S_k be the successor whose conflict and acceptance
+established the supersession of T's object o.
+- **Carried.** A later revision S_n of S_k carries the replacement when two things hold. First, S_n descends from S_k through
+  whole-spec supersession, each revision naming its one predecessor (02 §Kind registry; I-47). Second, the decision holding the
+  edge is classified `carried`, `amended`, or `amended_advisory` in S_n's `supersession:` block and keeps the same edge. For a
+  story revision on the rung-3 chain, which has no manifest, the decision must keep the same id and the same edge.
+  - No new conflict is filed, and the original conflict naming S_k stays the record, frozen and unchanged.
+  - The supersession keeps S_k's acceptance point and date.
+  - "Already superseded" does not refuse the carried edge, because it is the same replacement.
+  - If S_n amends the decision, the change is an ordinary amendment of the standing successor under 03 §The amendment ladder,
+    with its quorum and its cascade, and T is not challenged again.
+  - If S_n removes the decision or drops the edge, o stays superseded (§4), and surfaces say the current revision no longer
+    carries it.
+- **New.** Any other edge to o is a new replacement: on an `added` decision, on a decision whose predecessor version lacked that
+  edge, or on a spec outside S_k's revision chain. It needs its own conflict naming its own spec, and it is refused while o is
+  already superseded. A conflict naming S_k never resolves an edge on a spec outside S_k's revision chain.
 
 ## 4. When the successor is authoritative (SI-261)
 
@@ -77,24 +95,31 @@ step 3's single-maintainer exemption waives it but not the filing.
   presents a closed spec's object as superseded.
 - **In force** from the merge that accepts the successor, provided the records match at that commit (§3). The date shown is that
   merge's date.
-- **Permanent.** A later revision of the successor (whole-spec supersession) does not reinstate the object. Changing it again takes
-  a new challenge against the standing successor.
+- **Permanent.** A later revision of the successor (whole-spec supersession) does not reinstate the object; it carries the
+  replacement under the original conflict and date, amends it under the amendment ladder, or drops it (§3, SI-265). Replacing the
+  object with something else is an amendment of the standing successor's decision, never a second challenge against the closed
+  spec.
 
 ## 5. Computed resolution, in align and in the gate (SI-262)
 
 - **Align.** In the decision-conflict report's computed section, a `supersedes` edge to an object of a closed spec resolves
-  SUPERSEDED only when the match of §3 holds in the checked-out tree. Otherwise it stays unresolved and names the first failing
-  condition:
+  SUPERSEDED only when the records of §3 hold in the checked-out tree: the match for a new replacement, or the revision chain and
+  classification for a carried one. The finding's text says which. A new replacement reads "records match; takes effect when
+  spec/S is accepted". A carried one reads "carries the replacement established by spec/S_k (conflict/<name>, since <date>)". A
+  resolved pre-acceptance finding never reads as a supersession already in force. Otherwise the finding stays unresolved and names
+  the first failing condition:
   - the target spec is missing;
   - the target is not closed;
   - the object is not declared;
   - the object is not a criterion or a decision;
-  - the object is already superseded;
+  - the object is already superseded, for a new replacement;
   - no conflict challenges the object;
   - the conflict is not superseded;
-  - the conflict's `resolved_by` names another spec.
+  - the conflict's `resolved_by` names another spec, or a spec outside this revision chain;
+  - a carried decision's classification or edge does not match its predecessor.
 
-  A conflict fragment with no matching edge is its own unresolved computed finding.
+  A conflict fragment with no matching edge on the successor it names is its own unresolved computed finding. That completeness
+  is checked for the issuing successor, not for later revisions that carry or drop a replacement.
 - **Computed means computed.** Align never carries a disposition onto a computed finding: that holds for every computed finding of
   the decision-conflict report, including ADR `supersedes` edges and `exempts` edges, because 03 resolves the computed section by
   computation and gives human dispositions to the judged section only. No committed decision-conflict report on `origin/main`
@@ -108,7 +133,9 @@ step 3's single-maintainer exemption waives it but not the filing.
 Every surface that renders the object — the docs site and the board, and any later surface — shows:
 - **the original object text, unchanged;**
 - **what it governed:** "governed spec/T's completed work (closed <date>)";
-- **what superseded it:** "superseded since <date> by spec/S#<decision-id>", linking to S's decision and to the conflict.
+- **what superseded it:** "superseded since <date> by spec/S#<decision-id>", linking to S's decision and to the conflict, where S
+  and the date are those of the establishing successor. When an accepted later revision carries the replacement, the surface adds
+  "carried by spec/S_n"; when the current revision no longer carries it, it says so.
 
 The closed spec's fold, rollup, evidence, and verdicts render exactly as before. The successor's decision shows "supersedes
 spec/T#<object-id>" in force, or "proposed — supersedes spec/T#<object-id> when spec/S is accepted" on its design branch. Records
@@ -117,7 +144,9 @@ Default-branch surfaces compute from default-branch records only.
 
 ## 7. Lint (SI-264)
 
-A new rule, VL-023, checks shape only; the match is the gate's job (§5):
+A new rule, VL-026, checks shape only; the match is the gate's job (§5). VL-023 to VL-025 are reserved by the process-hardening
+plan (PR #351: VL-023 and VL-024 for verification rules, VL-025 for self-governance), and VL-026 was unused on every branch on
+2026-09-24.
 - a feature or component spec's top-level `links:` target no object fragment (02 §Link taxonomy; this closes BL-66);
 - no top-level `supersedes` link targets an object of a closed spec;
 - a decision's `supersedes` link to an object of a closed spec targets a declared acceptance criterion or decision;
@@ -129,8 +158,13 @@ The artifact contract's strict decode accepts a fragment on `challenges` only in
 
 ## 8. Verification requirements (the tooling lane's exit criteria)
 
-The tooling lane is Tier 3: authority, provenance, and gate behavior. Its implementer and reviewers are Opus 5.5. It is done only
-when one complete path is proven through lint, align, gate, docs site, and board, for a criterion target and a decision target:
+The tooling lane is Tier 3: authority, provenance, and gate behavior. The artifact, lint, align, and gate work is implemented by
+Opus 5.5, per the owner's directive of 2026-09-22 in the workspace `CLAUDE.md` assigning Tier 3 lanes to Opus 5.5. The docs-site
+and board presentation is implemented and fixed by FABLE, per the workspace frontend rule. Reviews and other fixes are Opus 5.5.
+The authoring controller keeps the authority edits.
+
+The lane is done only when one complete path is proven through lint, align, gate, docs site, and board, for a criterion target and
+a decision target:
 
 - **Happy path.** A successor feature's decisions supersede a closed feature's decision and a closed story's criterion, with
   matching superseded conflicts:
@@ -152,8 +186,18 @@ when one complete path is proven through lint, align, gate, docs site, and board
   - a top-level `supersedes` link targets a closed spec's object;
   - a feature's top-level fragment link;
   - a hand-typed `superseded` disposition on a computed finding (align drops it; the gate fails, naming the difference).
-- **Not yet accepted.** With the successor still a draft, default-branch surfaces show nothing and the design branch shows the
-  supersession as proposed.
+- **Carried through a revision.** S1 supersedes a closed criterion and is accepted; S2, S1's whole-spec revision, carries the
+  deciding object unchanged and is accepted; then S3 amends it and is accepted:
+  - each revision's align resolves the carried edge naming S1's conflict and date;
+  - no new conflict exists;
+  - surfaces keep S1's date and add "carried by" the latest revision;
+  - a revision that drops the edge leaves the object superseded and says the current revision no longer carries it.
+- **Unrelated reuse.** A spec outside S1's revision chain carries an edge to the same object and cites S1's conflict: unresolved,
+  naming the conflict's other successor and the object as already superseded.
+- **Not yet accepted.** With the successor still a draft:
+  - default-branch surfaces show nothing;
+  - the design branch shows the supersession as proposed;
+  - align's resolved finding reads "takes effect when … is accepted", never as a supersession in force.
 - **Test layers.** CLI paths are end-to-end Go tests driving the built binary. Docs-site and board paths are Playwright tests under
   `e2e/`. Fixtures are committed; no network.
 
@@ -177,12 +221,12 @@ vocabulary:
 
 > A conflict's `challenges` links may also target object fragments, all naming objects of one spec (evidence-model spec
 > §Challenging closed decisions). No other top-level `links:` target a fragment: a feature or component spec's top-level `links:`
-> never do, and a top-level `supersedes` link never targets an object of a closed spec — that edge belongs on a decision (VL-023).
+> never do, and a top-level `supersedes` link never targets an object of a closed spec — that edge belongs on a decision (VL-026).
 
 **02 §Lint rules**, VL-003's clause "and their edge types are the closed five-value enum (§Link taxonomy)" becomes "and their
 edge types are the closed five-value enum, or `challenges` from a conflict (§Link taxonomy)", and a new row:
 
-> | VL-023 | closed-spec object supersession shape: a feature or component spec's top-level `links:` target no object fragment; no
+> | VL-026 | closed-spec object supersession shape: a feature or component spec's top-level `links:` target no object fragment; no
 > top-level `supersedes` link targets an object of a closed spec; a decision's `supersedes` link to an object of a closed spec
 > targets a declared acceptance criterion or decision; a conflict's fragment `challenges` all name one spec, and a superseded
 > conflict with fragment `challenges` names an existing spec in `resolved_by`. The match between edges and conflicts is the
@@ -196,8 +240,8 @@ edge types are the closed five-value enum, or `challenges` from a conflict (§Li
 >
 > - **The edge.** A decision of the successor, a feature or story spec, carries `supersedes` to the object
 >   (`spec/<closed>#<object-id>`, artifact contract §Object model), and its text states what replaces the object and why. Only
->   acceptance criteria and decisions are targets; an object already superseded this way is not — supersede the standing
->   successor's decision instead.
+>   acceptance criteria and decisions are targets; an object already superseded this way cannot be newly replaced — amend the
+>   standing successor's decision instead.
 > - **The conflict.** A conflict filed under step 1 whose `challenges` name, as fragments of that one closed spec, exactly the
 >   objects this successor supersedes there — one conflict per closed spec and successor — resolved in the successor's spec MR with
 >   `status: superseded` and `resolved_by: spec/<successor>`, frozen at resolution (step 2's quorum; step 3's exemption).
@@ -206,10 +250,20 @@ edge types are the closed five-value enum, or `challenges` from a conflict (§Li
 > The supersession is in force from the merge that accepts the successor, and only while the three records match there: every
 > such edge on the successor has exactly one superseded conflict naming its object and the successor, and every fragment such a
 > conflict challenges has a matching edge. Before acceptance it is only proposed, and no surface presents the object as superseded.
-> Once in force it is permanent history: a later revision of the successor does not reinstate the object, and changing it again
-> takes a new challenge. Every surface that shows the object keeps its original text and shows both that it governed the closed
-> spec's completed work and since when, and by what, it is superseded. Records that do not match are shown as a supersession not
-> established, with the reason, never as a supersession.
+> Once in force it is permanent history, and a later revision of the successor does not reinstate the object.
+>
+> A later whole-spec revision of the successor (§The amendment ladder) **carries** the established replacement when its deciding
+> object is classified `carried`, `amended`, or `amended_advisory` in the revision's `supersession:` block (for a story revision,
+> which has no manifest: the same object id) and keeps the same edge. A carried replacement files no new conflict: the original
+> conflict and its acceptance date remain the record. Amending the carried decision is an ordinary amendment of the standing
+> successor under the ladder's quorum and cascade, and the closed spec is not challenged again. Any other edge to the object — on
+> an added decision, on a decision whose predecessor lacked it, or on a spec outside that revision chain — is a **new** replacement,
+> refused while the object is already superseded; a conflict naming one successor never resolves an edge outside its revision
+> chain.
+>
+> Every surface that shows the object keeps its original text and shows three things: that it governed the closed spec's completed
+> work; since when, and by which establishing successor, it is superseded; and which later revision carries the replacement, if
+> any. Records that do not match are shown as a supersession not established, with the reason, never as a supersession.
 
 **03 §Decision-conflict gate**, the `supersedes` bullet gains, after "Triggers the real supersession flow (the top-level artifact
 is amended, under its quorum)":
@@ -220,17 +274,20 @@ is amended, under its quorum)":
 and the computed-section bullet gains, at its end:
 
 > A `supersedes` edge to an object of a closed spec resolves SUPERSEDED only when the records of §Challenging closed decisions'
-> closed-spec object supersession match at the report's head; otherwise it stays unresolved and names what is missing or
-> mismatched. The computed section is resolved by computation alone: a disposition written onto a computed finding resolves
-> nothing, and the gate recomputes the section from the records and fails on any difference.
+> closed-spec object supersession hold at the report's head — a new replacement's match, or a carried replacement's revision
+> chain — and its finding says which: a new replacement takes effect when the successor is accepted, and a carried one names the
+> establishing successor, conflict, and date. Otherwise it stays unresolved and names what is missing or mismatched. The computed
+> section is resolved by computation alone: a disposition written onto a computed finding resolves nothing, and the gate
+> recomputes the section from the records and fails on any difference.
 
 **08**, a new entry, "Closed-spec object supersession (2026-09-24)", records the owner's decision (option 1, 2026-09-24), the
-probe, this design, SI-259 through SI-264, and the sections above, and states that the self-hosted mirrors are synced in the same
-change and that no runtime behavior ships with the entry: the tooling lane follows ratification.
+probe, this design, SI-259 through SI-265, the authority review and its correction, and the sections above. It states that the
+self-hosted mirrors are synced in the same change and that no runtime behavior ships with the entry: the tooling lane follows
+ratification.
 
 ## 10. Backlog
 
-- **BL-66** — lint accepts a feature spec's top-level fragment links, which 02 §Link taxonomy does not allow. Closed by VL-023 in
+- **BL-66** — lint accepts a feature spec's top-level fragment links, which 02 §Link taxonomy does not allow. Closed by VL-026 in
   the tooling lane. Status: scheduled.
 - **BL-67** — human dispositions are unauthenticated text, and today a hand-typed disposition on a computed decision-conflict finding
   passes the gate. This route's lane fixes the structural part: computed findings are computed only, and the gate recomputes them.
@@ -251,5 +308,9 @@ change and that no runtime behavior ships with the entry: the tooling lane follo
 | Probe findings 1–5 | §1; each resolved in §3 (1, 2), §7 (3), §5 (4), §6 (5) |
 | 02 §Object model, §Kind registry, §Link taxonomy, §Lint rules | §9 (02 text) |
 | 03 §Challenging closed decisions, §Decision-conflict gate | §9 (03 text) |
+| Authority review of `235b3729`, CSS-F1: an ordinary whole-spec revision cannot carry the established replacement | §3 (carried and new replacements); §4; §5; §6; §8 (carried and unrelated-reuse cases); §9 (03 text); SI-265 |
+| CSS-R1: VL-023 to VL-025 are reserved by the process-hardening plan | §7 and §9 use VL-026; SI-264; BL-66 |
+| CSS-R2: implementation assignment | §8. Accepted in part: FABLE implements and fixes the docs-site and board presentation. Not accepted: Sonnet for the backend. The workspace `CLAUDE.md` records the owner's directive of 2026-09-22 assigning Tier 3 lanes to Opus 5.5. The `AGENTS.md` the review cites predates that directive, and its divergence goes to the owner |
+| Review recommendation: a pre-acceptance resolution must not read as a supersession in force | §5 finding texts; §8 not-yet-accepted case; §9 (03 §Decision-conflict gate text) |
 
 Coverage: every source item is mapped. Intentional omissions: the out-of-scope items of §2.
