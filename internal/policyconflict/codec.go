@@ -739,6 +739,7 @@ type profileIdentityDoc struct {
 type inputIdentityDoc struct {
 	Target                targetIdentityDoc        `json:"target"`
 	Repository            json.RawMessage          `json:"repository"`
+	CIRef                 json.RawMessage          `json:"ci_ref,omitempty"`
 	ConstitutionDigest    string                   `json:"constitution_digest"`
 	EffectivePolicyDigest string                   `json:"effective_policy_digest"`
 	PolicyEntries         []policyEntryIdentityDoc `json:"policy_entries"`
@@ -1055,6 +1056,10 @@ func inputIdentityFromDoc(d inputIdentityDoc) (InputIdentity, error) {
 	if err := artifact.DecodeExactJSON(canonicalRepo, &repo); err != nil {
 		return InputIdentity{}, fmt.Errorf("input.repository: %w", err)
 	}
+	ciRef, err := inputCIRefFromDoc(d.CIRef)
+	if err != nil {
+		return InputIdentity{}, err
+	}
 	entries := make([]PolicyEntryIdentity, len(d.PolicyEntries))
 	for i, e := range d.PolicyEntries {
 		entries[i] = PolicyEntryIdentity(e)
@@ -1062,6 +1067,7 @@ func inputIdentityFromDoc(d inputIdentityDoc) (InputIdentity, error) {
 	return InputIdentity{
 		Target:                targetIdentityFromDoc(d.Target),
 		Repository:            repo,
+		CIRef:                 ciRef,
 		ConstitutionDigest:    d.ConstitutionDigest,
 		EffectivePolicyDigest: d.EffectivePolicyDigest,
 		PolicyEntries:         entries,
@@ -1075,6 +1081,12 @@ func inputIdentityDocFor(i InputIdentity) (inputIdentityDoc, error) {
 	if err != nil {
 		return inputIdentityDoc{}, fmt.Errorf("encoding input.repository: %w", err)
 	}
+	var ciRefRaw json.RawMessage
+	if i.CIRef != nil {
+		if ciRefRaw, err = canonjson.Marshal(*i.CIRef); err != nil {
+			return inputIdentityDoc{}, fmt.Errorf("encoding input.ci_ref: %w", err)
+		}
+	}
 	entries := make([]policyEntryIdentityDoc, len(i.PolicyEntries))
 	for idx, e := range i.PolicyEntries {
 		entries[idx] = policyEntryIdentityDoc(e)
@@ -1082,12 +1094,31 @@ func inputIdentityDocFor(i InputIdentity) (inputIdentityDoc, error) {
 	return inputIdentityDoc{
 		Target:                targetIdentityDocFor(i.Target),
 		Repository:            repoRaw,
+		CIRef:                 ciRefRaw,
 		ConstitutionDigest:    i.ConstitutionDigest,
 		EffectivePolicyDigest: i.EffectivePolicyDigest,
 		PolicyEntries:         entries,
 		Profile:               profileIdentityDoc(i.Profile),
 		EvaluatedOn:           i.EvaluatedOn,
 	}, nil
+}
+
+// inputCIRefFromDoc strictly decodes input.ci_ref the way input.repository
+// is decoded. An absent key is nil; any present value, null included,
+// decodes to a CI ref that InputIdentity.validate then judges.
+func inputCIRefFromDoc(raw json.RawMessage) (*repositoryfacts.CIRefFact, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	canonical, err := canonjson.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding input.ci_ref: %w", err)
+	}
+	var ciRef repositoryfacts.CIRefFact
+	if err := artifact.DecodeExactJSON(canonical, &ciRef); err != nil {
+		return nil, fmt.Errorf("input.ci_ref: %w", err)
+	}
+	return &ciRef, nil
 }
 
 func nonNilSlice[T any](s []T) []T {

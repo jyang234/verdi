@@ -520,12 +520,35 @@ func validateEvaluatedOn(field, value string) error {
 	return nil
 }
 
+// validateInputCIRef enforces input.ci_ref's rule (SI-257): absent, or the
+// known, valid CI ref that supplied the branch being closed, which only an
+// accepted-context report whose repository branch is unknown can carry.
+func (i InputIdentity) validateInputCIRef() error {
+	switch {
+	case i.CIRef == nil:
+		return nil
+	case i.Target.Kind != TargetAcceptedContext:
+		return fmt.Errorf("policyconflict: input.ci_ref: target kind %q cannot carry one", i.Target.Kind)
+	case i.Repository.Branch.Known:
+		return fmt.Errorf("policyconflict: input.ci_ref: repository branch %q is known, so no CI ref supplied the branch being closed", i.Repository.Branch.Value)
+	case !i.CIRef.Known:
+		return fmt.Errorf("policyconflict: input.ci_ref: a present CI ref must be known")
+	}
+	if err := i.CIRef.Validate(); err != nil {
+		return fmt.Errorf("policyconflict: input.ci_ref: %w", err)
+	}
+	return nil
+}
+
 func (i InputIdentity) validate() error {
 	if err := i.Target.validate(); err != nil {
 		return err
 	}
 	if err := i.Repository.Validate(); err != nil {
 		return fmt.Errorf("policyconflict: input.repository: %w", err)
+	}
+	if err := i.validateInputCIRef(); err != nil {
+		return err
 	}
 	if err := validateDigest("input.constitution_digest", i.ConstitutionDigest); err != nil {
 		return err
