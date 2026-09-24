@@ -40,6 +40,7 @@ const countersignConflictJudgeEnv = "VERDI_TEST_COUNTERSIGN_CONFLICT_JUDGE"
 // TestCountersignLifecycleConflictJudgeProcess is the hermetic subprocess
 // behind the production align.judge_cmd path in the lifecycle contract.
 func TestCountersignLifecycleConflictJudgeProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(countersignConflictJudgeEnv) != "1" {
 		return
 	}
@@ -64,7 +65,20 @@ func TestCountersignLifecycleConflictJudgeProcess(t *testing.T) {
 // wiring and I-55's honest conflict blocks, then uses the existing injected
 // conflict-verdict seams for positive resolver and closure-writer evidence.
 func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
-	binary := buildCountersignContractBinary(t)
+	// buildVerdiBinary (build_shared_test.go): the shared, process-wide
+	// build-once helper — lane T1 test-speed contract step 1 — rather than
+	// this file's own separate `go build` of the identical package/flags.
+	binary := buildVerdiBinary(t)
+	// gateRepoTemplate is built once (bound to the top-level t, so its
+	// t.TempDir() lives for this whole test's run) and cloned by every
+	// subtest below that used to call buildCountersignGateRepo(t)
+	// independently — five identical `git init` + five commits + five
+	// branch checkouts collapsed to one build and five cheap directory
+	// copies (lane T1 test-speed contract step 2; evidence: profiling
+	// showed this test's time is 90%+ blocked on subprocess exec/wait, not
+	// CPU, and these five call sites built byte-identical fixturegit
+	// output by construction — same zero-argument helper, same files).
+	gateRepoTemplate := buildCountersignGateRepo(t)
 
 	t.Run("build gate blocks disclosed-unproven missing countersign config without mutation", func(t *testing.T) {
 		repo := buildGateRepo(t, "accepted-pending-build")
@@ -88,7 +102,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("built-binary unconfigured gate preserves legacy conflict-first order", func(t *testing.T) {
-		repo := buildCountersignGateRepo(t)
+		repo := cloneCountersignGateRepo(t, gateRepoTemplate)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
 		removeCountersignConfig(t, repo.Dir)
 		writeCountersignGateReport(t, repo.Dir, head)
@@ -110,7 +124,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("built-binary configured gate proves countersign before unchanged conflict block without mutation", func(t *testing.T) {
-		repo := buildCountersignGateRepo(t)
+		repo := cloneCountersignGateRepo(t, gateRepoTemplate)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
 		writeCountersignGateReport(t, repo.Dir, head)
 		server, requests := newCountersignGitLabServer(t, countersignGitLabScenario{
@@ -299,7 +313,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("removed GitLab approval is absent from the newer active snapshot", func(t *testing.T) {
-		repo := buildCountersignGateRepo(t)
+		repo := cloneCountersignGateRepo(t, gateRepoTemplate)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
 		writeCountersignGateReport(t, repo.Dir, head)
 		server, requests := newCountersignGitLabServer(t, countersignGitLabScenario{
@@ -331,7 +345,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("explicit dismissed approval row is retained through the lifecycle reducer", func(t *testing.T) {
-		repo := buildCountersignGateRepo(t)
+		repo := cloneCountersignGateRepo(t, gateRepoTemplate)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
 		cfg, err := store.Open(repo.Dir)
 		if err != nil {
@@ -400,7 +414,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				repo := buildCountersignGateRepo(t)
+				repo := cloneCountersignGateRepo(t, gateRepoTemplate)
 				head := installCountersignContractAuthority(t, repo.Dir, tc.withForge, tc.withProfile)
 				if tc.absentTrustSource {
 					configureCountersignTrustSource(t, repo.Dir, "forge-unselected")
@@ -597,6 +611,68 @@ func buildCountersignGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	checkoutBranch(t, repo.Dir, "feature/enum-spike")
 	return repo
+}
+
+// cloneCountersignGateRepo returns an independent, freshly-copied working
+// directory of template (a repo built once by buildCountersignGateRepo,
+// bound to TestCountersignLifecycleContract_Behavioral's own top-level t so
+// it survives for that whole test's run) rather than re-running
+// buildCountersignGateRepo's full `git init` + commit + branch-checkout
+// sequence again for every one of this file's ~18 call sites that need
+// their own byte-identical, independently mutable copy of the same
+// fixture (lane T1 test-speed contract step 2: reduce the work, not the
+// proof — every copy starts from the exact bytes buildCountersignGateRepo
+// itself would have produced, so no assertion downstream of it changes).
+func cloneCountersignGateRepo(t *testing.T, template *fixturegit.Repo) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	return cloneFixtureRepoDir(t, template)
+}
+
+// cloneFixtureRepoDir copies template's entire working directory —
+// including its .git object store — into a fresh t.TempDir() and returns a
+// *fixturegit.Repo over the copy with the same Head/Heads (a plain `git
+// init` fixturegit repo records no absolute-path state — no core.worktree,
+// no hooksPath — so a byte-for-byte directory copy is exactly as valid a
+// repository as the original, and the commit SHAs are unchanged by
+// copying content-addressed objects).
+func cloneFixtureRepoDir(t *testing.T, template *fixturegit.Repo) *fixturegit.Repo {
+	t.Helper()
+	dir := t.TempDir()
+	err := filepath.WalkDir(template.Dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(template.Dir, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dir, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			return os.MkdirAll(target, info.Mode().Perm()|0o700)
+		case info.Mode()&os.ModeSymlink != 0:
+			linkDest, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkDest, target)
+		default:
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, info.Mode().Perm())
+		}
+	})
+	if err != nil {
+		t.Fatalf("cloneFixtureRepoDir: copying %s to %s: %v", template.Dir, dir, err)
+	}
+	return &fixturegit.Repo{Dir: dir, Head: template.Head, Heads: append([]string(nil), template.Heads...)}
 }
 
 func writeCountersignGateReport(t *testing.T, root, head string) {
@@ -939,17 +1015,6 @@ func countersignContractCloseDeps(manifest *store.Manifest, mdl *model.Model, f 
 		}
 	}
 	return deps
-}
-
-func buildCountersignContractBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "verdi")
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = "."
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build countersign contract binary: %v\n%s", err, output)
-	}
-	return binary
 }
 
 func runCountersignContractBinary(t *testing.T, binary, dir string, env map[string]string, args ...string) countersignCommandResult {
