@@ -24,9 +24,12 @@ const (
 	ReasonRowLinesShared = "row-lines-shared"
 	// ReasonRowLinesSplit: the row's lines blame to different commits.
 	ReasonRowLinesSplit = "row-lines-split"
-	// ReasonHistoryBoundary: blame reached a history boundary (a root
+	// ReasonHistoryBoundary: the available history ends before the
+	// determination can finish. Blame reached a history boundary (a root
 	// commit, or a shallow or grafted boundary), so the row's introducing
-	// commit is not determined.
+	// commit is not determined; or the repository is a shallow clone, so
+	// the ancestry path from the introducing commit to the head cannot be
+	// shown free of a withdrawal.
 	ReasonHistoryBoundary = "history-boundary"
 	// ReasonApprovalCommitShared: the commit that introduced the row also
 	// contributed a line to another row of the same artifact.
@@ -41,12 +44,17 @@ const (
 	// the body, or from two different rows) into a row that commit never
 	// approved.
 	ReasonRowAbsentAtApprovalCommit = "row-absent-at-approval-commit"
+	// ReasonRowWithdrawnAfterApproval: a commit that changes the artifact
+	// on the full-history ancestry path from the introducing commit to the
+	// head does not carry this row, so the approval was withdrawn after it
+	// was given; a merge that brings the row back is not a new signature.
+	ReasonRowWithdrawnAfterApproval = "row-withdrawn-after-approval"
 	// ReasonNonstandardLineBreak: a historical copy of the artifact that
-	// the determination reads (the introducing commit's) has a frontmatter
-	// line break other than LF or CRLF — a lone CR, NEL, LS, or PS, which
-	// YAML counts as a line break and Git does not — so its row lines
-	// cannot be located by Git line number. At the head the same frontmatter
-	// is an operational error.
+	// the determination reads (the introducing commit's, or a later one on
+	// the path to the head) has a frontmatter line break other than LF or
+	// CRLF: a lone CR, NEL, LS, or PS, which YAML counts as a line break
+	// and Git does not. At the head the same frontmatter is an operational
+	// error.
 	ReasonNonstandardLineBreak = "nonstandard-line-break"
 	// ReasonArtifactChangedAfterApproval: the artifact outside its
 	// approval rows differs between the introducing commit and the head.

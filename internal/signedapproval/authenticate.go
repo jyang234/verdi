@@ -106,6 +106,10 @@ type authenticator struct {
 	headDoc []byte
 	rows    []approvalRow
 	blames  [][]gitx.BlameLine
+
+	// shallowKnown and isShallow cache whether the repository is a
+	// shallow clone, read at most once.
+	shallowKnown, isShallow bool
 }
 
 // determine runs the SI-256 checks for row i in order. The first failing
@@ -162,6 +166,13 @@ func (a *authenticator) determine(ctx context.Context, i int) (Row, error) {
 	}
 	if !bytes.Equal(withoutRowLines(atCommit, commitRows), withoutRowLines(a.headDoc, a.rows)) {
 		return unproven(ReasonArtifactChangedAfterApproval, fmt.Sprintf("outside its approval rows the artifact at %s differs from the artifact at %s", c, a.in.Head))
+	}
+	reason, detail, err := a.withdrawal(ctx, r, c)
+	if err != nil {
+		return Row{}, err
+	}
+	if reason != "" {
+		return unproven(reason, detail)
 	}
 
 	v, err := a.in.Verifier.VerifyCommit(ctx, c)

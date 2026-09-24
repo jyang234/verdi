@@ -374,30 +374,35 @@ func TestAuthenticate_Scenarios(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newTestRepo(t)
-			sc := tc.build(t, r)
-			root, path := sc.root, sc.path
-			if root == "" {
-				root = r.dir
-			}
-			if path == "" {
-				path = artifactPath
-			}
-			v := &fakeVerifier{facts: sc.facts}
-			a, err := Authenticate(context.Background(), Input{Root: root, Head: sc.head, Path: path, Profile: soloProfile(t), Verifier: v})
-			if err != nil {
-				t.Fatalf("Authenticate: %v", err)
-			}
-			if len(a.Rows) != len(sc.want) {
-				t.Fatalf("rows = %+v, want %d rows", a.Rows, len(sc.want))
-			}
-			for _, got := range a.Rows {
-				want, ok := sc.want[got.Role]
-				if !ok {
-					t.Fatalf("unexpected row %+v", got)
-				}
-				assertRow(t, got, want)
-			}
+			checkScenario(t, r, tc.build(t, r))
 		})
+	}
+}
+
+// checkScenario authenticates a built scenario and checks every row.
+func checkScenario(t *testing.T, r *testRepo, sc scenario) {
+	t.Helper()
+	root, path := sc.root, sc.path
+	if root == "" {
+		root = r.dir
+	}
+	if path == "" {
+		path = artifactPath
+	}
+	v := &fakeVerifier{facts: sc.facts}
+	a, err := Authenticate(context.Background(), Input{Root: root, Head: sc.head, Path: path, Profile: soloProfile(t), Verifier: v})
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if len(a.Rows) != len(sc.want) {
+		t.Fatalf("rows = %+v, want %d rows", a.Rows, len(sc.want))
+	}
+	for _, got := range a.Rows {
+		want, ok := sc.want[got.Role]
+		if !ok {
+			t.Fatalf("unexpected row %+v", got)
+		}
+		assertRow(t, got, want)
 	}
 }
 

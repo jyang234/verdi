@@ -14,6 +14,13 @@
 //   - the artifact at C and at H, each with its own approval-row lines
 //     removed, are byte-identical, so the approval binds exactly the
 //     content at H;
+//   - every commit that changes the artifact on the full-history ancestry
+//     path from C to H still carries the row, so a withdrawal cannot be
+//     undone by a merge that restores a stale copy (in a shallow clone
+//     that path cannot be shown complete);
+//   - the frontmatter keeps one line-break convention, UTF-8 with only LF
+//     and CRLF, so YAML's line numbers are Git's (at H a violation is an
+//     operational error);
 //   - the forge, read through the consumer-defined CommitVerifier port,
 //     reports C's signature verified and attributes it to an account whose
 //     canonical principal under a signed-commit trust source of the
