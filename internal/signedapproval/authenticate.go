@@ -155,7 +155,7 @@ func (a *authenticator) determine(ctx context.Context, i int) (Row, error) {
 	}
 	commitRows, perr := parseApprovalRows(atCommit)
 	if perr != nil {
-		return unproven(ReasonRowAbsentAtApprovalCommit, fmt.Sprintf("the artifact at %s has no readable approval rows: %v", c, perr))
+		return unproven(unreadableReason(perr, ReasonRowAbsentAtApprovalCommit), fmt.Sprintf("the artifact at %s has no readable approval rows: %v", c, perr))
 	}
 	if !carriesRow(commitRows, r, lines) {
 		return unproven(ReasonRowAbsentAtApprovalCommit, fmt.Sprintf("the artifact at %s does not carry this row as one approval row on the lines blame maps it from", c))

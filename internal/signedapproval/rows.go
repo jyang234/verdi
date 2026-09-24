@@ -2,6 +2,7 @@ package signedapproval
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -52,6 +53,16 @@ func parseApprovalRows(doc []byte) ([]approvalRow, error) {
 		rows = append(rows, approvalRow{role: role, principal: principal, first: it.FirstLine, last: it.LastLine})
 	}
 	return rows, nil
+}
+
+// unreadableReason names why a historical copy of the artifact yields no
+// approval rows: a frontmatter line break other than LF or CRLF has its own
+// code, and every other parse failure takes fallback.
+func unreadableReason(perr error, fallback string) string {
+	if errors.Is(perr, artifact.ErrNonstandardLineBreak) {
+		return ReasonNonstandardLineBreak
+	}
+	return fallback
 }
 
 // withoutRowLines returns doc with every line inside any row's span

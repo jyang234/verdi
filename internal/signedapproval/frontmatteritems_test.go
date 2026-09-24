@@ -1,9 +1,11 @@
 package signedapproval
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
@@ -119,6 +121,115 @@ func TestFrontmatterMappingItems_Negative(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantSubstr) {
 				t.Fatalf("error %q does not mention %q", err, tc.wantSubstr)
+			}
+		})
+	}
+}
+
+// utf16LE encodes s as UTF-16LE with a byte-order mark, the encoding YAML
+// switches to on that mark.
+func utf16LE(s string) string {
+	var b strings.Builder
+	b.WriteString("\xff\xfe")
+	for _, u := range utf16.Encode([]rune(s)) {
+		b.WriteByte(byte(u))
+		b.WriteByte(byte(u >> 8))
+	}
+	return b.String()
+}
+
+// TestFrontmatterMappingItems_LineBreakConvention pins the one line-break
+// convention (SI-256): the frontmatter's only line breaks are LF and CRLF.
+// YAML also counts a lone CR, NEL, LS, and PS as line breaks and Git does
+// not, so each would make the reported spans disagree with the document's
+// lines; each is refused with ErrNonstandardLineBreak. A frontmatter that is
+// not UTF-8 is refused too: YAML reads a UTF-16 frontmatter by its
+// byte-order mark, and there a byte Git counts as a line break can sit
+// inside a character YAML does not break on. The body is never parsed for
+// spans and may carry any bytes.
+func TestFrontmatterMappingItems_LineBreakConvention(t *testing.T) {
+	// The reviewer's layout: row b sits alone on document line 5 and
+	// "extra: x" on line 6 when brk is not a Git line break.
+	probe := func(brk string) string {
+		return "---\napprovals:\n  - role: a\n    principal: p\n  - role: b" + brk + "    principal: q\nextra: x\n---\n"
+	}
+	refused := []struct {
+		name, doc string
+	}{
+		{name: "lone CR", doc: probe("\r")},
+		{name: "NEL", doc: probe("\u0085")},
+		{name: "LS", doc: probe("\u2028")},
+		{name: "PS", doc: probe("\u2029")},
+		{name: "two lone CRs push past the closing delimiter", doc: "---\napprovals:\n  - role: a\n    principal: p\n  - role: b\r\r    principal: q\n---\nEVIL\n---\nbody\n"},
+		{name: "lone CR before the final CRLF", doc: "---\napprovals:\n  - role: a\n    principal: p\r\r\n---\n"},
+		{name: "lone CR in a comment", doc: "---\n# a\rb\napprovals:\n  - role: a\n    principal: p\n---\n"},
+		{name: "raw LS inside a quoted scalar", doc: "---\ntitle: \"a\u2028b\"\napprovals:\n  - role: a\n    principal: p\n---\n"},
+	}
+	for _, tc := range refused {
+		t.Run("refused/"+tc.name, func(t *testing.T) {
+			got, err := artifact.FrontmatterMappingItems([]byte(tc.doc), "approvals")
+			if !errors.Is(err, artifact.ErrNonstandardLineBreak) {
+				t.Fatalf("FrontmatterMappingItems = %+v, %v: want ErrNonstandardLineBreak", got, err)
+			}
+		})
+	}
+
+	notUTF8 := []struct {
+		name, doc string
+	}{
+		{name: "UTF-16LE frontmatter", doc: "---\n" + utf16LE("approvals:\n  - role: a\n    principal: p\n  - role: b\u0a41\n    principal: q\n") + "\n---\n"},
+		{name: "invalid UTF-8 byte", doc: "---\napprovals:\n  - role: a\xff\n    principal: p\n---\n"},
+	}
+	for _, tc := range notUTF8 {
+		t.Run("not UTF-8/"+tc.name, func(t *testing.T) {
+			got, err := artifact.FrontmatterMappingItems([]byte(tc.doc), "approvals")
+			if err == nil || !strings.Contains(err.Error(), "UTF-8") {
+				t.Fatalf("FrontmatterMappingItems = %+v, %v: want a UTF-8 refusal", got, err)
+			}
+		})
+	}
+
+	accepted := []struct {
+		name, doc string
+		want      []artifact.FrontmatterItem
+	}{
+		{
+			name: "CRLF throughout",
+			doc:  strings.ReplaceAll(probe("\n"), "\n", "\r\n"),
+			want: []artifact.FrontmatterItem{
+				{Fields: map[string]string{"role": "a", "principal": "p"}, FirstLine: 3, LastLine: 4},
+				{Fields: map[string]string{"role": "b", "principal": "q"}, FirstLine: 5, LastLine: 6},
+			},
+		},
+		{
+			name: "CRLF on the last frontmatter line only",
+			doc:  "---\napprovals:\n  - role: a\n    principal: p\r\n---\n",
+			want: []artifact.FrontmatterItem{{Fields: map[string]string{"role": "a", "principal": "p"}, FirstLine: 3, LastLine: 4}},
+		},
+		{
+			name: "body carries every nonstandard break",
+			doc:  "---\napprovals:\n  - role: a\n    principal: p\n---\nx\ry\u0085z\u2028w\u2029v\r\r\n",
+			want: []artifact.FrontmatterItem{{Fields: map[string]string{"role": "a", "principal": "p"}, FirstLine: 3, LastLine: 4}},
+		},
+		{
+			name: "escaped LS is text, not a break",
+			doc:  "---\ntitle: \"a\\u2028b\"\napprovals:\n  - role: a\n    principal: p\n---\n",
+			want: []artifact.FrontmatterItem{{Fields: map[string]string{"role": "a", "principal": "p"}, FirstLine: 4, LastLine: 5}},
+		},
+		{
+			name: "UTF-8 byte-order mark",
+			doc:  "---\n\ufeffapprovals:\n  - role: a\n    principal: p\n---\n",
+			want: []artifact.FrontmatterItem{{Fields: map[string]string{"role": "a", "principal": "p"}, FirstLine: 3, LastLine: 4}},
+		},
+	}
+	for _, tc := range accepted {
+		t.Run("accepted/"+tc.name, func(t *testing.T) {
+			got, err := artifact.FrontmatterMappingItems([]byte(tc.doc), "approvals")
+			if err != nil {
+				t.Fatalf("FrontmatterMappingItems: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("FrontmatterMappingItems =\n%+v\nwant\n%+v", got, tc.want)
 			}
 		})
 	}

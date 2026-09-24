@@ -1,9 +1,24 @@
 package artifact
 
 import (
+	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+)
+
+// ErrNonstandardLineBreak reports a frontmatter line break other than LF or
+// CRLF: a lone CR (one not followed by LF), NEL (U+0085), LS (U+2028), or
+// PS (U+2029). YAML counts each as a line break and Git does not, so after
+// one YAML's line numbers are no longer the document's lines.
+var ErrNonstandardLineBreak = errors.New("artifact: frontmatter line break is not LF or CRLF")
+
+// The line breaks YAML counts besides LF and CR.
+const (
+	nextLine           rune = 0x85
+	lineSeparator      rune = 0x2028
+	paragraphSeparator rune = 0x2029
 )
 
 // FrontmatterItem is one item of a top-level frontmatter sequence whose
@@ -19,6 +34,8 @@ type FrontmatterItem struct {
 	// key or value, and any comment lines between them. A line holding
 	// only the item's "-" indicator, and the continuation lines of a
 	// scalar that wraps past the item's last node, are outside the span.
+	// They are Git's line numbers too, because FrontmatterMappingItems
+	// refuses every frontmatter line break YAML and Git count differently.
 	FirstLine, LastLine int
 }
 
@@ -33,14 +50,25 @@ type FrontmatterItem struct {
 // unique plain-string keys. An absent key, or a key whose value is null,
 // yields no items and no error. Any other value that is not a sequence of
 // string-to-string mappings is an error.
+//
+// The frontmatter must also keep one line-break convention (ledger SI-256),
+// so that YAML's line numbers are the document's: it must be UTF-8, and its
+// only line breaks must be LF and CRLF. A lone CR, NEL, LS, or PS is refused
+// with ErrNonstandardLineBreak, and a frontmatter that is not UTF-8 with
+// another error. The body is not parsed and may hold any bytes: every item
+// line precedes it, so it cannot shift a span.
 func FrontmatterMappingItems(doc []byte, key string) ([]FrontmatterItem, error) {
 	if key == "" {
 		return nil, fmt.Errorf("artifact: frontmatter sequence key must be nonempty")
 	}
-	fm, _, err := SplitFrontmatter(doc)
+	start, end, err := FrontmatterRange(doc)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkLineBreaks(doc, start, end); err != nil {
+		return nil, err
+	}
+	fm := doc[start:end]
 	var root yaml.Node
 	if err := yaml.Unmarshal(fm, &root); err != nil {
 		return nil, fmt.Errorf("artifact: yaml parse: %w", err)
@@ -79,6 +107,33 @@ func FrontmatterMappingItems(doc []byte, key string) ([]FrontmatterItem, error) 
 		items = append(items, FrontmatterItem{Fields: fields, FirstLine: first + 1, LastLine: last + 1})
 	}
 	return items, nil
+}
+
+// checkLineBreaks enforces the one line-break convention on the frontmatter
+// doc[start:end]. The frontmatter must be UTF-8: YAML reads a UTF-16
+// frontmatter by its byte-order mark, and there a byte Git counts as a line
+// break can sit inside a character YAML does not break on. Its only line
+// breaks must be LF and CRLF. The CR of a CRLF ending the frontmatter's last
+// line is followed by that LF in doc, just before the closing delimiter.
+func checkLineBreaks(doc []byte, start, end int) error {
+	fm := doc[start:end]
+	if !utf8.Valid(fm) {
+		return fmt.Errorf("artifact: frontmatter is not UTF-8, so its line breaks cannot be shown to be the LF bytes Git counts")
+	}
+	line := 2 // the document line; the opening delimiter is line 1
+	for i, r := range string(fm) {
+		switch r {
+		case '\n':
+			line++
+		case '\r':
+			if next := start + i + 1; next >= len(doc) || doc[next] != '\n' {
+				return fmt.Errorf("%w: a lone CR on document line %d", ErrNonstandardLineBreak, line)
+			}
+		case nextLine, lineSeparator, paragraphSeparator:
+			return fmt.Errorf("%w: %U on document line %d", ErrNonstandardLineBreak, r, line)
+		}
+	}
+	return nil
 }
 
 // topLevelValue returns the value under key in the top-level mapping, or

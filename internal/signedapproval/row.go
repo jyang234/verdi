@@ -41,6 +41,13 @@ const (
 	// the body, or from two different rows) into a row that commit never
 	// approved.
 	ReasonRowAbsentAtApprovalCommit = "row-absent-at-approval-commit"
+	// ReasonNonstandardLineBreak: a historical copy of the artifact that
+	// the determination reads (the introducing commit's) has a frontmatter
+	// line break other than LF or CRLF — a lone CR, NEL, LS, or PS, which
+	// YAML counts as a line break and Git does not — so its row lines
+	// cannot be located by Git line number. At the head the same frontmatter
+	// is an operational error.
+	ReasonNonstandardLineBreak = "nonstandard-line-break"
 	// ReasonArtifactChangedAfterApproval: the artifact outside its
 	// approval rows differs between the introducing commit and the head.
 	ReasonArtifactChangedAfterApproval = "artifact-changed-after-approval"

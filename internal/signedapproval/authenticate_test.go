@@ -313,6 +313,52 @@ func TestAuthenticate_Scenarios(t *testing.T) {
 			return scenario{head: c2, facts: map[string]CommitVerification{c1: verifiedBy(c1, "1001")},
 				want: map[string]wantRow{ownerRole: {principal: p1, reason: ReasonRowAbsentAtApprovalCommit, commit: c1}}}
 		}},
+		{name: "nonstandard line break in the approval commit copy", build: func(t *testing.T, r *testRepo) scenario {
+			// C's frontmatter carries a lone CR after its approvals; an
+			// unsigned commit normalizes it. C's YAML line numbers are not
+			// Git's, so C cannot bind its row (SI-256).
+			p := principalFor(t, signedSource, "1001")
+			withCR := func(rows ...row) string {
+				return strings.Replace(exemptionDoc("", defaultBody, rows...), "expiry: \"2026-12-31\"\n", "expiry: \"2026-12-31\"\rnote: x\n", 1)
+			}
+			r.write(artifactPath, withCR())
+			r.write("other.txt", "base\n")
+			r.commit("draft")
+			r.write(artifactPath, withCR(row{ownerRole, p}))
+			c1 := r.commit("approve")
+			r.write(artifactPath, strings.Replace(withCR(row{ownerRole, p}), "\r", "\n", 1))
+			c2 := r.commit("normalize the line break")
+			return scenario{head: c2, facts: map[string]CommitVerification{c1: verifiedBy(c1, "1001")},
+				want: map[string]wantRow{ownerRole: {principal: p, reason: ReasonNonstandardLineBreak, commit: c1, detailSubstr: "CR"}}}
+		}},
+		{name: "body line breaks are bytes, never spans", build: func(t *testing.T, r *testRepo) scenario {
+			// The body is never parsed for spans, so any line break there
+			// is ordinary content the binding compares byte for byte.
+			p := principalFor(t, signedSource, "1001")
+			body := "a\rb\u0085c\u2028d\u2029e\r\r\n"
+			r.write(artifactPath, exemptionDoc("", body))
+			r.write("other.txt", "base\n")
+			r.commit("draft")
+			r.write(artifactPath, exemptionDoc("", body, row{ownerRole, p}))
+			c1 := r.commit("approve")
+			r.write("other.txt", "later\n")
+			c2 := r.commit("unrelated")
+			return scenario{head: c2, facts: map[string]CommitVerification{c1: verifiedBy(c1, "1001")},
+				want: map[string]wantRow{ownerRole: {principal: p, commit: c1, signer: "1001"}}}
+		}},
+		{name: "body line break changed after the approval", build: func(t *testing.T, r *testRepo) scenario {
+			p := principalFor(t, signedSource, "1001")
+			body := "a\rb\n"
+			r.write(artifactPath, exemptionDoc("", body))
+			r.write("other.txt", "base\n")
+			r.commit("draft")
+			r.write(artifactPath, exemptionDoc("", body, row{ownerRole, p}))
+			c1 := r.commit("approve")
+			r.write(artifactPath, exemptionDoc("", "a\nb\n", row{ownerRole, p}))
+			c2 := r.commit("normalize the body")
+			return scenario{head: c2, facts: map[string]CommitVerification{c1: verifiedBy(c1, "1001")},
+				want: map[string]wantRow{ownerRole: {principal: p, reason: ReasonArtifactChangedAfterApproval, commit: c1}}}
+		}},
 		{name: "approval commit copy of the artifact does not parse", build: func(t *testing.T, r *testRepo) scenario {
 			p := principalFor(t, signedSource, "1001")
 			r.write(artifactPath, exemptionDoc("title: [unclosed\n", defaultBody))
