@@ -516,21 +516,35 @@ var makeSpecialTargetRE = regexp.MustCompile(`(^|[\s:])\.(IGNORE|ONESHELL|POSIX|
 // cannot show it.
 var makeFlagsVarRE = regexp.MustCompile(`\b(MAKEFLAGS|MFLAGS|GNUMAKEFLAGS)\b`)
 
-// makeShellVars choose the shell that runs every recipe and its flags, which
-// decide whether a failed command fails the recipe.
-var makeShellVars = []string{"SHELL", ".SHELLFLAGS"}
+// goFlagsVarRE finds GOFLAGS, which adds flags to every go command. Set from
+// the Makefile, or in a recipe's environment, it can change what each go test
+// runs (-run, -count, -failfast) where the shard guards, which read only a go
+// test command's own arguments, cannot see it.
+var goFlagsVarRE = regexp.MustCompile(`\bGOFLAGS\b`)
+
+// recipePrefixVarRE finds .RECIPEPREFIX, which changes which lines are
+// recipes, so the recipe guards would no longer read the lines make runs.
+var recipePrefixVarRE = regexp.MustCompile(`(^|[\s:])\.RECIPEPREFIX([\s:+?!=]|$)`)
+
+// makeRunnerVars decide how recipes and sub-makes run: SHELL and .SHELLFLAGS
+// choose the shell that runs every recipe line, and whether a failed command
+// fails it; MAKE is the command every $(MAKE) sub-make runs, flags included.
+// None may be assigned. An assignment through a computed variable name
+// (MK := MAKE, then $(MK) := make -i) is not recognized: that indirection is a
+// documented residual.
+var makeRunnerVars = []string{"SHELL", ".SHELLFLAGS", "MAKE"}
 
 // errorIgnoringGateRecipes returns every way the Makefile source lets a gate
 // target succeed over a failed command. Across the whole file it refuses the
-// special targets in makeSpecialTargetRE, any mention of make's flag
-// variables, and any assignment of SHELL or .SHELLFLAGS. For each recipe line
-// of a root target, or of any prerequisite a root pulls in, it refuses a `-`
-// prefix, written or reached through a leading variable
-// (recipePrefixProblem), a make invocation carrying -i, -k, -n, -t, or -q
-// (makeInvocationProblem), and either one reached through a variable the line
-// references, including any line of a define value (referencedValueProblem). A gate target with no rule, or with neither a
-// recipe nor a prerequisite, is reported too: its recipe cannot be read, so
-// it cannot be cleared.
+// special targets in makeSpecialTargetRE, .RECIPEPREFIX, any mention of make's
+// flag variables or of GOFLAGS, and any assignment of makeRunnerVars. For each
+// recipe line of a root target, or of any prerequisite a root pulls in, it
+// refuses a `-` prefix, written or reached through a leading variable
+// (recipePrefixProblem); a make invocation carrying -i, -k, -n, -t, or -q
+// (makeInvocationProblem); and either one reached through a variable the line
+// references, including any line of a define value (referencedValueProblem).
+// A gate target with no rule, or with neither a recipe nor a prerequisite, is
+// reported too: its recipe cannot be read, so it cannot be cleared.
 func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 	var problems []string
 	for i, line := range strings.Split(makefile, "\n") {
@@ -543,11 +557,17 @@ func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 		if m := makeFlagsVarRE.FindString(line); m != "" {
 			problems = append(problems, fmt.Sprintf("line %d names %s: make flags set from the Makefile (-i, -k, -n, -t, -q) ignore failures or skip recipes where make -n cannot show it: %q", i+1, m, strings.TrimSpace(line)))
 		}
+		if goFlagsVarRE.MatchString(line) {
+			problems = append(problems, fmt.Sprintf("line %d names GOFLAGS, which changes what every go test runs where the shard guards cannot see it: %q", i+1, strings.TrimSpace(line)))
+		}
+		if recipePrefixVarRE.MatchString(line) {
+			problems = append(problems, fmt.Sprintf("line %d sets .RECIPEPREFIX, which changes which lines are recipes, so the recipe guards cannot read what make runs: %q", i+1, strings.TrimSpace(line)))
+		}
 	}
 	assigns := parseMakeAssignments(makefile)
-	for _, name := range makeShellVars {
+	for _, name := range makeRunnerVars {
 		for _, a := range assignmentsOf(assigns, name) {
-			problems = append(problems, fmt.Sprintf("line %d assigns %s, which decides whether a failed command fails its recipe", a.Line, name))
+			problems = append(problems, fmt.Sprintf("line %d assigns %s, which decides how every recipe or sub-make runs and whether its failure is seen", a.Line, name))
 		}
 	}
 
@@ -607,8 +627,9 @@ func gateRoots(t *testing.T, makefile string) []string {
 
 // TestGateParity_GateRecipesNeverIgnoreErrors proves no gate target can go
 // green over a failed command through the Makefile source, which `make -n`
-// cannot show: no `.IGNORE`, `.ONESHELL`, `.POSIX`, or `.SILENT`, no make
-// flag variables, no SHELL or .SHELLFLAGS, and, on any recipe line of a gate
+// cannot show: no `.IGNORE`, `.ONESHELL`, `.POSIX`, `.SILENT`, or
+// `.RECIPEPREFIX`, no make flag variables and no GOFLAGS, no assignment of
+// SHELL, .SHELLFLAGS, or MAKE, and, on any recipe line of a gate
 // target or of a prerequisite it pulls in, no `-` prefix (written, through a
 // leading variable, or on any line of a define value the line reaches) and no
 // sub-make with -i, -k, -n, -t, or -q (written or in a value the line
@@ -669,6 +690,12 @@ func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
 		{"a define line led by a variable set to -", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\nI := -\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n$(I)go vet ./...\nendef\ntest-rest:\n\t$(RUN_REST)", "reaches $(RUN_REST)"},
 		{"a variable whose value runs $(MAKE) -i", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\nSUB = $(MAKE) -i\ntest-rest:\n\t$(SUB) fixture\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "reaches $(SUB)"},
 		{"control: a clean multi-line define leads a recipe line", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n@go vet ./...\nendef\ntest-rest:\n\t$(RUN_REST)", ""},
+		{"GOFLAGS exported", "\ntidy:\n", "\nexport GOFLAGS := -run=^$$\n\ntidy:\n", "names GOFLAGS"},
+		{"GOFLAGS in a recipe's environment", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\tGOFLAGS=-count=1 go test -race -parallel 4 $(TEST_CMD_PKGS)", "names GOFLAGS"},
+		{"MAKE reassigned", "\ntidy:\n", "\nMAKE := make -i\n\ntidy:\n", "assigns MAKE"},
+		{"MAKE reassigned for one target", "\ntest-rest:\n", "\ntest-rest: MAKE = make -k\ntest-rest:\n", "assigns MAKE"},
+		{".RECIPEPREFIX set", "\ntidy:\n", "\n.RECIPEPREFIX = >\n\ntidy:\n", "sets .RECIPEPREFIX"},
+		{"control: GOFLAGS and .RECIPEPREFIX named in a comment", "\ntidy:\n", "\n# never set GOFLAGS or .RECIPEPREFIX here\ntidy:\n", ""},
 		{"control: - on a target outside the gate", "\tgo mod tidy", "\t-go mod tidy", ""},
 		{"control: - opening a continuation line is shell text, not a prefix", "\tstatus=$$?; \\\n\tif [ \"$$status\" -ne 0 ]", "\tstatus=$$?; \\\n\t-true; if [ \"$$status\" -ne 0 ]", ""},
 		{"control: .IGNORE named in a comment", "\ntidy:\n", "\n# never declare .IGNORE: here\ntidy:\n", ""},
