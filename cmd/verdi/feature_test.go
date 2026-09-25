@@ -200,6 +200,7 @@ func TestRunFeatureStart_Negative(t *testing.T) {
 // TestCmdFeatureStart_UsageNegative proves cmdFeatureStart's own
 // argument-count check.
 func TestCmdFeatureStart_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdFeatureStart(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdFeatureStart(no args) = %d, want 2", got)
@@ -214,6 +215,7 @@ func TestCmdFeatureStart_UsageNegative(t *testing.T) {
 // TestRunFeatureVerb_UnknownSubcommand mirrors design's own subcommand
 // dispatch test.
 func TestRunFeatureVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runFeatureVerb([]string{"bogus"}, &stdout, &stderr); got != 2 {
 		t.Fatalf("runFeatureVerb(bogus) = %d, want 2", got)

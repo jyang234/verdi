@@ -28,6 +28,7 @@ const startupRequestLine = "readiness: the startup context request targets spec/
 // warm-up succeeds and before the server run is entered, and nothing at
 // all when no --context-request was supplied.
 func TestServeStartupRequestLine(t *testing.T) {
+	t.Parallel()
 	newDeps := func(t *testing.T, targetSpec string, run serveRunner) serveCommandDeps {
 		t.Helper()
 		return serveCommandDeps{
@@ -129,6 +130,7 @@ func TestServeStartupRequestLine(t *testing.T) {
 // spec and claims no wrong target, so the function is left as it is; a
 // guard here would be dead code pretending to a reachable state.
 func TestStartupRequestTarget(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		ref  string

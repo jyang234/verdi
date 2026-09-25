@@ -90,6 +90,7 @@ func readVerdicts(t *testing.T, root, specRef, commit string) []artifact.Evidenc
 // pass, written under store.RefSlug(spec.ID) (the convention every fold
 // consumer actually reads, not sync's branch-keyed bundle).
 func TestProduceSelfHostedEvidence_WritesPerSpecRecords(t *testing.T) {
+	t.Parallel()
 	repo := buildSelfEvidenceRepo(t)
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
 
@@ -137,6 +138,7 @@ func TestProduceSelfHostedEvidence_WritesPerSpecRecords(t *testing.T) {
 // [static, behavioral] evidence, with no other evidence anywhere, folds all
 // the way to evidenced once this producer has run — on source: ci alone.
 func TestProduceSelfHostedEvidence_FeedsTheRealFold(t *testing.T) {
+	t.Parallel()
 	repo := buildSelfEvidenceRepo(t)
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
@@ -172,6 +174,7 @@ func TestProduceSelfHostedEvidence_FeedsTheRealFold(t *testing.T) {
 // root verdi.bindings.yaml is a silent no-op, not an error — most repos ARE
 // real flowmap services and never need this producer.
 func TestProduceSelfHostedEvidence_NoRootBindings_NoOp(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
 		Message: "no self-hosted bindings",
@@ -189,6 +192,7 @@ func TestProduceSelfHostedEvidence_NoRootBindings_NoOp(t *testing.T) {
 // naming an AC its target spec does not declare is a hard error, never a
 // silent empty cell (03 §Declarations).
 func TestProduceSelfHostedEvidence_DanglingBindingFailsLoudly(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                   "schema: verdi.layout/v1\n",
@@ -211,6 +215,7 @@ bindings:
 // producer on the SAME commit (a CI retry) replaces its own prior records
 // rather than duplicating them, per producer id.
 func TestProduceSelfHostedEvidence_IdempotentAcrossReruns(t *testing.T) {
+	t.Parallel()
 	repo := buildSelfEvidenceRepo(t)
 	prov1 := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov1); err != nil {
@@ -255,6 +260,7 @@ func witnesses(recs []artifact.Evidence) []string {
 // only by an incoming record with its producer; one whose producer has no
 // incoming record is kept, in order, ahead of the incoming records.
 func TestMergeEvidenceByProducer(t *testing.T) {
+	t.Parallel()
 	pass := artifact.VerdictPass
 	cases := []struct {
 		name               string
@@ -281,6 +287,7 @@ func TestMergeEvidenceByProducer(t *testing.T) {
 // only that check's earlier record in runtime.json, and another check's
 // record, which this write did not mention, stays.
 func TestRuntimeProbe_WriteRuntimeRecordKeepsOtherProducers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	const commit = "c0ffee0"
 	rt := func(producer, ac, witness string) artifact.Evidence {
@@ -309,6 +316,7 @@ func TestRuntimeProbe_WriteRuntimeRecordKeepsOtherProducers(t *testing.T) {
 // incoming record is reported withdrawn. The result is never nil, so an
 // emptied file is written as an empty array.
 func TestReplaceManagedEvidence(t *testing.T) {
+	t.Parallel()
 	pass, fail := artifact.VerdictPass, artifact.VerdictFail
 	managed := func(ps ...string) map[string]bool {
 		m := map[string]bool{}
@@ -370,6 +378,7 @@ func TestReplaceManagedEvidence(t *testing.T) {
 // it writes an emptied file as an empty array; and it reports each spec's
 // withdrawn records.
 func TestWriteManagedEvidence(t *testing.T) {
+	t.Parallel()
 	const commit = "c0ffee0"
 	pass := artifact.VerdictPass
 	pathOf := func(root, spec string) string {

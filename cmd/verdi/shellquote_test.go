@@ -8,6 +8,7 @@ import (
 )
 
 func TestShellQuoteWord(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -39,6 +40,7 @@ func TestShellQuoteWord(t *testing.T) {
 // the ls binary's path. A finding id is arbitrary artifact text, so a bare
 // "=ls" would disposition an id the operator never saw printed.
 func TestShellQuoteWord_QuotesEqualsForZshEqualsExpansion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -67,6 +69,7 @@ func TestShellQuoteWord_QuotesEqualsForZshEqualsExpansion(t *testing.T) {
 // from the safe set. A shell that is absent is DISCLOSED (t.Skip names it)
 // rather than silently reducing what this test proves.
 func TestShellQuoteWord_RoundTripsThroughRealShells(t *testing.T) {
+	t.Parallel()
 	words := []string{
 		"=ls",
 		"=/bin/ls",
@@ -121,6 +124,7 @@ func TestShellQuoteWord_RoundTripsThroughRealShells(t *testing.T) {
 // word is emitted only when EVERY rune passes, so this table is the actual
 // boundary shellQuoteWord's callers depend on.
 func TestIsSafeShellWordRune(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   rune

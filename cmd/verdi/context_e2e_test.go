@@ -162,6 +162,7 @@ func TestContextCompileE2E_StdinRequest(t *testing.T) {
 // *contextcompile.NoConstitutionRefusal to exit 1 against a legacy-shaped
 // store fixture that carries no .verdi/policy/ tree at all.
 func TestContextCompileE2E_NoConstitution_ExitOne(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -290,6 +291,7 @@ func TestContextCompileE2E_OutAliasesReservedPath_RefusedNoWrite(t *testing.T) {
 // (no store root resolved, nothing touched), matching the hermetic
 // posture internal/specalign's verb inventory relies on.
 func TestContextCompileE2E_UnknownSubcommand_ExitTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 

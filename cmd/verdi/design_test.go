@@ -166,6 +166,7 @@ func TestRunDesignStart_Story(t *testing.T) {
 // operational: a usage precondition, not a business verdict) with no ref at
 // all — the story class REQUIRES the scheme-prefixed story ref (05 §CLI).
 func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
@@ -216,6 +217,7 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 // scheme (jira) resolves through a real adapter instead of always degrading
 // with ErrUnknownScheme, while an unconfigured scheme still honestly misses.
 func TestCmdDesignStart_WiresConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	reg := buildProviderRegistry(phase7Manifest(t))
 	if _, err := reg.Provider("jira"); err != nil {
 		t.Fatalf("Provider(jira) = %v, want a real adapter (design start must attempt real resolution for a configured scheme, not ErrUnknownScheme)", err)
@@ -465,6 +467,7 @@ func TestCmdDesignStart_KindFlagMissingOrInvalid(t *testing.T) {
 // TestRunDesignVerb_UnknownSubcommand proves the design/start subcommand
 // dispatch is a usage error for anything but "start".
 func TestRunDesignVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	got := runDesignVerb([]string{"bogus"}, &stdout, &stderr)
 	if got != 2 {
@@ -687,6 +690,7 @@ func TestRunDesignStart_OriginExistsButUnresolvable_Exit2(t *testing.T) {
 // (as this very fix's own comment does, contrasting the two) can never
 // false-positive the check.
 func TestDesignGo_AtomicWrite_NoDirectWriteFile(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("design.go")
 	if err != nil {
 		t.Fatalf("reading design.go: %v", err)
@@ -808,6 +812,7 @@ func TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 // (UAT-033), never gitx.AddAll's blanket `git add -A` sweep of the rest of
 // the working tree.
 func TestDesignGo_NoAddAll(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("design.go")
 	if err != nil {
 		t.Fatalf("reading design.go: %v", err)

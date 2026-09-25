@@ -48,6 +48,7 @@ func preflightQuarantineCLIFixture(t *testing.T) (root string, unreachable strin
 }
 
 func TestClosePreflight_CLI_QuarantinedRecord_NeverOperational_DisclosesUnproven(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, unreachable := preflightQuarantineCLIFixture(t)
 

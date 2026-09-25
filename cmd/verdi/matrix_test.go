@@ -807,6 +807,7 @@ func TestCmdMatrix_RefForms(t *testing.T) {
 // Negative path: without --preview neither rung emits any disclosure line, so
 // the banner never becomes background noise.
 func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
+	t.Parallel()
 	want := disclosure.Render(disclosure.AdvisoryPreview())
 
 	hasLine := func(out string) bool {

@@ -134,6 +134,7 @@ func recoverWriteStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 // the "--"-prefix rule, and R-RR3-17's short "-f" flag) plus a clean
 // entry that must print nothing and report false.
 func TestReportForbiddenCommands_Table(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		entries [][]string
@@ -414,6 +415,7 @@ func TestRecover_ApplyViolatedPostconditionIsExit1(t *testing.T) {
 // with the projection STILL printed ("the projection still prints what
 // it observed"), the executor having already run in both.
 func TestReportApplyOutcome_ExitMapping(t *testing.T) {
+	t.Parallel()
 	held := recovery.PostconditionResult{Text: "close/checkout does not exist", Held: true, Observed: "does not exist"}
 	violated := recovery.PostconditionResult{Text: "current branch is main", Held: false, Observed: "current branch is close/checkout"}
 	// The projection printed after the postcondition lines is the

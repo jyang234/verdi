@@ -571,8 +571,10 @@ declared edge:
 
 - **`supersedes`** — the decision above is wrong; this one replaces it.
   Triggers the real supersession flow (the top-level artifact is amended,
-  under its quorum) — the default is corrected for everyone, never quietly
-  bypassed.
+  under its quorum) — for an object of a closed spec, the flow is
+  §Challenging closed decisions' closed-spec object supersession, and the
+  closed spec is never amended — the default is corrected for everyone,
+  never quietly bypassed.
 - **`exempts`** — the decision above stays valid; this spec is excused,
   with a required reason. The default is not invalidated, but the
   exemption is audited (§Exemption audit) and may trigger the conversation
@@ -583,10 +585,20 @@ declared edge:
 split as the build-branch alignment report:
 
 - **Computed section — declared-edge completeness.** Every declared
-  `supersedes`/`exempts` edge on a decision object must resolve
-  (SUPERSEDED with the ratified supersession, or EXEMPT with reason) before
-  the spec MR is review-ready. Bidirectional and lint-checkable — the same
-  "nothing silently unaccounted for" shape as §Stub reconciliation.
+  `supersedes`/`exempts` edge on a decision object must resolve (SUPERSEDED
+  with the ratified supersession, or EXEMPT with reason) before the spec MR
+  is review-ready. Bidirectional and lint-checkable — the same "nothing
+  silently unaccounted for" shape as §Stub reconciliation. A `supersedes`
+  edge to an object of a closed spec resolves SUPERSEDED only when the
+  records of §Challenging closed decisions' closed-spec object supersession
+  hold at the report's head — a new replacement's match, or a carried
+  replacement's revision chain — and its finding says which: a new
+  replacement takes effect when the successor is accepted, and a carried one
+  names the establishing successor, conflict, and date. Otherwise it stays
+  unresolved and names what is missing or mismatched. The computed section
+  is resolved by computation alone: a disposition written onto a computed
+  finding resolves nothing, and the gate recomputes the section from the
+  records and fails on any difference.
 - **Judged section — the undeclared-conflict sweep.** The judge command
   (`align.judge_cmd`, §Alignment report) reads spec decisions (feature and
   story alike) against the ADR corpus, and story decisions against their
@@ -805,6 +817,54 @@ accumulated exemption threshold, or a build discovering its spec is wrong.
 3. **Single-maintainer exemption**: repos with one maintainer drop the
    two-approval requirement, but conflicts are still filed — the flag is
    non-negotiable; the quorum is contextual.
+
+**Closed-spec object supersession.** A later spec may replace one acceptance
+criterion or decision of a closed spec without reopening it. The closed
+spec, its closure record, rollup, and evidence stay unchanged; the
+supersession is a relationship computed from three records:
+
+- **The edge.** A decision of the successor, a feature or story spec,
+  carries `supersedes` to the object (`spec/<closed>#<object-id>`, artifact
+  contract §Object model), and its text states what replaces the object and
+  why. Only acceptance criteria and decisions are targets; an object already
+  superseded this way cannot be newly replaced — amend the standing
+  successor's decision instead.
+- **The conflict.** A conflict filed under step 1 whose `challenges` name,
+  as fragments of that one closed spec, exactly the objects this successor
+  supersedes there — one conflict per closed spec and successor — resolved
+  in the successor's spec MR with `status: superseded` and `resolved_by:
+  spec/<successor>`, frozen at resolution (step 2's quorum; step 3's
+  exemption).
+- **Acceptance.** The successor's spec MR merges into the default branch;
+  merging is acceptance.
+
+The supersession is in force from the merge that accepts the successor, and
+only while the three records match there: every such edge on the successor
+has exactly one superseded conflict naming its object and the successor, and
+every fragment such a conflict challenges has a matching edge. Before
+acceptance it is only proposed, and no surface presents the object as
+superseded. Once in force it is permanent history, and a later revision of
+the successor does not reinstate the object.
+
+A later whole-spec revision of the successor (§The amendment ladder)
+**carries** the established replacement when its deciding object is
+classified `carried`, `amended`, or `amended_advisory` in the revision's
+`supersession:` block (for a story revision, which has no manifest: the same
+object id) and keeps the same edge. A carried replacement files no new
+conflict: the original conflict and its acceptance date remain the record.
+Amending the carried decision is an ordinary amendment of the standing
+successor under the ladder's quorum and cascade, and the closed spec is not
+challenged again. Any other edge to the object — on an added decision, on a
+decision whose predecessor lacked it, or on a spec outside that revision
+chain — is a **new** replacement, refused while the object is already
+superseded; a conflict naming one successor never resolves an edge outside
+its revision chain.
+
+Every surface that shows the object keeps its original text and shows three
+things: that it governed the closed spec's completed work; since when, and
+by which establishing successor, it is superseded; and which later revision
+carries the replacement, if any. Records that do not match are shown as a
+supersession not established, with the reason, never as a supersession.
 
 ## Open questions
 

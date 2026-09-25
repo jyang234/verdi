@@ -124,6 +124,7 @@ func assertConflictLifecycleSnapshot(t *testing.T, root string, before conflictL
 // flag only in one position, accepting two request sources, or treating a
 // missing value/stdin as an ordinary positional operand.
 func TestConflictGateRequestGrammar(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -525,6 +526,7 @@ func TestConflictGateTargetProviderError(t *testing.T) {
 // TestConflictGateSummaryRender catches a lifecycle consumer leaking the full
 // report or dropping a closed reason/witness while translating the one result.
 func TestConflictGateSummaryRender(t *testing.T) {
+	t.Parallel()
 	result := policyconflict.Result{Report: policyconflict.Report{
 		Verdict: policyconflict.VerdictBlockedViolated,
 		Digest:  "sha256:" + strings.Repeat("d", 64),
@@ -569,6 +571,7 @@ func TestConflictGateSummaryRender(t *testing.T) {
 }
 
 func TestConflictGateSummaryPass(t *testing.T) {
+	t.Parallel()
 	result := policyconflict.Result{Report: policyconflict.Report{Verdict: policyconflict.VerdictPass, Digest: "sha256:" + strings.Repeat("e", 64)}}
 	condition := conflictCondition(result)
 	if !condition.OK || condition.Reason != "" {

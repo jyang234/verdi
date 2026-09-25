@@ -38,6 +38,7 @@ type wave5CExperimentFixture struct {
 }
 
 func TestExperimentRatificationCapsuleReleaseGrammarBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	for _, operation := range []string{"propose-ratification", "publish-capsule", "release-workspaces"} {
 		t.Run(operation, func(t *testing.T) {
