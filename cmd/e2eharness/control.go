@@ -42,12 +42,7 @@ package main
 //     dropped whole-spec-revision chains, the not-yet-accepted pair, and
 //     the not-in-force case — each materialized from
 //     internal/objsupersede/scenario's committed fixture — see
-//     objsupersedefixture.go. NOT YET wired into main.go's own defer
-//     chain the way unprovenBoard/specImport/readinessPilot are (lane
-//     L3d's declared write set excluded main.go; see its report) — a real
-//     (non-test) harness run that exercises this endpoint currently
-//     leaks its subprocesses at shutdown until that one-line defer is
-//     added.
+//     objsupersedefixture.go. main.go stops them with the harness.
 
 import (
 	"log"
