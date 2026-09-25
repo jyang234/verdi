@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // memoGit is a content-addressed fake gitReader for the corpus-memo tests.
@@ -508,8 +510,8 @@ func TestCorpusCache_Get(t *testing.T) {
 }
 
 // TestCorpusCache_ConcurrentGetsShareOneScan starts many gets for one key
-// while the first scan is still running: whether a caller waits on that
-// scan or arrives after it is stored, scan runs once.
+// and holds the first scan until every other caller is waiting on it:
+// scan runs once and every caller gets its corpus.
 func TestCorpusCache_ConcurrentGetsShareOneScan(t *testing.T) {
 	c := newCorpusCache(corpusCacheLimit)
 	key := corpusKey{root: "/r", commit: "c1"}
@@ -535,6 +537,7 @@ func TestCorpusCache_ConcurrentGetsShareOneScan(t *testing.T) {
 		}(i)
 	}
 	<-started
+	waitForWaiters(t, c, n-1) // every caller but the leader holds its flight
 	close(release)
 	wg.Wait()
 
@@ -585,65 +588,153 @@ func TestCorpusCache_CancelledWaiterScansForItself(t *testing.T) {
 	}
 }
 
-// TestCorpusCache_WaiterScansWhenTheLeaderFails proves a failed scan is
-// not handed to the callers that waited on it: each scans for itself.
+// waitForWaiters blocks until at least n callers of c hold a flight and
+// wait on it, failing the test after 10s. A caller counts itself under
+// c.mu in the same critical section that reads the flight, so once it is
+// counted it is bound to that flight's outcome.
+func waitForWaiters(t *testing.T, c *corpusCache, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		c.mu.Lock()
+		w := c.waiters
+		c.mu.Unlock()
+		if w >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d callers waiting after 10s, want %d", w, n)
+		}
+		runtime.Gosched()
+	}
+}
+
+// within receives from ch, failing the test if nothing arrives in 10s.
+func within[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s: nothing after 10s", what)
+		var zero T
+		return zero
+	}
+}
+
+// cacheGet is one get's outcome, sent back from a goroutine.
+type cacheGet struct {
+	corpus *successorCorpus
+	err    error
+}
+
+// getAsync runs c.get for key on a new goroutine, with a scan that counts
+// its runs in scans and returns corpus, and sends the outcome on the
+// returned channel.
+func getAsync(c *corpusCache, key corpusKey, corpus *successorCorpus, scans *atomic.Int32) <-chan cacheGet {
+	out := make(chan cacheGet, 1)
+	go func() {
+		got, err := c.get(context.Background(), key, func() (*successorCorpus, error) {
+			scans.Add(1)
+			return corpus, nil
+		})
+		out <- cacheGet{corpus: got, err: err}
+	}()
+	return out
+}
+
+// assertStored proves key's stored corpus is want: a get returns it
+// without scanning, and the cache is left with no flight or waiter.
+func assertStored(t *testing.T, c *corpusCache, key corpusKey, want *successorCorpus) {
+	t.Helper()
+	got, err := c.get(context.Background(), key, func() (*successorCorpus, error) {
+		t.Error("scan ran; want the stored corpus")
+		return nil, errors.New("unexpected scan")
+	})
+	if err != nil || got != want {
+		t.Fatalf("stored corpus = (%p, %v), want %p", got, err, want)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.flights) != 0 || c.waiters != 0 {
+		t.Fatalf("%d flights and %d waiters left, want none", len(c.flights), c.waiters)
+	}
+}
+
+// TestCorpusCache_WaiterScansWhenTheLeaderFails holds the leader's scan
+// until a second caller is waiting on its flight, then fails it: the
+// failure is not handed to the waiter, which is released, runs its own
+// scan, and stores that corpus.
 func TestCorpusCache_WaiterScansWhenTheLeaderFails(t *testing.T) {
 	c := newCorpusCache(corpusCacheLimit)
 	key := corpusKey{root: "/r", commit: "c1"}
 	errBoom := errors.New("boom")
-	waiterCorpus := &successorCorpus{}
-	started, release, waiterDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	started, fail := make(chan struct{}), make(chan struct{})
 
-	var waiterGot *successorCorpus
-	var waiterErr error
-	var leaderErr error
-	leaderDone := make(chan struct{})
+	leader := make(chan error, 1)
 	go func() {
-		defer close(leaderDone)
-		_, leaderErr = c.get(context.Background(), key, func() (*successorCorpus, error) {
+		_, err := c.get(context.Background(), key, func() (*successorCorpus, error) {
 			close(started)
-			<-release
+			<-fail
 			return nil, errBoom
 		})
+		leader <- err
 	}()
-	<-started
-	go func() {
-		defer close(waiterDone)
-		waiterGot, waiterErr = c.get(context.Background(), key, func() (*successorCorpus, error) { return waiterCorpus, nil })
-	}()
-	close(release)
-	<-leaderDone
-	<-waiterDone
+	<-started // the leader's flight is registered before its scan runs
 
-	if !errors.Is(leaderErr, errBoom) {
-		t.Fatalf("leader err = %v, want %v", leaderErr, errBoom)
+	waiterCorpus := &successorCorpus{}
+	var waiterScans atomic.Int32
+	waiter := getAsync(c, key, waiterCorpus, &waiterScans)
+	waitForWaiters(t, c, 1)
+	if n := waiterScans.Load(); n != 0 {
+		t.Fatalf("the waiter scanned %d times while the leader's scan was in flight, want 0", n)
 	}
-	if waiterErr != nil || waiterGot != waiterCorpus {
-		t.Fatalf("waiter get = (%p, %v), want its own scan %p", waiterGot, waiterErr, waiterCorpus)
+
+	close(fail)
+	if err := within(t, leader, "leader"); !errors.Is(err, errBoom) {
+		t.Fatalf("leader err = %v, want %v", err, errBoom)
 	}
+	got := within(t, waiter, "waiter released after the leader failed")
+	if got.err != nil || got.corpus != waiterCorpus || waiterScans.Load() != 1 {
+		t.Fatalf("waiter get = (%p, %v) after %d scans, want its own scan %p after 1", got.corpus, got.err, waiterScans.Load(), waiterCorpus)
+	}
+	assertStored(t, c, key, waiterCorpus)
 }
 
-// TestCorpusCache_PanickingScanStoresNothing proves a scan that panics
-// leaves no flight behind to block later callers and stores nothing.
+// TestCorpusCache_PanickingScanStoresNothing holds a scan until a second
+// caller is waiting on its flight, then panics it: the panic propagates,
+// the panicking scan stores nothing, and the waiter is released, runs its
+// own scan, and stores that corpus.
 func TestCorpusCache_PanickingScanStoresNothing(t *testing.T) {
 	c := newCorpusCache(corpusCacheLimit)
 	key := corpusKey{root: "/r", commit: "c1"}
+	started, panicNow := make(chan struct{}), make(chan struct{})
 
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("scan's panic did not propagate")
-			}
-		}()
-		_, _ = c.get(context.Background(), key, func() (*successorCorpus, error) { panic("scan failed") })
+	leader := make(chan any, 1)
+	go func() {
+		defer func() { leader <- recover() }()
+		_, _ = c.get(context.Background(), key, func() (*successorCorpus, error) {
+			close(started)
+			<-panicNow
+			panic("scan failed")
+		})
 	}()
-	if len(c.flights) != 0 || len(c.entries) != 0 {
-		t.Fatalf("after a panicking scan: %d flights, %d entries, want 0 and 0", len(c.flights), len(c.entries))
-	}
+	<-started
 
-	want := &successorCorpus{}
-	got, err := c.get(context.Background(), key, func() (*successorCorpus, error) { return want, nil })
-	if err != nil || got != want {
-		t.Fatalf("get after the panic = (%p, %v), want a fresh scan %p", got, err, want)
+	waiterCorpus := &successorCorpus{}
+	var waiterScans atomic.Int32
+	waiter := getAsync(c, key, waiterCorpus, &waiterScans)
+	waitForWaiters(t, c, 1)
+
+	close(panicNow)
+	if r := within(t, leader, "leader"); r == nil {
+		t.Fatal("the scan's panic did not propagate")
 	}
+	// The waiter runs its own scan only if the panicking scan left no
+	// entry behind.
+	got := within(t, waiter, "waiter released after the panic")
+	if got.err != nil || got.corpus != waiterCorpus || waiterScans.Load() != 1 {
+		t.Fatalf("waiter get = (%p, %v) after %d scans, want its own scan %p after 1", got.corpus, got.err, waiterScans.Load(), waiterCorpus)
+	}
+	assertStored(t, c, key, waiterCorpus)
 }

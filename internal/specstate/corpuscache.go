@@ -49,6 +49,7 @@ type corpusCache struct {
 	mu      sync.Mutex
 	entries []corpusEntry               // most recently used first, at most limit long
 	flights map[corpusKey]chan struct{} // scans in progress; each channel closes when its scan ends
+	waiters int                         // callers holding a flight and waiting on it; tests read it
 }
 
 // newCorpusCache returns an empty cache that keeps at most limit corpora.
@@ -75,13 +76,21 @@ func (c *corpusCache) get(ctx context.Context, key corpusKey, scan func() (*succ
 			c.mu.Unlock()
 			return c.lead(key, flight, scan)
 		}
+		c.waiters++
 		c.mu.Unlock()
 
+		ctxDone := false
 		select {
 		case <-flight:
 			// That scan ended. Loop: it either stored an entry, or it
 			// failed and stored nothing, in which case this caller leads.
 		case <-ctx.Done():
+			ctxDone = true
+		}
+		c.mu.Lock()
+		c.waiters--
+		c.mu.Unlock()
+		if ctxDone {
 			return scan()
 		}
 	}
