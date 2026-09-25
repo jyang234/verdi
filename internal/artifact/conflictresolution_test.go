@@ -66,6 +66,12 @@ func TestLink_ValidateFor_Happy(t *testing.T) {
 // object, and every other non-vocabulary fragment link still fails closed on a
 // conflict too.
 func TestLink_ValidateFor_Negative(t *testing.T) {
+	// ValidateFor's own refusals carry text Link.Validate's never does, so
+	// each case below proves which branch refused it.
+	const (
+		specObject = "but a conflict's fragment challenges name a spec object, spec/<name>#<object-id> (02 §Link taxonomy)"
+		pinned     = "targets pinned object fragment"
+	)
 	cases := []struct {
 		owner Kind
 		link  Link
@@ -79,8 +85,9 @@ func TestLink_ValidateFor_Negative(t *testing.T) {
 		{KindReaffirmation, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
 		{KindObligation, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
 		{Kind("bogus"), Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
-		{KindConflict, Link{Type: LinkChallenges, Ref: "adr/0001-old#dc-1"}, "02 §Link taxonomy"},
-		{KindConflict, Link{Type: LinkChallenges, Ref: "diagram/loan-flow#ac-1"}, "02 §Link taxonomy"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "adr/0001-old#dc-1"}, specObject},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "diagram/loan-flow#ac-1"}, specObject},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/loan-update@3e91ab2#ac-1"}, pinned},
 		{KindConflict, Link{Type: LinkVerifies, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
 		{KindConflict, Link{Type: LinkAnnotates, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
 		{KindConflict, Link{Type: LinkImpacts, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
@@ -224,12 +231,25 @@ func TestDecodeConflict_FragmentChallenges_Happy(t *testing.T) {
 }
 
 // TestDecodeConflict_FragmentChallenges_Negative: a conflict's fragment
-// challenge names a spec object; any other kind's fragment fails closed.
+// challenge names an unpinned spec object; any other kind's fragment, a
+// pinned one (SI-271), and a malformed one fail closed, each with its own
+// diagnostic.
 func TestDecodeConflict_FragmentChallenges_Negative(t *testing.T) {
-	for _, ref := range []string{"adr/0001-old#dc-1", "diagram/loan-flow#ac-1", "spec/home-status-glance#"} {
-		t.Run(ref, func(t *testing.T) {
-			if _, err := DecodeConflict(conflictDoc("open", []string{ref}, "")); err == nil {
-				t.Fatalf("DecodeConflict(challenges %q): want error, got nil", ref)
+	const specObject = "but a conflict's fragment challenges name a spec object, spec/<name>#<object-id> (02 §Link taxonomy)"
+	cases := []struct{ ref, want string }{
+		{"adr/0001-old#dc-1", specObject},
+		{"diagram/loan-flow#ac-1", specObject},
+		{"spec/home-status-glance@3e91ab2#ac-1", "targets pinned object fragment"},
+		{"spec/home-status-glance#", "has a trailing '#' with no object id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.ref, func(t *testing.T) {
+			_, err := DecodeConflict(conflictDoc("open", []string{tc.ref}, ""))
+			if err == nil {
+				t.Fatalf("DecodeConflict(challenges %q): want error, got nil", tc.ref)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("DecodeConflict(challenges %q) = %q, want it to contain %q", tc.ref, err, tc.want)
 			}
 		})
 	}
@@ -238,33 +258,39 @@ func TestDecodeConflict_FragmentChallenges_Negative(t *testing.T) {
 // TestDecodeConflict_ResolvedBy_Negative: per SI-269 resolved_by is accepted
 // only on a superseded conflict whose challenges name an object fragment,
 // and only as an unpinned spec/<name> ref with no fragment. Every other use
-// fails closed, citing 02 §Kind registry.
+// fails closed, citing 02 §Kind registry; each case asserts the text of the
+// one ValidateResolvedBy branch that refuses it.
 func TestDecodeConflict_ResolvedBy_Negative(t *testing.T) {
 	fragment := []string{"spec/home-status-glance#ac-1"}
 	const (
-		status = "whose status is superseded"
-		scope  = "whose challenges links name an object fragment"
-		shape  = "must be an unpinned spec/<name> ref"
+		scope = "is accepted only on a conflict whose challenges links name an object fragment, and none of this conflict's do"
+		// shape is the parsed-ref branch's text; unparsed is the
+		// unparseable-ref branch's, which wraps ParseRef's own error.
+		shape    = "must be an unpinned spec/<name> ref with no fragment (02 §Kind registry)"
+		unparsed = "must be an unpinned spec/<name> ref (02 §Kind registry): artifact: "
 	)
+	status := func(s string) string {
+		return fmt.Sprintf("is accepted only on a conflict whose status is superseded, not %q", s)
+	}
 	cases := []struct {
 		name, status string
 		refs         []string
 		resolvedBy   string
-		want         string
+		wants        []string
 	}{
-		{"open conflict", "open", fragment, "spec/home-status-v2", status},
-		{"dismissed conflict", "dismissed", fragment, "spec/home-status-v2", status},
-		{"superseded with only whole-artifact challenges", "superseded", []string{"spec/home-status-glance", "adr/0001-old"}, "spec/home-status-v2", scope},
-		{"pinned ref", "superseded", fragment, "spec/home-status-v2@3e91ab2", shape},
-		{"fragment ref", "superseded", fragment, "spec/home-status-v2#dc-1", shape},
-		{"pinned fragment ref", "superseded", fragment, "spec/home-status-v2@3e91ab2#dc-1", shape},
-		{"adr ref", "superseded", fragment, "adr/0002-outbox-events", shape},
-		{"conflict ref", "superseded", fragment, "conflict/other-conflict", shape},
-		{"external ref", "superseded", fragment, "svc/loansvc/boundary-contract", shape},
-		{"tracker ref", "superseded", fragment, "jira:LOAN-1482", shape},
-		{"bare name", "superseded", fragment, "home-status-v2", shape},
-		{"not kebab-case", "superseded", fragment, "spec/Home_Status", shape},
-		{"unknown kind", "superseded", fragment, "specs/home-status-v2", shape},
+		{"open conflict", "open", fragment, "spec/home-status-v2", []string{status("open")}},
+		{"dismissed conflict", "dismissed", fragment, "spec/home-status-v2", []string{status("dismissed")}},
+		{"superseded with only whole-artifact challenges", "superseded", []string{"spec/home-status-glance", "adr/0001-old"}, "spec/home-status-v2", []string{scope}},
+		{"pinned ref", "superseded", fragment, "spec/home-status-v2@3e91ab2", []string{shape}},
+		{"fragment ref", "superseded", fragment, "spec/home-status-v2#dc-1", []string{shape}},
+		{"pinned fragment ref", "superseded", fragment, "spec/home-status-v2@3e91ab2#dc-1", []string{shape}},
+		{"adr ref", "superseded", fragment, "adr/0002-outbox-events", []string{shape}},
+		{"conflict ref", "superseded", fragment, "conflict/other-conflict", []string{shape}},
+		{"external ref", "superseded", fragment, "svc/loansvc/boundary-contract", []string{unparsed, `unknown kind "svc"`}},
+		{"tracker ref", "superseded", fragment, "jira:LOAN-1482", []string{unparsed, "missing the '/'"}},
+		{"bare name", "superseded", fragment, "home-status-v2", []string{unparsed, "missing the '/'"}},
+		{"not kebab-case", "superseded", fragment, "spec/Home_Status", []string{unparsed, "must be kebab-case"}},
+		{"unknown kind", "superseded", fragment, "specs/home-status-v2", []string{unparsed, `unknown kind "specs"`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,7 +298,7 @@ func TestDecodeConflict_ResolvedBy_Negative(t *testing.T) {
 			if err == nil {
 				t.Fatalf("DecodeConflict(resolved_by %q): want error, got nil", tc.resolvedBy)
 			}
-			for _, want := range []string{"resolved_by", "02 §Kind registry", tc.want} {
+			for _, want := range append([]string{"resolved_by", "02 §Kind registry"}, tc.wants...) {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("DecodeConflict(resolved_by %q) = %q, want it to contain %q", tc.resolvedBy, err, want)
 				}
@@ -397,8 +423,8 @@ func TestResolvedBy_OnlyOnConflict(t *testing.T) {
 			if err == nil {
 				t.Fatal("resolved_by outside a conflict: want error, got nil")
 			}
-			if !strings.Contains(err.Error(), "resolved_by") {
-				t.Fatalf("error %q does not name resolved_by", err)
+			if !strings.Contains(err.Error(), "field resolved_by not found") {
+				t.Fatalf("error %q is not strict decode's unknown-field refusal of resolved_by", err)
 			}
 		})
 	}
