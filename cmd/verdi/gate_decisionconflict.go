@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/align"
@@ -188,8 +189,10 @@ func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head st
 // findings and the recomputed ones, matched by id (and, for a repeated id,
 // by position among that id's findings): a missing or extra finding, and
 // any field that differs — text, disposition, note, target ref, or routed
-// owners. Judged findings are not compared. An empty result means the
-// sections are equal.
+// owners (element by element, never by a joined rendering). Judged findings
+// are not compared. An empty result means the sections are equal.
+// TestDiffComputedFindings_ComparesEveryField fails when
+// artifact.ConflictFinding gains a field this does not compare.
 func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []string {
 	byID := func(fs []artifact.ConflictFinding) (map[string][]artifact.ConflictFinding, []string) {
 		m := map[string][]artifact.ConflictFinding{}
@@ -222,15 +225,19 @@ func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []str
 			case i >= len(w):
 				diffs = append(diffs, fmt.Sprintf("extra computed finding %s (the records do not compute it)", id))
 			default:
-				for _, fd := range []struct{ field, got, want string }{
-					{"text", g[i].Text, w[i].Text},
-					{"disposition", string(g[i].Disposition), string(w[i].Disposition)},
-					{"note", g[i].Note, w[i].Note},
-					{"target_ref", g[i].TargetRef, w[i].TargetRef},
-					{"routed_owners", strings.Join(g[i].RoutedOwners, ", "), strings.Join(w[i].RoutedOwners, ", ")},
+				g, w := g[i], w[i]
+				for _, fd := range []struct {
+					field, got, want string
+					equal            bool
+				}{
+					{"text", quotedOrNone(g.Text), quotedOrNone(w.Text), g.Text == w.Text},
+					{"disposition", quotedOrNone(string(g.Disposition)), quotedOrNone(string(w.Disposition)), g.Disposition == w.Disposition},
+					{"note", quotedOrNone(g.Note), quotedOrNone(w.Note), g.Note == w.Note},
+					{"target_ref", quotedOrNone(g.TargetRef), quotedOrNone(w.TargetRef), g.TargetRef == w.TargetRef},
+					{"routed_owners", listOrNone(g.RoutedOwners), listOrNone(w.RoutedOwners), slices.Equal(g.RoutedOwners, w.RoutedOwners)},
 				} {
-					if fd.got != fd.want {
-						diffs = append(diffs, fmt.Sprintf("%s: %s is %s, the records compute %s", id, fd.field, quotedOrNone(fd.got), quotedOrNone(fd.want)))
+					if !fd.equal {
+						diffs = append(diffs, fmt.Sprintf("%s: %s is %s, the records compute %s", id, fd.field, fd.got, fd.want))
 					}
 				}
 			}
@@ -246,4 +253,14 @@ func quotedOrNone(s string) string {
 		return "none"
 	}
 	return fmt.Sprintf("%q", s)
+}
+
+// listOrNone renders a compared list for a difference, each element
+// quoted, so lists that join alike (["a, b"] and ["a" "b"]) read apart; or
+// "none" when empty.
+func listOrNone(l []string) string {
+	if len(l) == 0 {
+		return "none"
+	}
+	return fmt.Sprintf("%q", l)
 }

@@ -531,21 +531,65 @@ func TestDiffComputedFindings(t *testing.T) {
 		return f
 	}
 	judged := artifact.ConflictFinding{ID: "j-1", Kind: artifact.FindingJudged, Text: "j"}
+	owners := func(o ...string) artifact.ConflictFinding {
+		return with(func(f *artifact.ConflictFinding) { f.RoutedOwners = o })
+	}
 	tests := []struct {
-		name     string
-		reported []artifact.ConflictFinding
-		want     []string
+		name       string
+		reported   []artifact.ConflictFinding
+		recomputed artifact.ConflictFinding
+		want       []string
 	}{
-		{"equal, judged ignored", []artifact.ConflictFinding{base, judged}, nil},
-		{"target ref", []artifact.ConflictFinding{with(func(f *artifact.ConflictFinding) { f.TargetRef = "adr/b" })}, []string{`e-1: target_ref is "adr/b", the records compute "adr/a"`}},
-		{"routed owners", []artifact.ConflictFinding{with(func(f *artifact.ConflictFinding) { f.RoutedOwners = nil })}, []string{`e-1: routed_owners is none, the records compute "o"`}},
-		{"a repeated id", []artifact.ConflictFinding{base, base}, []string{"extra computed finding e-1 (the records do not compute it)"}},
-		{"nothing reported", nil, []string{`missing computed finding e-1 (the records compute "t")`}},
+		{"equal, judged ignored", []artifact.ConflictFinding{base, judged}, base, nil},
+		{"target ref", []artifact.ConflictFinding{with(func(f *artifact.ConflictFinding) { f.TargetRef = "adr/b" })}, base, []string{`e-1: target_ref is "adr/b", the records compute "adr/a"`}},
+		{"routed owners", []artifact.ConflictFinding{owners()}, base, []string{`e-1: routed_owners is none, the records compute ["o"]`}},
+		{"routed owners that join alike", []artifact.ConflictFinding{owners("a, b")}, owners("a", "b"), []string{`e-1: routed_owners is ["a, b"], the records compute ["a" "b"]`}},
+		{"routed owners in another order", []artifact.ConflictFinding{owners("b", "a")}, owners("a", "b"), []string{`e-1: routed_owners is ["b" "a"], the records compute ["a" "b"]`}},
+		{"a repeated id", []artifact.ConflictFinding{base, base}, base, []string{"extra computed finding e-1 (the records do not compute it)"}},
+		{"nothing reported", nil, base, []string{`missing computed finding e-1 (the records compute "t")`}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := diffComputedFindings(tc.reported, []artifact.ConflictFinding{base}); !reflect.DeepEqual(got, tc.want) {
+			if got := diffComputedFindings(tc.reported, []artifact.ConflictFinding{tc.recomputed}); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("diffs = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDiffComputedFindings_ComparesEveryField guards design §5's "fails on
+// any difference" against a field added to artifact.ConflictFinding later
+// (L4 review b, M-6): it changes each of the struct's fields in turn, by
+// reflection, and requires diffComputedFindings to report the change — the
+// id (the match key) and the kind (the section filter) as a missing
+// finding, every other field by its YAML name. A field the diff does not
+// compare, or of a kind this guard cannot change, fails here by name.
+func TestDiffComputedFindings_ComparesEveryField(t *testing.T) {
+	t.Parallel()
+	base := artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: "t", Disposition: artifact.ConflictExempt, Note: "n", TargetRef: "adr/a", RoutedOwners: []string{"o"}}
+	typ := reflect.TypeOf(base)
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		t.Run(field.Name, func(t *testing.T) {
+			changed := base
+			changed.RoutedOwners = append([]string(nil), base.RoutedOwners...)
+			v := reflect.ValueOf(&changed).Elem().Field(i)
+			switch {
+			case v.Kind() == reflect.String:
+				v.SetString(v.String() + "-changed")
+			case v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.String:
+				v.Set(reflect.Append(v, reflect.ValueOf("changed").Convert(v.Type().Elem())))
+			default:
+				t.Fatalf("artifact.ConflictFinding.%s is a %s: extend diffComputedFindings and this guard to compare it", field.Name, v.Type())
+			}
+			diffs := strings.Join(diffComputedFindings([]artifact.ConflictFinding{changed}, []artifact.ConflictFinding{base}), "; ")
+			name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+			want := "e-1: " + name + " is "
+			if name == "id" || name == "kind" {
+				want = "missing computed finding e-1"
+			}
+			if !strings.Contains(diffs, want) {
+				t.Fatalf("changing artifact.ConflictFinding.%s gives diffs %q, want one containing %q: the gate's recompute must compare every field (design §5)", field.Name, diffs, want)
 			}
 		})
 	}
