@@ -439,8 +439,9 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 // leave every edge of this tree dependent on them (SI-274(6)): neither is
 // read in force.
 func (m *memo) inForce(ctx context.Context, r Result, edge, object artifact.Ref) (Establishment, bool) {
-	if r.Outcome == ResolvedCarried || edge.Pinned() || len(m.recs.Failures) > 0 ||
-		m.recs.carriedCandidate(m.recs.chain(r.Spec), r.Decision, object) {
+	// A carried result is always a carried candidate here: Evaluate chose it
+	// by the same check over the same records.
+	if edge.Pinned() || len(m.recs.Failures) > 0 || m.recs.carriedCandidate(m.recs.chain(r.Spec), r.Decision, object) {
 		return Establishment{}, false
 	}
 	e := checked(r.Spec, m.Establishment(ctx, r.Spec, object))
