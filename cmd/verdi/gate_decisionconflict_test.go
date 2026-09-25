@@ -40,6 +40,7 @@ func repeatZero(n int) string {
 const gdcHeadCommit = "0000000000000000000000000000000000000c"
 
 func TestCheckDeclaredDecisionConflicts_NoReport(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cond, err := checkDeclaredDecisionConflicts(root, "stale-decline", gdcHeadCommit)
 	if err != nil {
@@ -51,6 +52,7 @@ func TestCheckDeclaredDecisionConflicts_NoReport(t *testing.T) {
 }
 
 func TestCheckDeclaredDecisionConflicts_StaleCovers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeDecisionConflictReport(t, root, "0000000000000000000000000000000000000b",
 		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
@@ -64,6 +66,7 @@ func TestCheckDeclaredDecisionConflicts_StaleCovers(t *testing.T) {
 }
 
 func TestCheckDeclaredDecisionConflicts_UndispositionedFails(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeDecisionConflictReport(t, root, gdcHeadCommit,
 		"  - { id: f-1, kind: computed, text: t }\n")
@@ -100,6 +103,7 @@ func buildDesignGateRepo(t *testing.T) *fixturegit.Repo {
 // decision-conflict report carries a dangling declared edge — here an
 // undispositioned computed finding standing for an unresolved `exempts` edge.
 func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
+	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy is unresolved\" }\n")
@@ -124,6 +128,7 @@ func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 // spec/disclosure-seam-v2 ac-1 — never a silent pass, constitution 2/10)
 // rather than either failing the gate or being silently skipped.
 func TestSpecMRGate_ResolvedPasses(t *testing.T) {
+	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
@@ -159,6 +164,7 @@ func TestCmdGate_SpecMR_EntryPoint(t *testing.T) {
 }
 
 func TestCheckDeclaredDecisionConflicts_AllResolvedPasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeDecisionConflictReport(t, root, gdcHeadCommit,
 		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n  - { id: f-2, kind: judged, text: t2, disposition: no-conflict, note: n2 }\n")
@@ -175,6 +181,7 @@ func TestCheckDeclaredDecisionConflicts_AllResolvedPasses(t *testing.T) {
 // constitutional condition, constructing an accepted arm, or mutating any
 // repository/report bytes before returning a block or operational failure.
 func TestSpecMRGateConflictPreEffect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		verdict  policyconflict.Verdict

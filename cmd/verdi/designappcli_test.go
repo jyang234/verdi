@@ -81,6 +81,7 @@ func writeCLIChildStory(t *testing.T, root, name string) {
 // board/context/capabilities/provenance/review conformance pairing
 // internal/designapp/conformance_test.go completes on the MCP side.
 func TestDesignReadOnlySubcommandsBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, _, _ := designMutateStore(t)
 

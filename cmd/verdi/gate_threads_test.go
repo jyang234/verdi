@@ -13,6 +13,7 @@ import (
 )
 
 func TestCheckReviewThreadsCondition_NilForge_Disclosed(t *testing.T) {
+	t.Parallel()
 	cond, err := checkReviewThreadsCondition(context.Background(), nil, "main", "design/stale-decline")
 	if err != nil {
 		t.Fatalf("checkReviewThreadsCondition: %v", err)
@@ -26,6 +27,7 @@ func TestCheckReviewThreadsCondition_NilForge_Disclosed(t *testing.T) {
 }
 
 func TestCheckReviewThreadsCondition_NoOpenMR_PassesTrivially(t *testing.T) {
+	t.Parallel()
 	f := forgefake.New()
 	// No MR seeded at all: nothing to prove — no MR means no review
 	// threads exist yet (mirrors closuregate.go's "nothing to implement,
@@ -43,6 +45,7 @@ func TestCheckReviewThreadsCondition_NoOpenMR_PassesTrivially(t *testing.T) {
 }
 
 func TestCheckReviewThreadsCondition_UnresolvedThreadFails(t *testing.T) {
+	t.Parallel()
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "7", SourceBranch: "design/stale-decline", Title: "Stale decline"})
 	f.SeedComment("7", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] outcome AC reads implementation-scoped — reword?"})
@@ -60,6 +63,7 @@ func TestCheckReviewThreadsCondition_UnresolvedThreadFails(t *testing.T) {
 }
 
 func TestCheckReviewThreadsCondition_AllResolvedPasses(t *testing.T) {
+	t.Parallel()
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "7", SourceBranch: "design/stale-decline", Title: "Stale decline"})
 	f.SeedComment("7", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] outcome AC reads implementation-scoped — reword?"})
@@ -79,6 +83,7 @@ func TestCheckReviewThreadsCondition_AllResolvedPasses(t *testing.T) {
 // substantive/resolvable thread at all) never blocks the gate: it is
 // inbox-tray material, not a review thread 05's readiness rule governs.
 func TestCheckReviewThreadsCondition_GeneralCommentNeverBlocks(t *testing.T) {
+	t.Parallel()
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "7", SourceBranch: "design/stale-decline", Title: "Stale decline"})
 	f.SeedComment("7", forge.Comment{ID: "c1", Body: "nit: general conversation, no vd token, no thread at all"})
@@ -97,6 +102,7 @@ func TestCheckReviewThreadsCondition_GeneralCommentNeverBlocks(t *testing.T) {
 // when an injected forge reports an unresolved substantive thread, even
 // though the declared-decision-conflict condition passes.
 func TestSpecMRGate_ReviewThreads_UnresolvedBlocks(t *testing.T) {
+	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
@@ -122,6 +128,7 @@ func TestSpecMRGate_ReviewThreads_UnresolvedBlocks(t *testing.T) {
 // once both spec-MR conditions clear: declared decision conflicts
 // dispositioned AND every substantive review thread resolved.
 func TestSpecMRGate_ReviewThreads_ResolvedPasses(t *testing.T) {
+	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
@@ -142,6 +149,7 @@ func TestSpecMRGate_ReviewThreads_ResolvedPasses(t *testing.T) {
 }
 
 func TestBuildForgeBestEffort_NoManifest_ReturnsNil(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if f := buildForgeBestEffort(context.Background(), root); f != nil {
 		t.Fatalf("buildForgeBestEffort with no verdi.yaml = %v, want nil", f)

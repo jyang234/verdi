@@ -64,6 +64,7 @@ func buildSpecDocRepo(t *testing.T) *fixturegit.Repo {
 }
 
 func TestSpecDoc_RendersAcceptedSpecToStdout(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox")
@@ -81,6 +82,7 @@ func TestSpecDoc_RendersAcceptedSpecToStdout(t *testing.T) {
 }
 
 func TestSpecDoc_KindsFormatsAndOutputFile(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	out := filepath.Join(t.TempDir(), "tasks.html")
@@ -106,6 +108,7 @@ func TestSpecDoc_KindsFormatsAndOutputFile(t *testing.T) {
 }
 
 func TestSpecDoc_ProposedAndAt(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	// A design branch with a COMMITTED edit, then a further UNCOMMITTED
@@ -161,6 +164,7 @@ func TestSpecDoc_ProposedAndAt(t *testing.T) {
 // Evidence section's Source line must always name HEAD's own prefix, not
 // --at's.
 func TestSpecDoc_EvidenceSourceNamesHEADNotAt(t *testing.T) {
+	t.Parallel()
 	revised := strings.Replace(specDocFixture, "Keys are shared.", "Keys are shared, revised.", 1)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -197,6 +201,7 @@ func TestSpecDoc_EvidenceSourceNamesHEADNotAt(t *testing.T) {
 }
 
 func TestSpecDoc_Refusals(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	cases := []struct {
@@ -237,6 +242,7 @@ func TestSpecDoc_Refusals(t *testing.T) {
 // (".verdi-other") that shares the store directory's name as a string
 // prefix without being inside it.
 func TestOutPathInStore(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".verdi", "specs"), 0o755); err != nil {
 		t.Fatal(err)
@@ -275,6 +281,7 @@ func TestOutPathInStore(t *testing.T) {
 // buildSpecDocRepo's single layer) so --at has a genuinely OLD commit,
 // distinct from HEAD, to prove it actually read.
 func TestSpecDoc_FlagsAfterRef(t *testing.T) {
+	t.Parallel()
 	revised := strings.Replace(specDocFixture, "Keys are shared.", "Keys are shared, revised.", 1)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -351,6 +358,7 @@ func TestSpecDoc_FlagsAfterRef(t *testing.T) {
 }
 
 func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	_, stderr, code := runVerdiBinary(t, bin, t.TempDir(), nil, "spec", "doc", "spec/lockbox")
 	if code != 2 || stderr == "" {
@@ -365,6 +373,7 @@ func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {
 // user sees), producing a genuinely populated ## Readiness section, not
 // merely the heading.
 func TestSpecDoc_ReadinessDefaultPopulatesSection(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox")
@@ -384,6 +393,7 @@ func TestSpecDoc_ReadinessDefaultPopulatesSection(t *testing.T) {
 // chance to derive anything (proven indirectly: the render states the
 // absence exactly as a store with no loader wired at all would).
 func TestSpecDoc_NoReadinessFlagOmitsSection(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox", "--no-readiness")
@@ -405,6 +415,7 @@ func TestSpecDoc_NoReadinessFlagOmitsSection(t *testing.T) {
 // derive successfully for the accepted reading, so this is a genuine
 // mode-gated refusal, not an accident of an unreadable fixture.
 func TestSpecDoc_AtNeverAppliesReadiness(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox", "--at", repo.Head)
@@ -426,6 +437,7 @@ func TestSpecDoc_AtNeverAppliesReadiness(t *testing.T) {
 // explicitly refuses any class but feature/story, so this is a genuine
 // loader failure over an otherwise-renderable spec, not a contrived one.
 func TestSpecDoc_ReadinessLoaderErrorIsDisclosedNotFatal(t *testing.T) {
+	t.Parallel()
 	const componentSpec = `---
 id: spec/widget-notes
 kind: spec
@@ -473,6 +485,7 @@ Some component notes.
 // degrading evidence alone (the same mechanism
 // TestLoadDisclosuresOrderAndContent proves at the loader level).
 func TestSpecDoc_EvidenceDisclosureStillRenders(t *testing.T) {
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
 	if err := os.Remove(filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")); err != nil {

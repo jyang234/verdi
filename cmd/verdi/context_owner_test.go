@@ -517,6 +517,7 @@ func contextOwnerSnapshot(t *testing.T, root string) string {
 // real pipe as FD 3 and must leave it untouched, so the bridge cannot be
 // answering from — or reporting to — the controller it translates for.
 func TestContextOwnerE2EEffectFree(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	root := t.TempDir()
@@ -603,6 +604,7 @@ func TestContextOwnerE2EEffectFree(t *testing.T) {
 // subprocess, so both verbs are witnessed as built commands rather than only
 // as in-process calls.
 func TestContextOwnerE2EEncode(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -634,6 +636,7 @@ func TestContextOwnerE2EEncode(t *testing.T) {
 // stdout stays empty on a real failure and its exit status is the operational
 // 2, never a verdict 1 — the bridge asks no question a verdict could answer.
 func TestContextOwnerE2EFailureLeavesStdoutEmpty(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -666,6 +669,7 @@ func TestContextOwnerE2EFailureLeavesStdoutEmpty(t *testing.T) {
 // bridge that emitted a partial or speculative call under cancellation would
 // hand its caller an owner call that no controller ever made.
 func TestContextOwnerE2ECancellation(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 

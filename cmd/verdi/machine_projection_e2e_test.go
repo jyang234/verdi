@@ -31,17 +31,6 @@ acceptance_criteria:
 # Journey story
 `
 
-func buildMachineProjectionBinary(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "verdi")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
-	cmd.Dir = "."
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building verdi binary: %v\n%s", err, out)
-	}
-	return bin
-}
-
 func runMachineProjectionBinary(t *testing.T, bin, dir string, args ...string) (int, []byte, []byte) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
@@ -89,7 +78,7 @@ func decodeToolMatrix(t *testing.T, result map[string]any) ([]byte, matrixprojec
 }
 
 func TestMatrixProjectionContract_Behavioral(t *testing.T) {
-	bin := buildMachineProjectionBinary(t)
+	bin := buildVerdiBinary(t)
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
 		"specs/active/borrower-update-api",
@@ -151,7 +140,7 @@ func TestMatrixProjectionContract_Behavioral(t *testing.T) {
 }
 
 func TestJourneyJSONContract_Behavioral(t *testing.T) {
-	bin := buildMachineProjectionBinary(t)
+	bin := buildVerdiBinary(t)
 	repo := buildJourneyRepo(t, map[string]string{
 		".verdi/specs/active/payments/spec.md":      journeyFeatureSpecMD,
 		".verdi/specs/active/journey-story/spec.md": machineJourneyStorySpec,
@@ -176,7 +165,7 @@ func TestJourneyJSONContract_Behavioral(t *testing.T) {
 }
 
 func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
-	bin := buildMachineProjectionBinary(t)
+	bin := buildVerdiBinary(t)
 	repo := buildCorpusRepo(t)
 	writeViolatedMatrixFixture(t, repo.Dir, repo.Head)
 	exit, violatedJSON, stderr := runMachineProjectionBinary(t, bin, repo.Dir, "matrix", "--json", "spec/stale-decline")

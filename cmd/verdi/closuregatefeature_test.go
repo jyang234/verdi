@@ -71,6 +71,7 @@ func featureSupersededExclusionCondition(t *testing.T) gateCondition {
 // print a disclosed exclusion and still summarize READY claiming ZERO
 // disclosures. A fabricated stand-in literal cannot witness that.
 func TestReportClosureGateConditions_FeatureUsesStructuredOutcome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		conditions      []gateCondition
@@ -184,6 +185,7 @@ func featureStaleTestSpec(id string, acIDs ...string) *artifact.SpecFrontmatter 
 // ARCHIVED report (the feature's own report never reproduced it) must
 // still count toward the feature-close budget — not silently dropped.
 func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverZero(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 
@@ -219,6 +221,7 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverZero(t *testing.
 // accepted-deviation finding present in BOTH a closed implementing story's
 // archived report AND the feature's own report must count exactly once.
 func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverTwice(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 
@@ -245,6 +248,7 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverTwice(t *testing
 // since printFeatureMatrix-style callers compute every condition
 // unconditionally regardless of condition 3's own verdict.
 func TestCheckFeatureSpecStaleCondition_UnclosedStory_NoArchiveYet_NoOperationalError(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
@@ -277,6 +281,7 @@ func TestCheckFeatureSpecStaleCondition_UnclosedStory_NoArchiveYet_NoOperational
 // `archived == nil -> continue` with no disclosure, so the missing archive
 // silently contributed zero and the condition passed.
 func TestCheckFeatureSpecStaleCondition_ClosedStoryMissingArchive_Disclosed(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	// The feature's own report is present; the CLOSED implementing story has NO
@@ -318,6 +323,7 @@ func TestCheckFeatureSpecStaleCondition_ClosedStoryMissingArchive_Disclosed(t *t
 // evaluated, so this provable own-text violation was demoted to
 // disclosed-as-unproven and the feature closed anyway.
 func TestCheckFeatureSpecStaleCondition_MissingArchive_OwnTextFlag_Fails(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	// The feature's OWN report carries an own-text accepted-deviation (its id
@@ -359,6 +365,7 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_OwnTextFlag_Fails(t *test
 // non-blocking Disclosed condition and the over-threshold budget never blocked
 // closure.
 func TestCheckFeatureSpecStaleCondition_MissingArchive_PartialUnionOverThreshold_Fails(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	// One PRESENT closed-story archive already carrying 4 accepted-deviations
@@ -405,6 +412,7 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_PartialUnionOverThreshold
 // (previously it appeared only inside the FAIL reason), so a passing
 // feature-close gate shows how many archives actually fed the union.
 func TestCheckFeatureSpecStaleCondition_TallyPrintsOnPass(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	// Two closed stories WITH archives (one accepted-deviation total, under
@@ -437,6 +445,7 @@ func TestCheckFeatureSpecStaleCondition_TallyPrintsOnPass(t *testing.T) {
 // own "a story with no build activity yet cannot be spec-stale"): no
 // feature report, no story archives at all — trivially unflagged, no error.
 func TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 
@@ -471,6 +480,7 @@ func TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged(t *
 // hand-formatted with a 7-space indent before, which is precisely why the
 // reporting loop never counted it.
 func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 
@@ -521,6 +531,7 @@ func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *
 // exclude and nothing to disclose (never a spurious "(0 accepted-deviation(s))"
 // line), and never an operational error.
 func TestCheckFeatureSpecStaleCondition_SupersededStory_NoArchive_NoDisclosureNoError(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
@@ -572,6 +583,7 @@ func writeSixReportFeature(t *testing.T, root string, adCount int) []implementin
 // Red-first: against the pre-fix flat threshold this reds — 23 > 6 flags and the
 // condition FAILs, so cond.OK is false where this test requires true.
 func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	stories := writeSixReportFeature(t, root, 23)
@@ -600,6 +612,7 @@ func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes(t *testing.
 // per-report density that fires the counterweight; it never lets an over-dense
 // feature through.
 func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_DenseStillFails(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 	stories := writeSixReportFeature(t, root, 40)

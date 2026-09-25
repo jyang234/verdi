@@ -93,6 +93,7 @@ const wizardAllDefaultsScript = "\n\n\n\n\n\n\n\n\nn\nn\ny\n"
 // resolving to the canonical model (mirroring model_test.go's own
 // TestModelCheck_NoModelYAML_OK witness).
 func TestInit_Bare_EmptyDir_CreatesMinimalSkeleton(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -138,6 +139,7 @@ func TestInit_Bare_EmptyDir_CreatesMinimalSkeleton(t *testing.T) {
 // canonical vocabulary — mirroring TestInit_Bare_EmptyDir_CreatesMinimalSkeleton's
 // old expectations byte for byte.
 func TestInit_Bare_VocabularyCanonical_WritesNoModelYAML(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -174,6 +176,7 @@ func TestInit_Bare_VocabularyCanonical_WritesNoModelYAML(t *testing.T) {
 // entry," not "an existing manifest") — naming what exists, and leaving
 // the pre-existing tree completely byte-untouched.
 func TestInit_RefusesExistingVerdiDir_Table(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	cases := []struct {
@@ -236,6 +239,7 @@ func TestInit_RefusesExistingVerdiDir_Table(t *testing.T) {
 // and NO VERDI_INIT_ASSUME_TTY override exits 2 naming the missing TTY,
 // writing nothing at all.
 func TestInit_Wizard_NoTTY_Refuses(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -259,6 +263,7 @@ func TestInit_Wizard_NoTTY_Refuses(t *testing.T) {
 // resolve the same default --vocabulary preset and neither diverges from
 // it here.
 func TestInit_Wizard_AllDefaults_MatchesBarePath(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -294,6 +299,7 @@ func TestInit_Wizard_AllDefaults_MatchesBarePath(t *testing.T) {
 // proving --vocabulary canonical really did seed an empty vocabulary and
 // not silently fall back to the plain preset.
 func TestInit_Wizard_VocabularyCanonical_MatchesBareCanonicalPath(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -321,6 +327,7 @@ func TestInit_Wizard_VocabularyCanonical_MatchesBareCanonicalPath(t *testing.T) 
 // combined output must name the frontier, and the store must still be
 // created.
 func TestInit_Wizard_StructuralRequest_RefusesButContinues(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -344,6 +351,7 @@ func TestInit_Wizard_StructuralRequest_RefusesButContinues(t *testing.T) {
 // question land in the promoted store's model.yaml vocabulary: block and
 // as local .verdi/templates/ override copies.
 func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -402,6 +410,7 @@ func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
 // staging (aborted stdin / an injected error) still exits 2, so a script can
 // tell "the operator chose not to write" apart from "init broke".
 func TestInit_Wizard_DeclinedWrite_ExitsZeroNoOp(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -425,6 +434,7 @@ func TestInit_Wizard_DeclinedWrite_ExitsZeroNoOp(t *testing.T) {
 // is answered exits 2 and leaves NOTHING under the target directory — no
 // .verdi/, no leftover sibling temp directory.
 func TestInit_Wizard_MidInterviewAbort_LeavesNothing(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -446,6 +456,7 @@ func TestInit_Wizard_MidInterviewAbort_LeavesNothing(t *testing.T) {
 // after that file is staged but before promotion, leaving nothing at the
 // real root and no temp litter.
 func TestInit_Wizard_SimulatedCrash_LeavesNothing(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -468,6 +479,7 @@ func TestInit_Wizard_SimulatedCrash_LeavesNothing(t *testing.T) {
 // earlier crash point (right after verdi.yaml, before model.yaml is even
 // staged) must be equally clean.
 func TestInit_Wizard_SimulatedCrash_AfterVerdiYAML_AlsoLeavesNothing(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -490,6 +502,7 @@ func TestInit_Wizard_SimulatedCrash_AfterVerdiYAML_AlsoLeavesNothing(t *testing.
 // the real root (the sibling temp directory is discarded exactly like
 // every other pre-promotion failure).
 func TestInit_Bare_SimulatedCrash_LeavesNothing(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -514,6 +527,7 @@ func TestInit_Bare_SimulatedCrash_LeavesNothing(t *testing.T) {
 // the decode-compare-equal-to-the-interview's-own-intent property,
 // proven end to end through the real subprocess's file output.
 func TestInit_Wizard_PromotionIsSingleRename_AndDecodeComparesEqual(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -560,6 +574,7 @@ func TestInit_Wizard_PromotionIsSingleRename_AndDecodeComparesEqual(t *testing.T
 // cmd/verdi/context_project_test.go's identical "--root"
 // duplicate/empty-via-"=" table rows).
 func TestInit_UnknownArgument_UsageError(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	cases := []struct {
@@ -602,6 +617,7 @@ func TestInit_UnknownArgument_UsageError(t *testing.T) {
 // a bare invocation would, leaves the existing verdi.yaml byte-untouched,
 // and never lets a model.yaml appear.
 func TestInit_ExistingStore_VocabularyFlagStillRefuses(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 

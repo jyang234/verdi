@@ -144,7 +144,7 @@ func parseContextProjectLines(t *testing.T, stdout string) map[string]string {
 // the exact order a human operator would use them, against the committed
 // hermetic fixture provisioned without its recorded disposition.
 func TestLocalOperatorWave(t *testing.T) {
-	binary := buildCountersignContractBinary(t)
+	binary := buildVerdiBinary(t)
 	env := map[string]string{}
 	repo := buildLocalOperatorRepoNoDisposition(t)
 

@@ -702,6 +702,7 @@ func TestRunClose_UnresolvableStory_ExitsOperational(t *testing.T) {
 // judge's own configured ceiling (JudgeTimeout threaded through unchanged —
 // duration identical to today, only the timeout FAILURE SHAPE changes).
 func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
+	t.Parallel()
 	deps := closeDeps{
 		Runner:        upstream.NewFakeRunner(),
 		JudgeCmd:      []string{"claude", "-p"},
@@ -734,6 +735,7 @@ func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
 // the freeze step's judge path directly, exactly as it would run were a
 // regenerate ever reached.
 func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
@@ -782,6 +784,7 @@ func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
 // expiry message is unchanged and still speaks --wait
 // (TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated keeps passing).
 func TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
@@ -919,6 +922,7 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 // caller's target argument: an interrupted close has already moved the spec
 // out of the active zone, so a retry's own ref no longer resolves.
 func TestClosureResidueName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		paths []string
@@ -1389,6 +1393,7 @@ func TestUncommittedFoldRecordPaths(t *testing.T) {
 // --preflight and --prepare then ALL exited 2 on the happy path for any story
 // whose attestation or waiver is committed — the very state the design wants.
 func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const rel = ".verdi/waivers/jira-close-1/ac-1.md"
 
@@ -1435,6 +1440,7 @@ func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
 // TestStoryFoldRecordPaths table-drives which fold inputs count as CONSUMED —
 // the paths whose absence from HEAD is worth disclosing.
 func TestStoryFoldRecordPaths(t *testing.T) {
+	t.Parallel()
 	const slug = "jira-close-1"
 	cases := []struct {
 		name string
@@ -1538,6 +1544,7 @@ func TestStoryFoldRecordPaths(t *testing.T) {
 // commits the spec directory) is fine: the pathspec matches the index entry
 // and records the deletion. This covers the edge where it does not.
 func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
@@ -1811,6 +1818,7 @@ func TestRunClose_PublishFailureDisclosesCommittedButUnpublished(t *testing.T) {
 }
 
 func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			"staged.txt":   "committed staged content\n",

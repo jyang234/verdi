@@ -113,6 +113,7 @@ func runVerdiStdin(t *testing.T, bin, dir, stdin string, args ...string) (int, s
 }
 
 func TestPolicyAdopt_UsageAndFlagShape(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir() // no store, no git: every case below must fail before touching either
 	for _, args := range [][]string{{"policy"}, {"policy", "adopt"}, {"policy", "frobnicate"}, {"policy", "adopt", "--starter", "--profile", "solo", "--profile", "team"}, {"policy", "adopt", "--starter", "--profile", "high-assurance"}, {"policy", "adopt", "--starter", "--profile=frobnicate"}, {"policy", "adopt", "--starter", "--owner"}, {"policy", "adopt", "--starter", "--profile", "team"}} {

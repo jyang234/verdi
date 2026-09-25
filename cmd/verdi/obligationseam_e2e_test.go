@@ -54,6 +54,7 @@ func runVerdiBinary(t *testing.T, bin, dir string, extraEnv []string, args ...st
 // spec, I-41), run as a real subprocess, it exits 0 and leaves both
 // obligations decodable on disk.
 func TestObligationSeamE2E_ScaffoldsMissingObligations(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -102,6 +103,7 @@ func TestObligationSeamE2E_ScaffoldsMissingObligations(t *testing.T) {
 // fixture repo has no origin remote) — the verb proceeds and writes an
 // unauthored scaffold.
 func TestObligationSeamE2E_ObligationAuthorCreate(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildObligationAuthorRepo(t, nil)
 
@@ -138,6 +140,7 @@ func TestObligationSeamE2E_ObligationAuthorCreate(t *testing.T) {
 // since the fixture never diverges from it, so the already-committed
 // obligation is trivially "reachable from the merge-base".
 func TestObligationSeamE2E_ObligationAuthorRefusesOnAlreadyFrozen(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	frozenObligationMD := `---
 id: obligation/widget-story--ac-1--static

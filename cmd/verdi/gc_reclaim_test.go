@@ -21,6 +21,7 @@ import (
 // --- parseGcArgs ---
 
 func TestParseGcArgs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                   string
 		args                   []string
@@ -114,6 +115,7 @@ func writeGcFile(t *testing.T, dir, name, content string) {
 // printed eligible, the kept item is printed kept, nothing is mutated, and
 // the ac-3 scope-disclosure line is printed.
 func TestRunGcReclaimUnmanaged_DryRun_PrintsPlanAndScope(t *testing.T) {
+	t.Parallel()
 	root, eligibleBranch, eligibleWTPath, unmergedBranch := gcReclaimFixture(t)
 	ctx := context.Background()
 
@@ -158,6 +160,7 @@ func TestRunGcReclaimUnmanaged_DryRun_PrintsPlanAndScope(t *testing.T) {
 // is actually removed and its tip printed; the kept item's own line is
 // BYTE-IDENTICAL to the dry-run's (dc-1: never re-decided by --apply).
 func TestRunGcReclaimUnmanaged_Apply_ReclaimsEligible_KeepsUnchanged(t *testing.T) {
+	t.Parallel()
 	root, eligibleBranch, eligibleWTPath, unmergedBranch := gcReclaimFixture(t)
 	ctx := context.Background()
 
@@ -216,6 +219,7 @@ func TestRunGcReclaimUnmanaged_Apply_ReclaimsEligible_KeepsUnchanged(t *testing.
 // before computing any plan, dry-run and --apply alike, exit 2, no plan
 // printed, no mutating call attempted.
 func TestRunGcReclaimUnmanaged_UnresolvableDefaultBranch_RefusesWholeRun(t *testing.T) {
+	t.Parallel()
 	root, eligibleBranch, eligibleWTPath, _ := gcReclaimFixture(t)
 	ctx := context.Background()
 
@@ -250,6 +254,7 @@ func TestRunGcReclaimUnmanaged_UnresolvableDefaultBranch_RefusesWholeRun(t *test
 // an empty plan is not a special case: the scope-disclosure line still
 // prints and the run still exits 0.
 func TestRunGcReclaimUnmanaged_NoEligibleOrKeptItems_StillPrintsScope(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n", ".verdi/.gitignore": "data/\n"},
 		Message: "store root",
@@ -322,6 +327,7 @@ func TestRunGcReclaimUnmanaged_UnprovenSpecs_RefusesWholeRun(t *testing.T) {
 // result, not just a genuinely unproven one) is caught here, not just by
 // the two pre-existing tests continuing to pass.
 func TestRunGcReclaimUnmanaged_ZeroUnprovenSpecs_UnchangedBehavior(t *testing.T) {
+	t.Parallel()
 	root, eligibleBranch, eligibleWTPath, unmergedBranch := gcReclaimFixture(t)
 	ctx := context.Background()
 

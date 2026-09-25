@@ -442,6 +442,7 @@ func TestRunPrepare_JudgeTimeoutResumeHintSpeaksPreparation(t *testing.T) {
 // the way Wait and ResumeHint once were. DeepEqual over the whole struct is
 // deliberate — it fails on any new field preparation forgets.
 func TestPrepareAlignDeps_IsFreezeAlignDepsWithOnlyTheResumeHintOverridden(t *testing.T) {
+	t.Parallel()
 	deps := closeDeps{
 		Runner:        upstream.NewFakeRunner(),
 		JudgeCmd:      []string{"/bin/true"},

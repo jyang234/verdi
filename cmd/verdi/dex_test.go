@@ -52,6 +52,7 @@ func TestRunDexBuild_Happy(t *testing.T) {
 }
 
 func TestRunDexVerb_Negative_NoSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	got := runDexVerb(nil, &stdout, &stderr)
 	if got != 2 {
@@ -63,6 +64,7 @@ func TestRunDexVerb_Negative_NoSubcommand(t *testing.T) {
 }
 
 func TestRunDexVerb_Negative_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	got := runDexVerb([]string{"frobnicate"}, &stdout, &stderr)
 	if got != 2 {

@@ -235,6 +235,7 @@ func assertTreeUnchanged(t *testing.T, root string, before map[string]string) {
 //
 // guide-claim: 7.3-attest
 func TestRunAttest_Happy(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 
@@ -293,6 +294,7 @@ func TestRunAttest_Happy(t *testing.T) {
 // exit-2 posture for the identical resolution failure) — never exit 0,
 // never exit 2, and the working tree is left byte-for-byte unchanged.
 func TestRunAttest_RefusesUnknownStoryRef(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -322,6 +324,7 @@ func TestRunAttest_RefusesUnknownStoryRef(t *testing.T) {
 //
 // guide-claim: 7.3-attest
 func TestRunAttest_FeatureHappy(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 
@@ -386,6 +389,7 @@ func TestRunAttest_FeatureHappy(t *testing.T) {
 // its declared acceptance criteria — refused (exit 1, verdict), naming the
 // undeclared id, exactly like the story form's TestRunAttest_RefusesUndeclaredAC.
 func TestRunAttest_FeatureUndeclaredAC(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -414,6 +418,7 @@ func runAttestBuffers(ctx context.Context, root, storyRefArg, acID string, mdl *
 // resolved story spec that does not declare the given ac-id is refused
 // (exit 1, verdict), never exit 0, never exit 2.
 func TestRunAttest_RefusesUndeclaredAC(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -435,6 +440,7 @@ func TestRunAttest_RefusesUndeclaredAC(t *testing.T) {
 // exit 1, verdict, and the pre-existing file's bytes are provably
 // untouched.
 func TestRunAttest_RefusesAlreadyExists(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 
@@ -474,6 +480,7 @@ func TestRunAttest_RefusesAlreadyExists(t *testing.T) {
 // succeeds against the read-back bytes — while the unauthored marker is
 // still present, before any claim is ever authored.
 func TestRunAttest_ScaffoldRoundTrips(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 
@@ -503,6 +510,7 @@ func TestRunAttest_ScaffoldRoundTrips(t *testing.T) {
 // exist — the machinery to read it failed. co-2's exit discipline is
 // constitutional.
 func TestRunAttest_OperationalOnMalformedTargetSpec(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestMalformedRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -521,6 +529,7 @@ func TestRunAttest_OperationalOnMalformedTargetSpec(t *testing.T) {
 // operational failure (exit 2), never dressed as a "(story, AC) does not
 // exist" verdict for the unrelated file's malformation.
 func TestRunAttest_OperationalOnFallbackScanMalformedSpec(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestMalformedRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -539,6 +548,7 @@ func TestRunAttest_OperationalOnFallbackScanMalformedSpec(t *testing.T) {
 // bare story-ref — operational (exit 2), never dressed as a "(story, AC) does
 // not exist" verdict (exit 1) that would also mask a reachable pair.
 func TestRunAttest_OperationalOnScanStrayDir(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestStrayDirRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -556,6 +566,7 @@ func TestRunAttest_OperationalOnScanStrayDir(t *testing.T) {
 // attest's OWN terms — never leaking storyresolve/matrix's "matrix folds only
 // feature and story specs" contract wording, which names the wrong verb.
 func TestRunAttest_RefusesComponentInOwnTerms(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestComponentRepo(t)
 	ctx := context.Background()
 	before := snapshotTree(t, repo.Dir)
@@ -580,6 +591,7 @@ func TestRunAttest_RefusesComponentInOwnTerms(t *testing.T) {
 // read it — not an "an attestation already exists" verdict (exit 1) claiming
 // to protect a human record that isn't there.
 func TestRunAttest_OperationalOnDirectoryAtFoldPath(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
 
@@ -605,6 +617,7 @@ func TestRunAttest_OperationalOnDirectoryAtFoldPath(t *testing.T) {
 // non-empty refusal, opErr nil); a spec present-but-unreadable is operational
 // (opErr non-nil, refusal empty) — ADJ-51 finding 1's exit-discipline split.
 func TestClassifyPair(t *testing.T) {
+	t.Parallel()
 	repo := buildAttestFixtureRepo(t)
 
 	t.Run("clean pair resolves", func(t *testing.T) {
@@ -683,6 +696,7 @@ func TestClassifyPair(t *testing.T) {
 // TestAttestationAlreadyExists is AC-2's other static predicate: the
 // already-exists check at the exact fold path, exercised directly.
 func TestAttestationAlreadyExists(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	exists, err := attestationAlreadyExists(root, "jira-attest-1", "ac-1")
@@ -728,6 +742,7 @@ func TestAttestationAlreadyExists(t *testing.T) {
 // validation: exactly two positional arguments are required, before any
 // store root is even resolved.
 func TestCmdAttest_UsageErrors(t *testing.T) {
+	t.Parallel()
 	cases := [][]string{
 		nil,
 		{"jira:ATTEST-1"},
