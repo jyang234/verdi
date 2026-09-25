@@ -426,6 +426,50 @@ func leadingReference(s string) (name, rest string, ok bool) {
 	return name, s[end+1:], true
 }
 
+// makeRefRE finds a make variable reference by name: $(NAME), ${NAME}, or the
+// one-character $N. Run it on text with every `$$` (a literal `$` for the
+// shell) removed.
+var makeRefRE = regexp.MustCompile(`\$(?:[({]([A-Za-z0-9_.][A-Za-z0-9_.-]*)[)}]|([A-Za-z0-9_]))`)
+
+// referencedValueProblem says why a variable reached from a gate recipe line
+// could hide a failure, or returns "". It follows every variable the line
+// references, anywhere in it, and every variable their values reference in
+// turn. A define value brings newlines, and make runs each line after the
+// first as its own recipe line, with its own prefix, wherever the reference
+// sits; so every such line is checked like a recipe line
+// (recipePrefixProblem). The first line continues the line the reference sits
+// on, which recipePrefixProblem already checks when the reference leads it.
+// Every value reached is also checked for a sub-make carrying a masking flag
+// (makeInvocationProblem).
+func referencedValueProblem(text string, assigns []makeAssignment) string {
+	seen := map[string]bool{}
+	queue := []string{text}
+	for len(queue) > 0 {
+		cur := strings.ReplaceAll(queue[0], "$$", "")
+		queue = queue[1:]
+		for _, m := range makeRefRE.FindAllStringSubmatch(cur, -1) {
+			name := m[1] + m[2]
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			for _, a := range assignmentsOf(assigns, name) {
+				queue = append(queue, a.Value)
+				lines := strings.Split(a.Value, "\n")
+				for i, line := range lines[1:] {
+					if why := recipePrefixProblem(line, assigns, 0); why != "" {
+						return fmt.Sprintf("reaches $(%s), set at line %d, whose line %d %q %s", name, a.Line, i+2, line, why)
+					}
+				}
+				if why := makeInvocationProblem(a.Value); why != "" {
+					return fmt.Sprintf("reaches $(%s), set at line %d, whose value %s, so the step can pass without running or over a failure", name, a.Line, why)
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // makeInvocationRE finds a make invocation in recipe text: $(MAKE), ${MAKE},
 // or a bare `make` command word.
 var makeInvocationRE = regexp.MustCompile("(?:^|[\\s;&|(`])(?:\\$\\(MAKE\\)|\\$\\{MAKE\\}|make)[ \\t]")
@@ -482,8 +526,9 @@ var makeShellVars = []string{"SHELL", ".SHELLFLAGS"}
 // variables, and any assignment of SHELL or .SHELLFLAGS. For each recipe line
 // of a root target, or of any prerequisite a root pulls in, it refuses a `-`
 // prefix, written or reached through a leading variable
-// (recipePrefixProblem), and a make invocation carrying -i, -k, -n, -t, or -q
-// (makeInvocationProblem). A gate target with no rule, or with neither a
+// (recipePrefixProblem), a make invocation carrying -i, -k, -n, -t, or -q
+// (makeInvocationProblem), and either one reached through a variable the line
+// references, including any line of a define value (referencedValueProblem). A gate target with no rule, or with neither a
 // recipe nor a prerequisite, is reported too: its recipe cannot be read, so
 // it cannot be cleared.
 func errorIgnoringGateRecipes(makefile string, roots []string) []string {
@@ -540,6 +585,9 @@ func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 				if why := makeInvocationProblem(l.Text); why != "" {
 					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q %s, so the step can pass without running or over a failure", l.Line, target, first, why))
 				}
+				if why := referencedValueProblem(l.Text, assigns); why != "" {
+					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q %s", l.Line, target, first, why))
+				}
 			}
 		}
 		if !readable {
@@ -561,8 +609,10 @@ func gateRoots(t *testing.T, makefile string) []string {
 // green over a failed command through the Makefile source, which `make -n`
 // cannot show: no `.IGNORE`, `.ONESHELL`, `.POSIX`, or `.SILENT`, no make
 // flag variables, no SHELL or .SHELLFLAGS, and, on any recipe line of a gate
-// target or of a prerequisite it pulls in, no `-` prefix (written or through
-// a leading variable) and no sub-make with -i, -k, -n, -t, or -q.
+// target or of a prerequisite it pulls in, no `-` prefix (written, through a
+// leading variable, or on any line of a define value the line reaches) and no
+// sub-make with -i, -k, -n, -t, or -q (written or in a value the line
+// reaches).
 func TestGateParity_GateRecipesNeverIgnoreErrors(t *testing.T) {
 	makefile := readMakefile(t)
 	for _, p := range errorIgnoringGateRecipes(makefile, gateRoots(t, makefile)) {
@@ -613,6 +663,12 @@ func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
 		{"${MAKE} --keep-going after a continuation", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\techo x; \\\n\t${MAKE} --keep-going build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "(--keep-going)"},
 		{"$(MAKE) --ign, an accepted abbreviation", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t$(MAKE) --ign build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "(--ignore-errors)"},
 		{"$(MAKE) $(FLAGS)", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t$(MAKE) $(FLAGS) build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "variable reference whose flags"},
+		{"a define RUN_REST with a - line leads a recipe line", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n-go vet ./...\nendef\ntest-rest:\n\t$(RUN_REST)", "reaches $(RUN_REST)"},
+		{"a define RUN_REST with a - line sits mid-line", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n-go vet ./...\nendef\ntest-rest:\n\techo run $(RUN_REST)", "reaches $(RUN_REST)"},
+		{"a define with a - line reached through another variable", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n-go vet ./...\nendef\nRUN = $(RUN_REST)\ntest-rest:\n\t$(RUN)", "reaches $(RUN_REST)"},
+		{"a define line led by a variable set to -", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\nI := -\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n$(I)go vet ./...\nendef\ntest-rest:\n\t$(RUN_REST)", "reaches $(RUN_REST)"},
+		{"a variable whose value runs $(MAKE) -i", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\nSUB = $(MAKE) -i\ntest-rest:\n\t$(SUB) fixture\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "reaches $(SUB)"},
+		{"control: a clean multi-line define leads a recipe line", "\ntest-rest:\n\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\ndefine RUN_REST\ngo test -race -parallel 4 $(TEST_REST_PKGS)\n@go vet ./...\nendef\ntest-rest:\n\t$(RUN_REST)", ""},
 		{"control: - on a target outside the gate", "\tgo mod tidy", "\t-go mod tidy", ""},
 		{"control: - opening a continuation line is shell text, not a prefix", "\tstatus=$$?; \\\n\tif [ \"$$status\" -ne 0 ]", "\tstatus=$$?; \\\n\t-true; if [ \"$$status\" -ne 0 ]", ""},
 		{"control: .IGNORE named in a comment", "\ntidy:\n", "\n# never declare .IGNORE: here\ntidy:\n", ""},
