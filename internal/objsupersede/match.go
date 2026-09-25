@@ -205,7 +205,7 @@ func (recs *Records) namedBy(object artifact.Ref, spec string) *Conflict {
 		return nil
 	}
 	for _, c := range recs.challengers(object) {
-		if c.FM.Status == "superseded" && resolvedBy(c) == spec {
+		if c.superseded() && resolvedBy(c) == spec {
 			return c
 		}
 	}
@@ -274,7 +274,7 @@ func (recs *Records) carriedCandidate(chain []string, decision string, object ar
 		return false
 	}
 	for _, c := range recs.challengers(object) {
-		if c.FM.Status == "superseded" && indexOf(chain[1:], resolvedBy(c)) >= 0 {
+		if c.superseded() && indexOf(chain[1:], resolvedBy(c)) >= 0 {
 			return true
 		}
 	}
@@ -287,7 +287,7 @@ func (recs *Records) carriedCandidate(chain []string, decision string, object ar
 func (recs *Records) establishedByOther(object artifact.Ref, spec string) (*Conflict, string) {
 	for _, c := range recs.challengers(object) {
 		x := resolvedBy(c)
-		if c.FM.Status == "superseded" && x != "" && x != spec && recs.Specs[x] != nil && decisionEdge(recs.Specs[x].FM, "", object) {
+		if c.superseded() && x != "" && x != spec && recs.Specs[x] != nil && decisionEdge(recs.Specs[x].FM, "", object) {
 			return c, x
 		}
 	}
@@ -305,7 +305,7 @@ func (recs *Records) conflictFor(object artifact.Ref, namer string) (*Conflict, 
 	}
 	var superseded []*Conflict
 	for _, c := range cs {
-		if c.FM.Status == "superseded" {
+		if c.superseded() {
 			superseded = append(superseded, c)
 		}
 	}
@@ -318,7 +318,7 @@ func (recs *Records) conflictFor(object artifact.Ref, namer string) (*Conflict, 
 	}
 	count := 0
 	for _, c := range recs.Conflicts {
-		if c.FM.Status == "superseded" && resolvedBy(c) == namer && len(fragmentSpecs(c, object.Name)) > 0 {
+		if c.superseded() && resolvedBy(c) == namer && len(fragmentSpecs(c, object.Name)) > 0 {
 			count++
 		}
 	}
@@ -377,7 +377,7 @@ func (recs *Records) completeness(s *Spec) []Result {
 	}
 	var out []Result
 	for _, c := range recs.Conflicts {
-		if c.FM.Status != "superseded" || resolvedBy(c) != s.Name {
+		if !c.superseded() || resolvedBy(c) != s.Name {
 			continue
 		}
 		for _, l := range c.FM.Links {

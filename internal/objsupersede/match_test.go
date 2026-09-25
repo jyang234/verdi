@@ -110,9 +110,9 @@ func TestEvaluate_Conditions(t *testing.T) {
 		}, "successor", "dc-1", want{Unresolved, ReasonTargetMissing, "", "", "", ""}},
 		{"target not closed", []string{"successor-not-closed", "conflict-not-closed", "conflict-story"}, nil, "successor", "dc-1", want{Unresolved, ReasonTargetNotClosed, "", "", "", ""}},
 		{"target not closed wins over no conflict", []string{"successor-not-closed"}, nil, "successor", "dc-1", want{Unresolved, ReasonTargetNotClosed, "", "", "", ""}},
-		{"legacy status closed counts as closed", []string{"successor-not-closed", "conflict-not-closed"}, func(r *Records) {
+		{"an active-zone status: closed target is not closed (SI-277)", []string{"successor-not-closed", "conflict-not-closed"}, func(r *Records) {
 			r.Specs["other-feature"].FM.Status = "closed"
-		}, "successor", "dc-1", want{ResolvedNew, "", "", "successor-other-feature", "", ""}},
+		}, "successor", "dc-1", want{Unresolved, ReasonTargetNotClosed, "", "", "", ""}},
 		{"object not declared", []string{"successor-undeclared", "conflict-feature-undeclared", "conflict-story"}, nil, "successor", "dc-1", want{Unresolved, ReasonObjectNotDeclared, "", "", "", ""}},
 		{"object not declared wins over no conflict", []string{"successor-undeclared"}, nil, "successor", "dc-1", want{Unresolved, ReasonObjectNotDeclared, "", "", "", ""}},
 		{"object is a constraint", []string{"successor-constraint", "conflict-feature-constraint", "conflict-story"}, nil, "successor", "dc-1", want{Unresolved, ReasonObjectNotTarget, "", "", "", ""}},

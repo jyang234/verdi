@@ -103,9 +103,10 @@ type Spec struct {
 	FM       *artifact.SpecFrontmatter
 }
 
-// Closed reports the target reading of "closed": the archive zone, or an
-// explicit legacy `status: closed` (VL-002's zone reading).
-func (s *Spec) Closed() bool { return s.Archived || s.FM.Status == "closed" }
+// Closed reports the match's reading of "closed" (SI-277): the spec's
+// document sits in the archive zone. A `status: closed` spec in the active
+// zone is not closed; the match refuses it as target not closed.
+func (s *Spec) Closed() bool { return s.Archived }
 
 // Conflict is one decoded conflict of a tree.
 type Conflict struct {
@@ -113,6 +114,13 @@ type Conflict struct {
 	Path string
 	FM   *artifact.ConflictFrontmatter
 }
+
+// superseded reports whether the conflict's own claim is resolved: its
+// frontmatter status (open -> superseded | dismissed, 02 §Kind registry)
+// is superseded. It is the package's one read of a conflict's status
+// (SI-277); it is never a spec's lifecycle state, which comes from
+// internal/specstate and first-parent history (SI-270).
+func (c *Conflict) superseded() bool { return c.FM.Status == "superseded" }
 
 // Records is one tree's specs (both zones) and conflicts. Failures lists,
 // sorted, every record that failed strict decode or disagrees with its path:
