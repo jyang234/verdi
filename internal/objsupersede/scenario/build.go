@@ -28,19 +28,20 @@ type Repo struct {
 // fresh repository and fails t on any error.
 func Build(t testing.TB, name string) *Repo {
 	t.Helper()
-	repo, err := materialize(context.Background(), Dir(), t.TempDir(), name)
+	repo, err := Materialize(context.Background(), Dir(), t.TempDir(), name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return repo
 }
 
-// materialize builds scenario name from the fixture at fixtureDir into the
-// empty directory repoDir. Every commit input comes from the manifest, and
-// git runs with no inherited GIT_* variable and no global or system config
-// (lane L3 review a M-2), so no ambient identity, date, or merge setting
-// can move a SHA.
-func materialize(ctx context.Context, fixtureDir, repoDir, name string) (*Repo, error) {
+// Materialize builds scenario name from the fixture at fixtureDir into the
+// empty directory repoDir, following the package doc's replay rules, and
+// needs no testing.TB: it is the non-test materializer a harness calls.
+// Every commit input comes from the manifest, and every git invocation
+// carries its own config isolation (lane L3 review a M-2, re-review a m-3),
+// so no ambient identity, date, or setting can move a SHA.
+func Materialize(ctx context.Context, fixtureDir, repoDir, name string) (*Repo, error) {
 	m, err := Load(fixtureDir)
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func materialize(ctx context.Context, fixtureDir, repoDir, name string) (*Repo, 
 		return nil, fmt.Errorf("scenario: %q is not defined", name)
 	}
 	g := gitIn{ctx: ctx, dir: repoDir, id: m.Commit}
-	if _, err := g.run(nil, "init", "--quiet", "--initial-branch="+m.Commit.InitialBranch); err != nil {
+	if _, err := g.run(nil, "init", "--quiet", "--object-format=sha1", "--initial-branch="+m.Commit.InitialBranch); err != nil {
 		return nil, err
 	}
 	// The repository's own config keeps later test commits deterministic
@@ -142,9 +143,16 @@ func (g gitIn) step(m *Manifest, fixtureDir string, st Step) (string, error) {
 	return g.run(nil, "rev-parse", "HEAD")
 }
 
-// run runs git with every inherited GIT_* variable removed, global and
-// system config off, TZ=UTC, and the manifest's identity; a commit step
-// adds its dates. It returns trimmed stdout.
+// isolation is the config every invocation carries, over no global or
+// system config: settings a user's config could otherwise use to move a
+// SHA (a merge message's shortlog, a commit encoding header, line-ending
+// conversion, a message-rewriting hook, a signature).
+var isolation = []string{"-c", "merge.log=false", "-c", "i18n.commitEncoding=UTF-8", "-c", "core.autocrlf=false",
+	"-c", "core.hooksPath=" + os.DevNull, "-c", "commit.gpgsign=false"}
+
+// run runs git with isolation, every inherited GIT_* variable removed,
+// global and system config off, TZ=UTC, and the manifest's identity; a
+// commit step adds its dates. It returns trimmed stdout.
 func (g gitIn) run(st *Step, args ...string) (string, error) {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -168,7 +176,7 @@ func (g gitIn) run(st *Step, args ...string) (string, error) {
 			env = append(env, fmt.Sprintf("%s=%d +0000", key, when.Unix()))
 		}
 	}
-	cmd := exec.CommandContext(g.ctx, "git", args...)
+	cmd := exec.CommandContext(g.ctx, "git", append(append([]string{}, isolation...), args...)...)
 	cmd.Dir, cmd.Env = g.dir, env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

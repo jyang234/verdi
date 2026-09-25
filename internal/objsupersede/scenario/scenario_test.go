@@ -2,7 +2,9 @@ package scenario
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,12 +160,40 @@ func TestLoad_ErrorsAreDeterministic(t *testing.T) {
 	}
 }
 
+// hostileGit sets hostile ambient git state: exported identities and dates
+// (as git hooks export them), `git -c` settings passed down through
+// GIT_CONFIG_COUNT, a global config reached through GIT_CONFIG_GLOBAL or
+// HOME that sets merge.log and a commit encoding, and a non-UTC TZ.
+func hostileGit(t *testing.T) {
+	home := t.TempDir()
+	cfg := filepath.Join(home, ".gitconfig")
+	if err := os.WriteFile(cfg, []byte("[merge]\n\tlog = true\n[i18n]\n\tcommitEncoding = ISO-8859-1\n[user]\n\tname = Ambient\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "Hook Author"}, {"GIT_AUTHOR_EMAIL", "hook@example.invalid"},
+		{"GIT_AUTHOR_DATE", "@1790364264 -0400"}, {"GIT_COMMITTER_NAME", "Hook Author"},
+		{"GIT_COMMITTER_EMAIL", "hook@example.invalid"}, {"GIT_COMMITTER_DATE", "@1790364264 -0400"},
+		{"GIT_CONFIG_COUNT", "1"}, {"GIT_CONFIG_KEY_0", "i18n.commitEncoding"}, {"GIT_CONFIG_VALUE_0", "ISO-8859-1"},
+		{"GIT_CONFIG_GLOBAL", cfg}, {"HOME", home}, {"XDG_CONFIG_HOME", home}, {"TZ", "America/New_York"}} {
+		t.Setenv(kv[0], kv[1])
+	}
+}
+
+// wantAllCommits is the SHA-256 of every scenario's base and step commits,
+// one "name base steps" line per scenario in name order, from a build with
+// no ambient git state. TestBuild_EveryScenario reproduces it under
+// hostileGit, so no ambient setting moves any SHA of any scenario.
+const wantAllCommits = "bc01ce030463fa55f25324f2a4fabd5464cf8429c2c6faaa01a95ce58a7f5b2f"
+
 func TestBuild_EveryScenario(t *testing.T) {
+	hostileGit(t)
 	m, err := Load(Dir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, sc := range m.Scenarios {
+	var commits strings.Builder
+	for _, name := range sortedKeys(m.Scenarios) {
+		sc := m.Scenarios[name]
 		t.Run(name, func(t *testing.T) {
 			repo := Build(t, name)
 			if repo.Base[0] != wantRootCommit || len(repo.Base) != len(m.Base) {
@@ -178,33 +208,24 @@ func TestBuild_EveryScenario(t *testing.T) {
 			if len(repo.Steps) != len(sc.Steps) {
 				t.Fatalf("%d step commits, want %d", len(repo.Steps), len(sc.Steps))
 			}
+			fmt.Fprintf(&commits, "%s %s %s\n", name, strings.Join(repo.Base, ","), strings.Join(repo.Steps, ","))
 		})
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(commits.String()))); got != wantAllCommits {
+		t.Fatalf("every scenario's commits hash to %s, want %s:\n%s", got, wantAllCommits, commits.String())
 	}
 }
 
 // TestBuild_PinnedCommits pins the chain scenario's SHAs in a clean
-// environment and under hostile ambient git state: exported identities and
-// dates (as git hooks export them), `git -c` settings passed down through
-// GIT_CONFIG_COUNT, a global config reached through GIT_CONFIG_GLOBAL or
-// HOME that sets merge.log and a commit encoding, and a non-UTC TZ.
+// environment and under hostileGit.
 func TestBuild_PinnedCommits(t *testing.T) {
-	home := t.TempDir()
-	cfg := filepath.Join(home, ".gitconfig")
-	if err := os.WriteFile(cfg, []byte("[merge]\n\tlog = true\n[i18n]\n\tcommitEncoding = ISO-8859-1\n[user]\n\tname = Ambient\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	hostile := [][2]string{{"GIT_AUTHOR_NAME", "Hook Author"}, {"GIT_AUTHOR_EMAIL", "hook@example.invalid"},
-		{"GIT_AUTHOR_DATE", "@1790364264 -0400"}, {"GIT_COMMITTER_NAME", "Hook Author"},
-		{"GIT_COMMITTER_EMAIL", "hook@example.invalid"}, {"GIT_COMMITTER_DATE", "@1790364264 -0400"},
-		{"GIT_CONFIG_COUNT", "1"}, {"GIT_CONFIG_KEY_0", "i18n.commitEncoding"}, {"GIT_CONFIG_VALUE_0", "ISO-8859-1"},
-		{"GIT_CONFIG_GLOBAL", cfg}, {"HOME", home}, {"XDG_CONFIG_HOME", home}, {"TZ", "America/New_York"}}
 	for _, tc := range []struct {
-		name string
-		env  [][2]string
-	}{{"clean", nil}, {"hostile ambient state", hostile}} {
+		name    string
+		hostile bool
+	}{{"clean", false}, {"hostile ambient state", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, kv := range tc.env {
-				t.Setenv(kv[0], kv[1])
+			if tc.hostile {
+				hostileGit(t)
 			}
 			repo := Build(t, "chain")
 			if strings.Join(repo.Base, ",") != strings.Join(wantChainBase, ",") || strings.Join(repo.Steps, ",") != strings.Join(wantChainSteps, ",") {
@@ -232,7 +253,7 @@ func TestMaterialize_ManifestDrivesCommits(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := mutated(t, tc.mutate)
-			repo, err := materialize(ctx, dir, t.TempDir(), "chain")
+			repo, err := Materialize(ctx, dir, t.TempDir(), "chain")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -256,7 +277,7 @@ func TestMaterialize_ManifestDrivesCommits(t *testing.T) {
 			}
 		})
 	}
-	if _, err := materialize(ctx, Dir(), t.TempDir(), "no-such-scenario"); err == nil {
+	if _, err := Materialize(ctx, Dir(), t.TempDir(), "no-such-scenario"); err == nil {
 		t.Fatal("an undefined scenario materialized")
 	}
 }

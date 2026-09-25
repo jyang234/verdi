@@ -8,13 +8,30 @@
 // The manifest records every input a commit's SHA depends on (lane L3
 // review a M-7): the commit identity and initial branch (Commit), and each
 // step's branch, committer date, optional author date, message, and
-// operation. A scenario starts from the base steps on the initial branch,
-// then runs its own steps in order. A step writes layers as one commit,
-// moves paths (git mv) as one commit, or merges another branch --no-ff.
-// Every commit is made with Commit's identity, the step's dates in UTC,
-// and the step's message; files are written 0644. A materializer that
-// follows these rules reproduces the fixture's SHAs, and so every frozen
-// stamp, which names the root commit.
+// operation. Materialize replays it; a materializer that follows these
+// rules reproduces every SHA, and so every frozen stamp, which names the
+// root commit (re-review a m-3):
+//
+//   - Environment of every git invocation: no inherited GIT_* variable,
+//     GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=/dev/null, TZ=UTC, the
+//     author and committer name and email from Commit, and the options
+//     -c merge.log=false -c i18n.commitEncoding=UTF-8 -c core.autocrlf=false
+//     -c core.hooksPath=/dev/null -c commit.gpgsign=false.
+//   - `git init --object-format=sha1 --initial-branch=<initial branch>`.
+//   - The base steps, in order, then the scenario's steps. Before a step,
+//     check out its branch, creating it from HEAD when it does not exist.
+//   - A layers step writes each layer's files in order (later layers win),
+//     mode 0644, creating directories, then `git add -A` and
+//     `git commit -q --no-verify -m <message>`.
+//   - A moves step runs `git mv <from> <to>` for each move, creating the
+//     destination's parent, then commits the same way.
+//   - A merge step runs `git merge -q --no-ff --no-verify -m <message>
+//     <branch>`.
+//   - A commit or merge carries GIT_AUTHOR_DATE (the author date, else the
+//     date) and GIT_COMMITTER_DATE (the date), each as "<unix seconds>
+//     +0000".
+//   - Finally, point refs/remotes/origin/<initial branch> at the initial
+//     branch and check out the scenario's checkout.
 package scenario
 
 import (
