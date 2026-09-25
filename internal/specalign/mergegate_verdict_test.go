@@ -94,6 +94,12 @@ func TestMergeGateVerdictScript(t *testing.T) {
 			wantOut:  []string{"static", "e2e"},
 		},
 		{
+			name:     "a result containing = is not success",
+			args:     []string{"static=success=x", "e2e=success"},
+			wantCode: 1,
+			wantOut:  []string{"static", "success=x"},
+		},
+		{
 			name:     "a failure is reported even after a success of the same job",
 			args:     []string{"static=success", "static=failure"},
 			wantCode: 1,
