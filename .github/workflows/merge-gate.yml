@@ -22,16 +22,18 @@
 # this file is to be the one context that is NEVER ambiguous about whether
 # it will report.
 #
-# Parallel shape (SI-266, owner directive 2026-09-24). The gate is exactly
-# `make verify`'s step set plus the post-verify self-lint (`go build` the
-# binary, then `verdi lint` in the pull-request context, which exercises
-# I-14's CI-context lint baselines against a real GITHUB_BASE_REF), split
-# across parallel gate jobs so the wall clock is the slowest job, not the
-# sum:
+# Parallel shape (SI-266, owner directive 2026-09-24; SI-268, owner
+# directive 2026-09-25, split test-slow out). The gate is exactly `make
+# verify`'s step set plus the post-verify self-lint (`go build` the binary,
+# then `verdi lint` in the pull-request context, which exercises I-14's
+# CI-context lint baselines against a real GITHUB_BASE_REF), split across
+# parallel gate jobs so the wall clock is the slowest job, not the sum:
 #   static      build, fmt-check, vet, lint, lint-store, lint-showcase,
 #               showcase-coverage, then the self-lint;
 #   test-cmd    the cmd/verdi test shard;
 #   test-cross  the cross-binary test shard (always fresh, ADJ-68);
+#   test-slow   the slowest other packages' tests (the Makefile's
+#               TEST_SLOW_PKGS);
 #   test-rest   every other package's tests, then fixture, whose three
 #               packages test-rest already ran: after test-rest on the same
 #               runner they replay from the test cache instead of running
@@ -147,6 +149,17 @@ jobs:
           go-version: "1.25"
       - run: make test-cross
 
+  test-slow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-slow
+
   test-rest:
     runs-on: ubuntu-latest
     steps:
@@ -193,7 +206,7 @@ jobs:
       - run: make e2e
 
   merge-gate:
-    needs: [static, test-cmd, test-cross, test-rest, spec-align, e2e]
+    needs: [static, test-cmd, test-cross, test-slow, test-rest, spec-align, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -206,4 +219,4 @@ jobs:
           fi
           echo "merge-gate: canary OK: the verdict script fails a failing result"
       - name: Require every gate job to succeed
-        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }}
+        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}

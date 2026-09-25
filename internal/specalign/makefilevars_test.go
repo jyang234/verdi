@@ -176,7 +176,7 @@ func TestGateParity_ParseMakeAssignments(t *testing.T) {
 
 // gateVariables are the variables whose values define the gate: the steps
 // `make verify` runs and the package sets of the test shards.
-var gateVariables = []string{"VERIFY_STEPS", "CROSS_BINARY_PKGS", "TEST_CMD_PKGS", "SPEC_ALIGN_PKGS", "TEST_REST_PKGS"}
+var gateVariables = []string{"VERIFY_STEPS", "CROSS_BINARY_PKGS", "TEST_CMD_PKGS", "SPEC_ALIGN_PKGS", "TEST_SLOW_PKGS", "TEST_REST_PKGS"}
 
 // makeIncludeRE finds a directive that reads another makefile, or an eval
 // that defines makefile text at run time; the source guards read neither.
@@ -242,6 +242,7 @@ func TestGateParity_MakefileSourceProblemsFound(t *testing.T) {
 		{"CROSS_BINARY_PKGS made conditional", "CROSS_BINARY_PKGS :=", "CROSS_BINARY_PKGS ?=", `CROSS_BINARY_PKGS is assigned with "?="`},
 		{"TEST_CMD_PKGS overridden", tidy, "\noverride TEST_CMD_PKGS := ./internal/corpus\n" + tidy, "TEST_CMD_PKGS is assigned 2 times"},
 		{"TEST_REST_PKGS target-specific", "\ntest-rest:\n", "\ntest-rest: TEST_REST_PKGS = ./internal/corpus\ntest-rest:\n", "TEST_REST_PKGS is assigned 2 times"},
+		{"TEST_SLOW_PKGS appended to", tidy, "\nTEST_SLOW_PKGS += ./internal/corpus\n" + tidy, "TEST_SLOW_PKGS is assigned 2 times"},
 		{"SPEC_ALIGN_PKGS undefined", tidy, "\nundefine SPEC_ALIGN_PKGS\n" + tidy, "SPEC_ALIGN_PKGS is assigned 2 times"},
 		{"VERIFY_STEPS from the shell", "VERIFY_STEPS :=", "VERIFY_STEPS !=", `VERIFY_STEPS is assigned with "!="`},
 		{"VERIFY_STEPS gone", "VERIFY_STEPS :=", "VERIFY_STEP :=", "VERIFY_STEPS is assigned 0 times"},

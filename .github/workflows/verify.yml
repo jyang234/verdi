@@ -2,16 +2,17 @@
 # self-hosted CI evidence (the "verdi-evidence" artifact).
 #
 # Parallel shape (SI-267, owner directive 2026-09-25: "parallelize it like
-# merge-gate"). The first six jobs below are merge-gate.yml's gate jobs,
-# copied unchanged: static, test-cmd, test-cross, test-rest, spec-align, e2e.
-# SI-266 split `make verify`'s step set, plus the post-verify self-lint,
-# across those jobs so the wall clock is the slowest job, not the sum;
-# merge-gate.yml's head comment says what each job runs and why. Trust parity
-# (CLAUDE.md) is read here as SI-266 reads it for merge-gate.yml, since the
-# gate jobs are the same: CI runs exactly `make verify`'s step set, split
-# across the gate jobs, and that set grows only as the Makefile's
-# VERIFY_STEPS grows. A seventh job, `verify`, produces and uploads the
-# evidence once every gate job has succeeded (see "The evidence job" below).
+# merge-gate"). The first seven jobs below are merge-gate.yml's gate jobs,
+# copied unchanged: static, test-cmd, test-cross, test-slow, test-rest,
+# spec-align, e2e (SI-268 added test-slow). SI-266 split `make verify`'s step
+# set, plus the post-verify self-lint, across those jobs so the wall clock is
+# the slowest job, not the sum; merge-gate.yml's head comment says what each
+# job runs and why. Trust parity (CLAUDE.md) is read here as SI-266 reads it
+# for merge-gate.yml, since the gate jobs are the same: CI runs exactly `make
+# verify`'s step set, split across the gate jobs, and that set grows only as
+# the Makefile's VERIFY_STEPS grows. An eighth job, `verify`, produces and
+# uploads the evidence once every gate job has succeeded (see "The evidence
+# job" below).
 #
 # The self-lint (Phase 4). `make verify`'s own `lint-store` target already
 # runs `verdi lint` against this repo locally (no CI environment), which is
@@ -238,6 +239,17 @@ jobs:
           go-version: "1.25"
       - run: make test-cross
 
+  test-slow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-slow
+
   test-rest:
     runs-on: ubuntu-latest
     steps:
@@ -288,7 +300,7 @@ jobs:
   # The verdict step re-checks every result, as a legible witness in this
   # job's log of the results the evidence binds.
   verify:
-    needs: [static, test-cmd, test-cross, test-rest, spec-align, e2e]
+    needs: [static, test-cmd, test-cross, test-slow, test-rest, spec-align, e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -298,7 +310,7 @@ jobs:
         with:
           go-version: "1.25"
       - name: Require every gate job to succeed
-        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }}
+        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}
       - run: go build -o .build/verdi ./cmd/verdi
       - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
         run: ./.build/verdi sync --produce

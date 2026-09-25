@@ -1,4 +1,4 @@
-.PHONY: build test test-cmd test-cross test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
+.PHONY: build test test-cmd test-cross test-slow test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
 # exact version before the lint step runs (verify.yml and merge-gate.yml,
@@ -35,13 +35,16 @@ build:
 # and exec the result as `verdi serve`, the same cache blindness.
 CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/...
 
-# The Go tests run as disjoint shards (SI-266, owner directive 2026-09-24),
-# so the pull-request gate can run each as its own parallel CI job and no
+# The Go tests run as disjoint shards (SI-266, owner directive 2026-09-24;
+# SI-268 split test-slow out of test-rest, owner directive 2026-09-25), so
+# the pull-request gate can run each as its own parallel CI job and no
 # package runs twice. `make test` runs all of them; their package sets
 # partition `go list ./...`:
 #   test-cmd    ./cmd/verdi, the largest single package.
 #   test-cross  CROSS_BINARY_PKGS except internal/specalign, always fresh
 #               (-count=1, ADJ-68).
+#   test-slow   TEST_SLOW_PKGS, the slowest of the rest (below), cached
+#               honestly.
 #   test-rest   every other package, cached honestly.
 #   spec-align  internal/specalign alone, fresh and under -race (below).
 # internal/specalign's TestGateShards_* tests read these recipes through
@@ -62,19 +65,40 @@ CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./int
 TEST_CMD_PKGS := ./cmd/verdi
 SPEC_ALIGN_PKGS := ./internal/specalign/...
 
-# TEST_REST_PKGS is `go list ./...` minus test-cmd's and CROSS_BINARY_PKGS'
-# packages (spec-align's is among the latter). If either `go list` fails, or
-# nothing is left, the list is the single word test-rest-package-list-failed,
-# which `go test` rejects: the shard fails loudly instead of testing nothing.
-TEST_REST_PKGS = $(shell all="$$(go list ./...)" && skip="$$(go list $(TEST_CMD_PKGS) $(CROSS_BINARY_PKGS))" && printf '%s\n' "$$all" | grep -vxF -e "$$skip" || echo test-rest-package-list-failed)
+# TEST_SLOW_PKGS (SI-268) are the slowest packages test-rest used to run,
+# split into their own shard so that the two CI jobs finish at about the same
+# time. The list is balanced on the CI test-rest job at 704cac30 (4-vCPU
+# ubuntu-latest, 103 packages, 6m03s for `make test-rest`), using the time
+# each package's `ok` line reports: 821s in all. These are its fifteen
+# slowest, 591s of it. internal/sealedexec alone took 158s, which puts a
+# floor under this job; it is listed first so that `go test` builds and
+# starts it first. Estimate: a job's wall time is about 30s of first builds
+# plus a quarter of (5s of build per package + the packages' test times),
+# and never less than the time until its slowest package ends. That puts
+# both jobs near 200s. Rebalance when the CI test-slow and test-rest jobs
+# finish more than a minute apart, or when a package left in test-rest
+# approaches sealedexec's time. fixture's three packages stay in test-rest
+# (see fixture).
+TEST_SLOW_PKGS := ./internal/sealedexec ./internal/lint ./internal/artifact ./internal/dex ./internal/workbench ./internal/execworkspace ./internal/contextowner ./internal/constitutionapp ./internal/policyconflict ./internal/sealedreview ./cmd/public-execution-contract-release ./internal/contextcompile ./internal/specimport ./internal/readinessload ./internal/align
 
-test: test-cmd test-cross test-rest spec-align
+# TEST_REST_PKGS is `go list ./...` minus the packages of test-cmd,
+# CROSS_BINARY_PKGS (spec-align's is among them), and TEST_SLOW_PKGS, so a new
+# package always lands here. If any `go list` fails (a TEST_SLOW_PKGS entry
+# that names no package, say), or nothing is left, the list is the single
+# word test-rest-package-list-failed, which `go test` rejects: the shard fails
+# loudly instead of testing nothing.
+TEST_REST_PKGS = $(shell all="$$(go list ./...)" && skip="$$(go list $(TEST_CMD_PKGS) $(CROSS_BINARY_PKGS) $(TEST_SLOW_PKGS))" && printf '%s\n' "$$all" | grep -vxF -e "$$skip" || echo test-rest-package-list-failed)
+
+test: test-cmd test-cross test-slow test-rest spec-align
 
 test-cmd:
 	go test -race -parallel 4 $(TEST_CMD_PKGS)
 
 test-cross:
 	go test -race -count=1 -parallel 4 $(filter-out $(SPEC_ALIGN_PKGS),$(CROSS_BINARY_PKGS))
+
+test-slow:
+	go test -race -parallel 4 $(TEST_SLOW_PKGS)
 
 test-rest:
 	go test -race -parallel 4 $(TEST_REST_PKGS)
@@ -382,9 +406,10 @@ e2e: e2e-check-node
 # a summary table at the end so a CI log carries the same series. Steps run in
 # order and the gate fails fast on the first red step.
 #
-# VERIFY_STEPS lists `test` as its shards (test-cmd test-cross test-rest), not
-# as `test`, because `test` also runs spec-align, which keeps its own named
-# step here; listing `test` would run internal/specalign twice (SI-266).
+# VERIFY_STEPS lists `test` as its shards (test-cmd test-cross test-slow
+# test-rest), not as `test`, because `test` also runs spec-align, which keeps
+# its own named step here; listing `test` would run internal/specalign twice
+# (SI-266).
 #
 # The pull-request gate (.github/workflows/merge-gate.yml) runs exactly these
 # steps, split across parallel jobs, plus the post-verify self-lint; its
@@ -407,11 +432,11 @@ e2e: e2e-check-node
 #     value the line reaches;
 #   - a gate target's recipe cannot be read.
 # TestGateParity_GateVariablesAssignedOnceAndNothingIncluded fails unless
-# VERIFY_STEPS, CROSS_BINARY_PKGS, TEST_CMD_PKGS, SPEC_ALIGN_PKGS, and
-# TEST_REST_PKGS are each assigned exactly once, with `=` or `:=`, and the
-# Makefile includes or evals no other makefile text: the guards read only the
-# first assignment, and only this file.
-VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
+# VERIFY_STEPS, CROSS_BINARY_PKGS, TEST_CMD_PKGS, SPEC_ALIGN_PKGS,
+# TEST_SLOW_PKGS, and TEST_REST_PKGS are each assigned exactly once, with `=`
+# or `:=`, and the Makefile includes or evals no other makefile text: the
+# guards read only the first assignment, and only this file.
+VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-slow test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 
 verify:

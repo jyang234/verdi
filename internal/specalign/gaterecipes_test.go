@@ -665,6 +665,7 @@ func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
 		{"- on lint-store's second line", "\t$(LINT_STORE_BIN) lint\n", "\t-$(LINT_STORE_BIN) lint\n", "lint-store"},
 		{"- on verify", "\t@mkdir -p $(dir $(GATE_TIMINGS)); \\", "\t-@mkdir -p $(dir $(GATE_TIMINGS)); \\", "verify"},
 		{"- on e2e's prerequisite", "\t@if ! command -v node", "\t-@if ! command -v node", "e2e-check-node"},
+		{"- on test-slow", "\tgo test -race -parallel 4 $(TEST_SLOW_PKGS)", "\t-go test -race -parallel 4 $(TEST_SLOW_PKGS)", "test-slow"},
 		{"- in an inline recipe", "\ntest-cmd:\n\tgo test", "\ntest-cmd: ; -go test", "test-cmd"},
 		{".IGNORE for every target", "\ntidy:\n", "\n.IGNORE:\n\ntidy:\n", ".IGNORE"},
 		{".IGNORE for one target", "\ntidy:\n", "\n.IGNORE: test-rest\n\ntidy:\n", ".IGNORE"},

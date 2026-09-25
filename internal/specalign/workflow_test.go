@@ -869,7 +869,8 @@ const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
 	" static=${{ needs.static.result }}" +
 	" test-cmd=${{ needs.test-cmd.result }}" +
 	" test-cross=${{ needs.test-cross.result }}" +
-	" test-rest=${{ needs.test-rest.result }}"
+	" test-rest=${{ needs.test-rest.result }}" +
+	" test-slow=${{ needs.test-slow.result }}"
 
 // verdictRunFor derives the verdict call over gates: the committed script,
 // then one `<job>=${{ needs.<job>.result }}` argument per gate job, sorted by
@@ -912,7 +913,7 @@ var mergeGatePostVerifyCommands = []string{
 // edit here, and removing one fails.
 var verifyGateFloor = []string{
 	"build", "fmt-check", "vet", "lint",
-	"test-cmd", "test-cross", "test-rest",
+	"test-cmd", "test-cross", "test-slow", "test-rest",
 	"fixture", "lint-store", "spec-align", "lint-showcase", "showcase-coverage", "e2e",
 }
 
