@@ -43,6 +43,7 @@ func runExperimentBuiltBinary(t *testing.T, bin, dir string, stdin []byte, args 
 }
 
 func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	operations := []string{
 		"inspect", "discover-capabilities", "validate-draft", "review-registration", "status", "explain-result",
@@ -74,6 +75,7 @@ func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
 var experimentUsageRowRe = regexp.MustCompile(`\n {7}context, experiment(,|\n)`)
 
 func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, t.TempDir(), nil, "definitely-not-a-verb")
 	if code != 2 || stdout != "" {
@@ -97,6 +99,7 @@ func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentInputBindingsBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n", ".verdi/.gitignore": "data/\n"},
@@ -167,12 +170,13 @@ type experimentChallengeOutput struct {
 }
 
 func TestExperimentHumanProofBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "-b", "proposal")
 	experimentDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2")
@@ -399,12 +403,13 @@ func experimentGitOutput(t *testing.T, dir string, args ...string) string {
 }
 
 func TestExperimentAcceptedPolicySymlinkModeBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 
 	// Real-Git probe: retype the still-valid policy blob to a committed
@@ -444,12 +449,13 @@ func TestExperimentAcceptedPolicySymlinkModeBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentUnrelatedAcceptedSymlinkBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 
 	// A committed symlink OUTSIDE .verdi/policy must not be rejected by the
@@ -493,12 +499,13 @@ func TestExperimentUnrelatedAcceptedSymlinkBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentHumanKeyUnmappedBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepoWithSubjects(t, []string{"user:alice"})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 
 	base := []string{"experiment", "reconcile-draft", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2", "--accepted-head", repo.Head, "--json"}
@@ -526,12 +533,13 @@ func TestExperimentHumanKeyUnmappedBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentReadOperationClassificationBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 	before := contextE2EPorcelainStatus(t, repo.Dir)
 	for _, test := range []struct {
@@ -568,12 +576,13 @@ func TestExperimentReadOperationClassificationBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentDeterministicOutputBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	bin := buildVerdiBinary(t)
 	args := []string{"experiment", "status", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2", "--accepted-head", repo.Head}
 	jsonArgs := append(append([]string{}, args...), "--json")
@@ -727,6 +736,7 @@ func experimentFixtureCommitEnvironment(base []string) []string {
 }
 
 func TestExperimentInventoryBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, t.TempDir(), nil, "experiment")

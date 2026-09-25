@@ -98,6 +98,29 @@ type Forge interface {
 	// false} with a disclosed UnsupportedReason and a nil error — never an
 	// error that would break a close.
 	EnvironmentReview(ctx context.Context, query EnvironmentReviewQuery) (EnvironmentReviewFacts, error)
+	// MergeRecords returns the forge's merge records for commit (SI-249;
+	// plan R-PB-2): the change requests the forge associates with it, each
+	// with its state, target branch, merge commit, and merge time, plus the
+	// forge's own default branch for the repository. commit must be a full
+	// lowercase 40- or 64-character hexadecimal SHA; anything else is an
+	// operational error before any request (ValidateMergeRecordCommit).
+	// These are provider facts only: ProveMergedIntoDefault is the pure
+	// predicate over them, and the parent-count and ancestry checks the
+	// exemption also needs are the consumer's. The predicate proves only
+	// that the forge reports this exact commit as the merge commit of a
+	// change it reports merged into its default branch. That does NOT by
+	// itself prove the forge created the commit: a forge also reports a
+	// change merged when its commits reach the target branch outside it
+	// (GitHub's indirect merges, GitLab's push-detected merges); see the
+	// pending owner ruling on SI-249 evidence (lane EF review F1).
+	// Transport or HTTP unavailability wraps ErrUnavailable; a JSON or
+	// schema violation, an unknown state, a missing id, or a change the
+	// forge lists for another repository or project is an operational
+	// error that does not.
+	// An adapter that cannot read merge records returns
+	// MergeRecordFacts{Supported: false} with a disclosed UnsupportedReason
+	// and a nil error, which the predicate reads as unproven.
+	MergeRecords(ctx context.Context, commit string) (MergeRecordFacts, error)
 	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
 	// CI run's artifact for (ref, commit) through the forge's own API and
 	// returns its full derived tree (every bundle file keyed by path

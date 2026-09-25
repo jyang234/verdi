@@ -86,6 +86,7 @@ func storySpecForCascade(t *testing.T) *artifact.SpecFrontmatter {
 // TestCheckCascadeReaffirmation covers 03 §The amendment ladder rung 4's
 // three verdicts and the re-affirmation resolution path.
 func TestCheckCascadeReaffirmation(t *testing.T) {
+	t.Parallel()
 	t.Run("no merged supersession at all: unaffected", func(t *testing.T) {
 		repo := fixturegit.Build(t, []fixturegit.Layer{{
 			Files: map[string]string{
@@ -210,6 +211,7 @@ func TestCheckCascadeReaffirmation(t *testing.T) {
 // would let a permission error mask as a clean, exit-0 pass at the
 // build-start/gate verb level, co-2's witness-scoped 0->2 fix).
 func TestCheckCascadeReaffirmation_Negative_UnreadableSpec(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-spec path under this user")
 	}
@@ -247,6 +249,7 @@ func TestCheckCascadeReaffirmation_Negative_UnreadableSpec(t *testing.T) {
 // not 0 (a clean pass) or 1 (a business-precondition refusal) — the sole
 // exit-code behavior change this story makes.
 func TestRunBuildStart_Negative_UnreadableSupersedingSpec(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-spec path under this user")
 	}
@@ -286,7 +289,7 @@ frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
 	t.Cleanup(func() {
 		_ = os.Chmod(specPath, 0o644)
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -321,6 +324,7 @@ frozen: { at: 2024-02-02, commit: 0000000000000000000000000000000000000c }
 // gate entry point (not just the shared checkCascadeReaffirmation helper
 // already covered above), proving the wiring in gate.go itself.
 func TestGate_Condition4_CascadeBlock(t *testing.T) {
+	t.Parallel()
 	// Spec name "stale-decline" (not "-story") deliberately matches
 	// writeGateReport's own hardcoded deviation-report.md path
 	// (gate_test.go) — reused unchanged rather than parameterizing a
@@ -356,7 +360,7 @@ y
 		},
 		Message: "scaffold + cascade-stale story",
 	}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 

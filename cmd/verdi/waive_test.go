@@ -91,6 +91,7 @@ var waiveTestNow = time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 // --- parseWaiveArgs ---
 
 func TestParseWaiveArgs_Happy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		args          []string
@@ -137,6 +138,7 @@ func TestParseWaiveArgs_Happy(t *testing.T) {
 }
 
 func TestParseWaiveArgs_Negative(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -164,6 +166,7 @@ func TestParseWaiveArgs_Negative(t *testing.T) {
 // well-formed invocation writes a decodable, active waiver at the
 // convention path, copying owners verbatim and stamping frozen at HEAD.
 func TestRunWaive_Create_Happy(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -211,6 +214,7 @@ func TestRunWaive_Create_Happy(t *testing.T) {
 // TestRunWaive_Create_NoExpiry proves an absent --expires still creates
 // cleanly and discloses "no --expires given" rather than a fabricated date.
 func TestRunWaive_Create_NoExpiry(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -233,6 +237,7 @@ func TestRunWaive_Create_NoExpiry(t *testing.T) {
 // (exit 1) naming --reaffirm, and leaves the existing file byte-for-byte
 // untouched.
 func TestRunWaive_Create_RefusesWhenAlreadyExists(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -262,6 +267,7 @@ func TestRunWaive_Create_RefusesWhenAlreadyExists(t *testing.T) {
 // prior waiver: refuses (exit 1) naming the plain create form, writes
 // nothing.
 func TestRunWaive_Reaffirm_RefusesWhenNoneExists(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -283,6 +289,7 @@ func TestRunWaive_Reaffirm_RefusesWhenNoneExists(t *testing.T) {
 // body's log carries BOTH the original "waived" entry (verbatim) and
 // exactly one new "reaffirmed" entry after it.
 func TestRunWaive_Reaffirm_RoundTrips(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -338,6 +345,7 @@ func TestRunWaive_Reaffirm_RoundTrips(t *testing.T) {
 // waiver whose recorded expiry has already passed (by the reaffirm
 // invocation's own `now`) discloses that lapse plainly on stdout.
 func TestRunWaive_Reaffirm_DisclosesLapsedPriorExpiry(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -364,6 +372,7 @@ func TestRunWaive_Reaffirm_DisclosesLapsedPriorExpiry(t *testing.T) {
 // (exit 1), never operational — classifyPair's own shared behavior,
 // reused rather than duplicated.
 func TestRunWaive_RefusesUnknownStoryRef(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -377,6 +386,7 @@ func TestRunWaive_RefusesUnknownStoryRef(t *testing.T) {
 // TestRunWaive_RefusesUndeclaredAC mirrors TestRunAttest_
 // RefusesUndeclaredAC.
 func TestRunWaive_RefusesUndeclaredAC(t *testing.T) {
+	t.Parallel()
 	repo := buildWaiveFixtureRepo(t)
 	ctx := context.Background()
 
@@ -390,6 +400,7 @@ func TestRunWaive_RefusesUndeclaredAC(t *testing.T) {
 // --- cmdWaive: usage-level validation (exit 2) ---
 
 func TestCmdWaive_UsageErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -433,6 +444,7 @@ func TestRun_WaiveDispatchesToRealVerb(t *testing.T) {
 // rewrite, the prior log entry preserved, one new entry appended); and
 // verdi audit counts the waiver in its own dedicated section.
 func TestWaiveE2E_FullLifecycle(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildWaiveFixtureRepo(t)
 

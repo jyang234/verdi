@@ -291,6 +291,7 @@ func findingByID(fs []artifact.Finding, id string) (artifact.Finding, bool) {
 // injected FakeRunner, runs the fake judge, and writes a decodable
 // deviation-report.md into the spec's directory.
 func TestRunAlign_WritesReport(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -321,6 +322,7 @@ func TestRunAlign_WritesReport(t *testing.T) {
 // round is mechanically legible as "M new == 0" from stdout alone. A first
 // run (nothing to carry) prints 1 total, 0 candidates, 1 new.
 func TestRunAlign_TallyLine_ControllerDirective(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -342,6 +344,7 @@ func TestRunAlign_TallyLine_ControllerDirective(t *testing.T) {
 // path (not just Generate in isolation) is byte-identical across runs
 // against the same tree/commit.
 func TestRunAlign_ByteIdenticalAcrossRuns(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	judgeCmd := alignFakeJudgeOK(t)
@@ -367,6 +370,7 @@ func TestRunAlign_ByteIdenticalAcrossRuns(t *testing.T) {
 // itself exit non-zero (exit 1, PLAN.md Phase 8's exit criteria), and
 // writes no report.
 func TestRunAlign_JudgeRequiredAndFailing_ExitsOne(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), JudgeRequired: true, ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -384,6 +388,7 @@ func TestRunAlign_JudgeRequiredAndFailing_ExitsOne(t *testing.T) {
 // TestRunAlign_JudgeRequiredAndNotConfigured_ExitsOne is the "no judge at
 // all" half of the same requirement.
 func TestRunAlign_JudgeRequiredAndNotConfigured_ExitsOne(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeRequired: true, ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -409,6 +414,7 @@ func TestRunAlign_JudgeRequiredAndNotConfigured_ExitsOne(t *testing.T) {
 // reasoning (fakeJudgeTimeoutScript sleeps 5s regardless of scheduling
 // load, so a 100ms timeout fires deterministically either way).
 func TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{
@@ -436,6 +442,7 @@ func TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation(t *testing.T) {
 // run against the now-frozen report refuses (exit 1) rather than silently
 // overwriting an immutable artifact.
 func TestRunAlign_Freeze(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -473,6 +480,7 @@ func TestRunAlign_Freeze(t *testing.T) {
 // owner-ratified accepted-deviation). runClose freezes through this exact
 // runAlignForSpec path, so proving it here covers `verdi close`'s freeze step.
 func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -541,6 +549,7 @@ func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
 // human edits the written report's disposition, and a second `verdi align`
 // run against the same tree/commit preserves it.
 func TestRunAlign_DispositionPreservation(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -602,6 +611,7 @@ func TestRunAlign_DispositionPreservation(t *testing.T) {
 // align.FreezeInPlace already covers the --freeze path; this is its
 // ordinary-regenerate analogue (cmd/verdi's runAlignForSpec).
 func TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -665,6 +675,7 @@ func TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
 // must still degrade to the synthetic absence finding and succeed (exit 0),
 // exactly as before this fix.
 func TestRunAlign_NoPriorReport_JudgeFailure_WritesSynthetic(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -691,6 +702,7 @@ func TestRunAlign_NoPriorReport_JudgeFailure_WritesSynthetic(t *testing.T) {
 // genuine on disk either, so a still-failing judge must regenerate and
 // overwrite it normally, exactly as before this fix.
 func TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -730,6 +742,7 @@ func TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally(t *testin
 // scope for D6-24 (its own second half); PreserveDispositions' existing
 // behavior must stand untouched.
 func TestRunAlign_RegenerateWithGenuineJudgeCompletion_RegeneratesNormally(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -893,6 +906,7 @@ func TestCmdAlign_WaitAtOrAboveCeiling_NotRefused(t *testing.T) {
 // the hermetic stand-in for a real bound) so the message text is asserted
 // directly.
 func TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{
@@ -921,6 +935,7 @@ func TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated(t *testing.T) {
 // passes --wait there must be told loudly, not have the flag quietly do
 // nothing.
 func TestRunAlign_Wait_RejectedOnDesignBranch(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignDesignRepo(t)
 	deps := alignDeps{Wait: true}
 
@@ -941,6 +956,7 @@ func TestRunAlign_Wait_RejectedOnDesignBranch(t *testing.T) {
 // instant it starts), and the report itself does not exist on disk yet at
 // that same moment.
 func TestRunAlign_ReportPathPrintedBeforeJudgeRuns(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	sentinel := filepath.Join(t.TempDir(), "judge-started")
@@ -987,6 +1003,7 @@ func TestRunAlign_ReportPathPrintedBeforeJudgeRuns(t *testing.T) {
 // through the atomicfile seam (temp-then-rename) instead of a raw
 // os.WriteFile.
 func TestRunAlign_ReportNeverPartiallyObservable(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSlowOK(t, 1), ModelDigest: testResolveModelDigest(t, repo.Dir)}
@@ -1034,6 +1051,7 @@ func TestRunAlign_ReportNeverPartiallyObservable(t *testing.T) {
 // the report written once the judge finishes — ordinary success, just
 // bounded.
 func TestRunAlign_Wait_CompletesWithinBound(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{
@@ -1059,6 +1077,7 @@ func TestRunAlign_Wait_CompletesWithinBound(t *testing.T) {
 // already on stdout's first line and — since this is a first-ever run — no
 // report file written at all.
 func TestRunAlign_Wait_ExpiresExitsTwoWithPathPrinted(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{
@@ -1094,6 +1113,7 @@ func TestRunAlign_Wait_ExpiresExitsTwoWithPathPrinted(t *testing.T) {
 // byte-for-byte untouched, never overwritten with a partial or synthetic
 // edition.
 func TestRunAlign_Wait_ExpiryPreservesExistingReport(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
@@ -1132,6 +1152,7 @@ func TestRunAlign_Wait_ExpiryPreservesExistingReport(t *testing.T) {
 // value (no --wait passed), a judge timeout must still degrade to the
 // synthetic absence finding and exit 0, exactly as before this story.
 func TestRunAlign_Wait_DefaultOffPreservesGracefulDegrade(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	deps := alignDeps{
@@ -1159,6 +1180,7 @@ func TestRunAlign_Wait_DefaultOffPreservesGracefulDegrade(t *testing.T) {
 // --wait/exit-2-with-path-on-expiry behavior from the one shared engine
 // hook, not a second implementation.
 func TestRunAlignForSpec_CloseFreezeAlign_WaitExpires(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
@@ -1191,6 +1213,7 @@ func TestRunAlignForSpec_CloseFreezeAlign_WaitExpires(t *testing.T) {
 // bound writes a genuinely frozen report through the atomicfile seam and
 // exits 0, exactly like align's own --wait success path.
 func TestRunAlignForSpec_CloseFreezeAlign_WaitCompletes(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")

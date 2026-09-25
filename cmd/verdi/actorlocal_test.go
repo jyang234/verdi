@@ -129,6 +129,7 @@ func mustDecodeActorLocalProfile(t *testing.T, raw string) governanceprincipal.P
 // --- resolveLocalActors --------------------------------------------------
 
 func TestResolveLocalActors_NoLocalOperatorSource(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.email", "bound@example.com")
 	profile := mustDecodeActorLocalProfile(t, actorLocalNoSourceProfileYAML)
@@ -143,6 +144,7 @@ func TestResolveLocalActors_NoLocalOperatorSource(t *testing.T) {
 }
 
 func TestResolveLocalActors_BoundIdentity_Authenticated(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.email", "bound@example.com")
 	profile := mustDecodeActorLocalProfile(t, actorLocalProfileYAML)
@@ -180,6 +182,7 @@ func TestResolveLocalActors_BoundIdentity_Authenticated(t *testing.T) {
 }
 
 func TestResolveLocalActors_FallsBackToUserName(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.name", "bound@example.com")
 	profile := mustDecodeActorLocalProfile(t, actorLocalProfileYAML)
@@ -194,6 +197,7 @@ func TestResolveLocalActors_FallsBackToUserName(t *testing.T) {
 }
 
 func TestResolveLocalActors_EmailPreferredOverName(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.email", "bound@example.com")
 	setLocalGitConfig(t, dir, "user.name", "someone-else@example.com")
@@ -213,6 +217,7 @@ func TestResolveLocalActors_EmailPreferredOverName(t *testing.T) {
 }
 
 func TestResolveLocalActors_UnboundIdentity_Violated(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.email", "unbound@example.com")
 	profile := mustDecodeActorLocalProfile(t, actorLocalProfileYAML)
@@ -234,6 +239,7 @@ func TestResolveLocalActors_UnboundIdentity_Violated(t *testing.T) {
 }
 
 func TestResolveLocalActors_AbsentIdentity_Unproven(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	profile := mustDecodeActorLocalProfile(t, actorLocalProfileYAML)
 
@@ -250,6 +256,7 @@ func TestResolveLocalActors_AbsentIdentity_Unproven(t *testing.T) {
 }
 
 func TestResolveLocalActors_AmbiguousConfig_Operational(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	addLocalGitConfig(t, dir, "user.email", "a@example.com")
 	addLocalGitConfig(t, dir, "user.email", "b@example.com")
@@ -262,6 +269,7 @@ func TestResolveLocalActors_AmbiguousConfig_Operational(t *testing.T) {
 }
 
 func TestResolveLocalActors_MultipleLocalOperatorSources_Operational(t *testing.T) {
+	t.Parallel()
 	dir := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, dir, "user.email", "bound@example.com")
 	profile := mustDecodeActorLocalProfile(t, actorLocalTwoSourceProfileYAML)
@@ -277,6 +285,7 @@ func TestResolveLocalActors_MultipleLocalOperatorSources_Operational(t *testing.
 // larger enclosing repository (no .git of its own) must never have that
 // ENCLOSING repository's identity read on its behalf.
 func TestResolveLocalActors_RefusesNonTopLevelRoot(t *testing.T) {
+	t.Parallel()
 	outer := initGitRepoNoIdentity(t)
 	setLocalGitConfig(t, outer, "user.email", "enclosing-repo@example.com")
 	nested := filepath.Join(outer, "nested-store")
@@ -298,6 +307,7 @@ func TestResolveLocalActors_RefusesNonTopLevelRoot(t *testing.T) {
 // inside any Git repository at all fails operationally rather than
 // silently proceeding.
 func TestResolveLocalActors_NotAGitRepository(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	profile := mustDecodeActorLocalProfile(t, actorLocalProfileYAML)
 

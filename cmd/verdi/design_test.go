@@ -28,8 +28,8 @@ func seedFakeProvider(t *testing.T) *providerfake.Provider {
 // provider-resolved title, scaffold committed (carrying attributes, ACs,
 // and stubs per 05 §CLI's own exit criterion), board placeholder printed.
 func TestRunDesignStart_Happy(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -92,8 +92,8 @@ func TestRunDesignStart_Happy(t *testing.T) {
 // --kind feature with no ref at all scaffolds a draft feature spec with an
 // empty story: field.
 func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -117,8 +117,8 @@ func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
 // epic/objective tracker ref (02 §Kind registry's own okr:LOAN-Q3 example)
 // when the store configures that scheme.
 func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -138,8 +138,8 @@ func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
 // spec, requires its ref, and carries the object-model fields validateStory
 // requires (problem/outcome/an implements edge).
 func TestRunDesignStart_Story(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -166,6 +166,7 @@ func TestRunDesignStart_Story(t *testing.T) {
 // operational: a usage precondition, not a business verdict) with no ref at
 // all — the story class REQUIRES the scheme-prefixed story ref (05 §CLI).
 func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
@@ -186,8 +187,8 @@ func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
 // story never blocks the scaffold, and the disclosed degrade is visible on
 // stderr.
 func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -216,6 +217,7 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 // scheme (jira) resolves through a real adapter instead of always degrading
 // with ErrUnknownScheme, while an unconfigured scheme still honestly misses.
 func TestCmdDesignStart_WiresConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	reg := buildProviderRegistry(phase7Manifest(t))
 	if _, err := reg.Provider("jira"); err != nil {
 		t.Fatalf("Provider(jira) = %v, want a real adapter (design start must attempt real resolution for a configured scheme, not ErrUnknownScheme)", err)
@@ -230,8 +232,8 @@ func TestCmdDesignStart_WiresConfiguredProvider(t *testing.T) {
 // ref degrades for the TRUE reason (Unavailable/NotFound), never the generic
 // ErrUnknownScheme that reads as "this scheme isn't configured" (D-3).
 func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -255,7 +257,7 @@ func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *t
 // TestRunDesignStart_Negative covers runDesignStart's own operational
 // error paths.
 func TestRunDesignStart_Negative(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "")
+	t.Parallel()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 	ctx := context.Background()
@@ -322,8 +324,8 @@ func TestRunDesignStart_Negative(t *testing.T) {
 // deleting/recutting an existing branch to "retry") would pass one
 // witness while violating the other.
 func TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -390,7 +392,6 @@ func TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse(t *testing.T) {
 // consuming flags at the first non-flag token), hence extractFlags's
 // hand-rolled parse.
 func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	cases := []struct {
 		name string
 		args []string
@@ -465,6 +466,7 @@ func TestCmdDesignStart_KindFlagMissingOrInvalid(t *testing.T) {
 // TestRunDesignVerb_UnknownSubcommand proves the design/start subcommand
 // dispatch is a usage error for anything but "start".
 func TestRunDesignVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	got := runDesignVerb([]string{"bogus"}, &stdout, &stderr)
 	if got != 2 {
@@ -499,7 +501,7 @@ func TestRun_DesignDispatchesToRealVerb(t *testing.T) {
 // crash-durability guarantee and no fsync. This proves the fixed write
 // leaves no temp sibling in the spec directory, across both spec classes.
 func TestRunDesignStart_ScaffoldUsesAtomicWrite(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "")
+	t.Parallel()
 	tests := []struct {
 		name     string
 		kind     artifact.SpecClass
@@ -687,6 +689,7 @@ func TestRunDesignStart_OriginExistsButUnresolvable_Exit2(t *testing.T) {
 // (as this very fix's own comment does, contrasting the two) can never
 // false-positive the check.
 func TestDesignGo_AtomicWrite_NoDirectWriteFile(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("design.go")
 	if err != nil {
 		t.Fatalf("reading design.go: %v", err)
@@ -709,8 +712,8 @@ func TestDesignGo_AtomicWrite_NoDirectWriteFile(t *testing.T) {
 // file rides untouched (still untracked/modified) in the working tree
 // afterward, and the verb's own success disclosure is unchanged.
 func TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -808,6 +811,7 @@ func TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 // (UAT-033), never gitx.AddAll's blanket `git add -A` sweep of the rest of
 // the working tree.
 func TestDesignGo_NoAddAll(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("design.go")
 	if err != nil {
 		t.Fatalf("reading design.go: %v", err)
@@ -826,8 +830,8 @@ func TestDesignGo_NoAddAll(t *testing.T) {
 // directory name and the id. Refused now, operator-facing, before any
 // branch is cut or anything is written.
 func TestRunDesignStart_FragmentNameRefused(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -856,8 +860,8 @@ func TestRunDesignStart_FragmentNameRefused(t *testing.T) {
 // TestRunDesignStart_PinnedNameRefused proves the sibling decoration
 // (an "@commit" pin) refuses too, on the same path.
 func TestRunDesignStart_PinnedNameRefused(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -878,8 +882,8 @@ func TestRunDesignStart_PinnedNameRefused(t *testing.T) {
 // archived spec (guide 6.1: names are unique across active and archived
 // specs).
 func TestRunDesignStart_ArchivedNameRefused(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "retired"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -910,8 +914,9 @@ func TestRunDesignStart_ArchivedNameRefused(t *testing.T) {
 // branch setup) could therefore cut a design/<name> branch whose tree
 // silently replaced a same-named spec already landed on main.
 func TestRunDesignStart_BehindCheckout_NameOnMainRefused(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	// Cut a side branch from main's current tip, then land a spec of the

@@ -1,0 +1,1 @@
+{"adapter":{"id":"codex","version":"1"},"grants":{"grants":[],"schema":"verdi.execution-grants/v1"},"phase":"review","schema":"verdi.context-compile-request/v1","scope":{"environments":[],"paths":[],"phases":["review"],"refs":[]},"spec":""}

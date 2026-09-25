@@ -25,6 +25,7 @@ import (
 )
 
 func TestServe_PrintsBuildIdentificationLineAtStartup(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := newIntegrationStoreRoot(t)
 

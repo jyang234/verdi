@@ -166,7 +166,10 @@ no `links:` of their own — a feature constraint inherits downward to its
 stories, checked wherever relevant, never assigned to one. `decisions`
 objects may carry their own `links:` — the same shape as document-level
 `links:` (§Common frontmatter) — for `supersedes`/`exempts` edges against
-ADRs or other decisions (§Link taxonomy). `open_questions` objects (added
+ADRs or other decisions (§Link taxonomy); a decision's `supersedes` edge may
+also target an acceptance criterion or decision of a closed spec
+(evidence-model spec §Challenging closed decisions, closed-spec object
+supersession). `open_questions` objects (added
 at ratification round four's phase review — the block VL-017's "declared
 open-question object" and the spike variant's `resolves` target had named
 without a home in this contract) carry no `links:` of their own: they are
@@ -207,6 +210,11 @@ registry, R4-I-4): the same `id` with an unchanged hash across revisions is
 | waiver      | waivers/         | file | active → expired                  | frozen at commit          |
 | reaffirmation | reaffirmations/ | file | (none — existence is the record)  | frozen at commit          |
 | conflict    | conflicts/       | file | open → superseded \| dismissed    | frozen at resolution      |
+
+A conflict's `links:` carry one or more `challenges` edges. A superseded
+conflict whose `challenges` name object fragments also carries `resolved_by:
+spec/<name>`, the successor spec that resolved it (evidence-model spec
+§Challenging closed decisions).
 
 Attestation, waiver, and reaffirmation paths nest by story and object —
 `attestations/<story-slug>/<ac-id>.md`, `waivers/<story-slug>/<ac-id>.md`,
@@ -449,7 +457,7 @@ Backlinks are computed by inverting this table at index/dex-build time.
 | depends-on    | depended-on-by      | reading-order/knowledge dependency                   |
 | story         | —                   | spec → tracker item (scheme-prefixed ref): required on the story class (the canonical tracker binding, R4-I-2), optional epic/objective ref on the feature class |
 | impacts       | impacted-by         | spec → service                                       |
-| challenges    | challenged-by       | conflict → the closed decision or rollup it disputes |
+| challenges    | challenged-by       | conflict → the closed decision or rollup it disputes; with a fragment, the exact acceptance criterion or decision of a closed spec |
 
 `implements`, `resolves`, `supersedes`, `exempts`, and `depends-on` are the
 **closed spec-object edge vocabulary** (R4 concept §1): a decision object's
@@ -460,6 +468,12 @@ violation. An `implements`/`resolves`/`exempts` edge added or changed on a
 story-spec MR is CODEOWNERS-routed to the owners of the spec it targets —
 the party who owns the AC or ADR being claimed against, not the party
 claiming credit (R4 concept §1, §2).
+
+A conflict's `challenges` links may also target object fragments, all naming
+objects of one spec (evidence-model spec §Challenging closed decisions). No
+other top-level `links:` target a fragment: a feature or component spec's
+top-level `links:` never do, and a top-level `supersedes` link never targets
+an object of a closed spec — that edge belongs on a decision (VL-026).
 
 Proto-links (board yarn) are `{ from, to, label }` with no type — the v0
 authoring-time shape, produced before commit-to-design's promotion pass.
@@ -673,7 +687,7 @@ run locally and as a CI gate. Rules:
 |---------|-------------------------------------------------------------------------------|
 | VL-001  | frontmatter present, decodes strictly against kind schema; the restricted dialect is enforced here (anchors, aliases, custom tags fail) |
 | VL-002  | id/path agreement; global ref uniqueness. Status-in-path applies to the feature and story classes only: superseded component specs remain in `specs/active/` |
-| VL-003  | all link refs resolve — verdi refs against the committed zone, `svc/...` external refs against discovery, and `evidence-for` bindings in discovered `verdi.bindings.yaml` sidecars (evidence-model spec) against the named spec's ACs; pins name real commits; object-id fragments (`#<object-id>`, §Identity and references) resolve against the target's parsed frontmatter objects (§Object model), and their edge types are the closed five-value enum (§Link taxonomy) — unknown types fail closed |
+| VL-003  | all link refs resolve — verdi refs against the committed zone, `svc/...` external refs against discovery, and `evidence-for` bindings in discovered `verdi.bindings.yaml` sidecars (evidence-model spec) against the named spec's ACs; pins name real commits; object-id fragments (`#<object-id>`, §Identity and references) resolve against the target's parsed frontmatter objects (§Object model), and their edge types are the closed five-value enum, or `challenges` from a conflict (§Link taxonomy) — unknown types fail closed |
 | VL-004  | status transitions legal per kind; `status: draft` MUST NOT exist on the default branch — enforced when linting the default branch itself or a change targeting it (CI vars, or a local merge-base against the default branch); elsewhere a bare warning, since always-enforcing would break ordinary design branches |
 | VL-005  | story spec has exactly one `story:` link with a configured scheme (moved from the feature class, R4-I-2); a feature spec's optional `story:` epic ref, when present, is validated against the same configured schemes |
 | VL-006  | every AC declares ≥1 expected evidence kind (activation lint)                 |
@@ -690,6 +704,7 @@ run locally and as a CI gate. Rules:
 | VL-017  | open-question stickies resolved-or-carried: on a design branch targeting the default branch, every open-question annotation (§Record schemas) is either `status: resolved` or explicitly carried as a declared open-question object on the spec — the VL-014 successor for new specs. Scoped by mutable-zone presence: open-question annotations live in the per-checkout mutable zone (`data/mutable/annotations/*.jsonl`), which is never committed. The rule enforces **where the mutable zone is present** — author-local lint and the workbench's review-ready indicator. **Where the mutable zone is absent (CI clone), lint reports the check disclosed-unproven for that spec** — never a silent pass — honoring three-valued honesty (constitution 2); a vacuous green is never emitted. The disclosure is a printed notice, not a verdict failure — a CI run with no other findings exits 0 with the disclosure on the record (adjudicated at W2 wave close) |
 | VL-018  | `layout.json` positions: every key in a spec directory's `positions` map (`verdi.boardlayout/v1`, §Record schemas) resolves to a real object ID declared in that spec's frontmatter, or — as `stub:<slug>` — to a declared stub of that spec |
 | VL-019  | an obligation's `verifies` edge targets a whole STORY spec (bare `spec/<story>` ref, no fragment) that genuinely declares the `<ac-id>` named in the obligation's own id — a feature-class target, a fragment, an unresolvable ref, or an undeclared AC is refused naming the offending target (obligations are a story-level concern; 03 §The feature fold carried to obligations). Ratified through spec/obligation-artifact (its ac-2/dc-3); recorded in this table per spec/fail-loud dc-4 |
+| VL-026  | closed-spec object supersession shape: a feature or component spec's top-level `links:` target no object fragment; no top-level `supersedes` link targets an object of a closed spec; a decision's `supersedes` link to an object of a closed spec targets a declared acceptance criterion or decision; a conflict's fragment `challenges` all name one spec, and a superseded conflict with fragment `challenges` names an existing spec in `resolved_by`. The match between edges and conflicts is the decision-conflict gate's (evidence-model spec §Decision-conflict gate), not this rule's |
 
 ## Repository plumbing
 

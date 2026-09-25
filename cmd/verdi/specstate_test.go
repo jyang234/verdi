@@ -35,7 +35,7 @@ func buildSpecStateRepo(t *testing.T, files map[string]string) *fixturegit.Repo 
 		base[k] = v
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: base, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 	return repo
 }
@@ -273,6 +273,7 @@ func TestCmdSpecState_Negative(t *testing.T) {
 
 // TestRunSpecVerb_Usage pins spec's own subcommand-shape check.
 func TestRunSpecVerb_Usage(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runSpecVerb(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("runSpecVerb(no args) = %d, want 2", got)

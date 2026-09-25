@@ -15,11 +15,13 @@ import (
 )
 
 // resolvableDefaultBranchRoot builds a minimal fixturegit repo (local
-// branch "main", no remote) so CI_DEFAULT_BRANCH="main" resolves to a
-// real, git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
+// branch "main", no remote) and pins refs/remotes/origin/HEAD at it
+// (pinFixtureDefaultBranch) so the default branch resolves to a real,
+// git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
 // resolver internal/lint.ResolveDefaultBranch now delegates to — requires
 // the named branch to actually resolve, not just be named; a bare
-// t.TempDir() is not a git repository at all and no longer resolves).
+// t.TempDir() is not a git repository at all and no longer resolves)
+// without any caller needing its own t.Setenv("CI_DEFAULT_BRANCH", ...).
 // Shared by this file, reviewfeed_test.go, and supersessionfeed_test.go
 // (all package main, all needing the same hermetic "give me a resolvable
 // default branch" root).
@@ -28,6 +30,7 @@ func resolvableDefaultBranchRoot(t *testing.T) string {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"seed.txt": "seed\n"}, Message: "seed"},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	return repo.Dir
 }
 
@@ -35,8 +38,7 @@ func resolvableDefaultBranchRoot(t *testing.T) string {
 // hermetic forge fake: every open MR targeting the resolved default branch
 // contributes its source branch, sorted.
 func TestForgeOpenMRs_ListsSourceBranches(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // named branch must still resolve to a real local ref (internal/specstate)
-
+	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "2", SourceBranch: "design/zeta", Title: "Zeta"})
 	f.SeedOpenMR("main", forge.OpenMR{ID: "1", SourceBranch: "design/alpha", Title: "Alpha"})
@@ -64,6 +66,7 @@ func TestForgeOpenMRs_UnresolvableDefaultBranch(t *testing.T) {
 // TestHTTPOpenMRFeed_Table drives the harness double's strict decode:
 // happy path, unknown fields, trailing data, non-200, unreachable.
 func TestHTTPOpenMRFeed_Table(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		body    string
@@ -110,6 +113,7 @@ func TestHTTPOpenMRFeed_Table(t *testing.T) {
 // TestHTTPOpenMRFeed_Unreachable: a closed server errors — the shape the
 // home page degrades to its disclosed notice.
 func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
@@ -120,6 +124,7 @@ func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
 
 // TestUnavailableOpenMRs always errors with the disclosed reason.
 func TestUnavailableOpenMRs(t *testing.T) {
+	t.Parallel()
 	_, err := unavailableOpenMRs{reason: "forge \"gitlab\" is configured but unreachable"}.OpenMRSourceBranches(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "unreachable") {
 		t.Fatalf("err = %v, want the disclosed reason", err)
@@ -132,6 +137,7 @@ func TestUnavailableOpenMRs(t *testing.T) {
 // is up, and the disclosed "MR status unavailable" notice — with the
 // refs-computed directory still complete — after the double goes away.
 func TestDirectoryHome_Integration_HTTPFeed(t *testing.T) {
+	t.Parallel()
 	entries := []refindex.Entry{
 		{Ref: "spec/mr-draft", Source: refindex.SourceBoth, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},
 		{Ref: "spec/quiet-draft", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},

@@ -20,6 +20,7 @@ import (
 // TestRunSync_CIFetch_QuarantinesUnreachableCommitRecord: a PROVEN-unreachable
 // commit is still quarantined — X-15 holds.)
 func TestQuarantineUnreachable_ShallowBeyondHorizon_NotQuarantined(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "one\n"}, Message: "layer 1"},
@@ -64,6 +65,7 @@ func TestQuarantineUnreachable_ShallowBeyondHorizon_NotQuarantined(t *testing.T)
 // record, evidenced AC), naming the AC, the commit, and the shallow reason,
 // rendered through the shared disclosure seam.
 func TestUnprovableDisclosures_NamesACCommitAndShallow(t *testing.T) {
+	t.Parallel()
 	const commit = "cafebabecafebabecafebabecafebabecafebabe"
 	recs := []artifact.Evidence{{
 		Kind:        artifact.EvidenceStatic,

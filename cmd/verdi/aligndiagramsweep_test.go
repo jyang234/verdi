@@ -49,6 +49,7 @@ func buildDiagramSweepRepo(t *testing.T) *fixturegit.Repo {
 // proposal diagram writes .verdi/diagrams/<name>.sweep-report.md with a
 // well-formed verdi.diagramsweep/v1 frontmatter.
 func TestRunDiagramSweepAlign_WritesReport(t *testing.T) {
+	t.Parallel()
 	repo := buildDiagramSweepRepo(t)
 
 	var stdout, stderr bytes.Buffer
@@ -87,6 +88,7 @@ func TestRunDiagramSweepAlign_WritesReport(t *testing.T) {
 // rather than swept — the sweep's own stated subject is a class: proposal
 // diagram (spec/judged-sweep's outcome text).
 func TestRunDiagramSweepAlign_NotAProposal_Refused(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -112,6 +114,7 @@ func TestRunDiagramSweepAlign_NotAProposal_Refused(t *testing.T) {
 // bytes before a real sweep run, run it, re-read, and assert byte-identity
 // — the sweep never touched the diagram it read.
 func TestRunDiagramSweepAlign_ByteIdentity(t *testing.T) {
+	t.Parallel()
 	repo := buildDiagramSweepRepo(t)
 	diagPath := filepath.Join(repo.Dir, ".verdi", "diagrams", "loansvc-future.mermaid")
 

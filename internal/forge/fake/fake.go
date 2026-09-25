@@ -23,26 +23,28 @@ type Forge struct {
 	openMRs   map[string][]forge.OpenMR    // targetBranch -> open MRs
 	files     map[string]map[string][]byte // branch -> path -> content
 
-	comments   map[string][]forge.Comment              // mrID -> comment feed
-	threads    map[string][]forge.ThreadResolution     // mrID -> thread resolutions
-	approvals  map[string]forge.ApprovalSnapshot       // changeID -> current facts
-	envReviews map[string]forge.EnvironmentReviewFacts // query key -> seeded facts
-	nextCommID int
+	comments     map[string][]forge.Comment              // mrID -> comment feed
+	threads      map[string][]forge.ThreadResolution     // mrID -> thread resolutions
+	approvals    map[string]forge.ApprovalSnapshot       // changeID -> current facts
+	envReviews   map[string]forge.EnvironmentReviewFacts // query key -> seeded facts
+	mergeRecords map[string]forge.MergeRecordFacts       // commit -> seeded facts
+	nextCommID   int
 }
 
 // New returns an empty Forge: no bundles seeded, GeneratedAttribute
 // returns "fake-generated", CIContext returns a zero CIInfo, no open MRs.
 func New() *Forge {
 	return &Forge{
-		bundles:    make(map[string]forge.DerivedTree),
-		attribute:  "fake-generated",
-		openMRs:    make(map[string][]forge.OpenMR),
-		files:      make(map[string]map[string][]byte),
-		comments:   make(map[string][]forge.Comment),
-		threads:    make(map[string][]forge.ThreadResolution),
-		approvals:  make(map[string]forge.ApprovalSnapshot),
-		envReviews: make(map[string]forge.EnvironmentReviewFacts),
-		nextCommID: 1,
+		bundles:      make(map[string]forge.DerivedTree),
+		attribute:    "fake-generated",
+		openMRs:      make(map[string][]forge.OpenMR),
+		files:        make(map[string]map[string][]byte),
+		comments:     make(map[string][]forge.Comment),
+		threads:      make(map[string][]forge.ThreadResolution),
+		approvals:    make(map[string]forge.ApprovalSnapshot),
+		envReviews:   make(map[string]forge.EnvironmentReviewFacts),
+		mergeRecords: make(map[string]forge.MergeRecordFacts),
+		nextCommID:   1,
 	}
 }
 
@@ -130,6 +132,47 @@ func cloneEnvironmentReviewFacts(facts forge.EnvironmentReviewFacts) forge.Envir
 		v := *facts.EnvironmentPreventSelfReview
 		facts.EnvironmentPreventSelfReview = &v
 	}
+	return facts
+}
+
+// SeedMergeRecordFacts makes MergeRecords(commit) return facts (SI-249; plan
+// R-PB-2), mirroring SeedEnvironmentReviewFacts' seed-or-error pattern. It
+// refuses facts that break the facts contract and facts observing another
+// commit than the one they are seeded for, so the fake can never hand a
+// consumer an observation a real adapter could not produce.
+func (f *Forge) SeedMergeRecordFacts(commit string, facts forge.MergeRecordFacts) error {
+	if err := facts.Validate(); err != nil {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
+		return fmt.Errorf("fake: seed merge record facts: %w", err)
+	}
+	if facts.Commit != commit {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
+		return fmt.Errorf("fake: seeded merge record facts observe commit %q, not %q", facts.Commit, commit)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergeRecords[commit] = cloneMergeRecordFacts(facts)
+	return nil
+}
+
+// MergeRecords implements forge.Forge: a clone of the facts seeded for
+// commit, or an error for a commit nothing was seeded for.
+func (f *Forge) MergeRecords(ctx context.Context, commit string) (forge.MergeRecordFacts, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.MergeRecordFacts{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	facts, ok := f.mergeRecords[commit]
+	if !ok {
+		// vocab:identity — forge merge-record diagnostic: a provider's merge of a change request, not a Verdi lifecycle verb.
+		return forge.MergeRecordFacts{}, fmt.Errorf("fake: no merge record facts seeded for commit %q", commit)
+	}
+	return cloneMergeRecordFacts(facts), nil
+}
+
+func cloneMergeRecordFacts(facts forge.MergeRecordFacts) forge.MergeRecordFacts {
+	facts.Changes = append([]forge.ChangeRequestMerge{}, facts.Changes...)
 	return facts
 }
 

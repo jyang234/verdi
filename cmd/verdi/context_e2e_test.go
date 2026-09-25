@@ -53,6 +53,7 @@ func contextE2ECurrentHead(t *testing.T, dir string) string {
 // stderr, and — the store/worktree-unchanged invariant — neither HEAD nor
 // `git status --porcelain` changes.
 func TestContextCompileE2E_StdoutHappyPath(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -96,6 +97,7 @@ func TestContextCompileE2E_StdoutHappyPath(t *testing.T) {
 // explicit output file" — `git status --porcelain` names exactly that one
 // new path and nothing else (no data-item or projection file anywhere).
 func TestContextCompileE2E_OutFile_LeavesOnlyThatFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -135,6 +137,7 @@ func TestContextCompileE2E_OutFile_LeavesOnlyThatFile(t *testing.T) {
 // TestContextCompileE2E_StdinRequest proves `--request -` reads from the
 // real subprocess's os.Stdin.
 func TestContextCompileE2E_StdinRequest(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -162,6 +165,7 @@ func TestContextCompileE2E_StdinRequest(t *testing.T) {
 // *contextcompile.NoConstitutionRefusal to exit 1 against a legacy-shaped
 // store fixture that carries no .verdi/policy/ tree at all.
 func TestContextCompileE2E_NoConstitution_ExitOne(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -187,6 +191,7 @@ func TestContextCompileE2E_NoConstitution_ExitOne(t *testing.T) {
 // TestContextCompileE2E_MalformedRequest_ExitTwo proves the real binary
 // maps a syntactically invalid request to exit 2.
 func TestContextCompileE2E_MalformedRequest_ExitTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -206,6 +211,7 @@ func TestContextCompileE2E_MalformedRequest_ExitTwo(t *testing.T) {
 // binary refuses a --out destination inside .verdi/ (exit 2) and writes
 // nothing at all — the store and worktree are completely unchanged.
 func TestContextCompileE2E_OutInVerdiZone_RefusedNoWrite(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -232,6 +238,7 @@ func TestContextCompileE2E_OutInVerdiZone_RefusedNoWrite(t *testing.T) {
 // of the input request file — each with exit 2, nothing written into
 // .verdi/, an unclobbered request file, and an unchanged worktree.
 func TestContextCompileE2E_OutAliasesReservedPath_RefusedNoWrite(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
@@ -290,6 +297,7 @@ func TestContextCompileE2E_OutAliasesReservedPath_RefusedNoWrite(t *testing.T) {
 // (no store root resolved, nothing touched), matching the hermetic
 // posture internal/specalign's verb inventory relies on.
 func TestContextCompileE2E_UnknownSubcommand_ExitTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 

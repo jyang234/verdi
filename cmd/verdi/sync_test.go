@@ -178,6 +178,7 @@ func seedRunner(t *testing.T, root string) upstream.Runner {
 //
 // guide-claim: 7.2-verdi-sync
 func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	runner := seedRunner(t, root)
 
@@ -390,6 +391,7 @@ func TestRunSync_Produce_ForceLocalOverride_StampsSourceLocal(t *testing.T) {
 // before ever touching the filesystem (store.FindRoot) — the two flags
 // express incompatible provenance intents.
 func TestRunSync_Produce_Negative_MutuallyExclusiveWithOrRegen(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--or-regen", "--produce"}, &stdout, &stderr)
 	if code != 2 {
@@ -403,6 +405,7 @@ func TestRunSync_Produce_Negative_MutuallyExclusiveWithOrRegen(t *testing.T) {
 // TestRunSync_Produce_Negative_ForceLocalWithoutProduce proves --force-local
 // alone (without --produce) is a usage error, not a silently ignored flag.
 func TestRunSync_Produce_Negative_ForceLocalWithoutProduce(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--force-local"}, &stdout, &stderr)
 	if code != 2 {
@@ -418,6 +421,7 @@ func TestRunSync_Produce_Negative_ForceLocalWithoutProduce(t *testing.T) {
 // --produce — three distinct provenance intents, never combinable
 // (spec/runtime-evidence dc-1).
 func TestCmdSync_ProduceRuntime_Negative_MutuallyExclusive(t *testing.T) {
+	t.Parallel()
 	cases := [][]string{
 		{"--produce-runtime", "--produce"},
 		{"--produce-runtime", "--or-regen"},
@@ -435,6 +439,7 @@ func TestCmdSync_ProduceRuntime_Negative_MutuallyExclusive(t *testing.T) {
 // --story/--ac/--verdict/--witness are rejected without --produce-runtime —
 // they have no meaning for --produce/--or-regen.
 func TestCmdSync_ProduceRuntime_Negative_ValueFlagsRequireMode(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--produce", "--story", "spec/x"}, &stdout, &stderr)
 	if code != 2 {
@@ -448,6 +453,7 @@ func TestCmdSync_ProduceRuntime_Negative_ValueFlagsRequireMode(t *testing.T) {
 // TestCmdSync_ProduceRuntime_Negative_InvalidVerdict proves an unrecognized
 // --verdict value is a usage error, never silently coerced or ignored.
 func TestCmdSync_ProduceRuntime_Negative_InvalidVerdict(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--produce-runtime", "--story", "spec/x", "--ac", "ac-1", "--verdict", "maybe", "--witness", "w"}, &stdout, &stderr)
 	if code != 2 {
@@ -462,6 +468,7 @@ func TestCmdSync_ProduceRuntime_Negative_InvalidVerdict(t *testing.T) {
 // given with no following value is a usage error rather than an index panic
 // or a silently absorbed empty string.
 func TestCmdSync_ProduceRuntime_Negative_MissingFlagValue(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--produce-runtime", "--story"}, &stdout, &stderr)
 	if code != 2 {
@@ -544,6 +551,7 @@ func TestRunSync_Produce_NoServicesDiscovered_StillSucceeds(t *testing.T) {
 //
 // guide-claim: 7.2-ci-evidence-bundles
 func TestRunSync_CI_PullsBundle(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	f := fake.New()
 	// The fetched artifact is the whole derived subtree CI uploaded, keyed
@@ -631,6 +639,7 @@ func runSeededFetch(t *testing.T, tree forgepkg.DerivedTree) (code int, stdout, 
 // commit the canned graph's tool pseudo-version
 // (v0.0.0-20260707202836-cd38b1a56bb7) truncates to 12 hex chars.
 func TestRunSync_CIFetch_ToolPin(t *testing.T) {
+	t.Parallel()
 	const pinnedTool = "v0.0.0-20260707202836-cd38b1a56bb7"
 	const mismatchedTool = "v0.0.0-20260707202836-ffffffffffff"
 	const pinnedCommit = "cd38b1a56bb7deadbeefdeadbeefdeadbeefdead"
@@ -703,6 +712,7 @@ func TestRunSync_CIFetch_ToolPin(t *testing.T) {
 // the missing carrier), so the scope is empty by construction and the id is
 // the bare source.
 func TestToolPinCarrierAbsentDisclosure(t *testing.T) {
+	t.Parallel()
 	d := toolPinCarrierAbsentDisclosure()
 	if d.Source != toolPinCarrierAbsentSource {
 		t.Errorf("Source = %q, want %q", d.Source, toolPinCarrierAbsentSource)
@@ -737,6 +747,7 @@ func TestToolPinCarrierAbsentDisclosure(t *testing.T) {
 // DOES carry a matching pin prints nothing — the negative path that keeps
 // the notice from becoming background noise.
 func TestCheckFetchedToolPin_AbsentCarrierRendersThroughTheSeam(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	tree := forgepkg.DerivedTree{"spec--stale-decline/" + testCommit + "/verdicts.json": []byte("{}\n")}
 	// root is unused on this path: the manifest is read only when a carrier
@@ -765,6 +776,7 @@ func TestCheckFetchedToolPin_AbsentCarrierRendersThroughTheSeam(t *testing.T) {
 // port collapsed the multi-verdicts.json artifact to a single bundle, or
 // errored on the duplicate.
 func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	const specRef = "spec/close-fixture"
@@ -847,6 +859,7 @@ func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
 // still prevents them from becoming positive proof. A locally fabricated
 // bundle can never fold as trusted.
 func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	const specRef = "spec/close-fixture"
@@ -899,6 +912,7 @@ func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
 // no CI bundle available and no --or-regen fails loudly (exit 2) rather
 // than silently regenerating anyway.
 func TestRunSync_NoBundle_NoRegen_ExitsOperational(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	var stdout, stderr bytes.Buffer
 	deps := syncDeps{
@@ -922,6 +936,7 @@ func TestRunSync_NoBundle_NoRegen_ExitsOperational(t *testing.T) {
 // review verdicts BLOCK surfaces sync's own exit 1 (verdict failure),
 // using the real BLOCK capture.
 func TestRunSync_BlockingReview_ExitsOne(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	fr := upstream.NewFakeRunner()
 	fr.Enqueue("flowmap", "graph", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "graph.json"), ExitCode: 0})
@@ -952,6 +967,7 @@ func TestRunSync_BlockingReview_ExitsOne(t *testing.T) {
 // boundaryWriteRunner simulates, regeneration fails loudly rather than
 // silently trusting its own computation.
 func TestRunSync_Negative_BoundaryDiffCrossCheckDisagreement(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	fr := upstream.NewFakeRunner()
 	fr.Enqueue("flowmap", "graph", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "graph.json"), ExitCode: 0})
@@ -985,6 +1001,7 @@ func TestRunSync_Negative_BoundaryDiffCrossCheckDisagreement(t *testing.T) {
 // TestRunSync_Negative_UnknownForgeError proves runSync surfaces a forge
 // error (not ErrNoBundle) as an operational failure even with --or-regen.
 func TestRunSync_Negative_ForgeError(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	deps := syncDeps{
 		Runner: upstream.NewFakeRunner(),
@@ -1020,6 +1037,9 @@ func (erroringForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]fo
 }
 func (erroringForge) EnvironmentReview(ctx context.Context, query forgepkg.EnvironmentReviewQuery) (forgepkg.EnvironmentReviewFacts, error) {
 	return forgepkg.EnvironmentReviewFacts{}, errors.New("forge: simulated transport failure")
+}
+func (erroringForge) MergeRecords(ctx context.Context, commit string) (forgepkg.MergeRecordFacts, error) {
+	return forgepkg.MergeRecordFacts{}, errors.New("forge: simulated transport failure")
 }
 func (erroringForge) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	return nil, errors.New("forge: simulated transport failure")

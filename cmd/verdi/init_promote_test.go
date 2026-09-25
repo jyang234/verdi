@@ -55,6 +55,7 @@ func stageSyntheticVerdi(t *testing.T, root string) (stagedVerdi string) {
 // succeeds on every platform — the property that keeps init working where
 // os.Mkdir-then-rename would have failed.
 func TestPromoteStagedStore_AbsentDest_Promotes(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	verdiDir := filepath.Join(root, verdiDirName)
 	stagedVerdi := stageSyntheticVerdi(t, root)
@@ -79,6 +80,7 @@ func TestPromoteStagedStore_AbsentDest_Promotes(t *testing.T) {
 // load-bearing. The foreign directory is left byte-untouched (still empty)
 // and the staged source is left intact for the caller's defer to discard.
 func TestPromoteStagedStore_RefusesForeignEmptyVerdi(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	verdiDir := filepath.Join(root, verdiDirName)
 	stagedVerdi := stageSyntheticVerdi(t, root)
@@ -114,6 +116,7 @@ func TestPromoteStagedStore_RefusesForeignEmptyVerdi(t *testing.T) {
 // cases route through one atomic refusal, and the foreign content is left
 // byte-untouched.
 func TestPromoteStagedStore_RefusesForeignPopulatedVerdi(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	verdiDir := filepath.Join(root, verdiDirName)
 	stagedVerdi := stageSyntheticVerdi(t, root)

@@ -85,7 +85,7 @@ var kernelFieldTable = map[string][]string{
 
 	policyartifact.KindPolicy:      {"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"},
 	policyartifact.KindOverlay:     {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
-	policyartifact.KindExemption:   {"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"},
+	policyartifact.KindExemption:   {"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "required_input", "compensating_controls", "approvals", "expiry", "review_condition"},
 	policyartifact.KindDisposition: {"schema", "id", "kind", "title", "owners", "template", "scope", "witness", "conclusion", "origin", "judgment", "compensating_controls", "approvals", "expiry", "review_condition"},
 
 	policyartifact.KindConstitution:   {"schema", "id", "kind", "title", "owners", "template", "selected_profile", "environments", "catalog", "subjects", "adapters"},

@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoadManifest_Happy(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	m, err := loadManifest(root)
 	if err != nil {
@@ -27,6 +28,7 @@ func TestLoadManifest_Happy(t *testing.T) {
 }
 
 func TestLoadManifest_Negative(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if _, err := loadManifest(root); err == nil {
 		t.Fatal("loadManifest with no verdi.yaml: want error, got nil")
@@ -44,6 +46,7 @@ func TestLoadManifest_Negative(t *testing.T) {
 }
 
 func TestDecodeBundleFile_Negative(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var out []int
 	if err := decodeBundleFile(dir, "missing.json", &out); err == nil {
@@ -59,6 +62,7 @@ func TestDecodeBundleFile_Negative(t *testing.T) {
 }
 
 func TestEvaluateBundle_Negative_MissingFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	code := evaluateBundle(syncDeps{Stdout: &stdout, Stderr: &stderr}, dir)
@@ -68,6 +72,7 @@ func TestEvaluateBundle_Negative_MissingFiles(t *testing.T) {
 }
 
 func TestLoadSpecACs_Happy(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	acs, err := loadSpecACs(root, "spec/stale-decline")
 	if err != nil {
@@ -81,6 +86,7 @@ func TestLoadSpecACs_Happy(t *testing.T) {
 }
 
 func TestLoadSpecACs_Negative(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	if _, err := loadSpecACs(root, "spec/does-not-exist"); err == nil {
 		t.Fatal("loadSpecACs(unknown spec): want error, got nil")
@@ -91,6 +97,7 @@ func TestLoadSpecACs_Negative(t *testing.T) {
 }
 
 func TestListGoldenFlows_Happy(t *testing.T) {
+	t.Parallel()
 	flows, err := listGoldenFlows(svcfixSrcDir)
 	if err != nil {
 		t.Fatalf("listGoldenFlows: %v", err)
@@ -101,6 +108,7 @@ func TestListGoldenFlows_Happy(t *testing.T) {
 }
 
 func TestListGoldenFlows_NoDirIsEmptyNotError(t *testing.T) {
+	t.Parallel()
 	flows, err := listGoldenFlows(t.TempDir())
 	if err != nil {
 		t.Fatalf("listGoldenFlows(no testdata/flows dir): %v", err)
@@ -111,6 +119,7 @@ func TestListGoldenFlows_NoDirIsEmptyNotError(t *testing.T) {
 }
 
 func TestWriteTempGraph_HappyAndCleanup(t *testing.T) {
+	t.Parallel()
 	g := &upstream.Graph{Stamp: "deadbeef", Algo: "rta"}
 	path, cleanup, err := writeTempGraph(g)
 	if err != nil {
@@ -157,6 +166,7 @@ func TestGithubRepoName(t *testing.T) {
 }
 
 func TestBuildForge_Negative_UnknownKind(t *testing.T) {
+	t.Parallel()
 	if _, err := buildForge("bitbucket", "", nil); err == nil {
 		t.Fatal("buildForge(unknown kind): want error, got nil")
 	}
@@ -358,6 +368,7 @@ func TestGitlabProjectID(t *testing.T) {
 }
 
 func TestResolveRefCommit_Negative_NotAGitRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, _, err := resolveRefCommit(context.Background(), dir); err == nil {
 		t.Fatal("resolveRefCommit outside a git repo: want error, got nil")

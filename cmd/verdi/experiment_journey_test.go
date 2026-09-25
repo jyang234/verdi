@@ -26,7 +26,7 @@ import (
 )
 
 func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	privateKey := ed25519.NewKeyFromSeed(wave5CFixtureEd25519Seed[:])
 	seen := map[string]bool{}
@@ -65,6 +65,7 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 	// Begin unlocked: author through the typed draft/candidate seams, then
 	// make one direct Git edit and require explicit human reconciliation.
 	repo := buildExperimentHumanRepo(t, privateKey.Public().(ed25519.PublicKey))
+	pinFixtureDefaultBranch(t, repo.Dir)
 	experimentDir := filepath.Dir(wave5CDefinitionPath(repo.Dir))
 	policyDir := filepath.Join(repo.Dir, ".verdi", "policy", "policies")
 	basePolicy := mustReadWave5CFile(t, filepath.Join(policyDir, "experiment.md"))

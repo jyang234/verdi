@@ -58,7 +58,7 @@ func buildJourneyRepo(t *testing.T, files map[string]string) *fixturegit.Repo {
 		base[k] = v
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: base, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 	return repo
 }

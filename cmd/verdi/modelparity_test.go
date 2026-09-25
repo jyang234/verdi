@@ -16,6 +16,7 @@ import (
 // with no matching model transition, or a model transition naming a
 // verb dispatch.go does not recognize) fails this test.
 func TestCanonicalModel_VerbsMatchDispatch(t *testing.T) {
+	t.Parallel()
 	canonical := model.Canonical()
 	if len(canonical.Lifecycle) == 0 {
 		t.Fatal("model.Canonical().Lifecycle is empty — nothing to compare")
@@ -74,6 +75,7 @@ func TestCanonicalModel_VerbsMatchDispatch(t *testing.T) {
 // be one of the catalog's transition verbs, so the exemption above can
 // never quietly excuse a verb the catalog does not even declare.
 func TestSpecTransitionForgeVerbs_SubsetOfTransitionVerbs(t *testing.T) {
+	t.Parallel()
 	all := map[string]bool{}
 	for _, v := range SpecTransitionVerbs() {
 		all[v] = true
@@ -90,6 +92,7 @@ func TestSpecTransitionForgeVerbs_SubsetOfTransitionVerbs(t *testing.T) {
 // must not remove it from the CLI-verb inventory — accept.go still prints
 // its compatibility notice, and specalign/showcasealign still count it.
 func TestAcceptRemainsARecognizedCLIVerb(t *testing.T) {
+	t.Parallel()
 	if _, known := verbPhase["accept"]; !known {
 		t.Fatal("dispatch.go no longer recognizes `accept`; the CLI-verb inventory must be unchanged by the catalog's merge-signaled transition")
 	}

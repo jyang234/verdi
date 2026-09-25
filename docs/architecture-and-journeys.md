@@ -240,19 +240,20 @@ attributes the load-bearing ones to the component that embodies them.
    release as an alias) refuses a non-accepted spec, refuses a superseded story
    naming its successor, and refuses unresolved rung-4 cascade flags.
 2. **Implement.** On every pull request — no path filter, no exceptions —
-   `merge-gate.yml` runs the full `make verify`, builds the binary, and
-   self-lints the store. That single check reports on every PR unconditionally,
-   and its context, `merge-gate`, is the stable name designated for the branch
-   ruleset's required-status rule; once the owner activates that rule, no PR is
-   ever silently ungated and none waits on a context that will never report. On
-   pushes the work splits by path: a push touching code paths runs `verify.yml`
-   — the same full `make verify`, then, in the same job and strictly after it
-   passes, `verdi sync --produce` assembles the evidence bundle stamped
-   `source: ci` and uploads it as the `verdi-evidence` artifact — while a push
-   touching only spec/doc paths rides `spec-gate.yml`'s fast check (build + lint
-   + spec-align). Evidence production stays push-only on purpose: it must follow
-   a `make verify` that already gated the same commit, never a second
-   independent run.
+   `merge-gate.yml` runs `make verify`'s steps as parallel jobs, builds the
+   binary, and self-lints the store (SI-266). Its aggregating `merge-gate`
+   job reports on every PR unconditionally, and that context is the stable
+   name designated for the branch ruleset's required-status rule; once the
+   owner activates that rule, no PR is ever silently ungated and none waits on
+   a context that will never report. On pushes the work splits by path: a push
+   touching code paths runs `verify.yml` — the same parallel gate jobs, then
+   a final `verify` job that runs only when every gate job of that run
+   succeeded, in which `verdi sync --produce` assembles the evidence bundle
+   stamped `source: ci` and uploads it as the `verdi-evidence` artifact
+   (SI-267) — while a push touching only spec/doc paths rides
+   `spec-gate.yml`'s fast check (build + lint + spec-align). Evidence
+   production stays push-only on purpose: it must follow a gate that already
+   passed the same commit in the same run, never a second independent run.
 3. **`verdi sync`** pulls the per-(git-ref, commit) bundle into `derived/`,
    preserving its per-spec keys so the fold can actually read it (D6-9);
    `--or-regen` rebuilds locally as advisory (`source: local`) when no pipeline
@@ -484,12 +485,12 @@ flowchart LR
     subgraph build ["2 · BUILD"]
         BS{"verdi build start<br/><i>refuses non-accepted,<br/>superseded, cascade-stale</i>"}
         IMPL["implement<br/><i>code + tests</i>"]
-        EVJOB["CI verify.yml (push, code paths)<br/><i>make verify → sync --produce →<br/>verdi-evidence, source: ci</i>"]
+        EVJOB["CI verify.yml (push, code paths)<br/><i>parallel gate jobs → verify job:<br/>sync --produce → verdi-evidence,<br/>source: ci</i>"]
         SYNC["verdi sync<br/><i>bundle → derived/</i>"]
         MATRIX["verdi matrix<br/><i>the fold + stub table</i>"]
         ALIGN["verdi align<br/><i>computed + diagram alignment<br/>+ judged</i>"]
         GATE{"verdi gate<br/>4 conditions"}
-        PRGATE{"merge-gate.yml<br/><i>the designated required check ·<br/>every PR, no path filter ·<br/>full make verify + self-lint</i>"}
+        PRGATE{"merge-gate.yml<br/><i>the designated required check ·<br/>every PR, no path filter ·<br/>make verify's steps as parallel<br/>jobs + self-lint</i>"}
         BS --> IMPL --> EVJOB --> SYNC --> MATRIX --> ALIGN --> GATE --> PRGATE
     end
 

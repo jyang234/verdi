@@ -14,16 +14,16 @@
 # close/**, unfiltered on close/**" cannot be expressed in verify.yml's own
 # trigger alone. This is therefore a second, tiny workflow, push-triggered
 # on close/** ONLY, with no paths: filter at all, whose one job calls
-# verify.yml's own `verify` job through `workflow_call`
-# (jobs.<job_id>.uses) instead of copying its steps. Reusing the SAME job
-# body matters for two reasons, not just economy:
+# verify.yml — its gate jobs and its final `verify` evidence job — through
+# `workflow_call` (jobs.<job_id>.uses) instead of copying them. Reusing the
+# SAME jobs matters for two reasons, not just economy:
 #
 #   - The self-hosted evidence producer (cmd/verdi/selfevidence.go) binds
-#     verdi's own make-verify outcome as static/behavioral evidence, and is
-#     only honest when `verdi sync --produce` runs strictly AFTER `make
-#     verify` already exited 0 in the SAME job (verify.yml's own head
-#     comment) — never a second, independent run that could disagree with
-#     the first.
+#     verdi's own gate outcome as static/behavioral evidence, and is only
+#     honest when `verdi sync --produce` runs after every gate job of the
+#     SAME workflow run succeeded at the same commit (SI-267; verify.yml's
+#     own head comment) — never a second, independent run that could
+#     disagree with the first.
 #   - verify.yml's OWN push trigger now excludes close/** via
 #     `branches-ignore` (see its head comment), so one push to a close/**
 #     branch runs the evidence job once, through this workflow, never also
@@ -32,20 +32,20 @@
 #     can also be pushed to another branch or a tag where verify.yml runs.
 #     internal/forge/github's FetchEvidenceBundle finds runs by head_sha
 #     alone and takes the first successful run, in API order, that carries
-#     the artifact. Every such bundle comes from the same job definition
-#     over the same commit and is source: ci, so which one it takes changes
-#     no authority, though which one it takes is not defined.
+#     the artifact. Every such bundle comes from the same workflow
+#     definition over the same commit and is source: ci, so which one it
+#     takes changes no authority, though which one it takes is not defined.
 #
 # GITHUB_JOB: the construction relies on GITHUB_JOB being `verify` inside
-# the called job. GITHUB_JOB feeds the evidence records'
-# `provenance.job_name` (SI-229, lane L1a), which the obligation match
-# compares with the CI job the obligations name, `verify` (plan R-CM-4).
-# For a reusable workflow GitHub documents that "the github context is
-# always associated with the caller workflow", which would make GITHUB_JOB
-# this file's caller job id; community reports show the called job's id
-# instead. The caller job below and verify.yml's job are both `verify`, so
-# GITHUB_JOB is `verify` under either reading; internal/specalign pins both
-# ids.
+# the called workflow's evidence job. GITHUB_JOB feeds the evidence
+# records' `provenance.job_name` (SI-229, lane L1a), which the obligation
+# match compares with the CI job the obligations name, `verify` (plan
+# R-CM-4). For a reusable workflow GitHub documents that "the github
+# context is always associated with the caller workflow", which would make
+# GITHUB_JOB this file's caller job id; community reports show the called
+# job's id instead. The caller job below and verify.yml's evidence job are
+# both `verify`, so GITHUB_JOB is `verify` under either reading;
+# internal/specalign pins both ids.
 #
 # The caller job below declares only `uses:` and `permissions:`. GitHub's
 # documented keyword whitelist for a job that calls a reusable workflow is
@@ -58,7 +58,7 @@
 # permissions: GitHub documents that when the calling job does not specify
 # jobs.<job_id>.permissions, the called workflow gets the default
 # GITHUB_TOKEN permissions, and a called workflow can only downgrade what
-# it is passed. The called verify job needs contents: read and nothing
+# it is passed. The called workflow's jobs need contents: read and nothing
 # else: actions/checkout reads the repository (the scope its README
 # recommends), `verdi sync --produce` never dials the forge (sync.go), no
 # step of verify.yml is given the token, and actions/upload-artifact

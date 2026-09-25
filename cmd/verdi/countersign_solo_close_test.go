@@ -85,6 +85,7 @@ func closeWorkflowPinViolations(raw []byte) ([]string, error) {
 // resolver asks GitHub for the review of environment "close" dated by the
 // job the jobs API names "close", both constants.
 func TestCloseWorkflowPinsTheEnvironmentReviewQuery(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(closeWorkflowFile)
 	if err != nil {
 		t.Fatalf("read close workflow: %v", err)
@@ -408,7 +409,7 @@ func assertSoloCloseReadOnly(t *testing.T, github *soloCloseGitHub, attempt stri
 // countersign witnesses carry the kernel's solo role-collapse disclosure
 // (L2a review m-7).
 func TestSoloEnvironmentReviewCloseCountersign(t *testing.T) {
-	binary := buildCountersignContractBinary(t)
+	binary := buildVerdiBinary(t)
 
 	t.Run("built binary: the owner's approved review of the first attempt proves the close countersign", func(t *testing.T) {
 		root, head := readySoloCloseRepo(t)

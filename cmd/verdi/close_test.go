@@ -80,8 +80,7 @@ func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	// through the real, git-backed specstate projector; this fixturegit repo
 	// has no origin remote, so the default branch is pinned here exactly as
 	// buildCloseFeatureRepo already documents for its own fixtures.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                                    "schema: verdi.layout/v1\nforge: github\n",
 			".verdi/specs/active/loan-mgmt/spec.md":                featureV1SpecMD,
@@ -92,6 +91,8 @@ func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "close fixture: feature + story + self-hosted bindings",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // writeCloseGateReport writes deviation-report.md directly into the
@@ -128,6 +129,7 @@ digest: sha256:%s
 // archive, freeze, stage, commit, or publish effect. Both block states and an
 // operational failure preserve every observable repository and provider fact.
 func TestCloseConflictPreEffect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		verdict  policyconflict.Verdict
@@ -257,6 +259,7 @@ func writePoisonLocalRecord(t *testing.T, root, specRef, commit string) {
 //
 // guide-claim: 7.4-gate-close-rollup
 func TestRunClose_EndToEnd(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 
@@ -414,6 +417,7 @@ func TestRunClose_EndToEnd(t *testing.T) {
 }
 
 func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
@@ -475,6 +479,7 @@ func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
 }
 
 func TestRunClose_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", JobName: "1", Commit: repo.Head}
@@ -534,6 +539,7 @@ func TestRunClose_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testin
 // gate actually gates: with no evidence at all, `verdi close` exits 1,
 // creates no closure branch, moves nothing, and publishes nothing.
 func TestRunClose_NotEligible_ExitsOneWithNoSideEffects(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 
@@ -573,6 +579,7 @@ func TestRunClose_NotEligible_ExitsOneWithNoSideEffects(t *testing.T) {
 // ritual, and — the round's own repeated lesson — leaves NOTHING
 // archived: no closure branch, no quartet move, no publish.
 func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		setup      func(t *testing.T, root, head string) // "" setup = no report at all (X-17)
@@ -652,6 +659,7 @@ func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
 // proven end to end in closefeature_test.go; this test only pins that
 // close.go's dispatch is wired to it.
 func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	// discoverImplementingStories' Git-derived effective-state resolution
 	// (Task 5) now refuses OPERATIONALLY when the default branch cannot be
@@ -660,7 +668,7 @@ func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
 	// discoverImplementingStories), so it alone needs this pinned;
 	// buildCloseFixtureRepo stays untouched for its other 26 story-scoped
 	// callers, none of which reach this code path.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
 
@@ -684,6 +692,7 @@ func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
 // argument that resolves to nothing is an operational error (2), not a
 // silent nothing-to-close success.
 func TestRunClose_UnresolvableStory_ExitsOperational(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New()}
 	var stdout, stderr bytes.Buffer
@@ -702,6 +711,7 @@ func TestRunClose_UnresolvableStory_ExitsOperational(t *testing.T) {
 // judge's own configured ceiling (JudgeTimeout threaded through unchanged —
 // duration identical to today, only the timeout FAILURE SHAPE changes).
 func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
+	t.Parallel()
 	deps := closeDeps{
 		Runner:        upstream.NewFakeRunner(),
 		JudgeCmd:      []string{"claude", "-p"},
@@ -734,6 +744,7 @@ func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
 // the freeze step's judge path directly, exactly as it would run were a
 // regenerate ever reached.
 func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
@@ -782,6 +793,7 @@ func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
 // expiry message is unchanged and still speaks --wait
 // (TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated keeps passing).
 func TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
@@ -870,6 +882,7 @@ func hasLocalBranch(t *testing.T, dir, name string) bool {
 // once the blocking condition clears (the human re-aligns — the analog of
 // "the judge window now allows").
 func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 
@@ -919,6 +932,7 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 // caller's target argument: an interrupted close has already moved the spec
 // out of the active zone, so a retry's own ref no longer resolves.
 func TestClosureResidueName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		paths []string
@@ -1000,6 +1014,7 @@ func TestClosureResidueName(t *testing.T) {
 // archive. The guard must still REFUSE (no new pass path), but say what the
 // staged paths actually are and how to recover.
 func TestRequireCleanIndex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("clean index passes", func(t *testing.T) {
@@ -1255,6 +1270,7 @@ frozen: { at: 2024-01-01, commit: ` + frozenCommit + ` }
 // disclaimed": a runtime disclosure from the same predicate, not prose in a
 // design document.
 func TestRunClose_DisclosesFoldRecordsMissingFromHEAD(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("an uncommitted waiver the fold consumed is disclosed", func(t *testing.T) {
@@ -1306,6 +1322,7 @@ func TestRunClose_DisclosesFoldRecordsMissingFromHEAD(t *testing.T) {
 // exposed as a function precisely so the preflight/prepare rehearsal paths can
 // call the SAME predicate later rather than re-deriving it.
 func TestUncommittedFoldRecordPaths(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("absent from HEAD, present in the working tree", func(t *testing.T) {
@@ -1389,6 +1406,7 @@ func TestUncommittedFoldRecordPaths(t *testing.T) {
 // --preflight and --prepare then ALL exited 2 on the happy path for any story
 // whose attestation or waiver is committed — the very state the design wants.
 func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const rel = ".verdi/waivers/jira-close-1/ac-1.md"
 
@@ -1435,6 +1453,7 @@ func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
 // TestStoryFoldRecordPaths table-drives which fold inputs count as CONSUMED —
 // the paths whose absence from HEAD is worth disclosing.
 func TestStoryFoldRecordPaths(t *testing.T) {
+	t.Parallel()
 	const slug = "jira-close-1"
 	cases := []struct {
 		name string
@@ -1538,6 +1557,7 @@ func TestStoryFoldRecordPaths(t *testing.T) {
 // commits the spec directory) is fine: the pathspec matches the index entry
 // and records the deletion. This covers the edge where it does not.
 func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
@@ -1710,6 +1730,7 @@ func seedCloseHappyPath(t *testing.T, repo *fixturegit.Repo) {
 // (constitution 2/10). The design scopes rollback out, so the fix is
 // disclosure, not unwind.
 func TestRunClose_PreStageFailuresDiscloseFreezeResidue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	run := func(t *testing.T, repo *fixturegit.Repo) string {
 		t.Helper()
@@ -1779,6 +1800,7 @@ func TestRunClose_PreStageFailuresDiscloseFreezeResidue(t *testing.T) {
 // branch cut). Silence would strand an unpublished rollup; the disclosure names
 // the archive as durable and points at `verdi rollup --publish`.
 func TestRunClose_PublishFailureDisclosesCommittedButUnpublished(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	seedCloseHappyPath(t, repo)
@@ -1811,6 +1833,7 @@ func TestRunClose_PublishFailureDisclosesCommittedButUnpublished(t *testing.T) {
 }
 
 func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			"staged.txt":   "committed staged content\n",
