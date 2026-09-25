@@ -17,14 +17,18 @@ import (
 // memTree is a TreeReader over an in-memory repo-path -> content map.
 type memTree map[string]string
 
-func (m memTree) Files(_ context.Context, dir string) ([]string, error) {
-	var out []string
+func (m memTree) Files(_ context.Context, dir string) ([]TreeFile, error) {
+	var paths []string
 	for p := range m {
 		if strings.HasPrefix(p, dir+"/") {
-			out = append(out, p)
+			paths = append(paths, p)
 		}
 	}
-	sort.Strings(out)
+	sort.Strings(paths)
+	out := make([]TreeFile, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, TreeFile{Path: p, Regular: true})
+	}
 	return out, nil
 }
 
@@ -153,6 +157,44 @@ func TestReadRecords_Parity(t *testing.T) {
 	work, commit := mustRead(t, WorkTree{Root: repo.Dir}), mustRead(t, CommitTree{Root: repo.Dir, Commit: "HEAD"})
 	if len(work.Failures) != 2 || !reflect.DeepEqual(work, commit) {
 		t.Fatalf("readers differ on one tree:\nwork   %v\ncommit %v", work.Failures, commit.Failures)
+	}
+}
+
+// TestReadRecords_SymlinkParity reads one committed tree holding a
+// symlinked conflict file and a symlinked spec directory through both
+// readers (review a M-5): each is a recorded Failure in both, never read
+// through and never skipped.
+func TestReadRecords_SymlinkParity(t *testing.T) {
+	repo := scenario.Build(t, "proposed")
+	for link, target := range map[string]string{
+		".verdi/conflicts/successor-closed-story.md": "outside/successor-closed-story.md",
+		".verdi/specs/active/successor":              "outside/successor",
+	} {
+		full, dest := filepath.Join(repo.Dir, link), filepath.Join(repo.Dir, target)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(full, dest); err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(filepath.Dir(full), dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(rel, full); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, repo.Dir, "add", "-A")
+	gitIn(t, repo.Dir, "commit", "-q", "--no-verify", "-m", "Link a conflict and a spec directory")
+	want := []string{
+		".verdi/conflicts/successor-closed-story.md: " + errNotRegular.Error(),
+		".verdi/specs/active/successor: " + errNotRegular.Error(),
+	}
+	work, commit := mustRead(t, WorkTree{Root: repo.Dir}), mustRead(t, CommitTree{Root: repo.Dir, Commit: "HEAD"})
+	if !reflect.DeepEqual(work, commit) || !reflect.DeepEqual(work.Failures, want) || work.Specs["successor"] != nil || len(work.Conflicts) != 1 {
+		t.Fatalf("symlinked records:\nwork   %v (conflicts %d, successor read %v)\ncommit %v\nwant   %v",
+			work.Failures, len(work.Conflicts), work.Specs["successor"] != nil, commit.Failures, want)
 	}
 }
 

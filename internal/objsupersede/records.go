@@ -27,20 +27,35 @@ import (
 
 // TreeReader reads one tree's files: a working tree or a commit's tree.
 type TreeReader interface {
-	// Files lists every file under dir, recursively, as repo-relative slash
-	// paths. A dir absent from the tree lists nothing.
-	Files(ctx context.Context, dir string) ([]string, error)
+	// Files lists every entry under dir that is not a directory,
+	// recursively, as repo-relative slash paths; dir itself is listed when
+	// it is not a directory. A symlink, to a file or a directory, is listed
+	// as not Regular and never followed. A dir absent from the tree lists
+	// nothing.
+	Files(ctx context.Context, dir string) ([]TreeFile, error)
 	// ReadFile returns a repo-relative path's bytes.
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 }
+
+// TreeFile is one listed entry: its repo-relative path, and whether it is a
+// regular file rather than a symlink or another special entry.
+type TreeFile struct {
+	Path    string
+	Regular bool
+}
+
+// errNotRegular is the Failure of a record path, or a directory above one,
+// that is not a regular file: both readers report it alike and read
+// through neither (lane L3 review a M-5).
+var errNotRegular = errors.New("not a regular file; a record is read only from a regular file, never through a link")
 
 // WorkTree reads the working tree under Root, as `verdi align` does.
 type WorkTree struct{ Root string }
 
 // Files implements TreeReader.
-func (w WorkTree) Files(_ context.Context, dir string) ([]string, error) {
+func (w WorkTree) Files(_ context.Context, dir string) ([]TreeFile, error) {
 	base := filepath.Join(w.Root, filepath.FromSlash(dir))
-	var out []string
+	var out []TreeFile
 	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if p == base && errors.Is(err, fs.ErrNotExist) {
@@ -53,7 +68,7 @@ func (w WorkTree) Files(_ context.Context, dir string) ([]string, error) {
 			if err != nil {
 				return err
 			}
-			out = append(out, filepath.ToSlash(rel))
+			out = append(out, TreeFile{Path: filepath.ToSlash(rel), Regular: d.Type().IsRegular()})
 		}
 		return nil
 	})
@@ -75,15 +90,15 @@ type CommitTree struct{ Root, Commit string }
 // Files implements TreeReader through a NUL-terminated listing, so a path
 // git would quote in a plain listing (a non-ASCII byte, a quote, a control
 // character) is listed as written, never skipped (lane L3 review a I-1).
-func (c CommitTree) Files(ctx context.Context, dir string) ([]string, error) {
+func (c CommitTree) Files(ctx context.Context, dir string) ([]TreeFile, error) {
 	entries, err := gitx.LsTreeEntries(ctx, c.Root, c.Commit)
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []TreeFile
 	for _, e := range entries {
 		if e.Path == dir || strings.HasPrefix(e.Path, dir+"/") {
-			out = append(out, e.Path)
+			out = append(out, TreeFile{Path: e.Path, Regular: e.Mode == "100644" || e.Mode == "100755"})
 		}
 	}
 	return out, nil
@@ -140,17 +155,23 @@ var (
 
 // ReadRecords reads and strict-decodes, through internal/artifact, every
 // spec.md in both zones and every conflict of the tree. An operational read
-// failure is an error; a record that fails decode, or whose id disagrees
-// with its path, is a Failure.
+// failure is an error; a record that fails decode, whose id disagrees with
+// its path, or that is listed under the two directories as a symlink or
+// other non-regular entry, is a Failure.
 func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 	recs := &Records{Specs: map[string]*Spec{}}
 	fail := func(p string, err error) { recs.Failures = append(recs.Failures, fmt.Sprintf("%s: %v", p, err)) }
 
-	specPaths, err := tr.Files(ctx, specsDir)
+	specFiles, err := tr.Files(ctx, specsDir)
 	if err != nil {
 		return nil, fmt.Errorf("objsupersede: %w", err)
 	}
-	for _, p := range specPaths {
+	for _, f := range specFiles {
+		p := f.Path
+		if !f.Regular {
+			fail(p, errNotRegular)
+			continue
+		}
 		parts := strings.Split(p, "/")
 		if len(parts) != 5 || p != store.SpecRelPath(parts[2], parts[3]) || (parts[2] != store.ZoneActive && parts[2] != store.ZoneArchive) {
 			continue
@@ -173,11 +194,16 @@ func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 		}
 	}
 
-	conflictPaths, err := tr.Files(ctx, conflictsDir)
+	conflictFiles, err := tr.Files(ctx, conflictsDir)
 	if err != nil {
 		return nil, fmt.Errorf("objsupersede: %w", err)
 	}
-	for _, p := range conflictPaths {
+	for _, f := range conflictFiles {
+		p := f.Path
+		if !f.Regular {
+			fail(p, errNotRegular)
+			continue
+		}
 		name := strings.TrimSuffix(path.Base(p), ".md")
 		if p != filepath.ToSlash(store.ConflictPath("", name)) {
 			continue
