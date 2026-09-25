@@ -36,6 +36,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/evidence"
@@ -61,6 +63,16 @@ var (
 // and builds the real verdi binary ONCE for every test in the package to
 // exec against — build-then-exec, matching internal/specalign's own
 // convention (never `go run`, which swallows child exit codes).
+//
+// It also owns the process-lifetime cleanup for showcaseTemplateDir (see
+// ensureShowcaseTemplate below): that directory is deliberately NOT a
+// t.TempDir(), since it must outlive whichever single test happens to
+// trigger the one-time build, so nothing but this function ever removes
+// it. Both cleanups run as plain statements AFTER m.Run() returns and
+// BEFORE os.Exit — os.Exit terminates the process immediately without
+// running deferred calls, so a defer registered before it (as the
+// pre-existing binary-tmp-dir cleanup below used to be) never fires; this
+// is why both are ordinary post-Run() statements instead.
 func TestMain(m *testing.M) {
 	root, err := computeVerdiRoot()
 	if err != nil {
@@ -74,7 +86,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "showcasealign: TestMain: mkdtemp:", err)
 		os.Exit(2)
 	}
-	defer func() { _ = os.RemoveAll(tmp) }()
 
 	verdiBinPath = filepath.Join(tmp, "verdi")
 	cmd := exec.Command("go", "build", "-o", verdiBinPath, "./cmd/verdi")
@@ -84,7 +95,12 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(tmp)
+	if showcaseTemplateDir != "" {
+		_ = os.RemoveAll(showcaseTemplateDir)
+	}
+	os.Exit(code)
 }
 
 // computeVerdiRoot resolves the verdi module root from THIS file's own
@@ -188,9 +204,143 @@ func runBinary(t *testing.T, dir string, args ...string) (stdout, stderr string,
 // the derived zone). A future task needing real mutable/derived content,
 // the rate-lock pair, or the deviation report must layer that in
 // separately — disclosed here, not silently assumed.
+//
+// PROVISIONED ONCE PER PROCESS (lane R3, test-speed contract): buildShowcaseRepo
+// itself is expensive (3 fixturegit.Build's worth of git spawns, plus
+// attachHistoricalObligationQualityAncestry's `git fetch` of the
+// obligation-quality adoption commit's full ancestry). Every one of this
+// package's ~29 calling tests needs its own independently mutable copy —
+// several attest, waive, init, gc, or otherwise commit into the store — so
+// provisionShowcaseStore below builds it for real only once
+// (ensureShowcaseTemplate) and gives every caller, including the very
+// first, a byte-for-byte copy of that one build (cloneShowcaseRepoDir),
+// following T1's cmd/verdi/countersign_lifecycle_contract_test.go
+// cloneFixtureRepoDir exactly: a full working-directory copy — objects,
+// refs (the refs/replace graft included, since it is just another ref
+// under .git/refs), config, HEAD, and the working tree — then `git
+// update-index -q --refresh` once, up front, so the copy's stat cache
+// agrees with its own (different-mtime) files and every later `git
+// diff-files`/`diff-index` in that copy reports a genuinely clean tree.
+// TestProvisionShowcaseStoreCopyEquivalence below is this mechanism's own
+// proof: a cached clone agrees with a completely independent, uncached
+// buildShowcaseRepo call on refs, objects, config, the working tree, and
+// the replace graft, and a mutation in one copy is invisible to another.
 func provisionShowcaseStore(t *testing.T) (storeRoot string) {
 	t.Helper()
-	return buildShowcaseRepo(t).Dir
+	return cloneShowcaseRepoDir(t, ensureShowcaseTemplate(t)).Dir
+}
+
+// showcaseTemplateMu guards showcaseTemplate/showcaseTemplateDir.
+// ensureShowcaseTemplate builds the store at most once per test process; a
+// plain Mutex is used rather than sync.Once because buildShowcaseRepo can
+// call t.Fatalf, whose runtime.Goexit unwinds through (and runs) any defer
+// registered before it — including a hypothetical sync.Once's own internal
+// "mark done" defer, which would leave the Once permanently reporting
+// "done" with showcaseTemplate still nil, wedging every later caller
+// behind a silently-broken cache instead of retrying. With a plain Mutex,
+// showcaseTemplate is only ever assigned AFTER a build fully succeeds, so
+// a Goexit mid-build leaves it nil (Unlock still runs, via its own defer,
+// so no deadlock) and the next caller retries the build cleanly.
+var (
+	showcaseTemplateMu  sync.Mutex
+	showcaseTemplateDir string
+	showcaseTemplate    *fixturegit.Repo
+)
+
+// ensureShowcaseTemplate returns the process-wide showcase store template,
+// building it via buildShowcaseRepo on the first call only. buildShowcaseRepo
+// itself returns a repo rooted in a t.TempDir() (fixturegit.Build's own
+// construction — internal/fixturegit is a shared, non-test-only helper
+// this lane does not touch), which is torn down when THAT ONE test
+// finishes; this function copies it into its own directory with explicit
+// TestMain-owned, process-lifetime cleanup (mirroring
+// cmd/verdi/build_shared_test.go's buildVerdiBinary/buildDir for the
+// shared built binary) before that happens, so the template survives every
+// later test in the process, not just the one that happened to build it.
+func ensureShowcaseTemplate(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	showcaseTemplateMu.Lock()
+	defer showcaseTemplateMu.Unlock()
+	if showcaseTemplate != nil {
+		return showcaseTemplate
+	}
+
+	built := buildShowcaseRepo(t)
+
+	dir, err := os.MkdirTemp("", "verdi-showcasealign-template-")
+	if err != nil {
+		t.Fatalf("ensureShowcaseTemplate: mkdtemp: %v", err)
+	}
+	showcaseTemplateDir = dir
+	copyDirTree(t, built.Dir, dir)
+
+	showcaseTemplate = &fixturegit.Repo{Dir: dir, Head: built.Head, Heads: append([]string(nil), built.Heads...)}
+	return showcaseTemplate
+}
+
+// cloneShowcaseRepoDir returns an independent, freshly copied working
+// directory of template — objects, refs (including any refs/replace
+// graft), config, HEAD, and the working tree — in a fresh t.TempDir(),
+// then refreshes git's index-stat cache against the copy. Twin of
+// cmd/verdi/countersign_lifecycle_contract_test.go's cloneFixtureRepoDir
+// (T1): a byte copy carries the ORIGINAL files' mtimes into
+// .git/index's stat cache, so `git diff-files`/`diff-index` would
+// misreport every tracked file as modified in the copy without this
+// refresh.
+func cloneShowcaseRepoDir(t *testing.T, template *fixturegit.Repo) *fixturegit.Repo {
+	t.Helper()
+	dir := t.TempDir()
+	copyDirTree(t, template.Dir, dir)
+
+	refresh := exec.Command("git", "update-index", "-q", "--refresh")
+	refresh.Dir = dir
+	if out, err := refresh.CombinedOutput(); err != nil {
+		t.Fatalf("cloneShowcaseRepoDir: git update-index -q --refresh in %s: %v\n%s", dir, err, out)
+	}
+	return &fixturegit.Repo{Dir: dir, Head: template.Head, Heads: append([]string(nil), template.Heads...)}
+}
+
+// copyDirTree recursively byte-copies src's entire contents — files,
+// directories, and symlinks, preserving permissions — into dst. Shared by
+// ensureShowcaseTemplate (the once-per-process template copy) and
+// cloneShowcaseRepoDir (every per-test clone from it); the walk itself is
+// T1's cloneFixtureRepoDir WalkDir body, factored out so both copy sites
+// use the identical logic rather than two hand-maintained twins.
+func copyDirTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			return os.MkdirAll(target, info.Mode().Perm()|0o700)
+		case info.Mode()&os.ModeSymlink != 0:
+			linkDest, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkDest, target)
+		default:
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, info.Mode().Perm())
+		}
+	})
+	if err != nil {
+		t.Fatalf("copyDirTree: copying %s to %s: %v", src, dst, err)
+	}
 }
 
 // showcaseDir is examples/showcase, anchored at the repo root TestMain
@@ -467,5 +617,167 @@ func attachHistoricalObligationQualityAncestry(t *testing.T, repo *fixturegit.Re
 	prove.Dir = repo.Dir
 	if out, err := prove.CombinedOutput(); err != nil {
 		t.Fatalf("proving historical showcase ancestry %s <= %s: %v\n%s", repo.Head, evidence.ObligationQualityAdoptionCommit, err, out)
+	}
+}
+
+// TestProvisionShowcaseStoreCopyEquivalence is lane R3's own proof: caching
+// the store's construction (ensureShowcaseTemplate/cloneShowcaseRepoDir)
+// must never change what any of this package's other tests read. It
+// checks a cached clone against a completely independent, uncached
+// buildShowcaseRepo call on every axis provisionShowcaseStore's own doc
+// comment promises equivalence for — refs (including the refs/replace
+// graft), objects, config, the working tree, and the index — and then
+// checks that a mutation made in one clone never appears in a sibling
+// clone or in a clone taken afterward from the shared template.
+func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
+	t.Run("a cached clone agrees with a completely independent, uncached build", func(t *testing.T) {
+		fresh := buildShowcaseRepo(t)          // never touches the shared template
+		cachedDir := provisionShowcaseStore(t) // ensureShowcaseTemplate + cloneShowcaseRepoDir
+
+		// refs: every ref under .git/refs (branches AND the
+		// refs/replace/<sha> graft), plus the symbolic HEAD pointer itself
+		// (show-ref does not list HEAD).
+		freshRefs := sortedShowcaseGitLines(t, fresh.Dir, "show-ref")
+		cachedRefs := sortedShowcaseGitLines(t, cachedDir, "show-ref")
+		if freshRefs != cachedRefs {
+			t.Fatalf("git show-ref disagrees between an independent build and a cached clone:\nfresh:\n%s\ncached:\n%s", freshRefs, cachedRefs)
+		}
+		freshHead, err := os.ReadFile(filepath.Join(fresh.Dir, ".git", "HEAD"))
+		if err != nil {
+			t.Fatalf("reading fresh .git/HEAD: %v", err)
+		}
+		cachedHead, err := os.ReadFile(filepath.Join(cachedDir, ".git", "HEAD"))
+		if err != nil {
+			t.Fatalf("reading cached .git/HEAD: %v", err)
+		}
+		if string(freshHead) != string(cachedHead) {
+			t.Fatalf(".git/HEAD disagrees: fresh=%q cached=%q", freshHead, cachedHead)
+		}
+
+		// objects: every object reachable from every ref, replace refs
+		// resolved — the exact object graph a git command run against the
+		// store would see, including (via the graft) the attached
+		// historical obligation-quality adoption commit itself.
+		freshObjects := sortedShowcaseGitLines(t, fresh.Dir, "rev-list", "--all", "--objects")
+		cachedObjects := sortedShowcaseGitLines(t, cachedDir, "rev-list", "--all", "--objects")
+		if freshObjects != cachedObjects {
+			t.Fatalf("git rev-list --all --objects disagrees between an independent build and a cached clone")
+		}
+
+		// config
+		freshCfg := sortedShowcaseGitLines(t, fresh.Dir, "config", "-l", "--local")
+		cachedCfg := sortedShowcaseGitLines(t, cachedDir, "config", "-l", "--local")
+		if freshCfg != cachedCfg {
+			t.Fatalf("git config -l --local disagrees between an independent build and a cached clone:\nfresh:\n%s\ncached:\n%s", freshCfg, cachedCfg)
+		}
+
+		// working tree + index: worktreeFingerprint (cli_showcase_test.go,
+		// TestCLIShowcaseVersion's own helper, reused rather than
+		// reimplemented) hashes `git status --porcelain -uall` plus every
+		// non-.git file's path, permissions, and content — deliberately
+		// excluding .git's own bookkeeping, which the refs/objects/config
+		// checks above already cover directly.
+		freshDigest, freshStatus := worktreeFingerprint(t, fresh.Dir)
+		cachedDigest, cachedStatus := worktreeFingerprint(t, cachedDir)
+		if freshDigest != cachedDigest {
+			t.Fatalf("working tree/index fingerprint disagrees between an independent build and a cached clone:\n%s", statusDelta(freshStatus, cachedStatus))
+		}
+
+		// the replace graft must be FUNCTIONALLY identical, not merely
+		// ref-identical: the historical ancestry proof
+		// attachHistoricalObligationQualityAncestry already ran once, at
+		// build time, must still hold after the copy.
+		proveShowcaseAncestor(t, fresh.Dir)
+		proveShowcaseAncestor(t, cachedDir)
+	})
+
+	t.Run("a mutation in one copy is invisible to a sibling copy and to the template", func(t *testing.T) {
+		baseline := provisionShowcaseStore(t)
+		baselineDigest, _ := worktreeFingerprint(t, baseline)
+
+		a := provisionShowcaseStore(t)
+		manifestRel := filepath.Join(".verdi", "verdi.yaml")
+		original, err := os.ReadFile(filepath.Join(a, manifestRel))
+		if err != nil {
+			t.Fatalf("reading %s in copy a: %v", manifestRel, err)
+		}
+		mutated := append(append([]byte{}, original...), []byte("# lane-r3 isolation probe\n")...)
+		if err := os.WriteFile(filepath.Join(a, manifestRel), mutated, 0o644); err != nil {
+			t.Fatalf("mutating copy a's %s: %v", manifestRel, err)
+		}
+		if aDigest, _ := worktreeFingerprint(t, a); aDigest == baselineDigest {
+			t.Fatalf("test setup: mutating copy a did not change its own fingerprint — the probe mutation is not being observed")
+		}
+
+		b := provisionShowcaseStore(t)
+		bManifest, err := os.ReadFile(filepath.Join(b, manifestRel))
+		if err != nil {
+			t.Fatalf("reading %s in copy b: %v", manifestRel, err)
+		}
+		if string(bManifest) != string(original) {
+			t.Fatalf("copy b's %s carries copy a's mutation — copies are not independent", manifestRel)
+		}
+		if bDigest, bStatus := worktreeFingerprint(t, b); bDigest != baselineDigest {
+			t.Fatalf("copy b's fingerprint differs from the pristine baseline — copy a's mutation leaked into copy b:\n%s", bStatus)
+		}
+
+		// A copy taken AFTER a's mutation still matches the pristine
+		// baseline exactly — proving the shared template itself was never
+		// touched by a's independent, working-tree-only edit.
+		c := provisionShowcaseStore(t)
+		cManifest, err := os.ReadFile(filepath.Join(c, manifestRel))
+		if err != nil {
+			t.Fatalf("reading %s in copy c: %v", manifestRel, err)
+		}
+		if string(cManifest) != string(original) {
+			t.Fatalf("copy c (taken after a's mutation) carries copy a's mutation — the shared template was mutated")
+		}
+		if cDigest, cStatus := worktreeFingerprint(t, c); cDigest != baselineDigest {
+			t.Fatalf("a later copy's fingerprint differs from the pristine baseline — the shared template was mutated:\n%s", cStatus)
+		}
+	})
+}
+
+// showcaseGitOutput runs git in dir and returns its combined stdout+stderr,
+// failing the calling test on a non-zero exit. Read-only plumbing helper
+// for TestProvisionShowcaseStoreCopyEquivalence.
+func showcaseGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return string(out)
+}
+
+// sortedShowcaseGitLines runs showcaseGitOutput and returns its output with
+// lines sorted, so two listings that are logically identical but were
+// produced in a different on-disk or traversal order still compare equal.
+func sortedShowcaseGitLines(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out := showcaseGitOutput(t, dir, args...)
+	trimmed := strings.TrimRight(out, "\n")
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(trimmed, "\n")
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+// proveShowcaseAncestor re-runs attachHistoricalObligationQualityAncestry's
+// own proof against dir: dir's current HEAD must still be provable as an
+// ancestor of the obligation-quality adoption commit via the
+// refs/replace graft, showing the graft itself works after a copy, not
+// merely that its ref exists.
+func proveShowcaseAncestor(t *testing.T, dir string) {
+	t.Helper()
+	head := strings.TrimSpace(showcaseGitOutput(t, dir, "rev-parse", "HEAD"))
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", head, evidence.ObligationQualityAdoptionCommit)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("proving historical ancestry %s <= %s in %s: %v\n%s", head, evidence.ObligationQualityAdoptionCommit, dir, err, out)
 	}
 }
