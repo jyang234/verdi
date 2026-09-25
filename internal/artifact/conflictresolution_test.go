@@ -307,6 +307,37 @@ func TestDecodeConflict_ResolvedBy_Negative(t *testing.T) {
 	}
 }
 
+// TestDecodeConflict_ResolvedBy_EmptyIsAbsent pins SI-269's reading that an
+// explicitly empty or null resolved_by decodes as absent: it names no
+// resolution, so no conflict refuses it, in scope or out. Whether a
+// superseded conflict with fragment challenges then lacks one is VL-026's.
+func TestDecodeConflict_ResolvedBy_EmptyIsAbsent(t *testing.T) {
+	fragment := []string{"spec/home-status-glance#ac-1"}
+	whole := []string{"spec/home-status-glance", "adr/0001-old"}
+	contexts := []struct {
+		name, status string
+		refs         []string
+	}{
+		{"open", "open", fragment},
+		{"dismissed", "dismissed", fragment},
+		{"superseded, whole-artifact challenges only", "superseded", whole},
+		{"superseded, fragment challenges", "superseded", fragment},
+	}
+	for _, value := range []string{`resolved_by: ""`, `resolved_by: ''`, "resolved_by: null", "resolved_by: ~", "resolved_by:"} {
+		for _, c := range contexts {
+			t.Run(value+"/"+c.name, func(t *testing.T) {
+				fm, err := DecodeConflict(conflictDoc(c.status, c.refs, value+"\n"))
+				if err != nil {
+					t.Fatalf("DecodeConflict(%s on a %s conflict): %v, want it to decode as absent (SI-269)", value, c.name, err)
+				}
+				if fm.ResolvedBy != "" {
+					t.Fatalf("ResolvedBy = %q, want empty", fm.ResolvedBy)
+				}
+			})
+		}
+	}
+}
+
 // TestDecodeConflict_ResolvedBy_ScopeCountsOnlyChallenges: SI-269 scopes
 // resolved_by to a superseded conflict whose `challenges` name an object
 // fragment, so a fragment reached through any other link type does not
