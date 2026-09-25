@@ -361,6 +361,132 @@ func TestVL026_Clauses(t *testing.T) {
 	}
 }
 
+// vl026LocusString renders a finding's self-declared wall placement for
+// comparison: "none" (nil, off the wall), "spec" (SpecLocus), or
+// "object:<id>" (ObjectLocus).
+func vl026LocusString(l *WallLocus) string {
+	switch {
+	case l == nil:
+		return "none"
+	case l.Object == "":
+		return "spec"
+	default:
+		return "object:" + l.Object
+	}
+}
+
+// vl026TwoDecisionsYAML declares two decisions of the subject spec, each
+// with one supersedes edge that breaks a different decision clause: dc-7
+// supersedes a closed spec's constraint (c), and dc-8 supersedes a pinned
+// acceptance criterion of a closed spec (g).
+const vl026TwoDecisionsYAML = `decisions:
+  - id: dc-7
+    text: "replaces the constraint"
+    anchor: "#dc-7"
+    links:
+      - { type: supersedes, ref: "spec/css-closed-archive#co-1" }
+  - id: dc-8
+    text: "replaces the criterion"
+    anchor: "#dc-8"
+    links:
+      - { type: supersedes, ref: "spec/css-closed-status@` + cssSHA + `#ac-1" }
+`
+
+// TestVL026_Loci pins each clause's self-declared wall placement
+// (Finding.Locus; spec/badge-computes dc-3): (c) and (g) concern a
+// decision's supersedes edge and badge that decision's card; (a) and (b)
+// concern top-level links and badge the case file when the carrier is a
+// spec, and declare nothing when it is not; (d), (e), and (f) concern a
+// conflict, which has no wall, and declare nothing.
+func TestVL026_Loci(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject []memDoc
+		want    []string // sorted "clause=locus"
+	}{
+		{
+			name:    "a: feature top-level fragment badges the case file",
+			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", linksYAML("implements", "spec/css-live#ac-1"))},
+			want:    []string{"a=spec"},
+		},
+		{
+			name:    "a: component top-level fragment badges the case file",
+			subject: []memDoc{cssSpec("active", "css-subject", "component", "", linksYAML("depends-on", "spec/css-live#dc-1"))},
+			want:    []string{"a=spec"},
+		},
+		{
+			name:    "b: story spec top-level supersedes badges the case file",
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", linksYAML("supersedes", "spec/css-closed-archive#ac-1"))},
+			want:    []string{"b=spec"},
+		},
+		{
+			name:    "b: ADR top-level supersedes declares no locus",
+			subject: []memDoc{cssADR("0002-css", linksYAML("supersedes", "spec/css-closed-archive#dc-1"))},
+			want:    []string{"b=none"},
+		},
+		{
+			name:    "a and b: feature top-level supersedes badges the case file twice",
+			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", linksYAML("supersedes", "spec/css-closed-archive#ac-1"))},
+			want:    []string{"a=spec", "b=spec"},
+		},
+		{
+			name:    "c: decision edge badges its decision",
+			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", decisionYAML("supersedes", "spec/css-closed-archive#co-1"))},
+			want:    []string{"c=object:dc-9"},
+		},
+		{
+			name:    "g: pinned decision edge badges its decision",
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status@"+cssSHA+"#dc-1"))},
+			want:    []string{"g=object:dc-9"},
+		},
+		{
+			name:    "c and g: one decision edge badges its decision for each clause",
+			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", decisionYAML("supersedes", "spec/css-closed-archive@"+cssSHA+"#co-1"))},
+			want:    []string{"c=object:dc-9", "g=object:dc-9"},
+		},
+		{
+			name:    "c and g: each decision's edge badges its own decision",
+			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", vl026TwoDecisionsYAML)},
+			want:    []string{"c=object:dc-7", "g=object:dc-8"},
+		},
+		{
+			name:    "d: conflict declares no locus",
+			subject: []memDoc{cssConflict("css-subject", "open", "", "spec/css-closed-archive#ac-1", "spec/css-closed-status#dc-1")},
+			want:    []string{"d=none"},
+		},
+		{
+			name:    "e: missing resolved_by declares no locus",
+			subject: []memDoc{cssConflict("css-subject", "superseded", "", "spec/css-closed-archive#ac-1")},
+			want:    []string{"e=none"},
+		},
+		{
+			name:    "e: resolved_by naming no spec declares no locus",
+			subject: []memDoc{cssConflict("css-subject", "superseded", "spec/css-missing", "spec/css-closed-archive#ac-1")},
+			want:    []string{"e=none"},
+		},
+		{
+			name:    "f: resolved_by outside decode scope declares no locus",
+			subject: []memDoc{cssConflict("css-subject", "open", "spec/css-live", "spec/css-closed-archive#ac-1")},
+			want:    []string{"f=none"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := runRule(vl026{}, memSnapshot(t, append(cssBase(), tc.subject...)...))
+			vl026Clauses(t, findings) // fails on a finding that names no clause
+			var got []string
+			for _, f := range findings {
+				got = append(got, f.Message[8:9]+"="+vl026LocusString(f.Locus))
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("VL-026 clause loci = %v, want %v:\n%s", got, tc.want, findingsString(findings))
+			}
+		})
+	}
+}
+
 // TestVL026_FindingPaths proves each finding is filed against the
 // document that carries the offending link or field, never the target.
 func TestVL026_FindingPaths(t *testing.T) {

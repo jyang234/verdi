@@ -65,15 +65,26 @@ func (r vl026) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// vl026Finding builds a VL-026 violation on d naming clause. It declares
-// no wall locus (Finding.Locus's nil default).
-func vl026Finding(d *Document, clause, message string) Finding {
-	return Finding{Rule: "VL-026", Path: d.RelPath, Message: "clause (" + clause + "): " + message}
+// vl026Finding builds a VL-026 violation on d naming clause, with the
+// wall locus the calling clause self-declares (Finding.Locus; spec/
+// badge-computes dc-3): ObjectLocus of the decision for a decision-edge
+// clause, SpecLocus for a top-level-link clause on a spec, and nil (no
+// wall) otherwise.
+func vl026Finding(d *Document, clause, message string, locus *WallLocus) Finding {
+	return Finding{Rule: "VL-026", Path: d.RelPath, Message: "clause (" + clause + "): " + message, Locus: locus}
 }
 
 // checkTopLevelLinks is clauses (a) and (b), over d's own top-level links.
+// Top-level links belong to the artifact itself, not to any one object,
+// so on a spec they badge the case file (SpecLocus, as VL-003's
+// top-level links do); a non-spec carrier (an ADR) has no wall, so its
+// findings declare no locus.
 func (vl026) checkTopLevelLinks(in *RunInput, d *Document) []Finding {
 	fragmentFree := d.Spec != nil && (d.Spec.Class == artifact.ClassFeature || d.Spec.Class == artifact.ClassComponent)
+	var locus *WallLocus
+	if d.Spec != nil {
+		locus = SpecLocus()
+	}
 	var findings []Finding
 	for _, l := range d.Base.Links {
 		ref, ok := vl026FragmentRef(l)
@@ -81,7 +92,7 @@ func (vl026) checkTopLevelLinks(in *RunInput, d *Document) []Finding {
 			continue
 		}
 		if fragmentFree {
-			findings = append(findings, vl026Finding(d, "a", fmt.Sprintf("top-level links[].ref %q targets object fragment #%s, but %s spec's top-level links target no object fragment (02 §Link taxonomy; VL-026)", l.Ref, ref.Object, model.Indefinite(in.Model.DisplayClass(string(d.Spec.Class))))))
+			findings = append(findings, vl026Finding(d, "a", fmt.Sprintf("top-level links[].ref %q targets object fragment #%s, but %s spec's top-level links target no object fragment (02 §Link taxonomy; VL-026)", l.Ref, ref.Object, model.Indefinite(in.Model.DisplayClass(string(d.Spec.Class)))), locus))
 		}
 		if l.Type != artifact.LinkSupersedes {
 			continue
@@ -89,14 +100,16 @@ func (vl026) checkTopLevelLinks(in *RunInput, d *Document) []Finding {
 		if target := vl026ClosedSpec(in.Snapshot, ref); target != nil {
 			// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
 			const msg = "top-level supersedes link %q targets #%s of closed spec %s, but a top-level supersedes link never targets an object of a closed spec: that edge belongs on a decision (02 §Link taxonomy; VL-026)"
-			findings = append(findings, vl026Finding(d, "b", fmt.Sprintf(msg, l.Ref, ref.Object, target.Base.ID)))
+			findings = append(findings, vl026Finding(d, "b", fmt.Sprintf(msg, l.Ref, ref.Object, target.Base.ID), locus))
 		}
 	}
 	return findings
 }
 
 // checkDecisionEdges is clauses (c) and (g), over every decision's own
-// supersedes links on spec d.
+// supersedes links on spec d. A decision's own links name its rendered
+// card, so each finding badges that decision (ObjectLocus, as VL-003's
+// decision links do).
 func (vl026) checkDecisionEdges(snap *Snapshot, d *Document) []Finding {
 	var findings []Finding
 	for _, dc := range d.Spec.Decisions {
@@ -115,19 +128,20 @@ func (vl026) checkDecisionEdges(snap *Snapshot, d *Document) []Finding {
 			if what, ok := vl026SupersedableObject(target.Spec, ref.Object); !ok {
 				// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
 				const msg = "decisions[%s].links[].ref %q supersedes #%s of closed spec %s, which %s, but a decision's supersedes link to an object of a closed spec targets a declared acceptance criterion or decision (02 §Link taxonomy, §Object model; VL-026)"
-				findings = append(findings, vl026Finding(d, "c", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, what)))
+				findings = append(findings, vl026Finding(d, "c", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, what), ObjectLocus(dc.ID)))
 			}
 			if ref.Pinned() {
 				// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
 				const msg = "decisions[%s].links[].ref %q supersedes #%s of closed spec %s pinned at %s, but refs inside links are unpinned and the edge names the object as spec/<name>#<object-id> (02 §Link taxonomy, §Common frontmatter; SI-271; VL-026)"
-				findings = append(findings, vl026Finding(d, "g", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, ref.Commit)))
+				findings = append(findings, vl026Finding(d, "g", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, ref.Commit), ObjectLocus(dc.ID)))
 			}
 		}
 	}
 	return findings
 }
 
-// checkConflict is clauses (d), (e), and (f), over conflict d.
+// checkConflict is clauses (d), (e), and (f), over conflict d. A conflict
+// has no wall, so its findings declare no locus.
 func (vl026) checkConflict(snap *Snapshot, d *Document) []Finding {
 	var findings []Finding
 
@@ -149,7 +163,7 @@ func (vl026) checkConflict(snap *Snapshot, d *Document) []Finding {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		findings = append(findings, vl026Finding(d, "d", fmt.Sprintf("fragment challenges name objects of %d artifacts (%s), but a conflict's fragment challenges all name objects of one spec (02 §Link taxonomy; VL-026)", len(names), strings.Join(names, ", "))))
+		findings = append(findings, vl026Finding(d, "d", fmt.Sprintf("fragment challenges name objects of %d artifacts (%s), but a conflict's fragment challenges all name objects of one spec (02 §Link taxonomy; VL-026)", len(names), strings.Join(names, ", ")), nil))
 	}
 
 	if d.Conflict.Status == "superseded" && len(named) > 0 {
@@ -157,16 +171,16 @@ func (vl026) checkConflict(snap *Snapshot, d *Document) []Finding {
 		case d.Conflict.ResolvedBy == "":
 			// vocab:identity — conflict status and field ids (status: superseded, resolved_by), quoting 02 §Kind registry
 			const msg = "status superseded with fragment challenges but no resolved_by: a superseded conflict whose challenges name object fragments carries resolved_by: spec/<name>, the successor spec that resolved it (02 §Link taxonomy, §Kind registry; VL-026)"
-			findings = append(findings, vl026Finding(d, "e", msg))
+			findings = append(findings, vl026Finding(d, "e", msg, nil))
 		case !vl026SpecExists(snap, d.Conflict.ResolvedBy):
 			// vocab:identity — conflict status and field ids (status: superseded, resolved_by), quoting 02 §Kind registry
 			const msg = "resolved_by %q does not name a spec in the store (either zone), but a superseded conflict with fragment challenges names an existing spec in resolved_by (02 §Link taxonomy, §Kind registry; VL-026)"
-			findings = append(findings, vl026Finding(d, "e", fmt.Sprintf(msg, d.Conflict.ResolvedBy)))
+			findings = append(findings, vl026Finding(d, "e", fmt.Sprintf(msg, d.Conflict.ResolvedBy), nil))
 		}
 	}
 
 	if err := d.Conflict.ValidateResolvedBy(); err != nil {
-		findings = append(findings, vl026Finding(d, "f", fmt.Sprintf("%v (02 §Link taxonomy; SI-269; VL-026)", err)))
+		findings = append(findings, vl026Finding(d, "f", fmt.Sprintf("%v (02 §Link taxonomy; SI-269; VL-026)", err), nil))
 	}
 	return findings
 }
