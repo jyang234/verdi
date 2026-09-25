@@ -541,6 +541,17 @@ func TestObjectView_LinesFailClosed(t *testing.T) {
 		{"carried without a revision", func(v *ObjectView) { v.Carry = CarryCarried }},
 		{"dropped without a revision", func(v *ObjectView) { v.Carry = CarryDropped }},
 		{"carry unproven without a witness", func(v *ObjectView) { v.Carry = CarryUnproven }},
+		{"a pinned object", func(v *ObjectView) { v.Object = "spec/t@0a1b2c3#dc-1" }},
+		{"an object of another kind", func(v *ObjectView) { v.Object = "conflict/c1#dc-1" }},
+		{"a deciding decision without its fragment", func(v *ObjectView) { v.By = "spec/s1" }},
+		{"a deciding decision that is a criterion", func(v *ObjectView) { v.By = "spec/s1#ac-1" }},
+		{"a pinned deciding decision", func(v *ObjectView) { v.By = "spec/s1@0a1b2c3#dc-1" }},
+		{"a deciding decision of another kind", func(v *ObjectView) { v.By = "conflict/c1#dc-1" }},
+		{"an unparseable deciding decision", func(v *ObjectView) { v.By = "s1#dc-1" }},
+		{"carried by a revision that is not a spec ref", func(v *ObjectView) { v.Carry, v.Revision = CarryCarried, "x" }},
+		{"dropped by a revision that names an object", func(v *ObjectView) { v.Carry, v.Revision = CarryDropped, "spec/s2#dc-1" }},
+		{"carried by a pinned revision", func(v *ObjectView) { v.Carry, v.Revision = CarryCarried, "spec/s2@0a1b2c3" }},
+		{"dropped by a revision of another kind", func(v *ObjectView) { v.Carry, v.Revision = CarryDropped, "conflict/s2" }},
 	}
 	if _, err := ok.Lines(); err != nil {
 		t.Fatalf("the well-formed view: %v", err)
@@ -570,6 +581,12 @@ func TestDecisionView_LinesFailClosed(t *testing.T) {
 		{"carried without its establisher", func(v *DecisionView) { v.Establisher = "" }},
 		{"carried without its conflict", func(v *DecisionView) { v.Conflict = "" }},
 		{"carried with a malformed date", func(v *DecisionView) { v.Since = "" }},
+		{"in force, with an unparseable object", func(v *DecisionView) { v.Carried, v.Object = false, "not a ref" }},
+		{"in force, with a whole-spec object", func(v *DecisionView) { v.Carried, v.Object = false, "spec/t" }},
+		{"in force, with a pinned object", func(v *DecisionView) { v.Carried, v.Object = false, "spec/t@0a1b2c3#dc-1" }},
+		{"in force, with an object of another kind", func(v *DecisionView) { v.Carried, v.Object = false, "conflict/c1#dc-1" }},
+		{"carried, with a whole-spec object", func(v *DecisionView) { v.Object = "spec/t" }},
+		{"proposed, with a whole-spec object", func(v *DecisionView) { v.State, v.Object = DecisionProposed, "spec/t" }},
 	}
 	if _, err := ok.Lines(); err != nil {
 		t.Fatalf("the well-formed view: %v", err)

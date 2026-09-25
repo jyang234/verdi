@@ -75,8 +75,9 @@ type ObjectView struct {
 // object is not superseded; "governed spec/T's completed work (closed
 // <date>)", "superseded since <date> by spec/S#<decision-id>", and the
 // carrying line when it is; "supersession unproven: <witness>" when that is
-// unproven. A view missing a name, date, or witness its text needs is an
-// error, never a rendering.
+// unproven. A view missing a name, date, or witness its text needs, or
+// naming a ref of the wrong shape (an unpinned spec object, decision, or
+// revision ref), is an error, never a rendering.
 func (v ObjectView) Lines() ([]string, error) {
 	switch v.State {
 	case ObjectNotSuperseded:
@@ -90,12 +91,13 @@ func (v ObjectView) Lines() ([]string, error) {
 	default:
 		return nil, fmt.Errorf("objsupersede: unknown object state %q", v.State)
 	}
-	ref, err := artifact.ParseRef(v.Object)
-	if err != nil || !ref.Fragment() {
+	ref, ok := specRef(v.Object)
+	if !ok || !ref.Fragment() {
 		return nil, fmt.Errorf("objsupersede: %q is not an object ref", v.Object)
 	}
-	if v.By == "" || v.Conflict == "" || !isDay(v.Since) {
-		return nil, fmt.Errorf("objsupersede: the view of %s lacks its deciding decision, conflict, or YYYY-MM-DD date", v.Object)
+	// A decision id is dc-<slug> (02 §Object model; artifact.Decision).
+	if by, ok := specRef(v.By); !ok || !strings.HasPrefix(by.Object, "dc-") || v.Conflict == "" || !isDay(v.Since) {
+		return nil, fmt.Errorf("objsupersede: the view of %s lacks its deciding decision (spec/S#dc-x), conflict, or YYYY-MM-DD date", v.Object)
 	}
 	closed := v.Closed
 	if !isDay(closed) {
@@ -110,17 +112,26 @@ func (v ObjectView) Lines() ([]string, error) {
 		// vocab:identity — design §6 / SI-263 binding surface wording: lifecycle ids, not display prose
 		fmt.Sprintf("superseded since %s by %s", v.Since, v.By),
 	}
+	rev, ok := specRef(v.Revision)
+	revision := ok && !rev.Fragment()
 	switch {
 	case v.Carry == CarryNone:
 		return out, nil
-	case v.Carry == CarryCarried && v.Revision != "":
+	case v.Carry == CarryCarried && revision:
 		return append(out, "carried by "+v.Revision), nil
-	case v.Carry == CarryDropped && v.Revision != "":
+	case v.Carry == CarryDropped && revision:
 		return append(out, fmt.Sprintf("no longer carried by the current revision (%s)", v.Revision)), nil
 	case v.Carry == CarryUnproven && v.Witness != "":
 		return append(out, "carrying unproven: "+v.Witness), nil
 	}
-	return nil, fmt.Errorf("objsupersede: the view of %s has carry %q without its revision or witness", v.Object, v.Carry)
+	return nil, fmt.Errorf("objsupersede: the view of %s has carry %q without its revision (spec/S) or witness", v.Object, v.Carry)
+}
+
+// specRef parses s as an unpinned spec ref, the only form a view names
+// (design §6: refs for links). ok is false for anything else.
+func specRef(s string) (artifact.Ref, bool) {
+	ref, err := artifact.ParseRef(s)
+	return ref, err == nil && ref.Kind == artifact.KindSpec && !ref.Pinned()
 }
 
 // DecisionState classifies a DecisionView.
@@ -165,7 +176,8 @@ type DecisionView struct {
 // accepted", each followed for a carried edge by design §5's "carries the
 // replacement established by spec/S_k (conflict/<name>, since <date>)";
 // or "supersession not established: <reason>". A view missing what its
-// text needs is an error, never a rendering.
+// text needs, or whose object is not an unpinned spec object ref, is an
+// error, never a rendering.
 func (v DecisionView) Lines() ([]string, error) {
 	switch v.State {
 	case DecisionNotEstablished:
@@ -177,8 +189,8 @@ func (v DecisionView) Lines() ([]string, error) {
 	default:
 		return nil, fmt.Errorf("objsupersede: unknown decision state %q", v.State)
 	}
-	if v.Object == "" {
-		return nil, fmt.Errorf("objsupersede: the view of %s has no object", v.Decision)
+	if o, ok := specRef(v.Object); !ok || !o.Fragment() {
+		return nil, fmt.Errorf("objsupersede: the view of %s has no object ref (spec/T#o): %q", v.Decision, v.Object)
 	}
 	first := "supersedes " + v.Object
 	if v.State == DecisionProposed {
