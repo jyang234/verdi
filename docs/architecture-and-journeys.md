@@ -240,19 +240,20 @@ attributes the load-bearing ones to the component that embodies them.
    release as an alias) refuses a non-accepted spec, refuses a superseded story
    naming its successor, and refuses unresolved rung-4 cascade flags.
 2. **Implement.** On every pull request — no path filter, no exceptions —
-   `merge-gate.yml` runs the full `make verify`, builds the binary, and
-   self-lints the store. That single check reports on every PR unconditionally,
+   `merge-gate.yml` runs `make verify`'s steps as parallel jobs, builds the
+   binary, and self-lints the store (SI-266). That single check reports on every PR unconditionally,
    and its context, `merge-gate`, is the stable name designated for the branch
    ruleset's required-status rule; once the owner activates that rule, no PR is
    ever silently ungated and none waits on a context that will never report. On
    pushes the work splits by path: a push touching code paths runs `verify.yml`
-   — the same full `make verify`, then, in the same job and strictly after it
-   passes, `verdi sync --produce` assembles the evidence bundle stamped
-   `source: ci` and uploads it as the `verdi-evidence` artifact — while a push
-   touching only spec/doc paths rides `spec-gate.yml`'s fast check (build + lint
-   + spec-align). Evidence production stays push-only on purpose: it must follow
-   a `make verify` that already gated the same commit, never a second
-   independent run.
+   — the same parallel gate jobs, then a final `verify` job that runs only when
+   every gate job of that run succeeded, in which `verdi sync --produce`
+   assembles the evidence bundle stamped `source: ci` and uploads it as the
+   `verdi-evidence` artifact (SI-267) — while a push touching only spec/doc
+   paths rides `spec-gate.yml`'s fast check (build + lint + spec-align).
+   Evidence production stays push-only on purpose: it must follow a gate that
+   already passed the same commit in the same run, never a second independent
+   run.
 3. **`verdi sync`** pulls the per-(git-ref, commit) bundle into `derived/`,
    preserving its per-spec keys so the fold can actually read it (D6-9);
    `--or-regen` rebuilds locally as advisory (`source: local`) when no pipeline
