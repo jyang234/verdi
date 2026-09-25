@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -478,5 +479,74 @@ func TestSpecMRGate_ShallowCloneNeverPassesCarried(t *testing.T) {
 		if !strings.Contains(stdout.String(), tc.want) {
 			t.Fatalf("%s: stdout = %s\nwant it to contain %q", tc.name, stdout.String(), tc.want)
 		}
+	}
+}
+
+// TestCheckDeclaredDecisionConflicts_RecomputeFailures pins the recompute's
+// two failure shapes: a spec that is not a decodable spec at the head
+// commit (present only in the working tree) fails the condition naming it,
+// and a head the repository cannot read is an operational error.
+func TestCheckDeclaredDecisionConflicts_RecomputeFailures(t *testing.T) {
+	t.Parallel()
+	uncommitted := fixturegit.Build(t, []fixturegit.Layer{{Message: "scaffold", Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}}})
+	if err := os.MkdirAll(filepath.Join(uncommitted.Dir, ".verdi", "specs", "active", "stale-decline"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uncommitted.Dir, ".verdi", "specs", "active", "stale-decline", "spec.md"), []byte(gateSpecMD("draft")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDecisionConflictReport(t, uncommitted.Dir, uncommitted.Head, "  - { id: f-1, kind: judged, text: t, disposition: no-conflict, note: n }\n")
+	notGit := t.TempDir()
+	writeDecisionConflictReport(t, notGit, gdcHeadCommit, "  - { id: f-1, kind: judged, text: t, disposition: no-conflict, note: n }\n")
+
+	for _, tc := range []struct {
+		name, root, head, wantReason string
+		wantErr                      bool
+	}{
+		{"spec absent at the head commit", uncommitted.Dir, uncommitted.Head, "cannot be recomputed from the records at " + uncommitted.Head, false},
+		{"unreadable head", notGit, gdcHeadCommit, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cond, err := checkDeclaredDecisionConflicts(context.Background(), tc.root, "stale-decline", tc.head)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if !tc.wantErr && (cond.OK || !strings.Contains(cond.Reason, tc.wantReason) || !strings.Contains(cond.Reason, "spec/stale-decline")) {
+				t.Fatalf("cond = %+v, want a failure containing %q naming spec/stale-decline", cond, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestDiffComputedFindings pins the comparison: equal sections and judged
+// findings produce nothing; every other field and a repeated id's count are
+// named.
+func TestDiffComputedFindings(t *testing.T) {
+	t.Parallel()
+	base := artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: "t", Disposition: artifact.ConflictExempt, Note: "n", TargetRef: "adr/a", RoutedOwners: []string{"o"}}
+	with := func(edit func(*artifact.ConflictFinding)) artifact.ConflictFinding {
+		f := base
+		f.RoutedOwners = append([]string(nil), base.RoutedOwners...)
+		edit(&f)
+		return f
+	}
+	judged := artifact.ConflictFinding{ID: "j-1", Kind: artifact.FindingJudged, Text: "j"}
+	tests := []struct {
+		name     string
+		reported []artifact.ConflictFinding
+		want     []string
+	}{
+		{"equal, judged ignored", []artifact.ConflictFinding{base, judged}, nil},
+		{"target ref", []artifact.ConflictFinding{with(func(f *artifact.ConflictFinding) { f.TargetRef = "adr/b" })}, []string{`e-1: target_ref is "adr/b", the records compute "adr/a"`}},
+		{"routed owners", []artifact.ConflictFinding{with(func(f *artifact.ConflictFinding) { f.RoutedOwners = nil })}, []string{`e-1: routed_owners is none, the records compute "o"`}},
+		{"a repeated id", []artifact.ConflictFinding{base, base}, []string{"extra computed finding e-1 (the records do not compute it)"}},
+		{"nothing reported", nil, []string{`missing computed finding e-1 (the records compute "t")`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := diffComputedFindings(tc.reported, []artifact.ConflictFinding{base}); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("diffs = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
