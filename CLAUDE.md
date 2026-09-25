@@ -7,15 +7,15 @@ here.
 
 ## Make targets
 
-- `make verify` — full gate, serial and fail-fast: build, fmt-check, vet, lint, test-cmd, test-cross, test-rest, fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e (last, slowest). The pull-request gate (`merge-gate.yml`) runs exactly these steps plus the post-verify self-lint as parallel jobs; the required `merge-gate` job fails unless every one succeeds (SI-266). Missing node/npm HARD-FAILS verify's e2e step — no silent skip.
-- `make test` — every package once under `-race`, as disjoint shards that also run alone: `test-cmd` (`./cmd/verdi`), `test-cross` (`CROSS_BINARY_PKGS` except specalign, always `-count=1`), `test-rest` (every other package, cached), and `spec-align` (the one target that runs specalign).
+- `make verify` — full gate, serial and fail-fast: build, fmt-check, vet, lint, test-cmd, test-cross, test-slow, test-rest, fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e-1, e2e-2, e2e-3 (last, slowest). The pull-request gate (`merge-gate.yml`) and the push-side evidence workflow (`verify.yml`) run exactly these steps plus the post-verify self-lint as parallel jobs; the required `merge-gate` job fails unless every one succeeds, and `verify.yml` produces evidence only after every one succeeds (SI-266, SI-267, SI-268). Missing node/npm HARD-FAILS verify's e2e steps — no silent skip.
+- `make test` — every package once under `-race`, as disjoint shards that also run alone: `test-cmd` (`./cmd/verdi`), `test-cross` (`CROSS_BINARY_PKGS` except specalign, always `-count=1`), `test-slow` (`TEST_SLOW_PKGS`, the slowest other packages, cached), `test-rest` (every remaining package, cached), and `spec-align` (the one target that runs specalign).
 - `make build` / `make vet` / `make fmt-check` / `make fmt`
 - `make lint` — golangci-lint if installed, else a non-failing warning.
 - `make fixture` — fixturegit + corpus + svcfixcanned determinism tests.
 - `make fixture-regen` — re-captures testdata/svcfix-canned/ from the real toolchain; opt-in, non-hermetic, never part of verify.
 - `make lint-store` — builds the binary, self-lints this repo's own `.verdi/specs/active/` store.
 - `make spec-align` — internal/specalign: self-hosted spec fidelity, v0 checklist audit, MCP tool + CLI verb inventories.
-- `make e2e` — the Playwright suite (e2e/) alone.
+- `make e2e` — the Playwright suite (e2e/) alone, as its three shards run concurrently, each with its own port base, store, and output directory; `make e2e-1` / `make e2e-2` / `make e2e-3` run one shard (SI-268).
 - `make tidy` — `go mod tidy`.
 
 ## Change-lane routing

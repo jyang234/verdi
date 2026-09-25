@@ -405,7 +405,8 @@ $ make verify
 vet`, `golangci-lint`, `go test -race ./...`, the fixture-determinism and
 corpus golden-SHA gates, a self-lint of this repo's own store, `spec-align`
 (self-hosted spec fidelity), the two showcase gates above, and the Playwright
-e2e suite last. CI runs exactly `make verify` — local and CI verdicts agree
+e2e suite last. CI runs exactly `make verify`'s steps, split across parallel
+jobs and guarded for parity (SI-266 to SI-268), so local and CI verdicts agree
 by construction. Individual gates are available too: `make test`, `make
 lint`, `make fixture`, `make spec-align`, `make lint-showcase`, `make
 showcase-coverage`, `make e2e`.
