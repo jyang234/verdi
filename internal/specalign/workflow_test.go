@@ -42,6 +42,7 @@ package specalign
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -140,12 +141,20 @@ type triggerFilter struct {
 // declaration, and a job's own `permissions:` map (scope -> "read"/
 // "write"/"none"). Environment is decoded from either the bare-string
 // form (`environment: close`) or the `{name, url}` mapping form.
+//
+// Needs, If, and RunsOn are additive fields for merge-gate.yml's parallel
+// shape (SI-266): the aggregator job's `needs:` list (decoded from either the
+// bare-string or the sequence form), its `if:` expression as raw text, and
+// every job's `runs-on:` label.
 type workflowJob struct {
 	Name        string
 	Steps       []workflowStep
 	Uses        string
 	Environment string
 	Permissions map[string]string
+	Needs       []string
+	If          string
+	RunsOn      string
 	Keys        []string
 }
 
@@ -476,6 +485,17 @@ func decodeJob(v interface{}) workflowJob {
 	if uses, ok := asStringVal(m["uses"]); ok {
 		job.Uses = uses
 	}
+	if needs, ok := m["needs"].(string); ok {
+		job.Needs = []string{needs}
+	} else {
+		job.Needs = asStringSlice(m["needs"])
+	}
+	if cond, ok := asStringVal(m["if"]); ok {
+		job.If = cond
+	}
+	if runsOn, ok := asStringVal(m["runs-on"]); ok {
+		job.RunsOn = runsOn
+	}
 	// environment: takes either the bare-string form (`environment: close`)
 	// or the `{name, url}` mapping form — both name the SAME environment.
 	if env, ok := asStringVal(m["environment"]); ok {
@@ -688,7 +708,9 @@ func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 		file string
 		job  string
 	}{
-		{"merge-gate.yml", "merge-gate.yml", "merge-gate"},
+		// merge-gate.yml's lint runs in its static-checks job (SI-266);
+		// TestMergeGateGateJobsUsePinnedSetup proves `make lint` runs there.
+		{"merge-gate.yml", "merge-gate.yml", mergeGateLintJob},
 		{"verify.yml", "verify.yml", "verify"},
 	}
 	for _, tt := range tests {
@@ -793,41 +815,65 @@ func TestMergeGateTriggersOnEveryPullRequest(t *testing.T) {
 	}
 }
 
-// TestMergeGateSingleUnnamedJob proves the workflow declares exactly one
-// job, its key is `merge-gate`, and the job carries no `name:` override —
-// together this is what makes GitHub report the required-status-check
-// context as exactly "merge-gate" (job key, no override), matching
-// verify.yml's own established workflow-name/job-key pattern (`name:
-// verify` + job key `verify`).
+// merge-gate.yml's parallel shape (SI-266, owner directive 2026-09-24). The
+// gate runs as parallel jobs — one per group of `make verify` steps — and one
+// aggregator job, keyed exactly `merge-gate`, is the required status check.
+// The tests below prove, from the workflow source alone:
 //
-// Same two layers as the trigger test. The `name:`-override check is the
-// targeted one (it names the exact regression in its message); the job
-// key-set assertion after it is the COMPLETENESS NET. Because it is a
-// whitelist — the job may declare `runs-on` and `steps` and nothing else —
-// it closes, in one assertion, every other way a required context can be
-// made absent, skipped, renamed, or non-blocking: `if:` (a skipped job
-// never satisfies a required context), `strategy: matrix:` (context becomes
-// "merge-gate (…)"), a job-level `uses:` (context becomes
-// "merge-gate / <inner-job>"), `continue-on-error:` (green over a failing
-// gate), plus `container:`/`needs:`/`environment:` and any future sibling.
-// Widening this set is a deliberate act that must be argued for here.
-func TestMergeGateSingleUnnamedJob(t *testing.T) {
-	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+//   - every job's key set is whitelisted, and no job renames its context;
+//   - the aggregator needs every gate job, runs `if: always()`, and decides
+//     through the committed verdict script with pinned text (item 4c);
+//   - the gate jobs together run exactly `make verify`'s steps plus the
+//     post-verify self-lint, each once, and nothing else (item 4a);
+//   - each gate job carries today's pinned setup;
+//   - every step's key set is whitelisted.
+//
+// Each old single-job bypass is still closed, one level at a time: a
+// workflow-level `env:`/`defaults:`/`concurrency:`/`permissions:`
+// (TestMergeGateTopLevelKeysAreWhitelisted); a `name:` override, a matrix, a
+// job-level `uses:` or `continue-on-error:`, and any `if:` other than the
+// aggregator's exact `always()` (TestMergeGateJobsAreWhitelisted); a step's
+// `if:`/`continue-on-error:`/`env:` (TestMergeGateStepsAreWhitelisted); and
+// `|| true` or any other command beside the gate's own
+// (TestMergeGateParity_GateJobsRunExactlyVerifySteps).
 
-	if len(doc.Jobs) != 1 {
-		t.Fatalf("merge-gate.yml: expected exactly one job, found %d: %v", len(doc.Jobs), jobKeys(doc.Jobs))
-	}
-	job, ok := doc.Jobs["merge-gate"]
-	if !ok {
-		t.Fatalf("merge-gate.yml: expected the one job's key to be %q, found %v", "merge-gate", jobKeys(doc.Jobs))
-	}
-	if job.Name != "" {
-		t.Errorf("merge-gate.yml: job %q must not declare a `name:` override (it would change the reported check context away from the job key), got %q", "merge-gate", job.Name)
-	}
-	wantJobKeys := []string{"runs-on", "steps"}
-	if !slices.Equal(job.Keys, wantJobKeys) {
-		t.Errorf("merge-gate.yml: job %q must declare exactly the keys %v and nothing else (any of name/if/strategy/uses/continue-on-error would make the required %q context absent, skipped, renamed, or non-blocking), got %v", "merge-gate", wantJobKeys, "merge-gate", job.Keys)
-	}
+// mergeGateAggregatorJob is the required status check. A job with no `name:`
+// override reports under its key, so the branch ruleset's "merge-gate"
+// context is exactly this job.
+const mergeGateAggregatorJob = "merge-gate"
+
+// mergeGateLintJob is the gate job that runs the static checks, `make lint`
+// among them, and so carries the pinned golangci-lint install.
+const mergeGateLintJob = "static"
+
+// mergeGateVerdictRun is the aggregator's decision step, pinned exactly: one
+// `<job>=<result>` argument per gate job, sorted by job key. A job missing
+// from `needs:` expands to an empty result, which the script fails.
+const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
+	" e2e=${{ needs.e2e.result }}" +
+	" spec-align=${{ needs.spec-align.result }}" +
+	" static=${{ needs.static.result }}" +
+	" test-cmd=${{ needs.test-cmd.result }}" +
+	" test-cross=${{ needs.test-cross.result }}" +
+	" test-rest=${{ needs.test-rest.result }}"
+
+// mergeGatePostVerifyCommands are the steps that ran after `make verify` in
+// the single-job gate: build the binary, then lint this repo's store with it
+// in the pull-request context. They stay on the required path as the final
+// two steps of one gate job.
+var mergeGatePostVerifyCommands = []string{
+	"go build -o .build/verdi ./cmd/verdi",
+	"./.build/verdi lint",
+}
+
+// verifyGateFloor is every gate `make verify` ran when the gate went parallel,
+// with `test` expanded to its shards. The gate grows and never shrinks, so
+// expanded VERIFY_STEPS must keep every one of these; adding a gate needs no
+// edit here, and removing one fails.
+var verifyGateFloor = []string{
+	"build", "fmt-check", "vet", "lint",
+	"test-cmd", "test-cross", "test-rest",
+	"fixture", "lint-store", "spec-align", "lint-showcase", "showcase-coverage", "e2e",
 }
 
 // jobKeys returns the job ids of jobs, sorted so comparisons and failure
@@ -841,159 +887,307 @@ func jobKeys(jobs map[string]workflowJob) []string {
 	return keys
 }
 
-// TestMergeGateStepsProvenSequence proves merge-gate.yml's steps are the
-// brief's required, proven sequence copied from verify.yml: checkout with
-// full history, pinned Go/Node/golangci-lint, `make verify`, build the
-// binary, and self-lint it. One subtest per assertion so a regression in any
-// one step names exactly which.
-//
-// The setup steps (checkout/setup-go/setup-node/golangci-lint) are asserted
-// loosely — by `uses:` prefix, by `with:` value, by substring for the
-// legitimately multi-line linter install. The three gate commands are
-// asserted STRICTLY (exact text, order, finality) and every step's key set is
-// whitelisted, because those are the assertions a bypass has to get past:
-// a mis-pinned Go version makes the gate wrong, but `continue-on-error:
-// true`, `if: false`, or `make verify || true` makes it a lie.
-func TestMergeGateStepsProvenSequence(t *testing.T) {
-	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
-	job, ok := doc.Jobs["merge-gate"]
-	if !ok {
-		t.Fatalf("merge-gate.yml: no %q job found to inspect steps of", "merge-gate")
+// gateJobKeys returns every job id except the aggregator's, sorted.
+func gateJobKeys(jobs map[string]workflowJob) []string {
+	var keys []string
+	for _, k := range jobKeys(jobs) {
+		if k != mergeGateAggregatorJob {
+			keys = append(keys, k)
+		}
 	}
-	steps := job.Steps
+	return keys
+}
 
-	t.Run("checkout@v4 with fetch-depth 0", func(t *testing.T) {
-		step := findStep(steps, "actions/checkout@v4")
-		if step == nil {
-			t.Fatalf("no actions/checkout@v4 step found")
-		}
-		if got := step.With["fetch-depth"]; got != "0" {
-			t.Errorf("actions/checkout@v4 fetch-depth = %q, want \"0\"", got)
-		}
-	})
+// golangciInstallRun is the pinned golangci-lint install step's exact command.
+// Its `||` skips the install on a cache hit; it is the one command a gate job
+// may run besides the gate's own.
+func golangciInstallRun(pin string) string {
+	return "test -x \"$(go env GOPATH)/bin/golangci-lint\" || \\\n" +
+		"  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@" + pin + "\n" +
+		"echo \"$(go env GOPATH)/bin\" >> \"$GITHUB_PATH\""
+}
 
-	t.Run("setup-go pins 1.25", func(t *testing.T) {
-		step := findStep(steps, "actions/setup-go@v5")
-		if step == nil {
-			t.Fatalf("no actions/setup-go@v5 step found")
-		}
-		if got := step.With["go-version"]; got != "1.25" {
-			t.Errorf("actions/setup-go@v5 go-version = %q, want \"1.25\"", got)
-		}
-	})
+// pinnedSetupActions maps each action a gate job may use to its exact
+// `with:` inputs — today's pinned setup. A `with:` that differs (a checkout
+// `ref:` naming other code, a different Go) changes what the gate proves.
+func pinnedSetupActions(pin string) map[string]map[string]string {
+	return map[string]map[string]string{
+		"actions/checkout@v4": {"fetch-depth": "0"},
+		"actions/setup-go@v5": {"go-version": "1.25"},
+		"actions/setup-node@v4": {
+			"node-version":          "22",
+			"cache":                 "npm",
+			"cache-dependency-path": "e2e/package-lock.json",
+		},
+		"actions/cache@v4": {
+			"path": "~/go/bin/golangci-lint",
+			"key":  "golangci-lint-${{ runner.os }}-" + pin,
+		},
+	}
+}
 
-	t.Run("setup-node pins 22", func(t *testing.T) {
-		step := findStep(steps, "actions/setup-node@v4")
-		if step == nil {
-			t.Fatalf("no actions/setup-node@v4 step found")
+// TestMergeGateJobsAreWhitelisted is the job-level whitelist net. Every job
+// runs on ubuntu-latest with no `name:` override. A gate job declares exactly
+// `runs-on` and `steps`; the aggregator adds exactly `needs` and `if`.
+//
+// A whitelist, not named negatives: `name:` renames a context, `strategy:
+// matrix:` renames it to "merge-gate (…)", a job-level `uses:` renames it to
+// "merge-gate / <inner-job>", `continue-on-error:` reports green over a
+// failure, and an `if:` on a gate job skips it. The aggregator's `if:` is the
+// one exception, and TestMergeGateAggregatorDecidesOverEveryGateJob pins it
+// to exactly `always()`. Widening either set must be argued for here.
+func TestMergeGateJobsAreWhitelisted(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	if _, ok := doc.Jobs[mergeGateAggregatorJob]; !ok {
+		t.Fatalf("merge-gate.yml: no %q job — the required context must be a job keyed exactly %q; found %v", mergeGateAggregatorJob, mergeGateAggregatorJob, jobKeys(doc.Jobs))
+	}
+	if len(gateJobKeys(doc.Jobs)) == 0 {
+		t.Fatalf("merge-gate.yml: no gate jobs beside %q; found %v", mergeGateAggregatorJob, jobKeys(doc.Jobs))
+	}
+	for _, key := range jobKeys(doc.Jobs) {
+		job := doc.Jobs[key]
+		if job.Name != "" {
+			t.Errorf("merge-gate.yml: job %q must not declare a `name:` override (it renames the reported context), got %q", key, job.Name)
 		}
-		if got := step.With["node-version"]; got != "22" {
-			t.Errorf("actions/setup-node@v4 node-version = %q, want \"22\"", got)
+		if job.RunsOn != "ubuntu-latest" {
+			t.Errorf("merge-gate.yml: job %q runs-on %q, want ubuntu-latest", key, job.RunsOn)
 		}
-	})
+		want := []string{"runs-on", "steps"}
+		if key == mergeGateAggregatorJob {
+			want = []string{"if", "needs", "runs-on", "steps"}
+		}
+		if !slices.Equal(job.Keys, want) {
+			t.Errorf("merge-gate.yml: job %q must declare exactly the keys %v, got %v (extra: %v) — name/if/strategy/uses/continue-on-error can each make a gate skip, rename, or report green over a failure", key, want, job.Keys, keysOutside(job.Keys, want))
+		}
+	}
+}
 
-	// The pin's VALUE is proven against the Makefile (the single source of
-	// truth) by TestGolangciLintPinIsLockstepWithMakefile, which also holds
-	// the one literal "v2.5.0" assertion; this subtest stays targeted at the
-	// step sequence — that an install step exists here at all and carries the
-	// pin.
-	t.Run("golangci-lint pinned to the Makefile's version", func(t *testing.T) {
-		step := findRunStep(steps, "golangci-lint")
-		if step == nil {
-			t.Fatalf("no run step mentioning golangci-lint found")
-		}
-		pin := makefileGolangciPin(t)
-		if !strings.Contains(step.Run, "@"+pin) {
-			t.Errorf("golangci-lint install step does not pin @%s, got run: %q", pin, step.Run)
-		}
-	})
+// TestMergeGateAggregatorDecidesOverEveryGateJob proves contract item 4c. The
+// aggregator `needs:` exactly the set of gate jobs, so no gate can be left
+// off the required path. Its `if:` is exactly `always()`: without it, a
+// failed dependency would make GitHub skip the aggregator, and a skipped
+// required check does not block a merge. Its steps are exactly a checkout
+// and the committed verdict script, called with the pinned text, which
+// passes one `<job>=<result>` argument per needed job and fails unless every
+// result is `success`.
+func TestMergeGateAggregatorDecidesOverEveryGateJob(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	agg, ok := doc.Jobs[mergeGateAggregatorJob]
+	if !ok {
+		t.Fatalf("merge-gate.yml: no %q job found", mergeGateAggregatorJob)
+	}
+	gates := gateJobKeys(doc.Jobs)
 
-	// The step-level whitelist net. TestMergeGateSingleUnnamedJob closes the
-	// job-level bypasses; this closes the identical family one level down,
-	// where they are just as fatal: `continue-on-error: true` on the `make
-	// verify` step reports the required context green over a failing gate,
-	// and `if: <anything false>` skips the gate while the job still
-	// succeeds. Both are pure key additions no assertion about `run:` text
-	// could ever see, so the net — not a growing list of named negatives —
-	// is what catches them, along with `timeout-minutes`, `env`, `shell`,
-	// `working-directory`, `id`, and whatever GitHub adds next.
-	//
-	// Whitelisted by SHAPE: an action step may carry {uses, with, name}, a
-	// command step {run, name}. Widening either set is a deliberate act that
-	// must be argued for right here.
-	t.Run("every step carries only whitelisted keys", func(t *testing.T) {
-		usesAllowed := []string{"name", "uses", "with"}
-		runAllowed := []string{"name", "run"}
+	needs := slices.Clone(agg.Needs)
+	slices.Sort(needs)
+	if !slices.Equal(needs, gates) {
+		t.Errorf("merge-gate.yml: %q needs %v, want exactly the gate jobs %v — a gate job outside `needs:` is off the required path", mergeGateAggregatorJob, agg.Needs, gates)
+	}
+	if agg.If != "always()" {
+		t.Errorf("merge-gate.yml: %q must run with `if: always()` exactly (a failed dependency otherwise skips it, and a skipped required check passes), got %q", mergeGateAggregatorJob, agg.If)
+	}
+
+	derived := mergeGateVerdictScript
+	for _, g := range gates {
+		derived += " " + g + "=${{ needs." + g + ".result }}"
+	}
+	if derived != mergeGateVerdictRun {
+		t.Errorf("the pinned verdict command must pass exactly one argument per gate job:\n got pinned %q\nwant derived %q", mergeGateVerdictRun, derived)
+	}
+
+	if len(agg.Steps) != 2 {
+		t.Fatalf("merge-gate.yml: %q must have exactly 2 steps (checkout, verdict), got %d: %+v", mergeGateAggregatorJob, len(agg.Steps), agg.Steps)
+	}
+	if co := agg.Steps[0]; co.Uses != "actions/checkout@v4" || len(co.With) != 0 {
+		t.Errorf("merge-gate.yml: %q step 0 must be a plain actions/checkout@v4, got uses %q with %v", mergeGateAggregatorJob, co.Uses, co.With)
+	}
+	if got := strings.TrimSpace(agg.Steps[1].Run); got != mergeGateVerdictRun {
+		t.Errorf("merge-gate.yml: %q decision step must run exactly\n  %q\ngot\n  %q", mergeGateAggregatorJob, mergeGateVerdictRun, got)
+	}
+
+	script := filepath.Join(verdiRepoRoot, filepath.FromSlash(mergeGateVerdictScript))
+	info, err := os.Stat(script)
+	if err != nil {
+		t.Fatalf("verdict script %s: %v", mergeGateVerdictScript, err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("verdict script %s is not executable (mode %v); the workflow runs it directly", mergeGateVerdictScript, info.Mode())
+	}
+}
+
+// TestMergeGateParity_GateJobsRunExactlyVerifySteps proves contract item 4a,
+// the trust-parity reading SI-266 records: CI runs exactly `make verify`'s
+// step set, split across jobs. The gate jobs' commands are exactly one
+// `make <step>` per expanded VERIFY_STEPS entry, each once across the whole
+// workflow, plus the two post-verify commands; the only other command a gate
+// job may run is the pinned golangci-lint install. Nothing is dropped and
+// nothing is extra: `make verify || true`, a step writing MAKEFLAGS=-i to
+// $GITHUB_ENV, or a second run of a step all fail here. Within a job, make
+// steps keep VERIFY_STEPS order, and the post-verify commands are that job's
+// final two steps, as they were the single job's.
+func TestMergeGateParity_GateJobsRunExactlyVerifySteps(t *testing.T) {
+	makefile := readMakefile(t)
+	steps := expandedVerifySteps(t, makefile)
+	for _, gate := range verifyGateFloor {
+		if !slices.Contains(steps, gate) {
+			t.Errorf("make verify no longer runs %q (expanded VERIFY_STEPS %v) — the gate grows, never shrinks", gate, steps)
+		}
+	}
+	seen := map[string]bool{}
+	for _, s := range steps {
+		if seen[s] {
+			t.Errorf("expanded VERIFY_STEPS runs %q twice: %v", s, steps)
+		}
+		seen[s] = true
+	}
+
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	install := golangciInstallRun(makefileGolangciPin(t))
+	ranIn := map[string][]string{}
+	for _, key := range gateJobKeys(doc.Jobs) {
+		var order []int
+		for i, step := range doc.Jobs[key].Steps {
+			if step.Uses != "" {
+				continue
+			}
+			cmd := strings.TrimSpace(step.Run)
+			target, isMake := strings.CutPrefix(cmd, "make ")
+			switch {
+			case cmd == install:
+			case slices.Contains(mergeGatePostVerifyCommands, cmd):
+				ranIn[cmd] = append(ranIn[cmd], key)
+			case isMake && slices.Contains(steps, target):
+				ranIn[cmd] = append(ranIn[cmd], key)
+				order = append(order, slices.Index(steps, target))
+			default:
+				t.Errorf("merge-gate.yml: job %q step %d runs %q, which is not a make verify step, a post-verify step, or the pinned golangci-lint install — nothing else may run in a gate job", key, i, cmd)
+			}
+		}
+		if !slices.IsSorted(order) {
+			t.Errorf("merge-gate.yml: job %q runs its make steps out of VERIFY_STEPS order %v", key, steps)
+		}
+	}
+
+	want := make([]string, 0, len(steps)+len(mergeGatePostVerifyCommands))
+	for _, s := range steps {
+		want = append(want, "make "+s)
+	}
+	want = append(want, mergeGatePostVerifyCommands...)
+	for _, cmd := range want {
+		if n := len(ranIn[cmd]); n != 1 {
+			t.Errorf("merge-gate.yml: %q runs in %d gate jobs %v, want exactly 1", cmd, n, ranIn[cmd])
+		}
+	}
+
+	postJob := ranIn[mergeGatePostVerifyCommands[0]]
+	if len(postJob) != 1 {
+		return
+	}
+	jobSteps := doc.Jobs[postJob[0]].Steps
+	n := len(mergeGatePostVerifyCommands)
+	if len(jobSteps) < n {
+		t.Fatalf("merge-gate.yml: job %q has %d steps, fewer than the %d post-verify commands", postJob[0], len(jobSteps), n)
+	}
+	for i, cmd := range mergeGatePostVerifyCommands {
+		if got := strings.TrimSpace(jobSteps[len(jobSteps)-n+i].Run); got != cmd {
+			t.Errorf("merge-gate.yml: job %q's final %d steps must be %v in order; step %d runs %q", postJob[0], n, mergeGatePostVerifyCommands, len(jobSteps)-n+i, got)
+		}
+	}
+}
+
+// TestMergeGateGateJobsUsePinnedSetup proves each gate job carries today's
+// pinned setup: it starts with a full-history checkout and Go 1.25, uses no
+// action outside the pinned set, passes each action exactly its pinned
+// inputs, finishes setup before its first gate command, installs Node 22
+// wherever `make e2e` runs, and caches and installs the pinned golangci-lint
+// wherever `make lint` runs — which must be the static job.
+func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	pin := makefileGolangciPin(t)
+	actions := pinnedSetupActions(pin)
+	install := golangciInstallRun(pin)
+	gates := gateJobKeys(doc.Jobs)
+	if len(gates) == 0 {
+		t.Fatalf("merge-gate.yml: no gate jobs found; jobs %v", jobKeys(doc.Jobs))
+	}
+	for _, key := range gates {
+		steps := doc.Jobs[key].Steps
+		if len(steps) < 2 || steps[0].Uses != "actions/checkout@v4" || steps[1].Uses != "actions/setup-go@v5" {
+			t.Errorf("merge-gate.yml: job %q must begin with actions/checkout@v4 then actions/setup-go@v5", key)
+		}
+		lastSetup, firstGate := -1, len(steps)
 		for i, step := range steps {
+			switch {
+			case step.Uses != "":
+				want, ok := actions[step.Uses]
+				if !ok {
+					t.Errorf("merge-gate.yml: job %q step %d uses %q, outside the pinned setup actions", key, i, step.Uses)
+				} else if !maps.Equal(step.With, want) {
+					t.Errorf("merge-gate.yml: job %q step %d (%s) has with: %v, want exactly %v", key, i, step.Uses, step.With, want)
+				}
+				lastSetup = i
+			case strings.TrimSpace(step.Run) == install:
+				lastSetup = i
+			case firstGate == len(steps):
+				firstGate = i
+			}
+		}
+		if lastSetup > firstGate {
+			t.Errorf("merge-gate.yml: job %q has a setup step (index %d) after its first gate command (index %d)", key, lastSetup, firstGate)
+		}
+		runs := runCommands(steps)
+		if slices.Contains(runs, "make e2e") && findStep(steps, "actions/setup-node@v4") == nil {
+			t.Errorf("merge-gate.yml: job %q runs make e2e without actions/setup-node@v4 (Node 22)", key)
+		}
+		if slices.Contains(runs, "make lint") {
+			if findCacheStep(steps, "golangci-lint") == nil || !slices.Contains(runs, install) {
+				t.Errorf("merge-gate.yml: job %q runs make lint without the pinned golangci-lint cache and install steps", key)
+			}
+			if key != mergeGateLintJob {
+				t.Errorf("merge-gate.yml: make lint runs in job %q, want %q (TestGolangciLintPinIsLockstepWithMakefile reads that job)", key, mergeGateLintJob)
+			}
+		}
+	}
+}
+
+// TestMergeGateStepsAreWhitelisted is the step-level whitelist net, over
+// every job. An action step may carry {uses, with, name} and a command step
+// {run, name}: `continue-on-error: true` reports a step green over a failed
+// gate, `if:` skips it, and `env:`/`shell:`/`working-directory:` change what
+// it runs, so none may appear. No step may suffix `|| true`, and evidence
+// production and upload stay verify.yml's push-only duty.
+func TestMergeGateStepsAreWhitelisted(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	usesAllowed := []string{"name", "uses", "with"}
+	runAllowed := []string{"name", "run"}
+	for _, key := range jobKeys(doc.Jobs) {
+		for i, step := range doc.Jobs[key].Steps {
 			hasUses := slices.Contains(step.Keys, "uses")
 			hasRun := slices.Contains(step.Keys, "run")
 			switch {
 			case hasUses == hasRun:
-				t.Errorf("step %d (name %q): must carry exactly one of `uses:` or `run:`, got keys %v", i, step.Name, step.Keys)
+				t.Errorf("job %q step %d (name %q): must carry exactly one of `uses:` or `run:`, got keys %v", key, i, step.Name, step.Keys)
 			case hasUses:
 				if extra := keysOutside(step.Keys, usesAllowed); len(extra) != 0 {
-					t.Errorf("step %d (uses %q): key(s) %v are not whitelisted — an action step may declare only %v (if/continue-on-error/env/shell/working-directory/timeout-minutes can each make the required %q context skip, go green over a failure, or run something other than the gate)", i, step.Uses, extra, usesAllowed, "merge-gate")
+					t.Errorf("job %q step %d (uses %q): key(s) %v are not whitelisted — an action step may declare only %v", key, i, step.Uses, extra, usesAllowed)
+				}
+				if strings.HasPrefix(step.Uses, "actions/upload-artifact") {
+					t.Errorf("job %q step %d uploads an artifact (%q) — evidence upload stays verify.yml's push-only duty", key, i, step.Uses)
 				}
 			case hasRun:
 				if extra := keysOutside(step.Keys, runAllowed); len(extra) != 0 {
-					t.Errorf("step %d (run %q): key(s) %v are not whitelisted — a command step may declare only %v (if/continue-on-error/env/shell/working-directory/timeout-minutes can each make the required %q context skip, go green over a failure, or run something other than the gate)", i, strings.TrimSpace(step.Run), extra, runAllowed, "merge-gate")
+					t.Errorf("job %q step %d (run %q): key(s) %v are not whitelisted — a command step may declare only %v", key, i, strings.TrimSpace(step.Run), extra, runAllowed)
+				}
+				compact := strings.Join(strings.Fields(step.Run), " ")
+				if strings.Contains(compact, "|| true") || strings.Contains(compact, "||true") {
+					t.Errorf("job %q step %d (run %q) suffixes `|| true`, which reports the step green whatever the gate says", key, i, strings.TrimSpace(step.Run))
+				}
+				if strings.Contains(step.Run, "verdi sync --produce") {
+					t.Errorf("job %q step %d runs evidence production (%q) — that stays verify.yml's push-only duty", key, i, strings.TrimSpace(step.Run))
 				}
 			}
 		}
-	})
-
-	// The three commands that ARE the gate, asserted by exact equality and
-	// in order, occupying the job's last three steps.
-	//
-	// Exact equality (not substring containment) is what refuses `make
-	// verify || true` — a one-token edit that keeps every substring
-	// assertion green while guaranteeing the step exits 0 whatever the gate
-	// says. Order and finality matter too: the self-lint must run the binary
-	// this commit just built, the build must follow a gate that already
-	// passed, and nothing may run after the lint (a later step is another
-	// place for a bypass to hide, and the brief's proven sequence ends
-	// here). Together with the whitelist above, the tail of this job is
-	// pinned to exactly three unconditional, un-suffixed commands.
-	t.Run("the gate commands are exact, ordered, and final", func(t *testing.T) {
-		want := []string{
-			"make verify",
-			"go build -o .build/verdi ./cmd/verdi",
-			"./.build/verdi lint",
-		}
-
-		idx := make([]int, len(want))
-		for i, cmd := range want {
-			matches := findExactRunSteps(steps, cmd)
-			if len(matches) != 1 {
-				t.Fatalf("expected exactly one run step whose command is exactly %q, found %d (substring lookalikes such as `%s || true` do NOT count — the gate must be unconditional); decoded run steps: %v", cmd, len(matches), cmd, runCommands(steps))
-			}
-			idx[i] = matches[0]
-		}
-
-		for i := 1; i < len(idx); i++ {
-			if idx[i-1] >= idx[i] {
-				t.Errorf("run step %q (index %d) must come strictly before %q (index %d)", want[i-1], idx[i-1], want[i], idx[i])
-			}
-		}
-
-		if len(steps) < len(want) {
-			t.Fatalf("job has %d steps, fewer than the %d required gate commands", len(steps), len(want))
-		}
-		for i, cmd := range want {
-			if got := len(steps) - len(want) + i; idx[i] != got {
-				t.Errorf("run step %q is at index %d, want %d — these three must be the FINAL steps of the job, in this order (nothing runs after the self-lint)", cmd, idx[i], got)
-			}
-		}
-	})
-
-	t.Run("does not upload evidence artifacts (that stays verify.yml's push-only duty)", func(t *testing.T) {
-		if step := findStep(steps, "actions/upload-artifact"); step != nil {
-			t.Errorf("merge-gate.yml must not produce/upload evidence artifacts, found a step using %q", step.Uses)
-		}
-		if step := findRunStep(steps, "verdi sync --produce"); step != nil {
-			t.Errorf("merge-gate.yml must not run evidence production (`verdi sync --produce`), found: %q", step.Run)
-		}
-	})
+	}
 }
 
 // TestOldWorkflowsNoLongerDeclarePullRequest is the negative-path proof:
