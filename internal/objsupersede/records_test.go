@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -140,6 +141,9 @@ func TestReadRecords_WorkTreeAndCommit(t *testing.T) {
 	if _, err := ReadRecords(ctx, CommitTree{Root: repo.Dir, Commit: "no-such-ref"}); err == nil {
 		t.Error("an unreadable commit read clean")
 	}
+	if _, err := ReadRecords(ctx, CommitTree{Root: t.TempDir(), Commit: "HEAD"}); err == nil {
+		t.Error("a store root outside any repository read clean")
+	}
 	if recs := mustRead(t, WorkTree{Root: t.TempDir()}); len(recs.Specs)+len(recs.Conflicts)+len(recs.Failures) != 0 {
 		t.Errorf("an empty directory read records: %+v", recs)
 	}
@@ -170,6 +174,35 @@ func TestReadRecords_Parity(t *testing.T) {
 	work, commit := mustRead(t, WorkTree{Root: repo.Dir}), mustRead(t, CommitTree{Root: repo.Dir, Commit: "HEAD"})
 	if len(work.Failures) != 2 || !reflect.DeepEqual(work, commit) {
 		t.Fatalf("readers differ on one tree:\nwork   %v\ncommit %v", work.Failures, commit.Failures)
+	}
+}
+
+// underSubdir rewrites a built scenario's whole history so its store sits
+// in product/, below the git root, a layout gitx.RepoPrefix exists for; the
+// rewrite keeps every author, committer, and date. It returns the store
+// root.
+func underSubdir(t *testing.T, repo *scenario.Repo) string {
+	t.Helper()
+	cmd := exec.Command("git", "filter-branch", "-f", "--index-filter",
+		`GIT_INDEX_FILE="$GIT_INDEX_FILE.new" git read-tree --prefix=product/ "$GIT_COMMIT" && mv "$GIT_INDEX_FILE.new" "$GIT_INDEX_FILE"`,
+		"--", "--all")
+	cmd.Dir = repo.Dir
+	cmd.Env = append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git filter-branch: %v\n%s", err, out)
+	}
+	return filepath.Join(repo.Dir, "product")
+}
+
+// TestReadRecords_SubRootParity reads one committed tree whose store sits
+// below the git root through both readers (lane L3 re-review a I-A): the
+// commit reader must see the same records, never an empty tree.
+func TestReadRecords_SubRootParity(t *testing.T) {
+	root := underSubdir(t, scenario.Build(t, "accepted"))
+	work, commit := mustRead(t, WorkTree{Root: root}), mustRead(t, CommitTree{Root: root, Commit: "HEAD"})
+	if len(work.Specs) != 4 || len(work.Conflicts) != 2 || !reflect.DeepEqual(work, commit) {
+		t.Fatalf("a store below the git root:\nwork   %d specs, %d conflicts, %v\ncommit %d specs, %d conflicts, %v",
+			len(work.Specs), len(work.Conflicts), work.Failures, len(commit.Specs), len(commit.Conflicts), commit.Failures)
 	}
 }
 

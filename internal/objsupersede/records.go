@@ -84,29 +84,38 @@ func (w WorkTree) ReadFile(_ context.Context, p string) ([]byte, error) {
 }
 
 // CommitTree reads the tree of Commit (any revision git resolves) in the
-// repository at Root, through internal/gitx.
+// repository holding Root, through internal/gitx. Paths are relative to
+// Root, which may sit below the git root (gitx.RepoPrefix); a prefix that
+// cannot be resolved is an error, never an empty tree (lane L3 re-review a
+// I-A).
 type CommitTree struct{ Root, Commit string }
 
 // Files implements TreeReader through a NUL-terminated listing, so a path
 // git would quote in a plain listing (a non-ASCII byte, a quote, a control
 // character) is listed as written, never skipped (lane L3 review a I-1).
 func (c CommitTree) Files(ctx context.Context, dir string) ([]TreeFile, error) {
+	prefix, err := gitx.RepoPrefix(ctx, c.Root)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := gitx.LsTreeEntries(ctx, c.Root, c.Commit)
 	if err != nil {
 		return nil, err
 	}
 	var out []TreeFile
 	for _, e := range entries {
-		if e.Path == dir || strings.HasPrefix(e.Path, dir+"/") {
-			out = append(out, TreeFile{Path: e.Path, Regular: e.Mode == "100644" || e.Mode == "100755"})
+		p, ok := strings.CutPrefix(e.Path, prefix)
+		if ok && (p == dir || strings.HasPrefix(p, dir+"/")) {
+			out = append(out, TreeFile{Path: p, Regular: e.Mode == "100644" || e.Mode == "100755"})
 		}
 	}
 	return out, nil
 }
 
-// ReadFile implements TreeReader.
+// ReadFile implements TreeReader; `<commit>:./<path>` resolves path from
+// Root, wherever Root sits in the repository.
 func (c CommitTree) ReadFile(ctx context.Context, p string) ([]byte, error) {
-	return gitx.Show(ctx, c.Root, c.Commit, p)
+	return gitx.Show(ctx, c.Root, c.Commit, "./"+p)
 }
 
 // Spec is one decoded spec of a tree.

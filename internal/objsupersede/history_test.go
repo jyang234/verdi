@@ -207,6 +207,19 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// TestHistory_EstablishmentBelowGitRoot pins that a store below the git
+// root reads its acceptance commit's own records (lane L3 re-review a I-A),
+// never "not in its acceptance commit's tree".
+func TestHistory_EstablishmentBelowGitRoot(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	root := underSubdir(t, scenario.Build(t, "accepted"))
+	got := NewHistory(ctx, root).Establishment(ctx, "successor", obj("closed-feature", "dc-1"))
+	if got.Reason != "" || got.Date != "2024-02-15" || got.Commit == "" {
+		t.Fatalf("got %+v, want in force since 2024-02-15", got)
+	}
+}
+
 // TestEvaluate_Scenarios drives Evaluate over built scenario stores with the
 // real history: §8's proposed, carried, and unrelated-reuse paths.
 func TestEvaluate_Scenarios(t *testing.T) {
