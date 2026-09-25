@@ -1,7 +1,8 @@
-// Test-shard parity guard (SI-266, owner directive 2026-09-24). The Go tests
-// run as disjoint make targets — test-cmd, test-cross, test-rest, plus the
-// spec-align gate, which alone runs internal/specalign — so that each can be
-// its own pull-request CI job and no package runs twice. This file proves,
+// Test-shard parity guard (SI-266, owner directive 2026-09-24; SI-268 added
+// test-slow). The Go tests run as disjoint make targets — test-cmd,
+// test-cross, test-slow, test-rest, plus the spec-align gate, which alone
+// runs internal/specalign — so that each can be its own pull-request CI job
+// and no package runs twice. This file proves,
 // from the Makefile's own dry-run output (`make -n`, never a hand-copied
 // list), that:
 //
@@ -288,9 +289,9 @@ func makefilePrereqs(t *testing.T, makefile, target string) []string {
 	return strings.Fields(rest)
 }
 
-// testShardTargets is `make test`'s composition: the three shards plus the
+// testShardTargets is `make test`'s composition: the four shards plus the
 // spec-align gate, which is the only target that runs internal/specalign.
-var testShardTargets = []string{"test-cmd", "test-cross", "test-rest", "spec-align"}
+var testShardTargets = []string{"test-cmd", "test-cross", "test-slow", "test-rest", "spec-align"}
 
 // expandedVerifySteps returns VERIFY_STEPS with `test` (if listed) replaced
 // by its prerequisites — the make targets `make verify` actually runs.
@@ -331,16 +332,30 @@ func hermeticMakeEnv() []string {
 // makeDryRun returns `make -n` output for target in the repo root.
 func makeDryRun(t *testing.T, target string) string {
 	t.Helper()
+	return makeDryRunEnv(t, hermeticMakeEnv(), target)
+}
+
+// makeDryRunEnv is makeDryRun with env as make's environment.
+func makeDryRunEnv(t *testing.T, env []string, target string) string {
+	t.Helper()
+	stdout, stderr, err := runMakeDryRun(env, target)
+	if err != nil {
+		t.Fatalf("make -n %s: %v\nstderr:\n%s", target, err, stderr)
+	}
+	return stdout
+}
+
+// runMakeDryRun runs `make -n` for target in the repo root with env as its
+// environment, and returns what it printed and how it exited.
+func runMakeDryRun(env []string, target string) (stdout, stderr string, err error) {
 	cmd := exec.Command("make", "-n", "-s", "--no-print-directory", target)
 	cmd.Dir = verdiRepoRoot
-	cmd.Env = hermeticMakeEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("make -n %s: %v\nstderr:\n%s", target, err, stderr.String())
-	}
-	return stdout.String()
+	cmd.Env = env
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err = cmd.Run()
+	return out.String(), errOut.String(), err
 }
 
 // targetGoTests dry-runs target and parses its `go test` commands.
@@ -383,12 +398,13 @@ func crossBinaryImportPaths(t *testing.T, makefile string) []string {
 }
 
 // TestGateShards_PartitionGoList proves the shards partition `go list ./...`
-// (contract item 4b): `make test` is exactly test-cmd, test-cross, test-rest,
-// and spec-align; each runs its packages under -race; no package is in two of
-// them; every package is in one; and each holds what the gate says it holds —
-// test-cmd is cmd/verdi, spec-align is internal/specalign, test-cross is the
-// rest of CROSS_BINARY_PKGS, and test-rest is everything else. It then proves
-// `make test` as a whole runs every package exactly once.
+// (contract item 4b): `make test` is exactly test-cmd, test-cross, test-slow,
+// test-rest, and spec-align; each runs its packages under -race; no package
+// is in two of them; every package is in one; and each holds what the gate
+// says it holds — test-cmd is cmd/verdi, spec-align is internal/specalign,
+// test-cross is the rest of CROSS_BINARY_PKGS, test-slow is TEST_SLOW_PKGS
+// (SI-268), and test-rest is everything else. It then proves `make test` as a
+// whole runs every package exactly once.
 func TestGateShards_PartitionGoList(t *testing.T) {
 	makefile := readMakefile(t)
 	if got := makefilePrereqs(t, makefile, "test"); !slices.Equal(got, testShardTargets) {
@@ -438,6 +454,7 @@ func TestGateShards_PartitionGoList(t *testing.T) {
 	wantShard := map[string][]string{
 		"test-cmd":   goList(t, "./cmd/verdi"),
 		"test-cross": crossWithoutSpecAlign,
+		"test-slow":  goList(t, makefileVarFields(t, makefile, "TEST_SLOW_PKGS")...),
 		"spec-align": specAlign,
 	}
 	for shard, want := range wantShard {

@@ -625,11 +625,14 @@ func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 }
 
 // gateRoots returns the targets whose recipes decide the gate: every
-// VERIFY_STEPS entry, the test shards, test, and verify.
+// VERIFY_STEPS entry, the test shards, test, and verify. It also returns e2e,
+// the whole-suite convenience target that runs the e2e shards concurrently:
+// it is not a gate step, but SI-268 holds it to the same recipe rules, so a
+// green `make e2e` cannot hide a failed shard.
 func gateRoots(t *testing.T, makefile string) []string {
 	t.Helper()
 	roots := append(makefileVarFields(t, makefile, "VERIFY_STEPS"), testShardTargets...)
-	return append(roots, "test", "verify")
+	return append(roots, "test", "verify", e2eSuiteTarget)
 }
 
 // TestGateParity_GateRecipesNeverIgnoreErrors proves no gate target can go
@@ -665,6 +668,10 @@ func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
 		{"- on lint-store's second line", "\t$(LINT_STORE_BIN) lint\n", "\t-$(LINT_STORE_BIN) lint\n", "lint-store"},
 		{"- on verify", "\t@mkdir -p $(dir $(GATE_TIMINGS)); \\", "\t-@mkdir -p $(dir $(GATE_TIMINGS)); \\", "verify"},
 		{"- on e2e's prerequisite", "\t@if ! command -v node", "\t-@if ! command -v node", "e2e-check-node"},
+		{"- on the e2e shards' shared setup", "\tcd e2e && npm install", "\t-cd e2e && npm install", "gate target e2e-setup's"},
+		{"- on an e2e shard", "\tcd e2e && $(E2E_RUN_2)", "\t-cd e2e && $(E2E_RUN_2)", "gate target e2e-2's"},
+		{"- on the whole-suite convenience target", "\t@cd e2e && tmp=", "\t-@cd e2e && tmp=", "gate target e2e's"},
+		{"- on test-slow", "\tgo test -race -parallel 4 $(TEST_SLOW_PKGS)", "\t-go test -race -parallel 4 $(TEST_SLOW_PKGS)", "test-slow"},
 		{"- in an inline recipe", "\ntest-cmd:\n\tgo test", "\ntest-cmd: ; -go test", "test-cmd"},
 		{".IGNORE for every target", "\ntidy:\n", "\n.IGNORE:\n\ntidy:\n", ".IGNORE"},
 		{".IGNORE for one target", "\ntidy:\n", "\n.IGNORE: test-rest\n\ntidy:\n", ".IGNORE"},

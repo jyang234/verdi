@@ -2,16 +2,18 @@
 # self-hosted CI evidence (the "verdi-evidence" artifact).
 #
 # Parallel shape (SI-267, owner directive 2026-09-25: "parallelize it like
-# merge-gate"). The first six jobs below are merge-gate.yml's gate jobs,
-# copied unchanged: static, test-cmd, test-cross, test-rest, spec-align, e2e.
-# SI-266 split `make verify`'s step set, plus the post-verify self-lint,
-# across those jobs so the wall clock is the slowest job, not the sum;
-# merge-gate.yml's head comment says what each job runs and why. Trust parity
-# (CLAUDE.md) is read here as SI-266 reads it for merge-gate.yml, since the
-# gate jobs are the same: CI runs exactly `make verify`'s step set, split
-# across the gate jobs, and that set grows only as the Makefile's
-# VERIFY_STEPS grows. A seventh job, `verify`, produces and uploads the
-# evidence once every gate job has succeeded (see "The evidence job" below).
+# merge-gate"). The first nine jobs below are merge-gate.yml's gate jobs,
+# copied unchanged: static, test-cmd, test-cross, test-slow, test-rest,
+# spec-align, e2e-1, e2e-2, e2e-3 (SI-268 added test-slow and split e2e into
+# its three shards). SI-266 split `make verify`'s step set, plus the
+# post-verify self-lint, across those jobs so the wall clock is the slowest
+# job, not the sum; merge-gate.yml's head comment says what each job runs and
+# why. Trust parity (CLAUDE.md) is read here as SI-266 reads it for
+# merge-gate.yml, since the gate jobs are the same: CI runs exactly `make
+# verify`'s step set, split across the gate jobs, and that set grows only as
+# the Makefile's VERIFY_STEPS grows. A tenth job, `verify`, produces and
+# uploads the evidence once every gate job has succeeded (see "The evidence
+# job" below).
 #
 # The self-lint (Phase 4). `make verify`'s own `lint-store` target already
 # runs `verdi lint` against this repo locally (no CI environment), which is
@@ -25,12 +27,13 @@
 # merge-gate.yml's job.
 #
 # Setup lives in the gate job that needs it, exactly as in merge-gate.yml.
-# The e2e job installs Node before `make e2e`, which is a HARD FAILURE without
-# Node (wave 7: CLAUDE.md's testing regime made e2e a merge blocker), keeping
-# local/CI parity real rather than nominal. The static job caches and installs
-# golangci-lint at the Makefile's pin before `make lint`, so the lint step
-# gates for real (the lint target hard-fails when CI=true and the binary is
-# absent). pages.yml only builds the dex site (no lint), so it needs no linter.
+# Each e2e shard job installs Node before `make e2e-N`, which is a HARD
+# FAILURE without Node (wave 7: CLAUDE.md's testing regime made e2e a merge
+# blocker), keeping local/CI parity real rather than nominal. The static job
+# caches and installs golangci-lint at the Makefile's pin before `make lint`,
+# so the lint step gates for real (the lint target hard-fails when CI=true and
+# the binary is absent). pages.yml only builds the dex site (no lint), so it
+# needs no linter.
 #
 # What internal/specalign enforces here (verifyworkflow_test.go, SI-267). The
 # gate jobs must equal merge-gate.yml's in every key and value: the guard
@@ -238,6 +241,17 @@ jobs:
           go-version: "1.25"
       - run: make test-cross
 
+  test-slow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-slow
+
   test-rest:
     runs-on: ubuntu-latest
     steps:
@@ -264,7 +278,7 @@ jobs:
           go-version: "1.25"
       - run: make spec-align
 
-  e2e:
+  e2e-1:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -281,14 +295,52 @@ jobs:
           # browser binaries themselves (~/.cache/ms-playwright).
           cache: npm
           cache-dependency-path: e2e/package-lock.json
-      - run: make e2e
+      - run: make e2e-1
+
+  e2e-2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache. Does NOT cache the downloaded Playwright
+          # browser binaries themselves (~/.cache/ms-playwright).
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: make e2e-2
+
+  e2e-3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache. Does NOT cache the downloaded Playwright
+          # browser binaries themselves (~/.cache/ms-playwright).
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: make e2e-3
 
   # The evidence job (SI-267; see the head comment). No `if:`: GitHub's
   # default success() skips this job unless every gate job it needs succeeded.
   # The verdict step re-checks every result, as a legible witness in this
   # job's log of the results the evidence binds.
   verify:
-    needs: [static, test-cmd, test-cross, test-rest, spec-align, e2e]
+    needs: [static, test-cmd, test-cross, test-slow, test-rest, spec-align, e2e-1, e2e-2, e2e-3]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -298,7 +350,7 @@ jobs:
         with:
           go-version: "1.25"
       - name: Require every gate job to succeed
-        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }}
+        run: scripts/merge-gate-verdict.sh e2e-1=${{ needs.e2e-1.result }} e2e-2=${{ needs.e2e-2.result }} e2e-3=${{ needs.e2e-3.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}
       - run: go build -o .build/verdi ./cmd/verdi
       - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
         run: ./.build/verdi sync --produce

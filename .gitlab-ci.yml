@@ -11,9 +11,10 @@
 # CI_DEFAULT_BRANCH / CI_MERGE_REQUEST_TARGET_BRANCH_NAME values, which a
 # local run has no way to supply.
 #
-# Wave 7: `make verify` now ends with `make e2e` (Playwright), which is a
-# HARD FAILURE without Node — CLAUDE.md's testing regime made e2e a merge
-# blocker, so this job installs Node + the Playwright browser (chromium
+# Wave 7: `make verify` now ends with the Playwright e2e steps (since
+# SI-268 the shards `make e2e-1`, `e2e-2`, and `e2e-3`, one after another),
+# which are a HARD FAILURE without Node — CLAUDE.md's testing regime made
+# e2e a merge blocker, so this job installs Node + the Playwright browser (chromium
 # only, per e2e/playwright.config.ts) BEFORE `make verify` runs, keeping
 # local/CI parity real rather than nominal. `golang:1.25` has no Node
 # preinstalled, hence the explicit NodeSource setup below rather than a
