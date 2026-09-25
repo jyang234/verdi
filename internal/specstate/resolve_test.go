@@ -51,6 +51,16 @@ func (s stubGit) LsTree(ctx context.Context, dir, ref, path string) ([]string, e
 	return s.lsTree(ctx, dir, ref, path)
 }
 
+// stubCommit is the commit every stubGit resolves the default branch to.
+const stubCommit = "cccccccccccccccccccccccccccccccccccccccc"
+
+// RevParse resolves every revision to stubCommit, so each row in this
+// file runs through the corpus cache's scan pinned to that commit; the
+// function fields above ignore the revision they are asked for.
+func (stubGit) RevParse(ctx context.Context, dir, rev string) (string, error) {
+	return stubCommit, nil
+}
+
 // buildResolvableRepo builds a fixturegit repo and points CI_DEFAULT_BRANCH
 // at its local "main" branch, so the real ResolveDefaultBranch that
 // ResolveMany/Resolve call internally legitimately succeeds — letting
