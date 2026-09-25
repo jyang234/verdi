@@ -94,6 +94,55 @@ func TestLink_ValidateFor_Negative(t *testing.T) {
 	}
 }
 
+// TestConflict_PinnedFragmentChallenge_Refused: per SI-271 a conflict's
+// fragment challenge names an unpinned spec object (02 §Common frontmatter:
+// refs inside links are unpinned), so a pinned one fails closed naming the
+// pin, both through ValidateFor and through the conflict's decode. A pinned
+// whole-artifact challenge on a conflict keeps Link.Validate's verdict (the
+// control), and so does a pinned fragment on every link type ValidateFor
+// does not widen (TestLink_ValidateFor_IsValidateElsewhere).
+func TestConflict_PinnedFragmentChallenge_Refused(t *testing.T) {
+	const full = "3e91ab2c4d5e6f708192a3b4c5d6e7f801234567"
+	cases := []struct{ ref, commit string }{
+		{"spec/home-status-glance@3e91ab2#ac-1", "3e91ab2"},
+		{"spec/home-status-glance@" + full + "#ac-1", full},
+		{"spec/home-status-glance@" + full + "#dc-2", full},
+	}
+	for _, tc := range cases {
+		t.Run(tc.ref, func(t *testing.T) {
+			wants := []string{"pinned object fragment", fmt.Sprintf("pinned at %q", tc.commit), "02 §Common frontmatter", "SI-271"}
+			check := func(what string, err error) {
+				t.Helper()
+				if err == nil {
+					t.Fatalf("%s(challenges %q): want error, got nil", what, tc.ref)
+				}
+				for _, want := range wants {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("%s(challenges %q) = %q, want it to contain %q", what, tc.ref, err, want)
+					}
+				}
+			}
+			check("ValidateFor", Link{Type: LinkChallenges, Ref: tc.ref}.ValidateFor(KindConflict))
+			for _, status := range []string{"open", "superseded"} {
+				_, err := DecodeConflict(conflictDoc(status, []string{tc.ref}, ""))
+				check("DecodeConflict/"+status, err)
+			}
+		})
+	}
+	t.Run("control: pinned whole-artifact challenge", func(t *testing.T) {
+		l := Link{Type: LinkChallenges, Ref: "spec/home-status-glance@" + full}
+		if err := l.Validate(); err != nil {
+			t.Fatalf("Validate(%+v): %v; this control assumes Link.Validate accepts a pinned whole-artifact ref", l, err)
+		}
+		if err := l.ValidateFor(KindConflict); err != nil {
+			t.Fatalf("ValidateFor(conflict, %+v): %v, want Link.Validate's nil", l, err)
+		}
+		if _, err := DecodeConflict(conflictDoc("open", []string{l.Ref}, "")); err != nil {
+			t.Fatalf("DecodeConflict(challenges %q): %v", l.Ref, err)
+		}
+	})
+}
+
 // TestLink_ValidateFor_IsValidateElsewhere proves ValidateFor behaves exactly
 // like Link.Validate (same verdict, same diagnostic) for every owner kind and
 // link except a conflict's fragment `challenges` link — the one context 02
@@ -108,7 +157,8 @@ func TestLink_ValidateFor_IsValidateElsewhere(t *testing.T) {
 	} {
 		for _, ref := range []string{
 			"", "not-a-ref", "spec/foo", "spec/foo@3e91ab2", "adr/0001-old", "spec/loan-update#ac-1",
-			"adr/0001-old#dc-1", "spec/loan-update#", "jira:LOAN-1482", "svc/loansvc/boundary-contract",
+			"spec/loan-update@3e91ab2#ac-1", "adr/0001-old#dc-1", "spec/loan-update#", "jira:LOAN-1482",
+			"svc/loansvc/boundary-contract",
 		} {
 			links = append(links, Link{Type: lt, Ref: ref})
 		}

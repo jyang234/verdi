@@ -8,11 +8,13 @@ import "fmt"
 // also target object fragments, all naming objects of one spec"): when owner
 // is a conflict, a `challenges` link may target a spec object fragment,
 // spec/<name>#<object-id>. A conflict's `challenges` fragment naming any
-// other kind fails closed. For every other owner, link type, and ref it
-// returns exactly what Link.Validate returns, so the closed five-value
-// spec-object edge vocabulary is unchanged in every other context and a
-// context-free caller of Link.Validate stays fail-closed on a fragment
-// `challenges` link.
+// other kind fails closed, and so does a pinned one, spec/<name>@<sha>#<id>
+// (02 §Common frontmatter: refs inside links are unpinned; SI-271); a pinned
+// whole-artifact `challenges` ref keeps Link.Validate's verdict. For every
+// other owner, link type, and ref it returns exactly what Link.Validate
+// returns, so the closed five-value spec-object edge vocabulary is unchanged
+// in every other context and a context-free caller of Link.Validate stays
+// fail-closed on a fragment `challenges` link.
 //
 // This is the one definition of the kind-aware link check: validateBase uses
 // it for every artifact kind, and a caller that decodes without the kind's
@@ -29,6 +31,9 @@ func (l Link) ValidateFor(owner Kind) error {
 	}
 	if ref.Kind != KindSpec {
 		return fmt.Errorf("artifact: conflict challenges link targets object fragment %q, but a conflict's fragment challenges name a spec object, spec/<name>#<object-id> (02 §Link taxonomy)", l.Ref)
+	}
+	if ref.Pinned() {
+		return fmt.Errorf("artifact: conflict challenges link targets pinned object fragment %q (pinned at %q), but refs inside links are unpinned and a conflict's fragment challenges name a spec object as spec/<name>#<object-id> (02 §Common frontmatter, SI-271)", l.Ref, ref.Commit)
 	}
 	return nil
 }
