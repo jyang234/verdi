@@ -116,9 +116,10 @@ func decisionYAML(pairs ...string) string {
 }
 
 // cssBase is the store every closed-spec object supersession case (VL-003's
-// amendment and VL-026) runs against: a spec closed by
-// zone (archive, statusless), a spec closed by an explicit legacy
-// `status: closed` (active zone), and a live spec that is not closed —
+// amendment and VL-026) runs against: a spec closed by zone (archive,
+// statusless); an active-zone spec with an explicit legacy
+// `status: closed`, which is NOT closed for VL-026 under SI-277 (the
+// archive zone alone decides it); and a live spec that is not closed —
 // each declaring an acceptance criterion, a constraint, a decision, an
 // open question, and a stub — plus one ADR. None of them carries a link,
 // so the base alone lints clean under VL-003 and VL-026.
