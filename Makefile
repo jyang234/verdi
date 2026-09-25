@@ -484,8 +484,8 @@ E2E_SHARD_3 = $(or $(filter-out $(E2E_SHARD_1) $(E2E_SHARD_2),$(sort $(notdir $(
 # are the one definition of each shard's command, used by e2e-N and by e2e,
 # so both derive their ports the same way.
 #
-# E2E_PORT_BASES is the shards' three bases. With VERDI_E2E_PORT_BASE unset,
-# empty, or blank they are the fixed 21000, 22000, and 23000, so two worktrees
+# E2E_PORT_BASES is the shards' three bases. With VERDI_E2E_PORT_BASE unset
+# or empty they are the fixed 21000, 22000, and 23000, so two worktrees
 # that run e2e shards at the same time (make verify, make e2e, or the same
 # e2e-N) collide. A worktree that runs them while another does must export its
 # own base first, e.g. `VERDI_E2E_PORT_BASE=31000 make verify` in one worktree
@@ -493,8 +493,9 @@ E2E_SHARD_3 = $(or $(filter-out $(E2E_SHARD_1) $(E2E_SHARD_2),$(sort $(notdir $(
 # lie in base..base+23, and runs whose bases are at least 24 apart, and clear
 # of the fixed bases' ports while an unset run is going, never collide. The
 # base must be a decimal integer from 1 to 65512, with no sign or leading
-# zero, so that every shard's ports stay within 1-65535; any other value stops
-# make with an error before a shard starts, never falling back to ports
+# zero, so that every shard's ports stay within 1-65535; any other non-empty
+# value, whitespace alone included (make's $(if) counts it as set, not empty),
+# stops make with an error before a shard starts, never falling back to ports
 # another run may hold. The shell checks the value, single-quoted so it cannot
 # run as code, and prints the three bases or nothing; nothing reaches
 # $(error). The check runs only when a shard's command is expanded, so no
