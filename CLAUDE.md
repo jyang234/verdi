@@ -7,8 +7,9 @@ here.
 
 ## Make targets
 
-- `make verify` — full gate: build, fmt-check, vet, lint, test, fixture, lint-store, spec-align, e2e (last, slowest). Missing node/npm HARD-FAILS verify's e2e step — no silent skip.
-- `make build` / `make test` / `make vet` / `make fmt-check` / `make fmt`
+- `make verify` — full gate, serial and fail-fast: build, fmt-check, vet, lint, test-cmd, test-cross, test-rest, fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e (last, slowest). The pull-request gate (`merge-gate.yml`) runs exactly these steps plus the post-verify self-lint as parallel jobs; the required `merge-gate` job fails unless every one succeeds (SI-266). Missing node/npm HARD-FAILS verify's e2e step — no silent skip.
+- `make test` — every package once under `-race`, as disjoint shards that also run alone: `test-cmd` (`./cmd/verdi`), `test-cross` (`CROSS_BINARY_PKGS` except specalign, always `-count=1`), `test-rest` (every other package, cached), and `spec-align` (the one target that runs specalign).
+- `make build` / `make vet` / `make fmt-check` / `make fmt`
 - `make lint` — golangci-lint if installed, else a non-failing warning.
 - `make fixture` — fixturegit + corpus + svcfixcanned determinism tests.
 - `make fixture-regen` — re-captures testdata/svcfix-canned/ from the real toolchain; opt-in, non-hermetic, never part of verify.

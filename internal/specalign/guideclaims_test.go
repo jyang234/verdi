@@ -37,8 +37,8 @@
 // package (every .go file here is a _test.go file, following
 // internal/corpus's and internal/svcfixcanned's own precedent) that `go
 // test ./internal/specalign/...` already runs — the Makefile's
-// `spec-align` target, and `test`'s CROSS_BINARY_PKGS re-run, both
-// already invoke that. No new Makefile target was needed.
+// `spec-align` target invokes that, and `make test` and `make verify` both
+// run it. No new Makefile target was needed.
 //
 // DISCLOSED SCOPE (spec/guide-claims-gate ac-4, mirroring
 // vocabprose_test.go's own disclosed-scope comment convention): this gate
@@ -66,9 +66,9 @@
 // it omits -race, which `make test` uses, so a witness whose behavior
 // depended on -race would be proven under different conditions than the gate
 // it couples to; and (2) the named witnesses execute more than once per make
-// verify — the inner transcript run here, plus this package's own run under
-// `go test -race ./...` and the CROSS_BINARY_PKGS -count=1 re-run — an
-// intentional but real repeated execution. The property actually proven is
+// verify — the inner transcript run here, plus each witness package's own
+// run in its `make test` shard (SI-266) — an intentional but real repeated
+// execution. The property actually proven is
 // "the witness passes when the gate itself invokes it"; coupling to make
 // verify holds only transitively because this gate runs under spec-align.
 // The alternative — coupling the gate to make verify's own Makefile gate
