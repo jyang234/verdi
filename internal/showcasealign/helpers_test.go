@@ -630,8 +630,10 @@ func attachHistoricalObligationQualityAncestry(t *testing.T, repo *fixturegit.Re
 // directories included), and the index, whose stat
 // cache must be fresh (`git diff-files` and `git diff-index HEAD` both
 // empty) in the clone as in the independent build — and then
-// checks that a mutation made in one clone never appears in a sibling
-// clone or in a clone taken afterward from the shared template.
+// checks that a mutation made in one clone (a working-tree edit, a commit,
+// and an update-ref) never appears in a coexisting sibling clone or in a
+// clone taken afterward from the shared template: not in its files,
+// directories, refs, or objects.
 func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
 	t.Run("a cached clone agrees with a completely independent, uncached build", func(t *testing.T) {
 		fresh := buildShowcaseRepo(t)          // never touches the shared template
@@ -715,8 +717,15 @@ func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
 	t.Run("a mutation in one copy is invisible to a sibling copy and to the template", func(t *testing.T) {
 		baseline := provisionShowcaseStore(t)
 		baselineDigest, _ := worktreeFingerprint(t, baseline)
+		baselineDirs := worktreeDirSet(t, baseline)
+		baselineRefs := sortedShowcaseGitLines(t, baseline, "show-ref")
 
+		// b is provisioned BEFORE a is mutated, so it is a live sibling:
+		// anything a's edits reached through shared storage (a symlinked
+		// or hard-linked .git/refs, objects, or file) would reach b too.
 		a := provisionShowcaseStore(t)
+		b := provisionShowcaseStore(t)
+
 		manifestRel := filepath.Join(".verdi", "verdi.yaml")
 		original, err := os.ReadFile(filepath.Join(a, manifestRel))
 		if err != nil {
@@ -730,37 +739,60 @@ func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
 			t.Fatalf("test setup: mutating copy a did not change its own fingerprint — the probe mutation is not being observed")
 		}
 
-		b := provisionShowcaseStore(t)
-		bManifest, err := os.ReadFile(filepath.Join(b, manifestRel))
-		if err != nil {
-			t.Fatalf("reading %s in copy b: %v", manifestRel, err)
-		}
-		if string(bManifest) != string(original) {
-			t.Fatalf("copy b's %s carries copy a's mutation — copies are not independent", manifestRel)
-		}
-		if bDigest, bStatus := worktreeFingerprint(t, b); bDigest != baselineDigest {
-			t.Fatalf("copy b's fingerprint differs from the pristine baseline — copy a's mutation leaked into copy b:\n%s", bStatus)
+		// The mutation reaches a's git state too: committing it writes new
+		// objects, moves the checked-out branch ref, and rewrites the index;
+		// update-ref then adds a ref of its own.
+		headBefore := strings.TrimSpace(showcaseGitOutput(t, a, "rev-parse", "HEAD"))
+		showcaseGitOutput(t, a, "add", "--", manifestRel)
+		showcaseGitOutput(t, a, "commit", "--quiet", "--no-verify", "-m", "lane-r3 isolation probe")
+		probeCommit := strings.TrimSpace(showcaseGitOutput(t, a, "rev-parse", "HEAD"))
+		showcaseGitOutput(t, a, "update-ref", "refs/heads/lane-r3-isolation-probe", headBefore)
+		if aRefs := sortedShowcaseGitLines(t, a, "show-ref"); aRefs == baselineRefs {
+			t.Fatalf("test setup: committing and update-ref in copy a did not change its git show-ref output — the probe is not being observed")
 		}
 
-		// A copy taken AFTER a's mutation still matches the pristine
-		// baseline exactly — proving the shared template itself was never
-		// touched by a's independent, working-tree-only edit.
+		// c is taken AFTER all of a's mutations: matching the pristine
+		// baseline proves the shared template itself was never touched.
 		c := provisionShowcaseStore(t)
-		cManifest, err := os.ReadFile(filepath.Join(c, manifestRel))
-		if err != nil {
-			t.Fatalf("reading %s in copy c: %v", manifestRel, err)
-		}
-		if string(cManifest) != string(original) {
-			t.Fatalf("copy c (taken after a's mutation) carries copy a's mutation — the shared template was mutated")
-		}
-		if cDigest, cStatus := worktreeFingerprint(t, c); cDigest != baselineDigest {
-			t.Fatalf("a later copy's fingerprint differs from the pristine baseline — the shared template was mutated:\n%s", cStatus)
+
+		for _, other := range []struct{ name, dir string }{
+			{"sibling copy b", b},
+			{"later copy c", c},
+		} {
+			// git state first: a leaked ref can point at an object this copy
+			// lacks, and show-ref's own error then names that ref, where the
+			// worktree checks below would only see git status exit 128.
+			if refs := sortedShowcaseGitLines(t, other.dir, "show-ref"); refs != baselineRefs {
+				t.Fatalf("%s's git show-ref differs from the pristine baseline — copy a's commit or update-ref leaked:\n%s", other.name, statusDelta(baselineRefs, refs))
+			}
+			probe := exec.Command("git", "cat-file", "-e", probeCommit)
+			probe.Dir = other.dir
+			err := probe.Run()
+			if err == nil {
+				t.Fatalf("%s holds copy a's probe commit %s — copies share an object store", other.name, probeCommit)
+			}
+			if _, ok := err.(*exec.ExitError); !ok {
+				t.Fatalf("git cat-file -e %s in %s: %v", probeCommit, other.name, err)
+			}
+			manifest, err := os.ReadFile(filepath.Join(other.dir, manifestRel))
+			if err != nil {
+				t.Fatalf("reading %s in %s: %v", manifestRel, other.name, err)
+			}
+			if string(manifest) != string(original) {
+				t.Fatalf("%s's %s carries copy a's mutation — copies are not independent", other.name, manifestRel)
+			}
+			if digest, status := worktreeFingerprint(t, other.dir); digest != baselineDigest {
+				t.Fatalf("%s's fingerprint differs from the pristine baseline — copy a's mutation leaked:\n%s", other.name, status)
+			}
+			if dirs := worktreeDirSet(t, other.dir); dirs != baselineDirs {
+				t.Fatalf("%s's directory set differs from the pristine baseline:\n%s", other.name, statusDelta(baselineDirs, dirs))
+			}
 		}
 	})
 }
 
 // showcaseGitOutput runs git in dir and returns its combined stdout+stderr,
-// failing the calling test on a non-zero exit. Read-only plumbing helper
+// failing the calling test on a non-zero exit. Plumbing helper
 // for TestProvisionShowcaseStoreCopyEquivalence.
 func showcaseGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
