@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // vl026Clauses returns the sorted clause letters of got's VL-026
@@ -30,6 +32,50 @@ func TestVL026_Base_Clean(t *testing.T) {
 	findings := runRule(vl026{}, memSnapshot(t, cssBase()...))
 	if len(findings) != 0 {
 		t.Fatalf("VL-026 fired on the link-free base store:\n%s", findingsString(findings))
+	}
+}
+
+// vl026ArchiveAccepted is an archive-zone spec whose own frontmatter
+// claims a non-closed status. Under SI-277 the archive zone alone makes a
+// spec closed for VL-026, so it is closed here; VL-002 separately rejects
+// the placement.
+func vl026ArchiveAccepted() memDoc {
+	return cssSpec("archive", "css-archive-accepted", "feature", "accepted-pending-build", cssObjectsYAML)
+}
+
+// TestVL026_ClosedSpec pins SI-277's reading of "closed": the target
+// spec's document sits in the archive zone, whatever its status: field
+// says. An active-zone spec claiming `status: closed` is not closed for
+// VL-026; that store is VL-002's to reject.
+func TestVL026_ClosedSpec(t *testing.T) {
+	snap := memSnapshot(t, append(cssBase(), vl026ArchiveAccepted())...)
+	cases := []struct {
+		name string
+		ref  string
+		want string // the closed spec's id, or "" for none
+	}{
+		{name: "archive zone, statusless", ref: "spec/css-closed-archive#ac-1", want: "spec/css-closed-archive"},
+		{name: "archive zone, status accepted-pending-build", ref: "spec/css-archive-accepted#ac-1", want: "spec/css-archive-accepted"},
+		{name: "pinned ref to an archive-zone spec", ref: "spec/css-closed-archive@" + cssSHA + "#ac-1", want: "spec/css-closed-archive"},
+		{name: "active zone claiming status: closed", ref: "spec/css-closed-status#ac-1"},
+		{name: "active zone, live", ref: "spec/css-live#ac-1"},
+		{name: "spec that does not exist", ref: "spec/css-missing#ac-1"},
+		{name: "not a spec", ref: "adr/0001-css"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref, err := artifact.ParseRef(tc.ref)
+			if err != nil {
+				t.Fatalf("ParseRef(%q): %v", tc.ref, err)
+			}
+			got := ""
+			if d := vl026ClosedSpec(snap, ref); d != nil {
+				got = d.Base.ID
+			}
+			if got != tc.want {
+				t.Fatalf("vl026ClosedSpec(%q) = %q, want %q", tc.ref, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -89,15 +135,19 @@ func TestVL026_Clauses(t *testing.T) {
 		// Clause (b): no top-level supersedes link, on any artifact,
 		// targets an object of a closed spec.
 		{
-			name:    "b: story top-level supersedes an object of a spec closed by zone",
+			name:    "b: story top-level supersedes an object of an archive-zone spec",
 			subject: []memDoc{cssSpec("active", "css-subject", "story", "", linksYAML("supersedes", "spec/css-closed-archive#ac-1"))},
 			want:    []string{"b"},
 			msgs:    []string{`"spec/css-closed-archive#ac-1"`, "spec/css-closed-archive", "belongs on a decision", "02 §Link taxonomy", "VL-026"},
 		},
 		{
-			name:    "b: story top-level supersedes an object of a spec closed by status",
-			subject: []memDoc{cssSpec("active", "css-subject", "story", "", linksYAML("supersedes", "spec/css-closed-status#dc-1"))},
+			name:    "b: top-level supersedes an object of an archive-zone spec whose status is not closed",
+			subject: []memDoc{vl026ArchiveAccepted(), cssSpec("active", "css-subject", "story", "", linksYAML("supersedes", "spec/css-archive-accepted#dc-1"))},
 			want:    []string{"b"},
+		},
+		{
+			name:    "b negative (SI-277): top-level supersedes an object of an active-zone spec claiming status: closed",
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", linksYAML("supersedes", "spec/css-closed-status#dc-1"))},
 		},
 		{
 			name:    "b: ADR top-level supersedes an object of a closed spec",
@@ -158,9 +208,13 @@ func TestVL026_Clauses(t *testing.T) {
 			msgs:    []string{"not declared"},
 		},
 		{
-			name:    "c: story decision supersedes a constraint of a spec closed by status",
-			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status#co-1"))},
+			name:    "c: story decision supersedes a constraint of an archive-zone spec whose status is not closed",
+			subject: []memDoc{vl026ArchiveAccepted(), cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-archive-accepted#co-1"))},
 			want:    []string{"c"},
+		},
+		{
+			name:    "c negative (SI-277): decision supersedes a constraint of an active-zone spec claiming status: closed",
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status#co-1"))},
 		},
 		{
 			name:    "c negative: decision supersedes a closed spec's acceptance criterion",
@@ -168,7 +222,7 @@ func TestVL026_Clauses(t *testing.T) {
 		},
 		{
 			name:    "c negative: decision supersedes a closed spec's decision",
-			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status#dc-1"))},
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-archive#dc-1"))},
 		},
 		{
 			name:    "c negative: decision supersedes a live spec's constraint",
@@ -284,15 +338,19 @@ func TestVL026_Clauses(t *testing.T) {
 		// Clause (g): a decision's supersedes link to an object of a closed
 		// spec is unpinned (SI-271).
 		{
-			name:    "g: decision supersedes a pinned object of a spec closed by zone",
+			name:    "g: decision supersedes a pinned object of an archive-zone spec",
 			subject: []memDoc{cssSpec("active", "css-subject", "feature", "", decisionYAML("supersedes", "spec/css-closed-archive@"+cssSHA+"#ac-1"))},
 			want:    []string{"g"},
 			msgs:    []string{"decisions[dc-9]", cssSHA, "SI-271", "VL-026"},
 		},
 		{
-			name:    "g: decision supersedes a pinned object of a spec closed by status",
-			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status@"+cssSHA+"#dc-1"))},
+			name:    "g: decision supersedes a pinned object of an archive-zone spec whose status is not closed",
+			subject: []memDoc{vl026ArchiveAccepted(), cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-archive-accepted@"+cssSHA+"#dc-1"))},
 			want:    []string{"g"},
+		},
+		{
+			name:    "g negative (SI-277): decision supersedes a pinned object of an active-zone spec claiming status: closed",
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status@"+cssSHA+"#dc-1"))},
 		},
 		{
 			name:    "c and g: decision supersedes a pinned constraint of a closed spec",
@@ -319,7 +377,7 @@ func TestVL026_Clauses(t *testing.T) {
 			subject: []memDoc{
 				cssSpec("active", "css-subject", "feature", "", linksYAML("supersedes", "spec/css-closed-archive#ac-1")+decisionYAML(
 					"supersedes", "spec/css-closed-archive#co-1",
-					"supersedes", "spec/css-closed-status@"+cssSHA+"#ac-1",
+					"supersedes", "spec/css-closed-archive@"+cssSHA+"#ac-1",
 				)),
 				cssConflict("css-subject-two", "superseded", "", "spec/css-closed-archive#ac-1", "spec/css-closed-status#ac-1"),
 				cssConflict("css-subject-three", "open", "spec/css-live", "spec/css-closed-archive#ac-1"),
@@ -393,7 +451,7 @@ const vl026TwoDecisionsYAML = `decisions:
     text: "replaces the criterion"
     anchor: "#dc-8"
     links:
-      - { type: supersedes, ref: "spec/css-closed-status@` + cssSHA + `#ac-1" }
+      - { type: supersedes, ref: "spec/css-closed-archive@` + cssSHA + `#ac-1" }
 `
 
 // TestVL026_Loci pins each clause's self-declared wall placement
@@ -440,7 +498,7 @@ func TestVL026_Loci(t *testing.T) {
 		},
 		{
 			name:    "g: pinned decision edge badges its decision",
-			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-status@"+cssSHA+"#dc-1"))},
+			subject: []memDoc{cssSpec("active", "css-subject", "story", "", decisionYAML("supersedes", "spec/css-closed-archive@"+cssSHA+"#dc-1"))},
 			want:    []string{"g=object:dc-9"},
 		},
 		{

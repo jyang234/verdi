@@ -39,9 +39,10 @@ import (
 //     unpinned (SI-271). A conflict's pinned fragment challenge is VL-003's
 //     (artifact.Link.ValidateFor refuses it), so it is not repeated here.
 //
-// "Closed" is VL-002's zone-derived reading: the target spec's document
-// sits under .verdi/specs/archive/, or it carries an explicit legacy
-// `status: closed`; either signal counts. Each clause is self-contained
+// "Closed" is the archive zone alone (SI-277): the target spec's document
+// sits under .verdi/specs/archive/. A spec's own status: field is never
+// read, so an active-zone spec claiming `status: closed` is not closed
+// here; that store is VL-002's to reject. Each clause is self-contained
 // (doc.go), so a link another rule also refuses (VL-003's undeclared
 // fragment) is still reported here when it breaks a VL-026 clause.
 type vl026 struct{}
@@ -98,7 +99,7 @@ func (vl026) checkTopLevelLinks(in *RunInput, d *Document) []Finding {
 			continue
 		}
 		if target := vl026ClosedSpec(in.Snapshot, ref); target != nil {
-			// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
+			// vocab:identity — VL-026 rule citation: "closed" is the target's archive-zone placement (SI-277), not display prose
 			const msg = "top-level supersedes link %q targets #%s of closed spec %s, but a top-level supersedes link never targets an object of a closed spec: that edge belongs on a decision (02 §Link taxonomy; VL-026)"
 			findings = append(findings, vl026Finding(d, "b", fmt.Sprintf(msg, l.Ref, ref.Object, target.Base.ID), locus))
 		}
@@ -126,12 +127,12 @@ func (vl026) checkDecisionEdges(snap *Snapshot, d *Document) []Finding {
 				continue
 			}
 			if what, ok := vl026SupersedableObject(target.Spec, ref.Object); !ok {
-				// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
+				// vocab:identity — VL-026 rule citation: "closed" is the target's archive-zone placement (SI-277), not display prose
 				const msg = "decisions[%s].links[].ref %q supersedes #%s of closed spec %s, which %s, but a decision's supersedes link to an object of a closed spec targets a declared acceptance criterion or decision (02 §Link taxonomy, §Object model; VL-026)"
 				findings = append(findings, vl026Finding(d, "c", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, what), ObjectLocus(dc.ID)))
 			}
 			if ref.Pinned() {
-				// vocab:identity — VL-026 rule citation: "closed" is VL-002's zone/status reading of the target, not display prose
+				// vocab:identity — VL-026 rule citation: "closed" is the target's archive-zone placement (SI-277), not display prose
 				const msg = "decisions[%s].links[].ref %q supersedes #%s of closed spec %s pinned at %s, but refs inside links are unpinned and the edge names the object as spec/<name>#<object-id> (02 §Link taxonomy, §Common frontmatter; SI-271; VL-026)"
 				findings = append(findings, vl026Finding(d, "g", fmt.Sprintf(msg, dc.ID, l.Ref, ref.Object, target.Base.ID, ref.Commit), ObjectLocus(dc.ID)))
 			}
@@ -204,17 +205,18 @@ func vl026FragmentRef(l artifact.Link) (artifact.Ref, bool) {
 const vl026ArchivePrefix = ".verdi/specs/archive/"
 
 // vl026ClosedSpec returns the committed-zone spec document that ref's
-// kind/name half names when that spec is closed under VL-002's
-// zone-derived reading, with no git: its document sits in the archive
-// zone, or it carries an explicit legacy `status: closed`. It returns nil
-// when ref names no spec, a spec that does not resolve (VL-003's), or one
-// that is not closed.
+// kind/name half names when that spec is closed for VL-026: its document
+// sits in the archive zone, and that alone decides it (SI-277), with no
+// git and no read of the spec's status: field. It returns nil when ref
+// names no spec, a spec that does not resolve (VL-003's), or one outside
+// the archive zone, including an active-zone spec claiming
+// `status: closed` (VL-002's to reject).
 func vl026ClosedSpec(snap *Snapshot, ref artifact.Ref) *Document {
 	if ref.Kind != artifact.KindSpec {
 		return nil
 	}
 	for _, t := range snap.ByRef[artifact.Ref{Kind: ref.Kind, Name: ref.Name}.String()] {
-		if t.Kind == "spec" && t.Spec != nil && (strings.HasPrefix(t.RelPath, vl026ArchivePrefix) || t.Status == "closed") {
+		if t.Kind == "spec" && t.Spec != nil && strings.HasPrefix(t.RelPath, vl026ArchivePrefix) {
 			return t
 		}
 	}
