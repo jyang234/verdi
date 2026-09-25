@@ -21,8 +21,12 @@
 //     empty remainder;
 //   - every Playwright test run has the shard command's shape and ends at its
 //     output directory, so no trailing argument narrows what a shard runs;
-//   - each shard has its own port range and output directory, and installs
-//     its setup exactly once, before Playwright runs;
+//   - each shard has its own port range and output directory, both with
+//     VERDI_E2E_PORT_BASE unset and with it exported, when shard N's port base
+//     is VERDI_E2E_PORT_BASE + (N-1)*10 (D6-28: two worktrees that export
+//     distinct bases can run the same shards at once), and make refuses an
+//     exported base that would put a port outside 1-65535; and each shard
+//     installs its setup exactly once, before Playwright runs;
 //   - `make e2e` runs exactly the three shard commands, and fails, with a
 //     per-shard summary, when any one shard fails alone or all three fail;
 //   - VERIFY_STEPS lists the three shards and not `e2e`.
@@ -62,6 +66,18 @@ var e2eShardTargets = []string{"e2e-1", "e2e-2", "e2e-3"}
 // VERDI_E2E_PORT_BASE: workbench, dex, control, and inspection, base to base+3
 // (cmd/e2eharness/ports.go, e2e/ports.ts).
 const e2ePortSpan = 4
+
+// e2ePortBaseEnvVar is the variable (D6-28) that moves the harness's ports.
+// Each shard command sets its own; exported before make, it moves them all.
+const e2ePortBaseEnvVar = "VERDI_E2E_PORT_BASE"
+
+// e2ePortStride is how far apart an exported VERDI_E2E_PORT_BASE puts the
+// shards' own bases: shard N's is base + (N-1)*e2ePortStride.
+const e2ePortStride = 10
+
+// e2eExportedPortBase is the VERDI_E2E_PORT_BASE the partition guard exports
+// for its second pass over the shard commands.
+const e2eExportedPortBase = 31000
 
 // e2eShardRun is one Playwright shard command found in a make dry-run.
 type e2eShardRun struct {
@@ -219,6 +235,37 @@ func e2eShardProblems(runs []namedE2ERun, specs []string) []string {
 	return problems
 }
 
+// e2ePortBaseProblems returns each of runs, the shard commands in shard
+// order, whose port base is not the one an exported VERDI_E2E_PORT_BASE of
+// base gives it, base + (N-1)*e2ePortStride for shard N. A shard that ignores
+// the exported base collides with the same shard in another worktree's run,
+// which exported a base of its own to avoid exactly that (D6-28).
+func e2ePortBaseProblems(runs []namedE2ERun, base int) []string {
+	var problems []string
+	for i, r := range runs {
+		if want := base + i*e2ePortStride; r.Run.PortBase != want {
+			problems = append(problems, fmt.Sprintf("with %s=%d exported, %s's port base is %d, want %d: a shard that does not derive its ports from the exported base collides with another worktree's run of it (D6-28)", e2ePortBaseEnvVar, base, r.Target, r.Run.PortBase, want))
+		}
+	}
+	return problems
+}
+
+// e2eMakeEnv is hermeticMakeEnv with VERDI_E2E_PORT_BASE exported as base, or
+// removed when base is "", so a value exported where the test runs never
+// decides what the guard reads.
+func e2eMakeEnv(base string) []string {
+	var env []string
+	for _, kv := range hermeticMakeEnv() {
+		if name, _, _ := strings.Cut(kv, "="); name != e2ePortBaseEnvVar {
+			env = append(env, kv)
+		}
+	}
+	if base != "" {
+		env = append(env, e2ePortBaseEnvVar+"="+base)
+	}
+	return env
+}
+
 // e2eSetupCommands are the e2e shards' shared setup, in order.
 var e2eSetupCommands = []string{"npm install", "npx playwright install --with-deps chromium"}
 
@@ -263,11 +310,11 @@ func e2eTestFiles(t *testing.T) []string {
 	return files
 }
 
-// targetE2ERuns dry-runs target and parses its shard commands, and reports
-// any problem with its setup.
-func targetE2ERuns(t *testing.T, target string) []e2eShardRun {
+// targetE2ERuns dry-runs target with env as make's environment, parses its
+// shard commands, and reports any problem with its setup.
+func targetE2ERuns(t *testing.T, env []string, target string) []e2eShardRun {
 	t.Helper()
-	dry := makeDryRun(t, target)
+	dry := makeDryRunEnv(t, env, target)
 	runs, err := parseE2EShardRuns(dry)
 	if err != nil {
 		t.Fatalf("make -n %s: %v", target, err)
@@ -279,9 +326,12 @@ func targetE2ERuns(t *testing.T, target string) []e2eShardRun {
 }
 
 // TestE2EShards_PartitionSpecFiles proves the three e2e shards partition
-// e2e/tests/*.spec.ts, each with its own ports and output directory and one
-// setup; that `make e2e` runs exactly those three shard commands; and that
-// VERIFY_STEPS runs the shards and not the convenience target.
+// every file Playwright collects under e2e/tests/, each with its own ports and
+// output directory and one setup; that `make e2e` runs exactly those three
+// shard commands; and that VERIFY_STEPS runs the shards and not the
+// convenience target. It reads the shard commands twice: with
+// VERDI_E2E_PORT_BASE unset, and exported, when each shard's port base must
+// also derive from it.
 func TestE2EShards_PartitionSpecFiles(t *testing.T) {
 	steps := makefileVarFields(t, readMakefile(t), "VERIFY_STEPS")
 	for _, target := range e2eShardTargets {
@@ -298,26 +348,154 @@ func TestE2EShards_PartitionSpecFiles(t *testing.T) {
 		t.Error(p)
 	}
 
-	var shards []namedE2ERun
-	for _, target := range e2eShardTargets {
-		runs := targetE2ERuns(t, target)
-		if len(runs) != 1 {
-			t.Fatalf("make -n %s runs %d Playwright shard commands, want exactly 1: %+v", target, len(runs), runs)
-		}
-		shards = append(shards, namedE2ERun{Target: target, Run: runs[0]})
+	modes := []struct {
+		name string
+		base string // the VERDI_E2E_PORT_BASE exported to make; "" leaves it unset
+	}{
+		{name: "VERDI_E2E_PORT_BASE unset"},
+		{name: "VERDI_E2E_PORT_BASE exported", base: strconv.Itoa(e2eExportedPortBase)},
 	}
-	for _, p := range e2eShardProblems(shards, specs) {
-		t.Error(p)
-	}
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			env := e2eMakeEnv(mode.base)
+			var shards []namedE2ERun
+			for _, target := range e2eShardTargets {
+				runs := targetE2ERuns(t, env, target)
+				if len(runs) != 1 {
+					t.Fatalf("make -n %s runs %d Playwright shard commands, want exactly 1: %+v", target, len(runs), runs)
+				}
+				shards = append(shards, namedE2ERun{Target: target, Run: runs[0]})
+			}
+			for _, p := range e2eShardProblems(shards, specs) {
+				t.Error(p)
+			}
+			if mode.base != "" {
+				for _, p := range e2ePortBaseProblems(shards, e2eExportedPortBase) {
+					t.Error(p)
+				}
+			}
 
-	suite := targetE2ERuns(t, e2eSuiteTarget)
-	if len(suite) != len(shards) {
-		t.Fatalf("make -n %s runs %d Playwright shard commands, want the %d shards' own: %+v", e2eSuiteTarget, len(suite), len(shards), suite)
+			suite := targetE2ERuns(t, env, e2eSuiteTarget)
+			if len(suite) != len(shards) {
+				t.Fatalf("make -n %s runs %d Playwright shard commands, want the %d shards' own: %+v", e2eSuiteTarget, len(suite), len(shards), suite)
+			}
+			for i, run := range suite {
+				want := shards[i].Run
+				if run.PortBase != want.PortBase || run.Output != want.Output || !slices.Equal(run.Specs, want.Specs) {
+					t.Errorf("make %s's shard command %d is %+v, want %s's own %+v", e2eSuiteTarget, i+1, run, shards[i].Target, want)
+				}
+			}
+		})
 	}
-	for i, run := range suite {
-		want := shards[i].Run
-		if run.PortBase != want.PortBase || run.Output != want.Output || !slices.Equal(run.Specs, want.Specs) {
-			t.Errorf("make %s's shard command %d is %+v, want %s's own %+v", e2eSuiteTarget, i+1, run, shards[i].Target, want)
+}
+
+// TestE2EShards_PortBaseProblems is e2ePortBaseProblems' happy and negative
+// paths.
+func TestE2EShards_PortBaseProblems(t *testing.T) {
+	shards := func(bases ...int) []namedE2ERun {
+		runs := make([]namedE2ERun, len(bases))
+		for i, b := range bases {
+			runs[i] = namedE2ERun{Target: e2eShardTargets[i], Run: e2eShardRun{PortBase: b}}
+		}
+		return runs
+	}
+	cases := []struct {
+		name string
+		runs []namedE2ERun
+		want []string // a substring of each problem, in order; nil wants none
+	}{
+		{name: "each shard derives its base", runs: shards(31000, 31010, 31020)},
+		{
+			name: "the fixed bases ignore the exported one",
+			runs: shards(21000, 22000, 23000),
+			want: []string{"e2e-1's port base is 21000, want 31000", "e2e-2's port base is 22000, want 31010", "e2e-3's port base is 23000, want 31020"},
+		},
+		{
+			name: "one shard keeps a fixed base",
+			runs: shards(31000, 22000, 31020),
+			want: []string{"e2e-2's port base is 22000, want 31010"},
+		},
+		{
+			name: "two shards derive the same base",
+			runs: shards(31000, 31000, 31020),
+			want: []string{"e2e-2's port base is 31000, want 31010"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := e2ePortBaseProblems(tc.runs, 31000)
+			if len(problems) != len(tc.want) {
+				t.Fatalf("problems = %q, want %d containing %q", problems, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				if !strings.Contains(problems[i], want) {
+					t.Errorf("problem %d = %q, want it to contain %q", i, problems[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestE2EShards_ExportedPortBase dry-runs every e2e shard target and `make
+// e2e` with VERDI_E2E_PORT_BASE exported, and proves make gives the shards
+// base, base+10, and base+20 across the whole range whose ports stay within
+// 1-65535, and refuses every other value with an error naming it before any
+// Playwright run, instead of falling back to bases another run may hold.
+func TestE2EShards_ExportedPortBase(t *testing.T) {
+	cases := []struct {
+		base string
+		want []int // the shards' port bases; nil wants make to refuse the base
+	}{
+		{base: "1", want: []int{1, 11, 21}},
+		{base: "4390", want: []int{4390, 4400, 4410}},
+		{base: "65512", want: []int{65512, 65522, 65532}}, // e2e-3's ports end at 65535
+		{base: "65513"}, // e2e-3's inspection port would be 65536
+		{base: "70000"},
+		{base: "100000"},
+		{base: "0"},
+		{base: "031000"}, // a leading zero, which the shell reads as octal
+		{base: "-1"},
+		{base: "+31000"},
+		{base: " 31000"},
+		{base: "31000x"},
+		{base: "3.1e4"},
+		{base: "abc"},
+		{base: "31000'; echo injected; '"},
+	}
+	targets := append(slices.Clone(e2eShardTargets), e2eSuiteTarget)
+	for _, tc := range cases {
+		for _, target := range targets {
+			t.Run(fmt.Sprintf("%s=%q/%s", e2ePortBaseEnvVar, tc.base, target), func(t *testing.T) {
+				stdout, stderr, err := runMakeDryRun(e2eMakeEnv(tc.base), target)
+				if tc.want == nil {
+					wantErr := fmt.Sprintf("%s=%s cannot place the three e2e shards", e2ePortBaseEnvVar, tc.base)
+					if err == nil || !strings.Contains(stderr, wantErr) {
+						t.Fatalf("make -n %s: error %v, stderr %q; want make to fail with %q", target, err, stderr, wantErr)
+					}
+					if playwrightTestRE.MatchString(stdout) {
+						t.Errorf("make -n %s refused the base but still ran Playwright:\n%s", target, stdout)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("make -n %s: %v\nstderr:\n%s", target, err, stderr)
+				}
+				runs, err := parseE2EShardRuns(stdout)
+				if err != nil {
+					t.Fatalf("make -n %s: %v", target, err)
+				}
+				want := tc.want
+				if target != e2eSuiteTarget {
+					want = tc.want[slices.Index(e2eShardTargets, target) : slices.Index(e2eShardTargets, target)+1]
+				}
+				got := make([]int, len(runs))
+				for i, r := range runs {
+					got[i] = r.PortBase
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("make -n %s gives port bases %v, want %v", target, got, want)
+				}
+			})
 		}
 	}
 }
@@ -698,7 +876,7 @@ func TestE2EShards_SuiteFailsWhenAnyShardFails(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command("make", "--no-print-directory", e2eSuiteTarget)
 			cmd.Dir = verdiRepoRoot
-			cmd.Env = append(hermeticMakeEnv(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FAKE_FAILING_SHARDS="+tc.failing)
+			cmd.Env = append(e2eMakeEnv(""), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FAKE_FAILING_SHARDS="+tc.failing)
 			raw, err := cmd.CombinedOutput()
 			out := string(raw)
 			if ok := err == nil; ok != tc.wantOK {

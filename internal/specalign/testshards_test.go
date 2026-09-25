@@ -332,16 +332,30 @@ func hermeticMakeEnv() []string {
 // makeDryRun returns `make -n` output for target in the repo root.
 func makeDryRun(t *testing.T, target string) string {
 	t.Helper()
+	return makeDryRunEnv(t, hermeticMakeEnv(), target)
+}
+
+// makeDryRunEnv is makeDryRun with env as make's environment.
+func makeDryRunEnv(t *testing.T, env []string, target string) string {
+	t.Helper()
+	stdout, stderr, err := runMakeDryRun(env, target)
+	if err != nil {
+		t.Fatalf("make -n %s: %v\nstderr:\n%s", target, err, stderr)
+	}
+	return stdout
+}
+
+// runMakeDryRun runs `make -n` for target in the repo root with env as its
+// environment, and returns what it printed and how it exited.
+func runMakeDryRun(env []string, target string) (stdout, stderr string, err error) {
 	cmd := exec.Command("make", "-n", "-s", "--no-print-directory", target)
 	cmd.Dir = verdiRepoRoot
-	cmd.Env = hermeticMakeEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("make -n %s: %v\nstderr:\n%s", target, err, stderr.String())
-	}
-	return stdout.String()
+	cmd.Env = env
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err = cmd.Run()
+	return out.String(), errOut.String(), err
 }
 
 // targetGoTests dry-runs target and parses its `go test` commands.

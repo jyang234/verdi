@@ -476,18 +476,37 @@ E2E_SHARD_2 := \
 E2E_SHARD_3 = $(or $(filter-out $(E2E_SHARD_1) $(E2E_SHARD_2),$(sort $(notdir $(wildcard e2e/tests/*.spec.ts)))),e2e-shard-3-list-failed)
 
 # e2e_shard is one shard's Playwright command, run in e2e/: $(1) is the
-# shard's number, $(2) its VERDI_E2E_PORT_BASE, and $(3) its spec files.
-# VERDI_E2E_PORT_BASE (D6-28; cmd/e2eharness/ports.go, e2e/ports.ts) moves
-# the harness's four ports to base..base+3. Each shard sets its own fixed
-# base and its own --output directory (Playwright empties it when a run
-# starts), so the three shards never collide when they run at once. A
-# VERDI_E2E_PORT_BASE exported before make does not reach a shard: the
-# shard's own value wins. The E2E_RUN_N variables are the one definition of
-# each shard's command, used by e2e-N and by e2e.
-e2e_shard = VERDI_E2E_PORT_BASE=$(2) VERDI_E2E_SPECS='$(strip $(3))' npx playwright test --output=test-results/e2e-$(1)
-E2E_RUN_1 = $(call e2e_shard,1,21000,$(E2E_SHARD_1))
-E2E_RUN_2 = $(call e2e_shard,2,22000,$(E2E_SHARD_2))
-E2E_RUN_3 = $(call e2e_shard,3,23000,$(E2E_SHARD_3))
+# shard's number and $(2) its spec files. VERDI_E2E_PORT_BASE (D6-28;
+# cmd/e2eharness/ports.go, e2e/ports.ts) moves the harness's four ports to
+# base..base+3. Each shard sets its own, the $(1)th of E2E_PORT_BASES, and its
+# own --output directory (Playwright empties it when a run starts), so the
+# three shards never collide when they run at once. The E2E_RUN_N variables
+# are the one definition of each shard's command, used by e2e-N and by e2e,
+# so both derive their ports the same way.
+#
+# E2E_PORT_BASES is the shards' three bases. With VERDI_E2E_PORT_BASE unset,
+# empty, or blank they are the fixed 21000, 22000, and 23000, so two worktrees
+# that run e2e shards at the same time (make verify, make e2e, or the same
+# e2e-N) collide. A worktree that runs them while another does must export its
+# own base first, e.g. `VERDI_E2E_PORT_BASE=31000 make verify` in one worktree
+# and 41000 in the next: shard N then uses base + (N-1)*10, so the run's ports
+# lie in base..base+23, and runs whose bases are at least 24 apart, and clear
+# of the fixed bases' ports while an unset run is going, never collide. The
+# base must be a decimal integer from 1 to 65512, with no sign or leading
+# zero, so that every shard's ports stay within 1-65535; any other value stops
+# make with an error before a shard starts, never falling back to ports
+# another run may hold. The shell checks the value, single-quoted so it cannot
+# run as code, and prints the three bases or nothing; nothing reaches
+# $(error). The check runs only when a shard's command is expanded, so no
+# other target reads the value. internal/specalign's e2eshards_test.go
+# dry-runs the shards with VERDI_E2E_PORT_BASE unset and exported, and fails
+# unless their ports and output directories are distinct, an exported base
+# gives exactly these bases, and make refuses every base outside that range.
+E2E_PORT_BASES = $(if $(VERDI_E2E_PORT_BASE),$(or $(shell b='$(subst ','\'',$(VERDI_E2E_PORT_BASE))'; case "$$b" in (*[!0-9]*|0*|??????*) ;; (?*) [ $$((b + 23)) -le 65535 ] && echo $$b $$((b + 10)) $$((b + 20)) ;; esac),$(error VERDI_E2E_PORT_BASE=$(VERDI_E2E_PORT_BASE) cannot place the three e2e shards: shard N binds base + (N-1)*10 through base + (N-1)*10 + 3, so the base must be a decimal integer from 1 to 65512 with no sign or leading zero; export another base, or unset it for the fixed bases 21000 22000 23000)),21000 22000 23000)
+e2e_shard = VERDI_E2E_PORT_BASE=$(word $(1),$(E2E_PORT_BASES)) VERDI_E2E_SPECS='$(strip $(2))' npx playwright test --output=test-results/e2e-$(1)
+E2E_RUN_1 = $(call e2e_shard,1,$(E2E_SHARD_1))
+E2E_RUN_2 = $(call e2e_shard,2,$(E2E_SHARD_2))
+E2E_RUN_3 = $(call e2e_shard,3,$(E2E_SHARD_3))
 
 e2e-1: e2e-setup
 	cd e2e && $(E2E_RUN_1)
