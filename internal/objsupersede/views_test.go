@@ -543,6 +543,7 @@ func TestObjectView_LinesFailClosed(t *testing.T) {
 		{"carry unproven without a witness", func(v *ObjectView) { v.Carry = CarryUnproven }},
 		{"a pinned object", func(v *ObjectView) { v.Object = "spec/t@0a1b2c3#dc-1" }},
 		{"an object of another kind", func(v *ObjectView) { v.Object = "conflict/c1#dc-1" }},
+		{"a whole-spec object", func(v *ObjectView) { v.Object = "spec/t" }},
 		{"a deciding decision without its fragment", func(v *ObjectView) { v.By = "spec/s1" }},
 		{"a deciding decision that is a criterion", func(v *ObjectView) { v.By = "spec/s1#ac-1" }},
 		{"a pinned deciding decision", func(v *ObjectView) { v.By = "spec/s1@0a1b2c3#dc-1" }},
