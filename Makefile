@@ -1,7 +1,8 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
+.PHONY: build test test-cmd test-cross test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
-# exact version before `make verify` (see .github/workflows/), so in CI the
+# exact version before the lint step runs (verify.yml before `make verify`,
+# merge-gate.yml in its static job before `make lint`), so in CI the
 # lint gate is mandatory — the `lint` target's CI=true branch refuses to pass
 # by skipping. Kept in lockstep with verdi-go's own pin so results agree
 # across the workspace if both are ever run side by side.
@@ -21,8 +22,10 @@ build:
 # binary's own buildID, so `go test` serves a STALE cached PASS after a
 # cmd/verdi behavior change (empirically reproduced: `ok (cached)` over a
 # genuine red; -race does NOT defeat result caching). We force -count=1 (the
-# documented cache bypass) for EXACTLY these, keeping honest caching for the
-# provably-not-blind majority. In-package cmd/verdi exec tests are NOT blind
+# documented cache bypass) for EXACTLY these — test-cross runs all of them
+# but internal/specalign, which spec-align runs — keeping honest caching for
+# the provably-not-blind majority. TestGateCacheHonesty_CrossBinaryPkgsRunFresh
+# fails if any of them runs without -count=1 in `make test` or `make verify`. In-package cmd/verdi exec tests are NOT blind
 # (their buildID covers cmd/verdi's own sources) and are deliberately absent.
 # TestGateCacheHonesty_CrossBinaryPkgsListInSync (internal/specalign) fails if a
 # package that builds+execs cmd/verdi from outside cmd/verdi is missing here.
@@ -31,22 +34,49 @@ build:
 # and exec the result as `verdi serve`, the same cache blindness.
 CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/...
 
+# The Go tests run as disjoint shards (SI-266, owner directive 2026-09-24),
+# so the pull-request gate can run each as its own parallel CI job and no
+# package runs twice. `make test` runs all of them; their package sets
+# partition `go list ./...`:
+#   test-cmd    ./cmd/verdi, the largest single package.
+#   test-cross  CROSS_BINARY_PKGS except internal/specalign, always fresh
+#               (-count=1, ADJ-68).
+#   test-rest   every other package, cached honestly.
+#   spec-align  internal/specalign alone, fresh and under -race (below).
+# internal/specalign's TestGateShards_* tests read these recipes through
+# `make -n` and fail if two shards share a package, a package is in none, or
+# a shard drops -race. That is why test-rest's list is computed by make
+# ($(shell ...)) and not by the recipe's own shell: a dry-run prints a
+# shell-computed list unexpanded, and the guard refuses it.
+#
 # -race mirrors CI's `go test -race` exactly: a data race that would fail CI
 # must fail `make test`/`make verify` locally first (CLAUDE.md: "go test
-# -race ./... — must always be clean"). The second line force-reruns the
-# cache-blind cross-binary clusters (ADJ-68): `go test -race ./...` above may
-# serve them a stale cached PASS, so -count=1 re-executes exactly those
-# packages against the freshly built binary. `./...` semantics are otherwise
-# unchanged — honest caching stands for every provably-not-blind package.
+# -race ./... — must always be clean").
 # -parallel 4 caps concurrent t.Parallel() tests and subtests within each
 # test binary, at the vCPU count of this public repo's GitHub-hosted
 # ubuntu-latest runners (lane T1 test-speed contract step 4). It does not
 # limit how many package binaries run at once: that is -p, left at its
 # default (GOMAXPROCS), so a machine with more cores than CI still runs more
 # packages concurrently than CI does.
-test:
-	go test -race -parallel 4 ./...
-	go test -race -count=1 -parallel 4 $(CROSS_BINARY_PKGS)
+TEST_CMD_PKGS := ./cmd/verdi
+SPEC_ALIGN_PKGS := ./internal/specalign/...
+
+# TEST_REST_PKGS is `go list ./...` minus test-cmd's and CROSS_BINARY_PKGS'
+# packages (spec-align's is among the latter). If either `go list` fails, or
+# nothing is left, the list is the single word test-rest-package-list-failed,
+# which `go test` rejects: the shard fails loudly instead of testing nothing.
+TEST_REST_PKGS = $(shell all="$$(go list ./...)" && skip="$$(go list $(TEST_CMD_PKGS) $(CROSS_BINARY_PKGS))" && printf '%s\n' "$$all" | grep -vxF -e "$$skip" || echo test-rest-package-list-failed)
+
+test: test-cmd test-cross test-rest spec-align
+
+test-cmd:
+	go test -race -parallel 4 $(TEST_CMD_PKGS)
+
+test-cross:
+	go test -race -count=1 -parallel 4 $(filter-out $(SPEC_ALIGN_PKGS),$(CROSS_BINARY_PKGS))
+
+test-rest:
+	go test -race -parallel 4 $(TEST_REST_PKGS)
 
 vet:
 	go vet ./...
@@ -96,8 +126,15 @@ lint:
 # sha256 ratchet against the committed canned upstream captures — hermetic
 # (no exec, no network); regenerating the captures for real is
 # `make fixture-regen`'s job, never this one's.
+#
+# These three packages are also in test-rest. fixture passes test-rest's
+# exact flags (-race -parallel 4), so inside `make verify`, which runs
+# test-rest first, the Go test cache replays their result here instead of
+# executing them a second time (SI-266: every package executes once under
+# -race; TestGateShards_VerifyExecutesEachPackageOnceUnderRace). Run alone,
+# or in the pull-request gate's static job, fixture executes them.
 fixture:
-	go test -race ./internal/fixturegit/... ./internal/corpus/... ./internal/svcfixcanned/...
+	go test -race -parallel 4 ./internal/fixturegit/... ./internal/corpus/... ./internal/svcfixcanned/...
 
 # fixture-regen re-captures testdata/svcfix-canned/*.json from the real,
 # pinned toolchain (spike S1's bin/, or `go run …@pin` over the network —
@@ -132,16 +169,19 @@ lint-store:
 # test package: self-hosted spec fidelity against ../docs/design/specs/
 # (skips loudly, never fakes a pass, when the workspace layout isn't
 # present — e.g. a CI checkout of verdi alone), the 00-index v0 checklist
-# audit, the MCP tool inventory, and the CLI verb inventory. -race isn't
-# used here (unlike `test`/`fixture`): this package execs the built verdi
-# binary as a subprocess per PLAN.md's build-then-exec discipline, which
-# the race detector has nothing to instrument.
+# audit, the MCP tool inventory, and the CLI verb inventory.
+#
+# spec-align is the only target that runs internal/specalign (SI-266): the
+# test-cross shard excludes it and `make test` runs this target instead, so
+# specalign runs once per `make test` and once per `make verify`, under
+# -race and -parallel 4 like every other package (it used to run three
+# times per `make verify`: twice inside `test`, once more here without
+# -race).
 #
 # -count=1 (ADJ-68): this package builds+execs the cmd/verdi binary, whose
 # sources never enter this test binary's cache key, so a bare `go test` here can
 # serve a stale PASS after a cmd/verdi behavior change. Forcing a fresh run
-# keeps `make spec-align` honest in isolation (the `test` target already
-# re-runs it fresh via CROSS_BINARY_PKGS for `make test`/`make verify`).
+# keeps `make spec-align` honest every time it runs.
 #
 # -v + skip surfacing (judged-ac3-resolution-check-skips-in-authoring-layout):
 # this package's workspace-side checks (guide-claims cite RESOLUTION and
@@ -154,7 +194,7 @@ lint-store:
 # three-valued honesty. On any failure the full transcript is printed for
 # debugging; on success only the disclosed skips and the package result line.
 spec-align:
-	@out="$$(go test -v -count=1 ./internal/specalign/... 2>&1)"; \
+	@out="$$(go test -race -v -count=1 -parallel 4 $(SPEC_ALIGN_PKGS) 2>&1)"; \
 	status=$$?; \
 	if [ "$$status" -ne 0 ]; then printf '%s\n' "$$out"; exit "$$status"; fi; \
 	skips="$$(printf '%s\n' "$$out" | grep -B1 -- '--- SKIP:' || true)"; \
@@ -302,9 +342,10 @@ e2e-check-node:
 # waits for readiness, and tears both down after the run.
 #
 # Wave 7: now wired into `verify` (see the `verify` target below) — both
-# CI configs install Node + Playwright browsers before `make verify` so
-# local/CI parity holds (CLAUDE.md: "CI runs exactly `make verify` —
-# trust parity"). Depends on e2e-check-node so a missing toolchain fails
+# CI configs install Node before running it (verify.yml before `make
+# verify`, merge-gate.yml in its e2e job) so local/CI parity holds
+# (CLAUDE.md: "CI runs exactly `make verify` — trust parity"; SI-266 reads
+# that as `make verify`'s step set). Depends on e2e-check-node so a missing toolchain fails
 # with the install message above, not a raw shell error.
 #
 # VERDI_E2E_PORT_BASE (D6-28): the harness (cmd/e2eharness/ports.go) and
@@ -332,10 +373,19 @@ e2e: e2e-check-node
 # nowhere, so its growth had no trend). Each run appends one row per step to
 # $(GATE_TIMINGS) — `<utc-time> <head> <step> <seconds> <ok|fail>` — under
 # .verdi/data/, which the store's own .gitignore already excludes, and prints
-# a summary table at the end so a CI log carries the same series. Steps, their
-# order, and fail-fast on the first red step are unchanged: VERIFY_STEPS is the
-# former prerequisite list, verbatim.
-VERIFY_STEPS := build fmt-check vet lint test fixture lint-store spec-align lint-showcase showcase-coverage e2e
+# a summary table at the end so a CI log carries the same series. Steps run in
+# order and the gate fails fast on the first red step.
+#
+# VERIFY_STEPS lists `test` as its shards (test-cmd test-cross test-rest), not
+# as `test`, because `test` also runs spec-align, which keeps its own named
+# step here; listing `test` would run internal/specalign twice (SI-266).
+#
+# The pull-request gate (.github/workflows/merge-gate.yml) runs exactly these
+# steps, split across parallel jobs, plus the post-verify self-lint; its
+# required `merge-gate` job fails unless every one of those jobs succeeds.
+# internal/specalign's TestMergeGateParity_GateJobsRunExactlyVerifySteps fails
+# if a step is dropped from, duplicated in, or added to that workflow alone.
+VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 
 verify:
