@@ -259,6 +259,66 @@ func TestComputeDecisionEdges_CommitTreeMatchesWorkTree(t *testing.T) {
 	}
 }
 
+// TestComputeDecisionEdges_CompletenessDeduplicated proves completeness
+// finding ids are unique (L4 review a, I-1): a conflict that lists the same
+// challenged fragment more than once yields ONE completeness finding for
+// that (conflict, fragment), so the generated report validates and align
+// writes it, while a distinct unmatched fragment keeps its own finding.
+func TestComputeDecisionEdges_CompletenessDeduplicated(t *testing.T) {
+	const (
+		ac1   = "  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n"
+		co1   = "  - { type: challenges, ref: \"spec/closed-feature#co-1\" }\n"
+		idAC1 = "completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1"
+		idCO1 = "completeness-conflict--successor-closed-feature-spec--closed-feature-co-1"
+	)
+	texts := map[string]string{
+		idAC1: "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge",
+		idCO1: "conflict/successor-closed-feature challenges spec/closed-feature#co-1, but spec/successor carries no matching edge",
+	}
+	tests := []struct {
+		name  string
+		extra string // challenges links added after the fixture's own ac-1 link
+		want  []string
+	}{
+		{"listed once", "", []string{idAC1}},
+		{"listed twice", ac1, []string{idAC1}},
+		{"listed three times", ac1 + ac1, []string{idAC1}},
+		{"a distinct unmatched fragment keeps its own finding", co1 + ac1, []string{idAC1, idCO1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := scenario.Build(t, "unmatched-challenge").Dir
+			p := filepath.Join(dir, ".verdi", "conflicts", "successor-closed-feature.md")
+			b, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(b), ac1) {
+				t.Fatalf("test setup: the fixture conflict has no %q link", ac1)
+			}
+			if err := os.WriteFile(p, []byte(strings.Replace(string(b), ac1, ac1+tc.extra, 1)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, f := range computeEdges(t, objsupersede.WorkTree{Root: dir}, "successor", &fakeEstablisher{}) {
+				if !strings.HasPrefix(f.ID, "completeness-") {
+					continue
+				}
+				if f.Dispositioned() || f.Text != texts[f.ID] {
+					t.Fatalf("completeness finding %+v, want undispositioned with text %q", f, texts[f.ID])
+				}
+				got = append(got, f.ID)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("completeness finding ids = %v, want %v", got, tc.want)
+			}
+			if _, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{Root: dir, Spec: loadTreeSpec(t, dir, "successor"), Covers: "abc1234", ModelDigest: testModelDigest(t)}); err != nil {
+				t.Fatalf("GenerateDecisionConflict: %v", err)
+			}
+		})
+	}
+}
+
 // TestComputeDecisionEdges_MemoizesEstablishment proves one computation asks
 // the establisher once per (successor, object): two carried edges to the
 // same object read the establishing successor's acceptance once (L3

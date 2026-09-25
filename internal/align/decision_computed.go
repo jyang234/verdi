@@ -50,7 +50,9 @@ var ErrSpecNotInTree = errors.New("align: the evaluated spec is not a decodable 
 //   - The core's completeness results for the issuing successor (a fragment
 //     that a superseded conflict naming spec challenges with no matching
 //     edge, design §5) are their own undispositioned computed findings,
-//     after the edges, with the id completenessFindingID documents.
+//     after the edges, with the id completenessFindingID documents: one per
+//     (conflict, challenged fragment as written), however often the
+//     conflict lists that fragment.
 //   - Every other edge keeps its earlier computation. A dangling edge (the
 //     ref does not parse, or names no document in the tree) is ALWAYS
 //     unresolved, fail-closed ("silence is never a pass"). An `exempts`
@@ -117,10 +119,20 @@ func ComputeDecisionEdges(ctx context.Context, tr objsupersede.TreeReader, spec 
 			next++
 		}
 	}
+	// A conflict may list one challenged fragment more than once (no rule
+	// refuses the repeat), and the core reports each listing: one finding
+	// per (conflict, fragment as written), deduplicated before its id is
+	// assigned, keeps ids unique (L4 review a, I-1).
+	seen := map[string]bool{}
 	for _, r := range results[next:] {
 		if r.Decision != "" {
 			return nil, fmt.Errorf("align: internal error: objsupersede evaluated decision %s's edge to %s, which align did not route to it", r.Decision, r.Edge)
 		}
+		key := r.Conflict + "\x00" + r.Edge
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		f, err := resultFinding(completenessFindingID(r), r)
 		if err != nil {
 			return nil, err
@@ -144,6 +156,8 @@ func closedSpecObjectEdge(l artifact.Link) bool {
 // store.RefSlug'd (conflict/x challenging spec/t#ac-1 is
 // completeness-conflict--x-spec--t-ac-1), or "completeness-<reason>" for a
 // result naming no conflict (records that do not decode, SI-274(6)).
+// ComputeDecisionEdges emits one finding per (conflict, fragment as
+// written), so a conflict repeating a challenge never repeats an id.
 func completenessFindingID(r objsupersede.Result) string {
 	if r.Conflict == "" {
 		return "completeness-" + store.RefSlug(string(r.Reason))

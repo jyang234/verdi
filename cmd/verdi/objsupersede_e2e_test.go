@@ -70,6 +70,31 @@ func cssAlign(t *testing.T, bin, dir, spec string, want map[string]cssFinding) s
 	return path
 }
 
+// cssGate runs `verdi gate` on dir's design branch: it passes when every
+// computed finding in want is resolved, and otherwise fails naming exactly
+// the unresolved ids — a recomputed difference would print "differs"
+// instead, so a failure here also proves align and the gate agree.
+func cssGate(t *testing.T, bin, dir string, want map[string]cssFinding) {
+	t.Helper()
+	var open []string
+	for id, f := range want {
+		if !f.resolved {
+			open = append(open, id)
+		}
+	}
+	if len(open) == 0 {
+		if out := cssRun(t, bin, dir, 0, "gate"); !strings.Contains(out, "gate: PASS") {
+			t.Fatalf("gate output = %s, want gate: PASS", out)
+		}
+		return
+	}
+	sort.Strings(open)
+	out := cssRun(t, bin, dir, 1, "gate")
+	if w := "undispositioned/unresolved finding(s): [" + strings.Join(open, " ") + "]"; !strings.Contains(out, w) {
+		t.Fatalf("gate output = %s\nwant it to name %q", out, w)
+	}
+}
+
 // TestObjSupersedeE2E_AlignAndGate drives lint, align, and gate through the
 // built binary on each scenario's design branch: both new replacements (a
 // closed feature's decision, a closed story's criterion) resolve SUPERSEDED
@@ -127,24 +152,7 @@ func TestObjSupersedeE2E_AlignAndGate(t *testing.T) {
 				gdcGit(t, dir, "checkout", "-q", tc.branch)
 			}
 			cssAlign(t, bin, dir, tc.spec, tc.want)
-			var open []string
-			for id, f := range tc.want {
-				if !f.resolved {
-					open = append(open, id)
-				}
-			}
-			if len(open) == 0 {
-				out := cssRun(t, bin, dir, 0, "gate")
-				if !strings.Contains(out, "gate: PASS") {
-					t.Fatalf("gate output = %s, want gate: PASS", out)
-				}
-			} else {
-				sort.Strings(open)
-				out := cssRun(t, bin, dir, 1, "gate")
-				if want := "undispositioned/unresolved finding(s): [" + strings.Join(open, " ") + "]"; !strings.Contains(out, want) {
-					t.Fatalf("gate output = %s\nwant it to name %q", out, want)
-				}
-			}
+			cssGate(t, bin, dir, tc.want)
 			if tc.scenario == "chain" {
 				entries, err := os.ReadDir(filepath.Join(dir, ".verdi", "conflicts"))
 				if err != nil {
@@ -158,6 +166,42 @@ func TestObjSupersedeE2E_AlignAndGate(t *testing.T) {
 					t.Fatalf("conflicts = %v, want only S1's %v (a carried replacement files no new conflict)", names, want)
 				}
 			}
+		})
+	}
+}
+
+// TestObjSupersedeE2E_RepeatedChallenge proves a conflict listing the same
+// unmatched challenged fragment more than once is a verdict, never an
+// operational failure (L4 review a, I-1): with the repeat committed, `verdi
+// align` exits 0 and writes ONE completeness finding for that (conflict,
+// fragment), and `verdi gate` exits 1 naming it.
+func TestObjSupersedeE2E_RepeatedChallenge(t *testing.T) {
+	t.Parallel()
+	bin := buildVerdiBinary(t)
+	const ac1 = "  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n"
+	want := map[string]cssFinding{gdcDC1: {true, cssNew}, gdcDC2: {true, cssNew},
+		"completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1": {false, "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"}}
+	for _, tc := range []struct {
+		name  string
+		times int
+	}{{"listed twice", 2}, {"listed three times", 3}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := scenario.Build(t, "unmatched-challenge").Dir
+			p := filepath.Join(dir, ".verdi", "conflicts", "successor-closed-feature.md")
+			b, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(b), ac1) {
+				t.Fatalf("test setup: the fixture conflict has no %q link", ac1)
+			}
+			if err := os.WriteFile(p, []byte(strings.Replace(string(b), ac1, strings.Repeat(ac1, tc.times), 1)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gdcGit(t, dir, "commit", "-q", "--no-verify", "-am", "Repeat a challenged fragment")
+			cssAlign(t, bin, dir, "successor", want)
+			cssGate(t, bin, dir, want)
 		})
 	}
 }
