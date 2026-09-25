@@ -196,13 +196,33 @@ func underSubdir(t *testing.T, repo *scenario.Repo) string {
 
 // TestReadRecords_SubRootParity reads one committed tree whose store sits
 // below the git root through both readers (lane L3 re-review a I-A): the
-// commit reader must see the same records, never an empty tree.
+// commit reader must see the same records, never an empty tree, and never
+// another store's (re-review b IA4: the prefix match is load-bearing).
 func TestReadRecords_SubRootParity(t *testing.T) {
-	root := underSubdir(t, scenario.Build(t, "accepted"))
-	work, commit := mustRead(t, WorkTree{Root: root}), mustRead(t, CommitTree{Root: root, Commit: "HEAD"})
-	if len(work.Specs) != 4 || len(work.Conflicts) != 2 || !reflect.DeepEqual(work, commit) {
-		t.Fatalf("a store below the git root:\nwork   %d specs, %d conflicts, %v\ncommit %d specs, %d conflicts, %v",
-			len(work.Specs), len(work.Conflicts), work.Failures, len(commit.Specs), len(commit.Conflicts), commit.Failures)
+	tests := []struct {
+		name       string
+		secondRoot bool // commit a copy of the store at the repo root too
+	}{
+		{"a store below the git root", false},
+		{"a second store at the repo root is not read", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := scenario.Build(t, "accepted")
+			root := underSubdir(t, repo)
+			if tc.secondRoot {
+				if out, err := exec.Command("cp", "-R", filepath.Join(root, ".verdi"), repo.Dir).CombinedOutput(); err != nil {
+					t.Fatalf("cp: %v\n%s", err, out)
+				}
+				gitIn(t, repo.Dir, "add", "-A")
+				gitIn(t, repo.Dir, "commit", "-q", "--no-verify", "-m", "Add a second store at the repo root")
+			}
+			work, commit := mustRead(t, WorkTree{Root: root}), mustRead(t, CommitTree{Root: root, Commit: "HEAD"})
+			if len(work.Specs) != 4 || len(work.Conflicts) != 2 || !reflect.DeepEqual(work, commit) {
+				t.Fatalf("a store below the git root:\nwork   %d specs, %d conflicts, %v\ncommit %d specs, %d conflicts, %v",
+					len(work.Specs), len(work.Conflicts), work.Failures, len(commit.Specs), len(commit.Conflicts), commit.Failures)
+			}
+		})
 	}
 }
 
@@ -261,6 +281,7 @@ func TestReadRecords_LinkLayouts(t *testing.T) {
 		{"a linked specs directory", ".verdi/specs", "real/specs", []string{".verdi/specs" + notRegular}, false},
 		{"a linked zone directory", ".verdi/specs/active", "real/active", []string{".verdi/specs/active" + notRegular}, false},
 		{"a linked conflicts directory", ".verdi/conflicts", "real/conflicts", []string{".verdi/conflicts" + notRegular}, true},
+		{"a linked spec.md", ".verdi/specs/active/successor/spec.md", "real/successor-spec.md", []string{".verdi/specs/active/successor/spec.md" + notRegular}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
