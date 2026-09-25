@@ -1,8 +1,8 @@
 .PHONY: build test test-cmd test-cross test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
-# exact version before the lint step runs (verify.yml before `make verify`,
-# merge-gate.yml in its static job before `make lint`), so in CI the
+# exact version before the lint step runs (verify.yml and merge-gate.yml,
+# each in its static job before `make lint`), so in CI the
 # lint gate is mandatory — the `lint` target's CI=true branch refuses to pass
 # by skipping. Kept in lockstep with verdi-go's own pin so results agree
 # across the workspace if both are ever run side by side.
@@ -96,8 +96,8 @@ fmt-check:
 # verdi-go's trust-parity posture):
 #   - CI (CI=true, which GitHub Actions sets): golangci-lint is MANDATORY.
 #     Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before
-#     this target runs (verify.yml before `make verify`, merge-gate.yml in its
-#     static job before `make lint`), so a missing binary here means the
+#     this target runs (verify.yml and merge-gate.yml, each in its static job
+#     before `make lint`), so a missing binary here means the
 #     install step regressed — we exit 1 rather than pass by skipping (a
 #     silent skip would be exactly the undisclosed gap the constitution's
 #     three-valued honesty rules out).
