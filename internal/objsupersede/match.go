@@ -36,10 +36,10 @@ type Establisher interface {
 }
 
 // Establishment is an Establisher's answer. Reason is "" when the
-// supersession was in force, and otherwise one of
+// supersession was in force, with its YYYY-MM-DD Date, and otherwise one of
 // ReasonEstablisherNotAccepted, ReasonEstablisherNotInForce (Detail: the
 // failing reason's text), or ReasonAcceptanceUnproven (Detail: the missing
-// witness).
+// witness). Evaluate reads any other answer as acceptance unproven.
 type Establishment struct {
 	Reason Reason
 	Detail string
@@ -107,42 +107,109 @@ func (recs *Records) evaluateEdge(ctx context.Context, s *Spec, decision, edge s
 	}
 
 	chain := recs.chain(s.Name)
-	carried := allowCarried && recs.carriedCandidate(chain, decision, ref)
-	namers := map[string]bool{s.Name: true}
-	if carried {
-		namers = map[string]bool{}
-		for _, n := range chain[1:] {
-			namers[n] = true
+	if !allowCarried || !recs.carriedCandidate(chain, decision, ref) {
+		if c, x := recs.establishedByOther(ref, s.Name); c != nil {
+			r.Conflict, r.Other = c.Name, x
+			return fail(ReasonAlreadySuperseded)
 		}
-	} else if c, x := recs.establishedByOther(ref, s.Name); c != nil {
-		r.Conflict, r.Other = c.Name, x
-		return fail(ReasonAlreadySuperseded)
-	}
-
-	c, named, reason := recs.conflictFor(ref, namers, chain)
-	if c != nil {
-		r.Conflict = c.Name
-	}
-	if reason != "" {
-		r.Other = named
-		return fail(reason)
-	}
-	if !carried {
+		c, other, reason := recs.conflictFor(ref, s.Name)
+		if c != nil {
+			r.Conflict = c.Name
+		}
+		if reason != "" {
+			r.Other = other
+			return fail(reason)
+		}
 		r.Outcome = ResolvedNew
 		return r
 	}
-	if rev, pred, ok := recs.carriedSteps(chain, named, decision, ref); !ok {
+	// A carried candidate: conditions 6-8 cannot fail, since candidacy
+	// needs a superseded conflict naming a chain member (SI-273). S_k is
+	// chosen first (SI-276), then SI-274(1)-(2) on its conflict, then
+	// condition 9 over the steps from S back to S_k.
+	sk, e := recs.establisher(ctx, chain[1:], ref, est)
+	r.Other, r.Detail = sk, e.Detail
+	if c := recs.namedBy(ref, sk); c != nil {
+		r.Conflict = c.Name
+	}
+	if e.Reason != "" {
+		return fail(e.Reason)
+	}
+	if _, other, reason := recs.conflictFor(ref, sk); reason != "" {
+		r.Other = other
+		return fail(reason)
+	}
+	if rev, pred, ok := recs.carriedSteps(chain, sk, decision, ref); !ok {
 		r.Other, r.Predecessor = rev, pred
 		return fail(ReasonCarryMismatch)
 	}
-	r.Other = named
-	e := est.Establishment(ctx, named, artifact.Ref{Kind: ref.Kind, Name: ref.Name, Object: ref.Object})
-	if e.Reason != "" {
-		r.Detail = e.Detail
-		return fail(e.Reason)
-	}
 	r.Outcome, r.Since = ResolvedCarried, e.Date
 	return r
+}
+
+// establisher chooses S_k (SI-276): the one member of members (S's chain
+// past S, nearest first) named by a superseded conflict challenging object
+// whose supersession was in force at its acceptance. It returns S_k and its
+// establishment; or, unresolved, "acceptance unproven" when more than one
+// member is in force or any named member's acceptance is unproven (the
+// earliest such member), and otherwise the earliest named member's reason.
+// Candidacy guarantees at least one named member.
+func (recs *Records) establisher(ctx context.Context, members []string, object artifact.Ref, est Establisher) (string, Establishment) {
+	var inForce []string
+	var sk, unproven, notInForce string
+	var eIn, eUnproven, eNot Establishment
+	for _, m := range members {
+		if recs.namedBy(object, m) == nil {
+			continue
+		}
+		switch e := checked(m, est.Establishment(ctx, m, object)); e.Reason {
+		case "":
+			inForce, sk, eIn = append(inForce, "spec/"+m), m, e
+		case ReasonAcceptanceUnproven:
+			unproven, eUnproven = m, e
+		default:
+			notInForce, eNot = m, e
+		}
+	}
+	switch {
+	case len(inForce) > 1:
+		return "", Establishment{Reason: ReasonAcceptanceUnproven, Detail: "more than one revision's supersession is in force: " + strings.Join(inForce, ", ")}
+	case unproven != "":
+		return unproven, eUnproven
+	case sk != "":
+		return sk, eIn
+	}
+	return notInForce, eNot
+}
+
+// checked holds an Establisher's answer to its contract (lane L3 review b
+// M-4): an in-force answer needs a YYYY-MM-DD date, and a reason other
+// than SI-274(3)'s three is unproven, never passed through as the edge's.
+func checked(successor string, e Establishment) Establishment {
+	switch e.Reason {
+	case "":
+		if !isDay(e.Date) {
+			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s is reported in force without a YYYY-MM-DD acceptance date", successor)}
+		}
+	case ReasonEstablisherNotAccepted, ReasonEstablisherNotInForce, ReasonAcceptanceUnproven:
+	default:
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("the establishment of spec/%s answered %q, which is not an establishment reason", successor, e.Reason)}
+	}
+	return e
+}
+
+// namedBy returns the first superseded conflict challenging object whose
+// resolved_by names spec, or nil.
+func (recs *Records) namedBy(object artifact.Ref, spec string) *Conflict {
+	if spec == "" {
+		return nil
+	}
+	for _, c := range recs.challengers(object) {
+		if c.FM.Status == "superseded" && resolvedBy(c) == spec {
+			return c
+		}
+	}
+	return nil
 }
 
 // isCriterionOrDecision reports whether id names an acceptance criterion or
@@ -227,11 +294,11 @@ func (recs *Records) establishedByOther(object artifact.Ref, spec string) (*Conf
 	return nil, ""
 }
 
-// conflictFor applies conditions 6-8 and SI-274(1)-(2): it returns the
-// superseded conflict challenging object whose resolved_by is one of
-// namers (for a carried candidate, the earliest in chain), the spec it
-// names, and the first failing reason, if any.
-func (recs *Records) conflictFor(object artifact.Ref, namers map[string]bool, chain []string) (*Conflict, string, Reason) {
+// conflictFor applies conditions 6-8 and SI-274(1)-(2) for the successor
+// namer: it returns the superseded conflict challenging object whose
+// resolved_by names namer (or the conflict a failure rests on), the other
+// spec a failure names, and the first failing reason, if any.
+func (recs *Records) conflictFor(object artifact.Ref, namer string) (*Conflict, string, Reason) {
 	cs := recs.challengers(object)
 	if len(cs) == 0 {
 		return nil, "", ReasonNoConflict
@@ -245,40 +312,35 @@ func (recs *Records) conflictFor(object artifact.Ref, namers map[string]bool, ch
 	if len(superseded) == 0 {
 		return cs[0], "", ReasonConflictNotSuperseded
 	}
-	var match *Conflict
-	for _, c := range superseded {
-		if n := resolvedBy(c); namers[n] && (match == nil || indexOf(chain, n) > indexOf(chain, resolvedBy(match))) {
-			match = c
-		}
-	}
+	match := recs.namedBy(object, namer)
 	if match == nil {
 		return superseded[0], resolvedBy(superseded[0]), ReasonResolvedByOther
 	}
-	named := resolvedBy(match)
 	count := 0
 	for _, c := range recs.Conflicts {
-		if c.FM.Status == "superseded" && resolvedBy(c) == named && len(fragmentSpecs(c, object.Name)) > 0 {
+		if c.FM.Status == "superseded" && resolvedBy(c) == namer && len(fragmentSpecs(c, object.Name)) > 0 {
 			count++
 		}
 	}
 	if count > 1 {
-		return match, named, ReasonMultipleConflicts
+		return match, namer, ReasonMultipleConflicts
 	}
 	if len(fragmentSpecs(match, "")) > 1 {
 		return match, "", ReasonConflictSpansSpecs
 	}
-	return match, named, ""
+	return match, namer, ""
 }
 
 // carriedSteps checks every step from chain[0] back to the establishing
-// successor: the predecessor and the revision both declare the decision
-// with the same edge, and the revision classifies it `carried`, `amended`,
-// or `amended_advisory` (a story revision: the same id). It returns the
-// first failing step (condition 9).
+// successor: the predecessor declares the decision with the same edge, and
+// the revision classifies it `carried`, `amended`, or `amended_advisory` (a
+// story revision: the same id). The revision's own edge needs no check:
+// step 0's revision is S, whose edge is under evaluation, and every later
+// revision is the previous step's predecessor. It returns the first failing
+// step (condition 9).
 func (recs *Records) carriedSteps(chain []string, establisher, decision string, object artifact.Ref) (string, string, bool) {
 	for i := 0; i < indexOf(chain, establisher); i++ {
-		rev, pred := recs.Specs[chain[i]].FM, recs.Specs[chain[i+1]].FM
-		if !decisionEdge(rev, decision, object) || !decisionEdge(pred, decision, object) || !classifiedCarried(rev, decision) {
+		if !decisionEdge(recs.Specs[chain[i+1]].FM, decision, object) || !classifiedCarried(recs.Specs[chain[i]].FM, decision) {
 			return chain[i], chain[i+1], false
 		}
 	}

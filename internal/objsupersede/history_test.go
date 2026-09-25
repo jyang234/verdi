@@ -2,7 +2,10 @@ package objsupersede
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -78,21 +81,35 @@ func TestUTCDay(t *testing.T) {
 	}
 }
 
+// TestHistory_Closed pins SI-270's closed date: the committer date of the
+// landing of specstate's Closed baseline, never invented from a shallow
+// history (review a X-1) or an unresolved default branch.
 func TestHistory_Closed(t *testing.T) {
 	hermetic(t)
 	ctx := context.Background()
 	repo := scenario.Build(t, "accepted")
 	recs := mustRead(t, CommitTree{Root: repo.Dir, Commit: "main"})
-	h := NewHistory(ctx, repo.Dir)
-	if got, want := h.Closed(ctx, recs.Specs["closed-feature"]), (Fact{State: FactProven, Commit: repo.Base[1], Date: "2024-01-01"}); got != want {
-		t.Errorf("closed-feature: got %+v, want %+v", got, want)
+	shallow := fixturegit.ShallowClone(t, &fixturegit.Repo{Dir: repo.Dir}, 1)
+	unresolved := scenario.Build(t, "accepted")
+	gitIn(t, unresolved.Dir, "update-ref", "-d", "refs/remotes/origin/main")
+	tests := []struct {
+		name, dir, spec string
+		want            Fact
+		witness         string // unproven: the witness's required substring
+	}{
+		{"closed feature", repo.Dir, "closed-feature", Fact{State: FactProven, Commit: repo.Base[1], Date: "2024-01-01"}, ""},
+		{"an accepted, unclosed spec", repo.Dir, "other-feature", Fact{State: FactAbsent}, ""},
+		{"shallow history", shallow, "closed-feature", Fact{State: FactUnproven}, "shallow history"},
+		{"no default branch", unresolved.Dir, "closed-feature", Fact{State: FactUnproven}, "no default branch"},
 	}
-	if got := h.Closed(ctx, recs.Specs["other-feature"]); got.State != FactAbsent {
-		t.Errorf("an accepted, unclosed spec: got %+v", got)
-	}
-	gitIn(t, repo.Dir, "update-ref", "-d", "refs/remotes/origin/main")
-	if got := NewHistory(ctx, repo.Dir).Closed(ctx, recs.Specs["closed-feature"]); got.State != FactUnproven || got.Witness == "" {
-		t.Errorf("no default branch: got %+v", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NewHistory(ctx, tc.dir).Closed(ctx, recs.Specs[tc.spec])
+			witnessOK := strings.Contains(got.Witness, tc.witness) && (tc.witness == "") == (got.Witness == "")
+			if got.State != tc.want.State || got.Commit != tc.want.Commit || got.Date != tc.want.Date || !witnessOK {
+				t.Fatalf("got %+v, want %+v with witness containing %q", got, tc.want, tc.witness)
+			}
+		})
 	}
 }
 
@@ -102,16 +119,47 @@ func TestHistory_Establishment(t *testing.T) {
 	hermetic(t)
 	ctx := context.Background()
 	accepted := scenario.Build(t, "accepted")
+	noBranchRepo := func(t *testing.T, dir string) {
+		gitIn(t, dir, "update-ref", "-d", "refs/remotes/origin/main")
+	}
+	// unreadable drops one record blob of the acceptance commit from the
+	// object store, so reading that commit's tree fails.
+	unreadable := func(t *testing.T, dir string) {
+		oid := gitOut(t, dir, "rev-parse", "main:.verdi/conflicts/successor-closed-story.md")
+		if err := os.Remove(filepath.Join(dir, ".git", "objects", oid[:2], oid[2:])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// acceptBroken accepts design/successor together with an undecodable
+	// spec (review b I-1's witness).
+	acceptBroken := func(t *testing.T, dir string) {
+		broken := filepath.Join(dir, ".verdi", "specs", "active", "zz-broken", "spec.md")
+		if err := os.MkdirAll(filepath.Dir(broken), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(broken, []byte("---\nid: [\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "add", "-A")
+		gitIn(t, dir, "commit", "-q", "--no-verify", "-m", "Add an undecodable spec")
+		gitIn(t, dir, "checkout", "-q", "main")
+		gitIn(t, dir, "merge", "-q", "--no-ff", "--no-verify", "-m", "Accept spec/successor", "design/successor")
+		gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "main")
+	}
 	tests := []struct {
 		name, scenario, successor string
+		prep                      func(*testing.T, string)
 		object                    artifact.Ref
-		want                      Establishment
+		want                      Establishment // Detail: its required prefix
 	}{
-		{"in force", "", "successor", obj("closed-feature", "dc-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
-		{"in force, criterion", "", "successor", obj("closed-story", "ac-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
-		{"no edge to the object at acceptance", "", "successor", obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "spec/successor carries no edge to spec/closed-feature#ac-1"}},
-		{"not accepted", "proposed", "successor", obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotAccepted}},
-		{"records did not match at acceptance", "unrelated-accepted", "unrelated", obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"}},
+		{"in force", "", "successor", nil, obj("closed-feature", "dc-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
+		{"in force, criterion", "", "successor", nil, obj("closed-story", "ac-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
+		{"no edge to the object at acceptance", "", "successor", nil, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "spec/successor carries no edge to spec/closed-feature#ac-1"}},
+		{"not accepted", "proposed", "successor", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotAccepted}},
+		{"records did not match at acceptance", "unrelated-accepted", "unrelated", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"}},
+		{"acceptance unproven: no default branch", "accepted", "successor", noBranchRepo, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: noBranch}},
+		{"acceptance unproven: a record fails decode at acceptance", "proposed", "successor", acceptBroken, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at the acceptance commit: .verdi/specs/active/zz-broken/spec.md: "}},
+		{"acceptance unproven: an unreadable acceptance commit", "accepted", "successor", unreadable, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "objsupersede: reading .verdi/conflicts/successor-closed-story.md: "}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,11 +167,25 @@ func TestHistory_Establishment(t *testing.T) {
 			if tc.scenario != "" {
 				dir = scenario.Build(t, tc.scenario).Dir
 			}
-			if got := NewHistory(ctx, dir).Establishment(ctx, tc.successor, tc.object); got != tc.want {
-				t.Fatalf("got %+v, want %+v", got, tc.want)
+			if tc.prep != nil {
+				tc.prep(t, dir)
+			}
+			got := NewHistory(ctx, dir).Establishment(ctx, tc.successor, tc.object)
+			if got.Reason != tc.want.Reason || got.Commit != tc.want.Commit || got.Date != tc.want.Date ||
+				!strings.HasPrefix(got.Detail, tc.want.Detail) || (tc.want.Detail == "") != (got.Detail == "") {
+				t.Fatalf("got %+v, want %+v (Detail as a prefix)", got, tc.want)
 			}
 		})
 	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TestEvaluate_Scenarios drives Evaluate over built scenario stores with the

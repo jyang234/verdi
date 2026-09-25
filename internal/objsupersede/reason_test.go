@@ -64,6 +64,27 @@ func TestResultText_FailsClosed(t *testing.T) {
 		{Outcome: Unresolved},
 		{Outcome: ResolvedNew, Reason: ReasonNoConflict},
 		{Outcome: ResolvedCarried, Other: "x", Conflict: "c"},
+		// review b M-4: an empty name, an empty witness, or a malformed date
+		// is refused, never rendered.
+		{Outcome: ResolvedNew},
+		{Outcome: ResolvedCarried, Since: "2024-01-01"},
+		{Outcome: ResolvedCarried, Other: "x", Since: "2024-01-01"},
+		{Outcome: ResolvedCarried, Other: "x", Conflict: "c", Since: "not-a-date"},
+		{Outcome: ResolvedCarried, Other: "x", Conflict: "c", Since: "2024-1-1"},
+		{Outcome: Unresolved, Reason: ReasonAcceptanceUnproven},
+		{Outcome: Unresolved, Reason: ReasonRecordsUndecodable},
+		{Outcome: Unresolved, Reason: ReasonEstablisherNotInForce, Other: "s"},
+		{Outcome: Unresolved, Reason: ReasonEstablisherNotInForce, Detail: "d"},
+		{Outcome: Unresolved, Reason: ReasonEstablisherNotAccepted},
+		{Outcome: Unresolved, Reason: ReasonCarryMismatch},
+		{Outcome: Unresolved, Reason: ReasonCarryMismatch, Other: "s2"},
+		{Outcome: Unresolved, Reason: ReasonAlreadySuperseded, Edge: "spec/t#dc-1", Other: "x"},
+		{Outcome: Unresolved, Reason: ReasonMultipleConflicts, Edge: "spec/t#dc-1"},
+		{Outcome: Unresolved, Reason: ReasonNoConflict},
+		{Outcome: Unresolved, Reason: ReasonPinned},
+		{Outcome: Unresolved, Reason: ReasonConflictNotSuperseded},
+		{Outcome: Unresolved, Reason: ReasonResolvedByOther},
+		{Outcome: Unresolved, Reason: ReasonUnmatchedChallenge, Edge: "spec/t#dc-1", Conflict: "c"},
 	}
 	for _, r := range tests {
 		if got, err := r.Text(); err == nil {
