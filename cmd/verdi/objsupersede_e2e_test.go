@@ -28,14 +28,28 @@ import (
 // resolves from the fixture's own origin/main.
 var cssHermeticEnv = []string{"GITHUB_TOKEN=", "CI_JOB_TOKEN=", "CI_PROJECT_ID=", "CI_DEFAULT_BRANCH="}
 
-const cssNew = "records match; takes effect when spec/successor is accepted"
+const (
+	cssNew = "records match; takes effect when spec/successor is accepted"
+	// A resolved finding's note is the edge it resolves.
+	cssNoteDC1 = "decision dc-1 supersedes spec/closed-feature#dc-1"
+	cssNoteDC2 = "decision dc-2 supersedes spec/closed-story#ac-1"
+)
 
 // cssFinding is an expected computed finding: resolved (SUPERSEDED) or not,
-// and its exact text.
+// its exact text, and its exact note (none on an unresolved finding, so a
+// note typed onto one is caught).
 type cssFinding struct {
-	resolved bool
-	text     string
+	resolved   bool
+	text, note string
 }
+
+var (
+	cssNewDC1 = cssFinding{true, cssNew, cssNoteDC1}
+	cssNewDC2 = cssFinding{true, cssNew, cssNoteDC2}
+)
+
+// cssUnresolved is an expected unresolved finding with its reason's text.
+func cssUnresolved(text string) cssFinding { return cssFinding{false, text, ""} }
 
 // cssRun runs the built binary in dir and fails t unless it exits want.
 func cssRun(t *testing.T, bin, dir string, want int, args ...string) string {
@@ -60,7 +74,7 @@ func cssAlign(t *testing.T, bin, dir, spec string, want map[string]cssFinding) s
 			if f.Dispositioned() && f.Disposition != artifact.ConflictSuperseded {
 				t.Fatalf("computed finding %+v: a closed-spec object edge resolves only SUPERSEDED", f)
 			}
-			got[f.ID] = cssFinding{resolved: f.Dispositioned(), text: f.Text}
+			got[f.ID] = cssFinding{resolved: f.Dispositioned(), text: f.Text, note: f.Note}
 		}
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -105,44 +119,42 @@ func cssGate(t *testing.T, bin, dir string, want map[string]cssFinding) {
 func TestObjSupersedeE2E_AlignAndGate(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
-	carried := func(conflict string) cssFinding {
-		return cssFinding{true, "carries the replacement established by spec/successor (conflict/" + conflict + ", since 2024-02-15)"}
+	carried := func(conflict, note string) cssFinding {
+		return cssFinding{true, "carries the replacement established by spec/successor (conflict/" + conflict + ", since 2024-02-15)", note}
 	}
-	newDC2 := cssFinding{true, cssNew}
-	unresolved := func(text string) cssFinding { return cssFinding{false, text} }
 	tests := []struct {
 		name, scenario, branch, spec string
 		want                         map[string]cssFinding
 	}{
 		{"not yet accepted: new replacements take effect at acceptance", "proposed", "", "successor",
-			map[string]cssFinding{gdcDC1: {true, cssNew}, gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2}},
 		{"carried through a revision", "chain", "design/successor-v2", "successor-v2",
-			map[string]cssFinding{gdcDC1: carried("successor-closed-feature"), gdcDC2: carried("successor-closed-story")}},
+			map[string]cssFinding{gdcDC1: carried("successor-closed-feature", cssNoteDC1), gdcDC2: carried("successor-closed-story", cssNoteDC2)}},
 		{"carried through an amending revision", "chain", "design/successor-v3", "successor-v3",
-			map[string]cssFinding{gdcDC1: carried("successor-closed-feature"), gdcDC2: carried("successor-closed-story")}},
+			map[string]cssFinding{gdcDC1: carried("successor-closed-feature", cssNoteDC1), gdcDC2: carried("successor-closed-story", cssNoteDC2)}},
 		{"no conflict", "no-conflict", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("no conflict challenges spec/closed-feature#dc-1"), gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("no conflict challenges spec/closed-feature#dc-1"), gdcDC2: cssNewDC2}},
 		{"open conflict", "conflict-open", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("the conflict conflict/successor-closed-feature is not superseded"), gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the conflict conflict/successor-closed-feature is not superseded"), gdcDC2: cssNewDC2}},
 		{"dismissed conflict", "conflict-dismissed", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("the conflict conflict/successor-closed-feature is not superseded"), gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the conflict conflict/successor-closed-feature is not superseded"), gdcDC2: cssNewDC2}},
 		{"resolved_by another spec", "resolved-by-other", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("the conflict conflict/successor-closed-feature's resolved_by names another spec, spec/other-feature"), gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the conflict conflict/successor-closed-feature's resolved_by names another spec, spec/other-feature"), gdcDC2: cssNewDC2}},
 		{"a conflict challenging another spec's object", "conflict-spans-specs", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("the conflict challenges objects of more than one spec"), gdcDC2: unresolved("the conflict challenges objects of more than one spec")}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the conflict challenges objects of more than one spec"), gdcDC2: cssUnresolved("the conflict challenges objects of more than one spec")}},
 		{"a challenged fragment with no edge", "unmatched-challenge", "", "successor",
-			map[string]cssFinding{gdcDC1: {true, cssNew}, gdcDC2: newDC2,
-				"completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1": unresolved("conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge")}},
+			map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2,
+				"completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1": cssUnresolved("conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge")}},
 		{"an edge to an undeclared object", "undeclared-object", "", "successor",
-			map[string]cssFinding{"edge-dc-1-supersedes-spec--closed-feature-dc-9": unresolved("the object spec/closed-feature#dc-9 is not declared"), gdcDC2: newDC2}},
+			map[string]cssFinding{"edge-dc-1-supersedes-spec--closed-feature-dc-9": cssUnresolved("the object spec/closed-feature#dc-9 is not declared"), gdcDC2: cssNewDC2}},
 		{"an edge to a constraint", "constraint-target", "", "successor",
-			map[string]cssFinding{"edge-dc-1-supersedes-spec--closed-feature-co-1": unresolved("the object spec/closed-feature#co-1 is not an acceptance criterion or a decision"), gdcDC2: newDC2}},
+			map[string]cssFinding{"edge-dc-1-supersedes-spec--closed-feature-co-1": cssUnresolved("the object spec/closed-feature#co-1 is not an acceptance criterion or a decision"), gdcDC2: cssNewDC2}},
 		{"target not closed", "target-not-closed", "", "successor",
-			map[string]cssFinding{"edge-dc-1-supersedes-spec--other-feature-dc-1": unresolved("the target spec spec/other-feature is not closed"), gdcDC2: newDC2}},
+			map[string]cssFinding{"edge-dc-1-supersedes-spec--other-feature-dc-1": cssUnresolved("the target spec spec/other-feature is not closed"), gdcDC2: cssNewDC2}},
 		{"target already superseded", "already-superseded", "", "successor",
-			map[string]cssFinding{gdcDC1: unresolved("the object spec/closed-feature#dc-1 is already superseded by spec/prior-successor (conflict/prior-successor-closed-feature)"), gdcDC2: newDC2}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the object spec/closed-feature#dc-1 is already superseded by spec/prior-successor (conflict/prior-successor-closed-feature)"), gdcDC2: cssNewDC2}},
 		{"unrelated reuse of S1's conflict", "unrelated", "", "unrelated",
-			map[string]cssFinding{gdcDC1: unresolved("the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)")}},
+			map[string]cssFinding{gdcDC1: cssUnresolved("the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)")}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -179,8 +191,8 @@ func TestObjSupersedeE2E_RepeatedChallenge(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
 	const ac1 = "  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n"
-	want := map[string]cssFinding{gdcDC1: {true, cssNew}, gdcDC2: {true, cssNew},
-		"completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1": {false, "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"}}
+	want := map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2,
+		"completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1": cssUnresolved("conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge")}
 	for _, tc := range []struct {
 		name  string
 		times int
@@ -207,20 +219,51 @@ func TestObjSupersedeE2E_RepeatedChallenge(t *testing.T) {
 }
 
 // TestObjSupersedeE2E_Lint proves VL-026 through the binary: the proposed
-// successor lints clean, and the two top-level-link refusals report VL-026.
+// successor lints clean, and each top-level-link refusal reports exactly
+// one VL-026 finding, naming its clause and reason. The refusal there is
+// lint's alone: a top-level link is not a declared edge on a decision
+// object (03), so align computes only the decision edges, which resolve,
+// and `verdi gate` passes.
 func TestObjSupersedeE2E_Lint(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
 	for _, tc := range []struct {
 		scenario string
-		code     int
-	}{{"proposed", 0}, {"top-level-supersedes", 1}, {"feature-fragment-link", 1}} {
+		finding  string // the one VL-026 finding's clause and reason; "" lints clean
+		computed map[string]cssFinding
+	}{
+		{"proposed", "", nil},
+		{"top-level-supersedes",
+			`clause (b): top-level supersedes link "spec/closed-feature#dc-1" targets #dc-1 of closed spec spec/closed-feature, but a top-level supersedes link never targets an object of a closed spec: that edge belongs on a decision (02 §Link taxonomy; VL-026)`,
+			map[string]cssFinding{gdcDC2: cssNewDC2}},
+		{"feature-fragment-link",
+			`clause (a): top-level links[].ref "spec/closed-feature#ac-1" targets object fragment #ac-1, but a feature spec's top-level links target no object fragment (02 §Link taxonomy; VL-026)`,
+			map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2}},
+	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			t.Parallel()
-			out := cssRun(t, bin, scenario.Build(t, tc.scenario).Dir, tc.code, "lint")
-			if got := strings.Contains(out, "VL-026"); got != (tc.code == 1) {
-				t.Fatalf("lint output = %s; VL-026 reported = %v, want %v", out, got, tc.code == 1)
+			dir := scenario.Build(t, tc.scenario).Dir
+			code := 0
+			if tc.finding != "" {
+				code = 1
 			}
+			var vl026 []string
+			for _, line := range strings.Split(cssRun(t, bin, dir, code, "lint"), "\n") {
+				if strings.Contains(line, "VL-026") {
+					vl026 = append(vl026, line)
+				}
+			}
+			if tc.finding == "" {
+				if len(vl026) != 0 {
+					t.Fatalf("VL-026 findings = %q, want none", vl026)
+				}
+				return
+			}
+			if len(vl026) != 1 || !strings.Contains(vl026[0], tc.finding) {
+				t.Fatalf("VL-026 findings = %q, want exactly one containing %q", vl026, tc.finding)
+			}
+			cssAlign(t, bin, dir, "successor", tc.computed)
+			cssGate(t, bin, dir, tc.computed)
 		})
 	}
 }
@@ -236,7 +279,7 @@ func TestObjSupersedeE2E_AcceptanceKeepsArchivedBytes(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	dir := scenario.Build(t, "proposed").Dir
 	cssRun(t, bin, dir, 0, "lint")
-	cssAlign(t, bin, dir, "successor", map[string]cssFinding{gdcDC1: {true, cssNew}, gdcDC2: {true, cssNew}})
+	cssAlign(t, bin, dir, "successor", map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2})
 	cssRun(t, bin, dir, 0, "gate")
 	gdcGit(t, dir, "add", "-A")
 	gdcGit(t, dir, "commit", "-q", "--no-verify", "-m", "Record the decision-conflict report")
@@ -293,7 +336,7 @@ func TestObjSupersedeE2E_HandTypedDisposition(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := scenario.Build(t, "no-conflict").Dir
-	want := map[string]cssFinding{gdcDC1: {false, "no conflict challenges spec/closed-feature#dc-1"}, gdcDC2: {true, cssNew}}
+	want := map[string]cssFinding{gdcDC1: cssUnresolved("no conflict challenges spec/closed-feature#dc-1"), gdcDC2: cssNewDC2}
 	path := cssAlign(t, bin, dir, "successor", want)
 	typeSuperseded := func() {
 		editDecisionReport(t, path, func(fm *artifact.DecisionConflictFrontmatter) {
@@ -303,7 +346,7 @@ func TestObjSupersedeE2E_HandTypedDisposition(t *testing.T) {
 	}
 
 	typeSuperseded()
-	cssAlign(t, bin, dir, "successor", want) // align drops the typed disposition
+	cssAlign(t, bin, dir, "successor", want) // align drops the typed disposition and note
 
 	typeSuperseded()
 	out := cssRun(t, bin, dir, 1, "gate")
