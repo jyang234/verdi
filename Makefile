@@ -389,6 +389,13 @@ e2e: e2e-check-node
 # required `merge-gate` job fails unless every one of those jobs succeeds.
 # internal/specalign's TestMergeGateParity_GateJobsRunExactlyVerifySteps fails
 # if a step is dropped from, duplicated in, or added to that workflow alone.
+# That parity holds only while `make verify` runs VERIFY_STEPS and nothing
+# else, so verify takes no prerequisites and its recipe below is pinned
+# (TestGateParity_VerifyRunsOnlyItsStepLoop): add a check to VERIFY_STEPS,
+# never to verify's rule. No recipe line of a gate target starts with a `-`
+# prefix, and the Makefile declares no .IGNORE
+# (TestGateParity_GateRecipesNeverIgnoreErrors): either lets a step pass over
+# a failed command where `make -n` cannot show it.
 VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 

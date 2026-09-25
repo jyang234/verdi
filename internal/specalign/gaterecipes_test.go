@@ -1,15 +1,23 @@
-// Makefile-source guard for `make verify` (SI-266). The shard and parity
+// Makefile-source guards for the gate targets (SI-266). The shard and parity
 // guards read `make -n`, which prints the commands make would run with every
-// variable expanded, but `make verify` itself never reaches that output: its
-// recipe calls $(MAKE), so even a dry-run executes it, and the guards
-// therefore dry-run its steps one at a time and never see verify's own
-// prerequisites or recipe. A prerequisite, or an extra command in the recipe,
-// would run under `make verify` but in no pull-request gate job. This file
-// reads the Makefile source instead.
+// variable expanded, but two things that decide whether the gate can go green
+// over a failing test never reach that output:
+//
+//   - `make verify` itself. Its recipe calls $(MAKE), so even a dry-run
+//     executes it; the guards therefore dry-run its steps one at a time and
+//     never see verify's own prerequisites or recipe. A prerequisite, or an
+//     extra command in the recipe, would run under `make verify` but in no
+//     pull-request gate job.
+//   - Error ignoring. A `-` recipe prefix, or a `.IGNORE` special target, makes
+//     make treat a failed command as a success, and `make -n` strips the prefix
+//     from what it prints.
+//
+// This file reads the Makefile source for both.
 package specalign
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -340,6 +348,143 @@ func TestGateParity_VerifyRuleProblemsFound(t *testing.T) {
 			problems := verifyRuleProblems(mutateMakefile(t, makefile, tc.from, tc.to))
 			if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, tc.want) }) {
 				t.Errorf("verifyRuleProblems() = %q, want a problem containing %q", problems, tc.want)
+			}
+		})
+	}
+}
+
+// ignoresErrors reports whether a recipe line's command prefix, the run of
+// `@`, `+`, `-`, and blanks make strips before running it, contains `-`: make
+// then treats the command's failure as success.
+func ignoresErrors(line string) bool {
+	for _, c := range line {
+		switch c {
+		case '-':
+			return true
+		case '@', '+', ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// dotIgnoreRE finds the `.IGNORE` special target on a non-comment line.
+var dotIgnoreRE = regexp.MustCompile(`(^|[\s:])\.IGNORE([\s:]|$)`)
+
+// errorIgnoringGateRecipes returns every way the Makefile source lets a gate
+// target succeed over a failed command: a `.IGNORE` special target anywhere,
+// or a recipe line of a root target, or of any prerequisite a root pulls in,
+// whose prefix carries `-`. A gate target with no rule, or with neither a
+// recipe nor a prerequisite, is reported too: its recipe cannot be read, so
+// it cannot be cleared.
+func errorIgnoringGateRecipes(makefile string, roots []string) []string {
+	var problems []string
+	for i, line := range strings.Split(makefile, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if dotIgnoreRE.MatchString(line) {
+			problems = append(problems, fmt.Sprintf("line %d declares .IGNORE, which makes make ignore failed commands: %q", i+1, strings.TrimSpace(line)))
+		}
+	}
+
+	rules := parseMakeRules(makefile)
+	seen := map[string]bool{}
+	queue := slices.Clone(roots)
+	for len(queue) > 0 {
+		target := queue[0]
+		queue = queue[1:]
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		targetRules := rulesFor(rules, target)
+		if len(targetRules) == 0 {
+			problems = append(problems, fmt.Sprintf("gate target %s has no rule in the Makefile source, so its recipe cannot be checked", target))
+			continue
+		}
+		readable := false
+		for _, r := range targetRules {
+			for _, p := range strings.Fields(r.Prereqs) {
+				readable = true
+				if p != "|" && !strings.ContainsAny(p, "$=") {
+					queue = append(queue, p)
+				}
+			}
+			for _, l := range r.Recipe {
+				if strings.TrimSpace(l.Text) != "" {
+					readable = true
+				}
+				if ignoresErrors(l.Text) {
+					first, _, _ := strings.Cut(l.Text, "\n")
+					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q starts with a `-` prefix, so make ignores its failure and the gate goes green over it", l.Line, target, first))
+				}
+			}
+		}
+		if !readable {
+			problems = append(problems, fmt.Sprintf("gate target %s has neither a recipe nor a prerequisite in the Makefile source, so what it runs cannot be checked", target))
+		}
+	}
+	return problems
+}
+
+// gateRoots returns the targets whose recipes decide the gate: every
+// VERIFY_STEPS entry, the test shards, test, and verify.
+func gateRoots(t *testing.T, makefile string) []string {
+	t.Helper()
+	roots := append(makefileVarFields(t, makefile, "VERIFY_STEPS"), testShardTargets...)
+	return append(roots, "test", "verify")
+}
+
+// TestGateParity_GateRecipesNeverIgnoreErrors proves no gate target can go
+// green over a failed command through the Makefile source, which `make -n`
+// cannot show: no `.IGNORE`, and no `-` prefix on any recipe line of a gate
+// target or of a prerequisite it pulls in.
+func TestGateParity_GateRecipesNeverIgnoreErrors(t *testing.T) {
+	makefile := readMakefile(t)
+	for _, p := range errorIgnoringGateRecipes(makefile, gateRoots(t, makefile)) {
+		t.Error(p)
+	}
+}
+
+// TestGateParity_ErrorIgnoringRecipesFound is errorIgnoringGateRecipes'
+// negative path, over mutated copies of the real Makefile, with the controls
+// that must stay clean.
+func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
+	makefile := readMakefile(t)
+	cases := []struct {
+		name     string
+		from, to string
+		want     string // "" means no problem may be reported
+	}{
+		{"- on a test shard", "\tgo test -race -parallel 4 $(TEST_REST_PKGS)", "\t-go test -race -parallel 4 $(TEST_REST_PKGS)", "test-rest"},
+		{"@- on spec-align", "\t@out=\"$$(go test -race -v -count=1", "\t@-out=\"$$(go test -race -v -count=1", "spec-align"},
+		{"+ then blank then - on test-cmd", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t+ -go test -race -parallel 4 $(TEST_CMD_PKGS)", "test-cmd"},
+		{"- on fixture", "\tgo test -race -parallel 4 ./internal/fixturegit/", "\t-go test -race -parallel 4 ./internal/fixturegit/", "fixture"},
+		{"- on lint-store's second line", "\t$(LINT_STORE_BIN) lint\n", "\t-$(LINT_STORE_BIN) lint\n", "lint-store"},
+		{"- on verify", "\t@mkdir -p $(dir $(GATE_TIMINGS)); \\", "\t-@mkdir -p $(dir $(GATE_TIMINGS)); \\", "verify"},
+		{"- on e2e's prerequisite", "\t@if ! command -v node", "\t-@if ! command -v node", "e2e-check-node"},
+		{"- in an inline recipe", "\ntest-cmd:\n\tgo test", "\ntest-cmd: ; -go test", "test-cmd"},
+		{".IGNORE for every target", "\ntidy:\n", "\n.IGNORE:\n\ntidy:\n", ".IGNORE"},
+		{".IGNORE for one target", "\ntidy:\n", "\n.IGNORE: test-rest\n\ntidy:\n", ".IGNORE"},
+		{"a gate target's rule is gone", "\nlint-showcase:\n", "\nlint-showcase-x:\n", "lint-showcase"},
+		{"control: - on a target outside the gate", "\tgo mod tidy", "\t-go mod tidy", ""},
+		{"control: - opening a continuation line is shell text, not a prefix", "\tstatus=$$?; \\\n\tif [ \"$$status\" -ne 0 ]", "\tstatus=$$?; \\\n\t-true; if [ \"$$status\" -ne 0 ]", ""},
+		{"control: .IGNORE named in a comment", "\ntidy:\n", "\n# never declare .IGNORE: here\ntidy:\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := mutateMakefile(t, makefile, tc.from, tc.to)
+			problems := errorIgnoringGateRecipes(mutated, gateRoots(t, mutated))
+			if tc.want == "" {
+				if len(problems) != 0 {
+					t.Errorf("errorIgnoringGateRecipes() = %q, want none", problems)
+				}
+				return
+			}
+			if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, tc.want) }) {
+				t.Errorf("errorIgnoringGateRecipes() = %q, want a problem naming %q", problems, tc.want)
 			}
 		})
 	}
