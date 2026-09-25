@@ -258,6 +258,7 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 // TestServeContextRequestReadinessReachesGetDocumentOverSocket (the real
 // binary end to end).
 func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
@@ -359,6 +360,7 @@ func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
 // R-RR1-14: the conflict verdict comes from Options.ConflictProvider
 // in-process — no judge process, no network.
 func TestServeReadinessSurvivesTheRequestFileVanishingAfterStartup(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
@@ -499,6 +501,7 @@ func readinessLoadPassReport(t *testing.T, root string, request policyconflict.R
 // second time — proven directly with a counting judge script, not merely
 // by comparing two outcomes that could coincidentally agree.
 func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
@@ -561,6 +564,7 @@ func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing
 // and deleting that one line leaves the refusing rows below red while the
 // disclosure behaviour stays green.
 func TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		branch  string // "" keeps the checkout's own branch
@@ -669,6 +673,7 @@ func contextRequestBytesWithExpected(t *testing.T, spec string, expected context
 // provider: a local shell script configured as align.judge_cmd stands in
 // for a live judge, so no network or LLM call is ever made.
 func TestServeContextRequestReadinessReachesGetDocumentOverSocket(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	repo := buildContextCompileRepo(t, map[string]string{

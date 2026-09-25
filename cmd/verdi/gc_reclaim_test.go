@@ -283,7 +283,7 @@ func TestRunGcReclaimUnmanaged_NoEligibleOrKeptItems_StillPrintsScope(t *testing
 // verbatim, same package) before refusing, so an operator sees exactly
 // which spec(s) could not be proven.
 func TestRunGcReclaimUnmanaged_UnprovenSpecs_RefusesWholeRun(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -292,6 +292,7 @@ func TestRunGcReclaimUnmanaged_UnprovenSpecs_RefusesWholeRun(t *testing.T) {
 		},
 		Message: "seed one valid, already-accepted story alongside one malformed spec (ch-widget's own supersession-completeness proof is blocked by the malformed sibling, per audit_closurehygiene_test.go's identical fixture)",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	for _, apply := range []bool{false, true} {
 		var stdout, stderr bytes.Buffer

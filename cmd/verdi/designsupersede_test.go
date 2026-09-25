@@ -139,7 +139,7 @@ a
 // branch).
 func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{
+	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                   supersedeManifestYAML,
@@ -149,6 +149,8 @@ func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 			Message: "lockbox lands",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // TestRunDesignStartSupersede_Happy is the unit-level proof (runs the
@@ -159,8 +161,9 @@ func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 // rendering), and the extra "supersedes: N objects carried" disclosure
 // line names the right count.
 func TestRunDesignStartSupersede_Happy(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSupersedeRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	predRaw, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox", "spec.md"))
@@ -227,10 +230,11 @@ func TestRunDesignStartSupersede_Happy(t *testing.T) {
 // internal/supersede's own resolve_test.go already proves every Resolve
 // refusal reason individually, so this only proves the CLI forwards it).
 func TestRunDesignStartSupersede_Negative(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 
 	t.Run("successor dir already exists", func(t *testing.T) {
 		repo := buildSupersedeRepo(t)
+		pinFixtureDefaultBranch(t, repo.Dir)
 		ctx := context.Background()
 		if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox-v2"), 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
@@ -805,8 +809,9 @@ func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
 // working tree afterward, and the verb's own success disclosure is
 // unchanged.
 func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSupersedeRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	// (a) untracked file at the repo root.

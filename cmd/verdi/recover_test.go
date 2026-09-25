@@ -49,7 +49,6 @@ func recoverHasState(p recovery.Projection, code recovery.StateCode) bool {
 // repository carrying one active feature spec, spec/checkout.
 func recoverFixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	const checkoutSpecMD = `---
 id: spec/checkout
 kind: spec
@@ -529,7 +528,7 @@ func recoverCutMergedRitualWorktree(t *testing.T, repo *fixturegit.Repo, branch 
 // Every line on the verb's error stream carries the "recover: " prefix.
 func TestRecover_ApplyReclaimRowsCarryTheVerbPrefix(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	recoverCutMergedRitualWorktree(t, repo, "feature/checkout")
 
 	var stdout, stderr bytes.Buffer

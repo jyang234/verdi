@@ -69,14 +69,15 @@ func buildFromStubRepo(t *testing.T) *fixturegit.Repo {
 	// fromstub-feature's active-zone reachability to actually resolve
 	// AcceptedPendingBuild (mirrors cmd/verdi/closefeature_test.go's
 	// buildCloseFeatureRepo, the same fixture-migration shape).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + fromStubFeatureName + "/spec.md": fromStubFeatureSpec,
 			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 		},
 		Message: "seed --from-stub fixture",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // TestRunDesignStartFromStub_Plain proves the plain-stub path end to end:
@@ -84,6 +85,7 @@ func buildFromStubRepo(t *testing.T) *fixturegit.Repo {
 // self-validated story spec with the stub's real implements edge — and
 // the calling checkout's HEAD/branch/working tree are never touched.
 func TestRunDesignStartFromStub_Plain(t *testing.T) {
+	t.Parallel()
 	repo := buildFromStubRepo(t)
 	ctx := context.Background()
 
@@ -144,6 +146,7 @@ func TestRunDesignStartFromStub_Plain(t *testing.T) {
 
 // TestRunDesignStartFromStub_Spike proves the spike-stub path.
 func TestRunDesignStartFromStub_Spike(t *testing.T) {
+	t.Parallel()
 	repo := buildFromStubRepo(t)
 	ctx := context.Background()
 
@@ -188,6 +191,7 @@ func TestRunDesignStartFromStub_Spike(t *testing.T) {
 // switch the calling checkout (dc-2 doesn't apply to this pure-plumbing
 // path).
 func TestRunDesignStartFromStub_BasesOnDefaultBranch_NotHEAD(t *testing.T) {
+	t.Parallel()
 	repo := buildFromStubRepo(t)
 	ctx := context.Background()
 
@@ -248,6 +252,7 @@ func TestRunDesignStartFromStub_BasesOnDefaultBranch_NotHEAD(t *testing.T) {
 // read at all — every case operational (exit 2), design start's own
 // established local exit-code convention.
 func TestRunDesignStartFromStub_Negative(t *testing.T) {
+	t.Parallel()
 	t.Run("unknown slug", func(t *testing.T) {
 		repo := buildFromStubRepo(t)
 		var stdout, stderr strings.Builder
@@ -338,6 +343,7 @@ func TestRun_DesignStartFromStub_Dispatch(t *testing.T) {
 // internal/workbench/boardspecapi.go), never two independent
 // implementations that happen to agree today.
 func TestDesignStartFromStub_ParityWithBoardAction(t *testing.T) {
+	t.Parallel()
 	boardRepo := buildFromStubRepo(t)
 	cliRepo := buildFromStubRepo(t)
 
@@ -429,7 +435,7 @@ Prose.
 // because internal/workbench routes through specstate. Before the fix,
 // this refused (spec.Status == "" != "accepted-pending-build").
 func TestRunDesignStartFromStub_StatuslessExactDefaultBranch_Starts(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + fromStubFeatureName + "/spec.md": statuslessFromStubFeatureSpec,
@@ -437,6 +443,7 @@ func TestRunDesignStartFromStub_StatuslessExactDefaultBranch_Starts(t *testing.T
 		},
 		Message: "seed a statusless, landed --from-stub fixture",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	var stdout, stderr strings.Builder
@@ -484,11 +491,12 @@ func TestRunDesignStartFromStub_StatuslessExactDefaultBranch_Starts(t *testing.T
 // branch, so specstate resolves RelationNew -> Proposed, never
 // AcceptedPendingBuild.
 func TestRunDesignStartFromStub_StatuslessUnmergedProposal_StillRefuses(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
 		Message: "store root, no fromstub-feature on main yet",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	specDir := repo.Dir + "/.verdi/specs/active/" + fromStubFeatureName
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatal(err)

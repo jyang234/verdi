@@ -32,6 +32,7 @@ import (
 )
 
 func TestReadinessLoadCLIVectorsReachRegisteredCommands(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	// WITH a request: NO judge is configured at all (manifest.Align stays

@@ -225,10 +225,8 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 	// carries no origin remote, so every test built from it needs this
 	// pinned for fixture-story-one/-two's archive-zone reachability to
 	// actually resolve Closed.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-
 	story2Dir := storyDirFor(opts.Story2Status)
-	return fixturegit.Build(t, []fixturegit.Layer{
+	repo := fixturegit.Build(t, []fixturegit.Layer{
 		featureCloseScaffoldLayer,
 		{
 			Files: map[string]string{
@@ -243,6 +241,8 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 			Message: "add close-feature-fixture + its two implementing stories",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // closeFeatureStoryDeviationMD renders a minimal, valid archived deviation
@@ -374,6 +374,7 @@ func nonDisclosureFindings(findings []lint.Finding) []lint.Finding {
 // (D6-20) produced a lint-INVALID archive that a files-exist-only test
 // passed; this is exactly the assertion that would have caught it.
 func TestRunCloseFeature_EndToEnd(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -491,6 +492,7 @@ func TestRunCloseFeature_EndToEnd(t *testing.T) {
 }
 
 func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -553,6 +555,7 @@ func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.
 // that enters neither the closure commit nor the archive, and the feature
 // attestation slug is the FEATURE's own name, not a story ref's slug (dc-6).
 func TestRunCloseFeature_DisclosesUncommittedOutcomeAttestation(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureAC2FloorSatisfied = false
 	repo := buildCloseFeatureRepo(t, opts)
@@ -673,6 +676,7 @@ func TestRunCloseFeature_StagingAndCommitFailuresRecover(t *testing.T) {
 // feature that actually carries a story: ref, since the story-less default
 // skips the publish entirely.
 func TestRunCloseFeature_PreStageAndPublishFailuresDisclose(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("ArchiveMove failure discloses the in-place freeze residue", func(t *testing.T) {
@@ -722,6 +726,7 @@ func TestRunCloseFeature_PreStageAndPublishFailuresDisclose(t *testing.T) {
 }
 
 func TestRunCloseFeature_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -823,6 +828,7 @@ digest: sha256:%s
 // apply verbatim. Driven through the whole runCloseFeature verb, not
 // runAlignForSpec directly.
 func TestRunCloseFeature_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -870,6 +876,7 @@ func TestRunCloseFeature_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t 
 //
 // guide-claim: 10.1-jira-github-gitlab
 func TestRunCloseFeature_WithStoryRef_PublishesRollup(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureStory = "jira:FIXTURE-EPIC-1"
 	repo := buildCloseFeatureRepo(t, opts)
@@ -924,6 +931,7 @@ func TestRunCloseFeature_WithStoryRef_PublishesRollup(t *testing.T) {
 // and confirms it survives byte-identical; it is not asserting new
 // behavior close.go had to implement.
 func TestRunCloseFeature_BoardJSONGrandfathered_SurvivesIfPresent(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -962,6 +970,7 @@ func TestRunCloseFeature_BoardJSONGrandfathered_SurvivesIfPresent(t *testing.T) 
 // After the fix, the SAME fixture refuses (exit 1), names the ritual, and
 // archives nothing.
 func TestRunCloseFeature_RefusesUndispositionedFindings(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		setup      func(t *testing.T, root, head string) // "" setup = no report at all (X-17)
@@ -1019,6 +1028,7 @@ func TestRunCloseFeature_RefusesUndispositionedFindings(t *testing.T) {
 // closure on its own, with no side effects: nothing archived, nothing
 // published, the active spec directory untouched, no closure branch cut.
 func TestRunCloseFeature_Negative(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name           string
 		mutate         func(opts *closeFeatureFixtureOpts)
@@ -1123,6 +1133,7 @@ func TestRunCloseFeature_Negative(t *testing.T) {
 // exists only to name the property explicitly rather than leave it
 // implicit.
 func TestRunCloseFeature_ClosedStoryDiscovered_NoOperationalError(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -1146,6 +1157,7 @@ func TestRunCloseFeature_ClosedStoryDiscovered_NoOperationalError(t *testing.T) 
 // silent on the feature surface either. Before the fix condition 1 rendered no
 // per-record disclosures at all.
 func TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -1198,6 +1210,7 @@ func TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed(t *testing.T)
 //     the exit code (which index.Build would produce even under a restored
 //     swallow). Recorded rather than left implicit.
 func TestRunCloseFeature_UnreadableAttestation_OperationalFailure(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
 	}

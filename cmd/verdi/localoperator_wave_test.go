@@ -102,7 +102,7 @@ func buildLocalOperatorRepoNoDisposition(t *testing.T) *fixturegit.Repo {
 	}
 	delete(files, localOperatorDispositionRelPath)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "adopt the local-operator fixture store without its recorded disposition"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
 	}

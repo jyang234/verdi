@@ -285,6 +285,7 @@ func TestRunClosureGate_AnnotatedRecordUnderReachableDir_ExcludedAndDisclosed(t 
 // The gate must instead evaluate cleanly, disclose the undecodable debris,
 // and exit per verdict discipline.
 func TestRunClosureGate_UndecodableUnderUnreachableDir_NeverOperational(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -323,6 +324,7 @@ func TestRunClosureGate_UndecodableUnderUnreachableDir_NeverOperational(t *testi
 // undecodable debris — identical to the unreachable-dir case above, degradation
 // now being reachability-independent.
 func TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -397,7 +399,6 @@ func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	// Pin the projector's default-branch resolution for the C1 pre-closure
 	// precondition (no origin remote in a fixturegit repo).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                                "schema: verdi.layout/v1\nforge: gitlab\n",
@@ -407,6 +408,7 @@ func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "closure gate fixture",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 	return repo
 }
@@ -417,7 +419,6 @@ func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 // must leave such positive satisfaction unproven.
 func buildClosureGateAttestationRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	spec := strings.Replace(closureGateStorySpecMD, "evidence: [static]", "evidence: [attestation]", 1)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -427,6 +428,7 @@ func buildClosureGateAttestationRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "closure gate unreadable-attestation fixture",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 	return repo
 }
@@ -451,6 +453,7 @@ func seedAttestation(t *testing.T, root string) {
 // TestRunClosureGate_EligibleCondition proves the closure gate's condition
 // 1: not eligible without matching evidence, eligible with it.
 func TestRunClosureGate_EligibleCondition(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	ctx := context.Background()
@@ -489,6 +492,7 @@ func TestRunClosureGate_EligibleCondition(t *testing.T) {
 // an unresolved spec-stale flag (03 §The amendment ladder's rung-arbitrage
 // counter-pressure) and passes once no such flag is raised.
 func TestRunClosureGate_SpecStaleCondition(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateRepo(t)
 	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
@@ -629,6 +633,7 @@ func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *tes
 // asymmetry, not a runtime check, is what proves the second half of this
 // exit criterion.
 func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateRepo(t)
 	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
@@ -639,7 +644,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	// which resolves the default branch through its own precedence chain
 	// rather than trusting a caller-passed ref; fixturegit repos carry no
 	// origin remote, so this is needed for both step 2 and step 3 below.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	fakeForge := forgefake.New()
 	fakeForge.SeedOpenMR("main", forge.OpenMR{ID: "42", SourceBranch: "supersede-loan-mgmt", Title: "supersede loan-mgmt"})
@@ -663,6 +668,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	// merged (local) supersessions, and none exists here.
 	buildDeps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	fresh := freshClosureGateRepoForBuildStart(t)
+	pinFixtureDefaultBranch(t, fresh.Dir)
 	var bstdout, bstderr bytes.Buffer
 	got := runBuildStart(context.Background(), fresh.Dir, "spec/stale-decline", specstate.NewProjector(), buildDeps, &bstdout, &bstderr)
 	if got != 0 {
@@ -686,6 +692,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 // ac-1), never a silent pass — while a reachable forge that finds no open
 // supersession MR passes the condition outright.
 func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("nil forge: disclosed-unproven notice, not a silent pass", func(t *testing.T) {
@@ -741,6 +748,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 // neither a condition-level unavailable input nor an excluded per-record
 // detail turns an otherwise-ready gate into a refusal.
 func TestRunClosureGateOutcome_CountsConditionAndRecordDisclosuresWithoutChangingReady(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateRepo(t)
 	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
@@ -790,6 +798,7 @@ func freshClosureGateRepoForBuildStart(t *testing.T) *fixturegit.Repo {
 // and this closure-gate condition share the same underlying facts, just
 // different remedy text.
 func TestRunClosureGate_DispositionCompleteCondition(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		setup      func(t *testing.T, root, head string)
@@ -872,6 +881,7 @@ func TestRunClosureGate_DispositionCompleteCondition(t *testing.T) {
 // gate-function error path, matching this file's other runClosureGate tests,
 // AND the cmd-level exit-2) and must FAIL if anyone restores the swallow.
 func TestRunClosureGate_UnreadableAttestation_OperationalFailure(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
 	}

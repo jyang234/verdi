@@ -57,6 +57,7 @@ acceptance_criteria:
 // occur and must still be excluded: a local archive/ copy this store has
 // not proven reachable from the default branch.
 func TestGatherArchivedRulings_ScopesToClosedImplementing(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -68,7 +69,7 @@ func TestGatherArchivedRulings_ScopesToClosedImplementing(t *testing.T) {
 			Message: "land three closed, archived stories",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	// Present on disk under specs/archive/ (the glob finds and decodes it),
 	// but never committed — never reachable from the default branch at this
@@ -98,6 +99,7 @@ func TestGatherArchivedRulings_ScopesToClosedImplementing(t *testing.T) {
 // not-resurfaced: section — both are dispositioned judged rulings the budget
 // counts, so both are valid cross-level carry candidates.
 func TestGatherArchivedRulings_IncludesNotResurfacedRulings(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -107,7 +109,7 @@ func TestGatherArchivedRulings_IncludesNotResurfacedRulings(t *testing.T) {
 			Message: "land one closed, archived, implementing story",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	writeFeatureStaleDeviationReport(t, repo.Dir, store.ZoneArchive, "impl-story",
 		"  - { id: judged-live, kind: judged, text: live ruling, disposition: accepted-deviation, note: n }\n",
 		"  - { id: judged-persisted, kind: judged, text: persisted ruling, disposition: accepted-deviation, note: n }\n")

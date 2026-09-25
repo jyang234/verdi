@@ -32,6 +32,7 @@ import (
 // by TestRunClosureGate_PendingSupersessionDisclosedUnproven
 // (closuregate_test.go).
 func TestDisclosureSeam_AC1_RenderThroughTheSharedSeam(t *testing.T) {
+	t.Parallel()
 	t.Run("lint.Finding", func(t *testing.T) {
 		f := lint.Finding{
 			Rule: "VL-017", Path: "spec/example",
@@ -90,7 +91,7 @@ func TestDisclosureSeam_AC1_RenderThroughTheSharedSeam(t *testing.T) {
 
 	t.Run("review_unavailable transport failure (mcp list_annotations)", func(t *testing.T) {
 		root := newSeamReviewFixture(t)
-		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		pinFixtureDefaultBranch(t, root)
 		b := &mcpserve.Backend{Root: root, Forge: erroringSeamForge{forgefake.New()}}
 		got := listAnnotationsReviewUnavailable(t, b)
 		want := disclosure.Render(disclosure.ReviewUnavailableTransport(errSeamTransport))
@@ -111,8 +112,9 @@ func TestDisclosureSeam_AC1_RenderThroughTheSharedSeam(t *testing.T) {
 // at their existing decision point, so an equivalent state is
 // byte-identical across the two surfaces by construction.
 func TestDisclosureSeam_AC2_TransportFailureIdenticalAcrossSurfaces(t *testing.T) {
+	t.Parallel()
 	root := newSeamReviewFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, root)
 
 	_, boardNotice, err := workbench.LoadProjection(context.Background(), root, seamReviewSpecName, erroringSeamFeed{}, "", nil)
 	if err != nil {

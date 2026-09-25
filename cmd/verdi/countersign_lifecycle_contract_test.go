@@ -610,7 +610,7 @@ func buildCountersignGateRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "scaffold countersign gate story",
 	}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/enum-spike")
 	return repo
 }
@@ -627,7 +627,10 @@ func buildCountersignGateRepo(t *testing.T) *fixturegit.Repo {
 // itself would have produced, so no assertion downstream of it changes).
 func cloneCountersignGateRepo(t *testing.T, template *fixturegit.Repo) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	// No pin needed here: cloneFixtureRepoDir copies template's entire .git
+	// directory, including the refs/remotes/origin/HEAD symref
+	// buildCountersignGateRepo already set via pinFixtureDefaultBranch — the
+	// clone inherits a resolvable default branch for free.
 	return cloneFixtureRepoDir(t, template)
 }
 
@@ -697,6 +700,7 @@ func cloneFixtureRepoDir(t *testing.T, template *fixturegit.Repo) *fixturegit.Re
 // calls t.Setenv, so this test (like TestCountersignLifecycleContract_
 // Behavioral itself) stays serial.
 func TestCloneFixtureRepoDir(t *testing.T) {
+	t.Parallel()
 	template := buildCountersignGateRepo(t)
 
 	tests := []struct {

@@ -292,7 +292,7 @@ func TestCmdContextResolveUnresolvable(t *testing.T) {
 				},
 				Message: "scaffold, no constitution",
 			}})
-			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			pinFixtureDefaultBranch(t, repo.Dir)
 			return repo.Dir
 		},
 	}
@@ -528,6 +528,7 @@ func contextResolveSnapshot(t *testing.T, root string) string {
 // child inherits and must leave untouched, so the resolver cannot be
 // answering from — or reporting to — the sealed controller channel.
 func TestContextResolveE2EReadOnly(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo, request := contextResolveRepo(t)
 
@@ -625,6 +626,7 @@ func TestContextResolveE2EReadOnly(t *testing.T) {
 // TestContextResolveE2EExitCodes proves the built command's own 0/1/2 split
 // and that a failure leaves stdout completely empty.
 func TestContextResolveE2EExitCodes(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo, proven := contextResolveRepo(t)
 	absent := contextResolveRequestBytes(t, repo.Dir, "spec/feature-nowhere")

@@ -78,6 +78,7 @@ func decodeToolMatrix(t *testing.T, result map[string]any) ([]byte, matrixprojec
 }
 
 func TestMatrixProjectionContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
@@ -165,6 +166,7 @@ func TestJourneyJSONContract_Behavioral(t *testing.T) {
 }
 
 func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildCorpusRepo(t)
 	writeViolatedMatrixFixture(t, repo.Dir, repo.Head)

@@ -38,6 +38,7 @@ func configureContextConflictJudge(t *testing.T, repo *fixturegit.Repo, command 
 }
 
 func TestContextConflictBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("absent constitution is typed exit one", func(t *testing.T) {

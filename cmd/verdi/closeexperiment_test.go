@@ -180,7 +180,6 @@ func closeExperimentPolicyFiles() map[string]string {
 // by the production-path tests below, never by the fake-provider ones.
 func buildCloseExperimentSpikeFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                     "schema: verdi.layout/v1\nforge: github\n",
@@ -189,6 +188,7 @@ func buildCloseExperimentSpikeFixtureRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "close-experiment fixture: parent feature + comparison spike",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	writeCloseExperimentWaiver(t, repo.Dir, repo.Head)
 	return repo
 }
@@ -235,7 +235,6 @@ const closeExperimentCandidateBranch = "feature/exp-spike"
 
 func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map[string]string) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			// providers.jira.mode: fake so the BUILT BINARY's own real
@@ -255,6 +254,7 @@ func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map
 		},
 		Message: "close-experiment production fixture: parent feature + comparison spike",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	workingHead := repo.Head
 
 	for rel, content := range closeExperimentPolicyFiles() {
@@ -505,6 +505,7 @@ func closeExperimentVerdictEvidence(id string) closeExperimentEvidence {
 // exactly as before — the empty-evidence path is a genuine zero-behavior-
 // change no-op (closeExperimentGate's very first check).
 func TestCloseOrdinarySpikeExperimentAbsentClosesUnchanged(t *testing.T) {
+	t.Parallel()
 	stdout, stderr, code := runCloseExperimentUnit(t, nil)
 	if code != 0 {
 		t.Fatalf("runClose(no experiment evidence) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
@@ -521,6 +522,7 @@ func TestCloseOrdinarySpikeExperimentAbsentClosesUnchanged(t *testing.T) {
 // runClose never looked at the experiments/ tree at all and this same
 // fixture closed with exit 0 — that differential IS the RED witness.
 func TestCloseComparisonBackedSpikeExperimentDetectionEngagesGate(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
 		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
 	})
@@ -563,6 +565,7 @@ func TestCloseComparisonBackedSpikeExperimentDetectionEngagesGate(t *testing.T) 
 // all) reports the specific "no ratification is present" verdict — the
 // controller's stop-gate audit's named example.
 func TestCloseExperimentProductionAdapterNoAcceptedRatification(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
 		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
 	})
@@ -594,6 +597,7 @@ func TestCloseExperimentProductionAdapterNoAcceptedRatification(t *testing.T) {
 // experiment is unmerged is NEVER read as "no experiments" and closed
 // (CO-1 fail-closed, design §10's no-favorable-reading-of-a-missing-fact).
 func TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
 	// Written after the fixture's own commits and its detached checkout, so
 	// it is untracked at the checked-out revision and absent from `main`.
@@ -635,6 +639,7 @@ func TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally(t *
 // against a shape its contract forbids, rather than trusting that
 // invariant blindly.
 func TestCloseExperimentSelectingWithUnverifiedCapsuleRefuses(t *testing.T) {
+	t.Parallel()
 	ev := closeExperimentUnverifiedCapsuleEvidence("comparison", experiment.DispositionSelectRecommended)
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 1 {
@@ -648,6 +653,7 @@ func TestCloseExperimentSelectingWithUnverifiedCapsuleRefuses(t *testing.T) {
 // Item 5: every non-selecting disposition is an honest terminal response
 // that does not satisfy closure by itself.
 func TestCloseExperimentNonSelectingDispositionsRefuse(t *testing.T) {
+	t.Parallel()
 	for _, disposition := range []experiment.Disposition{
 		experiment.DispositionRejectAll, experiment.DispositionMisframed, experiment.DispositionRequestNewRevision,
 	} {
@@ -667,6 +673,7 @@ func TestCloseExperimentNonSelectingDispositionsRefuse(t *testing.T) {
 // Item 6: an operational Outcome anywhere in the evidence, and a provider
 // Go error, both exit 2 (never folded into the 0/1 verdict).
 func TestCloseExperimentOperationalOutcomeAndProviderErrorExitTwo(t *testing.T) {
+	t.Parallel()
 	t.Run("operational evidence", func(t *testing.T) {
 		ev := closeExperimentEvidence{
 			ExperimentID: "comparison",
@@ -722,6 +729,7 @@ func TestCloseExperimentOperationalOutcomeAndProviderErrorExitTwo(t *testing.T) 
 // closeExperimentEvaluate's own `default:` arm and exited 1 — this test
 // exists specifically to catch a regression back to that collapse.
 func TestCloseExperimentUnknownOutcomeClassificationExitsTwo(t *testing.T) {
+	t.Parallel()
 	for _, classification := range []experimentapp.Classification{"", "wat"} {
 		t.Run(string(classification)+"/zero-or-unknown", func(t *testing.T) {
 			ev := closeExperimentEvidence{
@@ -770,6 +778,7 @@ func TestCloseExperimentUnknownOutcomeClassificationExitsTwo(t *testing.T) {
 // Item 11: a valid select-recommended ratification with a matching
 // capsule closes clean.
 func TestCloseExperimentValidSelectRecommendedClosesClean(t *testing.T) {
+	t.Parallel()
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 0 {
@@ -780,6 +789,7 @@ func TestCloseExperimentValidSelectRecommendedClosesClean(t *testing.T) {
 // Item 12: a valid select-other ratification with a matching capsule
 // closes clean.
 func TestCloseExperimentValidSelectOtherClosesClean(t *testing.T) {
+	t.Parallel()
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectOther, "baseline")
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 0 {
@@ -795,6 +805,7 @@ func TestCloseExperimentValidSelectOtherClosesClean(t *testing.T) {
 // closure even alongside another that already satisfies it, while a
 // non-selecting experiment merely fails to CONTRIBUTE the selection.
 func TestCloseMultipleExperimentEvidenceComposition(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		evidence []closeExperimentEvidence
@@ -857,6 +868,7 @@ func TestCloseMultipleExperimentEvidenceComposition(t *testing.T) {
 // frozen report, no rollup.json, no archive move, no staged paths, no
 // commit, no provider PublishRollup call, worktree byte-identical.
 func TestCloseExperimentRefusalHasZeroPreEffects(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
 	before := takeConflictLifecycleSnapshot(t, repo.Dir,
@@ -908,6 +920,7 @@ func closeExperimentAssertParentFeatureUnchanged(t *testing.T, repo *fixturegit.
 }
 
 func TestCloseExperimentValidClosureLeavesParentFeatureBytesUnchanged(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
@@ -915,6 +928,7 @@ func TestCloseExperimentValidClosureLeavesParentFeatureBytesUnchanged(t *testing
 }
 
 func TestCloseExperimentValidClosureLeavesNoOpenQuestionMutation(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectOther, "baseline")
@@ -925,6 +939,7 @@ func TestCloseExperimentValidClosureLeavesNoOpenQuestionMutation(t *testing.T) {
 // byte-identical to the pre-close spec.md, links block (the resolves
 // edge) included — no new edge is ever written.
 func TestCloseExperimentValidClosurePreservesResolvesEdgeByteIdentical(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
@@ -1074,6 +1089,7 @@ func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 // byte-for-byte struct comparison before and after the call is itself the
 // proof that closeExperimentEvaluate reads evidence only.
 func TestCloseExperimentEvidenceDeepCopyNoAlias(t *testing.T) {
+	t.Parallel()
 	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
 	before := ev
 
