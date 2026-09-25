@@ -3,6 +3,7 @@ package align
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -235,6 +236,29 @@ func TestGenerateDecisionConflict_Negative_EmptyCovers(t *testing.T) {
 	}
 }
 
+// TestGenerateDecisionConflict_Negative_SpecNotInTree proves the computed
+// section is computed from the tree's own spec: a spec absent from the tree
+// is ErrSpecNotInTree, and an id that names no spec is an error.
+func TestGenerateDecisionConflict_Negative_SpecNotInTree(t *testing.T) {
+	tests := []struct {
+		name, id  string
+		wantNotIn bool
+	}{
+		{"a spec absent from the tree", "spec/my-feature", true},
+		{"an id that does not parse", "not a ref", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+				Root: t.TempDir(), Spec: &artifact.SpecFrontmatter{Base: artifact.Base{ID: tc.id}}, Covers: "abc1234", ModelDigest: testModelDigest(t),
+			})
+			if err == nil || errors.Is(err, ErrSpecNotInTree) != tc.wantNotIn {
+				t.Fatalf("err = %v, want an error (ErrSpecNotInTree: %v)", err, tc.wantNotIn)
+			}
+		})
+	}
+}
+
 // TestGenerateDecisionConflict_ModelDigestStamped is spec/model-digest
 // ac-1's headline case for this mint site: the rendered, re-decoded
 // decision-conflict-report.md carries provenance.model equal to the
@@ -454,6 +478,63 @@ func TestGenerateDecisionConflict_ClosedSpecObjectEdges(t *testing.T) {
 			}
 			if got := computedOf(report.Frontmatter.Findings); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("computed findings:\n got %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGenerateDecisionConflict_ComputedNeverCarriesDisposition proves 03's
+// split (design §5 "Computed means computed", SI-262, BL-67's structural
+// part): a disposition or note typed onto ANY computed finding of an existing
+// report is dropped by the next align — ADR `supersedes`, `exempts`, and
+// closed-spec object edges alike — while a judged finding's disposition is
+// still preserved.
+func TestGenerateDecisionConflict_ComputedNeverCarriesDisposition(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	typed := func(f artifact.ConflictFinding) artifact.ConflictFinding {
+		f.Disposition, f.Note = artifact.ConflictSuperseded, "typed by hand"
+		return f
+	}
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) (root string, spec *artifact.SpecFrontmatter)
+	}{
+		{"an unresolved ADR supersedes edge", func(t *testing.T) (string, *artifact.SpecFrontmatter) {
+			root := t.TempDir()
+			writeADR(t, root, "current-policy", "accepted")
+			return root, writeDecisionSpec(t, root, "my-feature", artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/current-policy"})
+		}},
+		{"a resolved exempts edge's note", func(t *testing.T) (string, *artifact.SpecFrontmatter) {
+			root := t.TempDir()
+			writeADR(t, root, "retry-policy", "accepted")
+			return root, writeDecisionSpec(t, root, "my-feature", artifact.Link{Type: artifact.LinkExempts, Ref: "adr/retry-policy", Note: "documented exception"})
+		}},
+		{"an unresolved closed-spec object edge", func(t *testing.T) (string, *artifact.SpecFrontmatter) {
+			repo := scenario.Build(t, "no-conflict")
+			return repo.Dir, loadTreeSpec(t, repo.Dir, "successor")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root, spec := tc.setup(t)
+			in := DecisionConflictInput{Root: root, Spec: spec, Covers: "abc1234", ModelDigest: testModelDigest(t)}
+			first, err := GenerateDecisionConflict(context.Background(), in)
+			if err != nil {
+				t.Fatalf("GenerateDecisionConflict (first): %v", err)
+			}
+			for _, f := range first.Frontmatter.Findings {
+				in.ExistingFindings = append(in.ExistingFindings, typed(f))
+			}
+			second, err := GenerateDecisionConflict(context.Background(), in)
+			if err != nil {
+				t.Fatalf("GenerateDecisionConflict (second): %v", err)
+			}
+			if !reflect.DeepEqual(second.Frontmatter.Findings[:len(first.Frontmatter.Findings)-1], first.Frontmatter.Findings[:len(first.Frontmatter.Findings)-1]) {
+				t.Fatalf("computed findings after a typed disposition:\n got %+v\nwant %+v (align must drop it)", second.Frontmatter.Findings, first.Frontmatter.Findings)
+			}
+			judged := second.Frontmatter.Findings[len(second.Frontmatter.Findings)-1]
+			if judged.Kind != artifact.FindingJudged || judged.Disposition != artifact.ConflictSuperseded || judged.Note != "typed by hand" {
+				t.Fatalf("judged finding = %+v, want its disposition preserved", judged)
 			}
 		})
 	}

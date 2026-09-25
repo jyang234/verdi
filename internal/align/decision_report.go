@@ -137,11 +137,16 @@ func GenerateDecisionConflict(ctx context.Context, in DecisionConflictInput) (*D
 		return nil, err // *ErrDecisionJudgeRequiredAbsent, propagated as-is
 	}
 
-	allFindings := make([]artifact.ConflictFinding, 0, len(computedFindings)+len(judged.Findings))
-	allFindings = append(allFindings, computedFindings...)
-	allFindings = append(allFindings, judged.Findings...)
-	preserved := PreserveConflictDispositions(allFindings, in.ExistingFindings)
-	preserved = computeRouting(preserved, adrCorpus)
+	// Computed means computed (03 §Decision-conflict gate; design §5,
+	// SI-262): a prior report's disposition or note is carried onto judged
+	// findings only. A computed finding's disposition, note, and routing are
+	// exactly what ComputeDecisionEdges computed from the records, so a
+	// hand-typed disposition on one is dropped here and fails the gate's
+	// recompute if committed unchanged.
+	judgedFindings := computeRouting(PreserveConflictDispositions(judged.Findings, in.ExistingFindings), adrCorpus)
+	preserved := make([]artifact.ConflictFinding, 0, len(computedFindings)+len(judgedFindings))
+	preserved = append(preserved, computedFindings...)
+	preserved = append(preserved, judgedFindings...)
 
 	scanned := swCtx.scannedDecisionIDs()
 	digest, err := ComputeDecisionDigest(in.Covers, computedFindings, adrDigest, scanned)
