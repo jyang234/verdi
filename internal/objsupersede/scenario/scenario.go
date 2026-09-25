@@ -127,7 +127,7 @@ func (m *Manifest) validate(dir string) error {
 	}
 	for i, st := range m.Base {
 		if st.Branch != m.Commit.InitialBranch || st.Merge != "" {
-			return fmt.Errorf("base step %d must commit on %s and never merge", i, m.Commit.InitialBranch)
+			return fmt.Errorf("base step %d must write layers or move paths on %s", i, m.Commit.InitialBranch)
 		}
 		if err := m.validateStep(st); err != nil {
 			return fmt.Errorf("base step %d: %w", i, err)
