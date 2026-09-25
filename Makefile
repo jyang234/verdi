@@ -129,11 +129,14 @@ lint:
 # `make fixture-regen`'s job, never this one's.
 #
 # These three packages are also in test-rest. fixture passes test-rest's
-# exact flags (-race -parallel 4), so inside `make verify`, which runs
-# test-rest first, the Go test cache replays their result here instead of
-# executing them a second time (SI-266: every package executes once under
-# -race; TestGateShards_VerifyExecutesEachPackageOnceUnderRace). Run alone,
-# or in the pull-request gate's static job, fixture executes them.
+# exact flags (-race -parallel 4), so after test-rest on the same machine
+# the Go test cache replays their result here instead of executing them a
+# second time (SI-266: every package executes once under -race;
+# TestGateShards_VerifyExecutesEachPackageOnceUnderRace). That holds inside
+# `make verify`, which runs test-rest first, and in the pull-request gate,
+# which runs fixture in the test-rest job right after test-rest
+# (TestMergeGateParity_CacheReplaysRunAfterTheirExecutorInOneJob). Run
+# alone, fixture executes them.
 fixture:
 	go test -race -parallel 4 ./internal/fixturegit/... ./internal/corpus/... ./internal/svcfixcanned/...
 

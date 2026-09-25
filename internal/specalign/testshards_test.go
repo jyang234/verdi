@@ -476,6 +476,62 @@ func TestGateShards_SpecAlignGateKeepsItsShape(t *testing.T) {
 	}
 }
 
+// verifyRaceRun is one package's run under -race in one `make verify` step.
+type verifyRaceRun struct {
+	step  string // the expanded VERIFY_STEPS entry that runs it
+	pkg   string // the import path
+	flags string // the go test flags in command-line order (flagKey)
+	fresh bool   // -count=1: never replayed from the test cache
+}
+
+// verifyRaceRuns dry-runs each expanded VERIFY_STEPS entry in the order
+// `make verify` runs them and returns every package each one runs under
+// -race, in that order.
+func verifyRaceRuns(t *testing.T, makefile string) []verifyRaceRun {
+	t.Helper()
+	steps := expandedVerifySteps(t, makefile)
+	if slices.Contains(steps, "test") {
+		t.Fatalf("expanded VERIFY_STEPS still contains `test`: %v", steps)
+	}
+	var runs []verifyRaceRun
+	for _, step := range steps {
+		for _, inv := range targetGoTests(t, step) {
+			if !inv.has("-race") {
+				continue
+			}
+			for _, pkg := range goList(t, inv.Pkgs...) {
+				runs = append(runs, verifyRaceRun{step: step, pkg: pkg, flags: inv.flagKey(), fresh: inv.has("-count=1")})
+			}
+		}
+	}
+	return runs
+}
+
+// verifyCacheReplays maps each `make verify` step that re-runs, under -race,
+// a package an earlier step already ran to those earlier steps, sorted. In
+// `make verify` such a re-run is a cache replay
+// (TestGateShards_VerifyExecutesEachPackageOnceUnderRace), but only because
+// both steps share one machine's test cache: the pull-request gate must keep
+// them in one job, in this order
+// (TestMergeGateParity_CacheReplaysRunAfterTheirExecutorInOneJob).
+func verifyCacheReplays(t *testing.T, makefile string) map[string][]string {
+	t.Helper()
+	executor := map[string]string{}
+	replays := map[string][]string{}
+	for _, run := range verifyRaceRuns(t, makefile) {
+		first, seen := executor[run.pkg]
+		if !seen {
+			executor[run.pkg] = run.step
+			continue
+		}
+		if first != run.step && !slices.Contains(replays[run.step], first) {
+			replays[run.step] = append(replays[run.step], first)
+			slices.Sort(replays[run.step])
+		}
+	}
+	return replays
+}
+
 // TestGateShards_VerifyExecutesEachPackageOnceUnderRace proves contract item
 // 1 for `make verify`: walking VERIFY_STEPS in order, every package's first
 // -race run executes it and any later -race run of the same package is a
@@ -483,29 +539,15 @@ func TestGateShards_SpecAlignGateKeepsItsShape(t *testing.T) {
 // a second time. The fixture gate re-runs fixturegit, corpus, and
 // svcfixcanned after test-rest; this is what keeps that a replay.
 func TestGateShards_VerifyExecutesEachPackageOnceUnderRace(t *testing.T) {
-	makefile := readMakefile(t)
-	steps := expandedVerifySteps(t, makefile)
-	if slices.Contains(steps, "test") {
-		t.Fatalf("expanded VERIFY_STEPS still contains `test`: %v", steps)
-	}
-
-	type firstRun struct{ step, flags string }
-	first := map[string]firstRun{}
-	for _, step := range steps {
-		for _, inv := range targetGoTests(t, step) {
-			if !inv.has("-race") {
-				continue
-			}
-			for _, pkg := range goList(t, inv.Pkgs...) {
-				prev, seen := first[pkg]
-				if !seen {
-					first[pkg] = firstRun{step: step, flags: inv.flagKey()}
-					continue
-				}
-				if inv.flagKey() != prev.flags || inv.has("-count=1") {
-					t.Errorf("make verify executes %s under -race twice: in %s (flags %q) and again in %s (flags %q) — a later run must carry the identical flags and no -count=1 so the test cache replays it", pkg, prev.step, prev.flags, step, inv.flagKey())
-				}
-			}
+	first := map[string]verifyRaceRun{}
+	for _, run := range verifyRaceRuns(t, readMakefile(t)) {
+		prev, seen := first[run.pkg]
+		if !seen {
+			first[run.pkg] = run
+			continue
+		}
+		if run.flags != prev.flags || run.fresh {
+			t.Errorf("make verify executes %s under -race twice: in %s (flags %q) and again in %s (flags %q) — a later run must carry the identical flags and no -count=1 so the test cache replays it", run.pkg, prev.step, prev.flags, run.step, run.flags)
 		}
 	}
 	for _, pkg := range goList(t, "./...") {

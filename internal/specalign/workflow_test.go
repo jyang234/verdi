@@ -1095,6 +1095,62 @@ func TestMergeGateParity_GateJobsRunExactlyVerifySteps(t *testing.T) {
 	}
 }
 
+// mergeGateReplayFloor pins the one cache replay `make verify` relies on
+// today: the fixture gate re-runs fixturegit, corpus, and svcfixcanned after
+// test-rest has executed them. If the Makefile stops producing that pair,
+// this test fails rather than passing over nothing; update the pin here when
+// the change is deliberate.
+var mergeGateReplayFloor = map[string]string{"fixture": "test-rest"}
+
+// TestMergeGateParity_CacheReplaysRunAfterTheirExecutorInOneJob keeps the
+// SI-266 promise that no test package runs twice once `make verify` is split
+// into jobs. In `make verify`, a step that re-runs packages an earlier step
+// already executed replays them from the Go test cache
+// (TestGateShards_VerifyExecutesEachPackageOnceUnderRace). Each CI job starts
+// on a fresh runner with a cold test cache, so that replay holds only if the
+// re-running step runs in the same gate job as the executing step, and after
+// it. Anywhere else, the packages execute a second time.
+func TestMergeGateParity_CacheReplaysRunAfterTheirExecutorInOneJob(t *testing.T) {
+	replays := verifyCacheReplays(t, readMakefile(t))
+	for step, executor := range mergeGateReplayFloor {
+		if !slices.Contains(replays[step], executor) {
+			t.Errorf("make verify's %s step no longer replays packages %s executed (replays %v); this test pins that pair, so update mergeGateReplayFloor if the change is deliberate", step, executor, replays)
+		}
+	}
+
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	type position struct {
+		job   string
+		index int
+	}
+	where := map[string]position{}
+	for _, key := range gateJobKeys(doc.Jobs) {
+		for i, step := range doc.Jobs[key].Steps {
+			if target, ok := strings.CutPrefix(strings.TrimSpace(step.Run), "make "); ok {
+				where[target] = position{job: key, index: i}
+			}
+		}
+	}
+	for _, step := range slices.Sorted(maps.Keys(replays)) {
+		r, ok := where[step]
+		if !ok {
+			t.Errorf("merge-gate.yml: no gate job runs make %s", step)
+			continue
+		}
+		for _, executor := range replays[step] {
+			e, ok := where[executor]
+			switch {
+			case !ok:
+				t.Errorf("merge-gate.yml: no gate job runs make %s", executor)
+			case e.job != r.job:
+				t.Errorf("merge-gate.yml: make %s runs in job %q but make %s runs in job %q, so the packages make %s re-runs execute a second time on %q's cold runner; run make %s in job %q, after make %s", step, r.job, executor, e.job, step, r.job, step, e.job, executor)
+			case r.index < e.index:
+				t.Errorf("merge-gate.yml: job %q runs make %s (step %d) before make %s (step %d); it must run after it to replay its packages from the cache", r.job, step, r.index, executor, e.index)
+			}
+		}
+	}
+}
+
 // TestMergeGateGateJobsUsePinnedSetup proves each gate job carries today's
 // pinned setup: it starts with a full-history checkout and Go 1.25, uses no
 // action outside the pinned set, passes each action exactly its pinned

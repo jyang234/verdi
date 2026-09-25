@@ -28,11 +28,14 @@
 # I-14's CI-context lint baselines against a real GITHUB_BASE_REF), split
 # across parallel gate jobs so the wall clock is the slowest job, not the
 # sum:
-#   static      build, fmt-check, vet, lint, fixture, lint-store,
-#               lint-showcase, showcase-coverage, then the self-lint;
+#   static      build, fmt-check, vet, lint, lint-store, lint-showcase,
+#               showcase-coverage, then the self-lint;
 #   test-cmd    the cmd/verdi test shard;
 #   test-cross  the cross-binary test shard (always fresh, ADJ-68);
-#   test-rest   every other package's tests;
+#   test-rest   every other package's tests, then fixture, whose three
+#               packages test-rest already ran: after test-rest on the same
+#               runner they replay from the test cache instead of running
+#               twice;
 #   spec-align  internal/specalign, the one gate that runs it;
 #   e2e         the Playwright suite.
 # Each gate job repeats the setup the single job had (full-history
@@ -51,10 +54,11 @@
 #
 # internal/specalign/workflow_test.go is the parity guard for all of this:
 # the gate jobs run exactly VERIFY_STEPS (with `test` as its shards) plus
-# the post-verify steps, each once; `merge-gate` needs exactly the gate
-# jobs, with `if: always()` and the pinned verdict call; and every document,
-# job, and step key is whitelisted. Change this file and the Makefile's
-# VERIFY_STEPS together.
+# the post-verify steps, each once; a step that replays another step's
+# packages from the test cache runs in that step's job, after it;
+# `merge-gate` needs exactly the gate jobs, with `if: always()` and the
+# pinned verdict call; and every document, job, and step key is
+# whitelisted. Change this file and the Makefile's VERIFY_STEPS together.
 #
 # Evidence production/upload is deliberately NOT here. That stays
 # verify.yml's push-only duty (see verify.yml's own head comment on why
@@ -95,7 +99,6 @@ jobs:
       - run: make fmt-check
       - run: make vet
       - run: make lint
-      - run: make fixture
       - run: make lint-store
       - run: make lint-showcase
       - run: make showcase-coverage
@@ -134,6 +137,10 @@ jobs:
         with:
           go-version: "1.25"
       - run: make test-rest
+      # fixture re-runs three of test-rest's packages with test-rest's exact
+      # flags, so here, after test-rest on the same runner, the Go test cache
+      # replays them instead of executing them twice (SI-266).
+      - run: make fixture
 
   spec-align:
     runs-on: ubuntu-latest
