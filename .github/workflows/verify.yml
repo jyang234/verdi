@@ -7,9 +7,10 @@
 # SI-266 split `make verify`'s step set, plus the post-verify self-lint,
 # across those jobs so the wall clock is the slowest job, not the sum;
 # merge-gate.yml's head comment says what each job runs and why. Trust parity
-# (CLAUDE.md) holds here the way SI-266 records it for merge-gate.yml: CI runs
-# exactly `make verify`'s step set, split across the gate jobs, and that set
-# grows only as the Makefile's VERIFY_STEPS grows. A seventh job, `verify`,
+# (CLAUDE.md) is read here as SI-266 reads it for merge-gate.yml, since the
+# gate jobs are the same: CI runs exactly `make verify`'s step set, split
+# across the gate jobs, and that set grows only as the Makefile's
+# VERIFY_STEPS grows. A seventh job, `verify`,
 # produces and uploads the evidence once every gate job has succeeded (see
 # "The evidence job" below).
 #
@@ -87,13 +88,14 @@
 #
 # The evidence job (SI-267). `verify` needs every gate job and declares no
 # `if:` and no `continue-on-error:`, so GitHub's default success() skips it
-# unless every gate job of this run succeeded: a failed, cancelled, or
-# skipped gate job means no evidence from this run. It then passes every gate
-# job's result to scripts/merge-gate-verdict.sh, the same call merge-gate.yml's
-# `merge-gate` job makes. That step is defense in depth and a legible in-log
-# witness of the results the evidence binds; it needs no canary, because the
-# job cannot run over a failed need. Only then does it build the binary, run
-# `verdi sync --produce`, and upload the bundle.
+# unless every gate job it needs succeeded: after a failed, cancelled, or
+# skipped gate job it does not run, and no evidence is produced. When it
+# does run, it first passes every gate job's result to
+# scripts/merge-gate-verdict.sh, the same call merge-gate.yml's `merge-gate`
+# job makes. That step is defense in depth and a legible in-log witness of
+# the results the evidence binds; it needs no canary, because the job cannot
+# run over a failed need. Only then does it build the binary, run `verdi
+# sync --produce`, and upload the bundle.
 #
 # Disclosed consequence (a deviation from remote-and-ci's original
 # two-workflow delivery, flagged for `verdi align`/`verdi accept`
