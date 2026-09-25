@@ -75,10 +75,11 @@ func TestExperimentRatificationCapsuleReleaseGrammarBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentRatificationCapsuleReleaseBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	fixture := buildWave5CAcceptedResult(t, bin)
 	repo := fixture.repo
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	base := wave5CRatificationArgs(repo.Head, fixture.resultDigest, experiment.DispositionSelectRecommended, "", "")
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, append(base, "--json")...)
@@ -244,10 +245,11 @@ func TestExperimentRatificationCapsuleReleaseBuiltBinary(t *testing.T) {
 }
 
 func TestExperimentCapsuleReleaseNonSelectingBuiltBinary(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	fixture := buildWave5CAcceptedResult(t, bin)
 	repo := fixture.repo
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	base := wave5CRatificationArgs(repo.Head, fixture.resultDigest, experiment.DispositionRejectAll, "", "")
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, append(base, "--json")...)
@@ -301,7 +303,9 @@ func TestExperimentCapsuleReleaseNonSelectingBuiltBinary(t *testing.T) {
 }
 
 func TestWave5CFixtureConstructionIsDeterministic(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	// No pin needed here: buildWave5CAcceptedResult pins each fixture it
+	// builds (below) itself, right after building it and before any of its
+	// own git/binary operations run.
 	bin := buildVerdiBinary(t)
 
 	setWave5CGitAmbient(t, "Ambient One", "one@example.invalid", "1735689600 +0000")
@@ -349,6 +353,7 @@ func buildWave5CAcceptedResult(t *testing.T, bin string) wave5CExperimentFixture
 	privateKey := ed25519.NewKeyFromSeed(wave5CFixtureEd25519Seed[:])
 	publicKey := privateKey.Public().(ed25519.PublicKey)
 	repo := buildExperimentHumanRepo(t, publicKey)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	wave5CBindProtectedInputs(t, repo)
 
 	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "-b", "registration")

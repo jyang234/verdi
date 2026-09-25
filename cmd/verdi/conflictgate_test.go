@@ -159,6 +159,7 @@ func TestConflictGateRequestGrammar(t *testing.T) {
 // reading operands in a legacy checkout, or letting an adopted checkout run
 // without the explicit existing context request.
 func TestConflictGateAdoption(t *testing.T) {
+	t.Parallel()
 	t.Run("legacy without flag does not read operands or call provider", func(t *testing.T) {
 		root := t.TempDir()
 		called := false
@@ -208,6 +209,7 @@ func TestConflictGateAdoption(t *testing.T) {
 // TestConflictGateRequestValidation catches any permissive read/decode path,
 // any caller claim replacing lifecycle facts, and any symlink-following read.
 func TestConflictGateRequestValidation(t *testing.T) {
+	t.Parallel()
 	root, head := adoptedConflictGateRepo(t)
 	valid := contextLifecycleRequestFile(t, root, "valid.json", "spec/feature-alpha", contextcompile.PhaseDesign, nil)
 
@@ -366,6 +368,7 @@ func TestConflictGateRequestValidation(t *testing.T) {
 // request path containing that sequence must fail operationally before the
 // provider is constructed or called, never decode an external request file.
 func TestConflictGateRequestPathIdentity(t *testing.T) {
+	t.Parallel()
 	root, _ := adoptedConflictGateRepo(t)
 	writeContextRequestFile(t, root, "request.json", []byte("{not-the-request\n"))
 
@@ -404,6 +407,7 @@ func TestConflictGateRequestPathIdentity(t *testing.T) {
 // build the candidate union arm, while build/review must preserve the decoded
 // request as the accepted arm after binding computed branch and HEAD.
 func TestConflictGateTarget(t *testing.T) {
+	t.Parallel()
 	root, head := adoptedConflictGateRepo(t)
 	tests := []struct {
 		name      string
@@ -468,6 +472,7 @@ func TestConflictGateTarget(t *testing.T) {
 // threads the one request adapter through each review-mode entry point. The
 // real provider's conservative verdict must arrive before any close effect.
 func TestLifecycleConflictBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	tests := []struct {
 		name string
@@ -510,6 +515,7 @@ func TestLifecycleConflictBuiltBinary(t *testing.T) {
 }
 
 func TestConflictGateTargetProviderError(t *testing.T) {
+	t.Parallel()
 	root, head := adoptedConflictGateRepo(t)
 	path := contextLifecycleRequestFile(t, root, "provider-error.json", "spec/feature-alpha", contextcompile.PhaseBuild, nil)
 	want := errors.New("provider failed")

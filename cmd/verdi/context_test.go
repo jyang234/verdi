@@ -82,7 +82,7 @@ func buildContextCompileRepo(t *testing.T, specFiles map[string]string) *fixture
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
@@ -495,7 +495,7 @@ func TestCmdContextCompile_NoConstitution_ExitOne(t *testing.T) {
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold, no constitution"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
 
@@ -737,7 +737,7 @@ func buildContextCompileRepoTwoAdapter(t *testing.T, specFiles map[string]string
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)

@@ -15,11 +15,13 @@ import (
 )
 
 // resolvableDefaultBranchRoot builds a minimal fixturegit repo (local
-// branch "main", no remote) so CI_DEFAULT_BRANCH="main" resolves to a
-// real, git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
+// branch "main", no remote) and pins refs/remotes/origin/HEAD at it
+// (pinFixtureDefaultBranch) so the default branch resolves to a real,
+// git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
 // resolver internal/lint.ResolveDefaultBranch now delegates to — requires
 // the named branch to actually resolve, not just be named; a bare
-// t.TempDir() is not a git repository at all and no longer resolves).
+// t.TempDir() is not a git repository at all and no longer resolves)
+// without any caller needing its own t.Setenv("CI_DEFAULT_BRANCH", ...).
 // Shared by this file, reviewfeed_test.go, and supersessionfeed_test.go
 // (all package main, all needing the same hermetic "give me a resolvable
 // default branch" root).
@@ -28,6 +30,7 @@ func resolvableDefaultBranchRoot(t *testing.T) string {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"seed.txt": "seed\n"}, Message: "seed"},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	return repo.Dir
 }
 
@@ -35,8 +38,7 @@ func resolvableDefaultBranchRoot(t *testing.T) string {
 // hermetic forge fake: every open MR targeting the resolved default branch
 // contributes its source branch, sorted.
 func TestForgeOpenMRs_ListsSourceBranches(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // named branch must still resolve to a real local ref (internal/specstate)
-
+	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "2", SourceBranch: "design/zeta", Title: "Zeta"})
 	f.SeedOpenMR("main", forge.OpenMR{ID: "1", SourceBranch: "design/alpha", Title: "Alpha"})

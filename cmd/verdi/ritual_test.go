@@ -289,8 +289,9 @@ var storyImplementsPlaceholderRe = regexp.MustCompile(`links:\n  - \{ type: impl
 // supersession with its derived Superseded state and re-affirmation
 // enforcement.
 func TestRoundFourRitual_FullLoop(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	prov := seedRitualProvider(t)

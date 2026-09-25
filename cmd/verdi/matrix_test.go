@@ -59,7 +59,7 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 	// fold (discoverImplementingStories) to resolve implementing stories'
 	// closed/superseded state instead of refusing operationally
 	// (fix-round-1 finding 2).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	// verdi.yaml is not part of the corpus's own committed-zone fixture
 	// (examples/showcase predates it needing one); write a minimal one
@@ -451,7 +451,7 @@ func TestCmdMatrix_StatusLine_Superseded(t *testing.T) {
 	// Pin the projector's default-branch resolution (I2: the status line
 	// is the EFFECTIVE state now; a landed legacy `status: superseded`
 	// projects Superseded via the compatibility reading).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -472,6 +472,7 @@ func (distinctMatrixVocabulary) DisplayState(class, status string) string {
 }
 
 func TestPrintMatrix_GrandfatheredFeatureUsesFeatureVocabulary(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml": phase7ManifestYAML,
@@ -479,7 +480,7 @@ func TestPrintMatrix_GrandfatheredFeatureUsesFeatureVocabulary(t *testing.T) {
 		},
 		Message: "init store with a grandfathered feature",
 	}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	projection, err := matrixprojection.Project(context.Background(), repo.Dir, "spec/superseded-story-fixture", false, nil)
 	if err != nil {
 		t.Fatalf("Project(grandfathered feature): %v", err)
@@ -572,7 +573,7 @@ func TestCmdMatrix_ObligationColumn(t *testing.T) {
 	// Pin the projector's default-branch resolution (I2: the status line
 	// is the EFFECTIVE state; this landed legacy-accepted fixture then
 	// still prints accepted-pending-build).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer

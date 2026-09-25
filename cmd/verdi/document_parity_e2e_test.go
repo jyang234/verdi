@@ -41,8 +41,9 @@ import (
 // and the default branch coincide, so every consumer's reading is the
 // accepted one.
 func TestDocumentParity_NoReadiness(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -131,8 +132,9 @@ func TestDocumentParity_NoReadiness(t *testing.T) {
 // a pinned reading carries no readiness because ModeAt never calls the
 // loader at all, not because none happened to be configured.
 func TestDocumentParity_PinnedCommit(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -233,8 +235,9 @@ func TestDocumentParity_PinnedCommit(t *testing.T) {
 // Without the TargetRef gate this test reds: the board leg would grow a
 // populated Readiness section the other three legs do not have.
 func TestDocumentParity_BoardWithForeignReadinessSnapshot(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -389,8 +392,9 @@ func (f fixedSnapshotLoader) Load(context.Context, string) (readinesspilot.Snaps
 // all (a build-time artifact has no request to derive against), so it is
 // not part of this arm's byte-equality comparison.
 func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSpecDocRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -507,6 +511,7 @@ func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
 // Go value. dex is excluded throughout: the static docs site never
 // carries readiness at all (spec/spec-documents ac-4).
 func TestDocumentParity_ServedWithContextRequest(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 		".verdi/specs/active/lockbox/spec.md":       specDocFixture,

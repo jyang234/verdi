@@ -76,7 +76,7 @@ func localOperatorFixtureFiles(t *testing.T) map[string]string {
 func buildLocalOperatorRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: localOperatorFixtureFiles(t), Message: "adopt the local-operator fixture store"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestContextConflict_LocalOperator_SubjectMismatch_Violated(t *testing.T) {
 	files[dispositionPath] = strings.Replace(files[dispositionPath], boundPrincipal, string(mismatchedID), 1)
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "adopt the local-operator fixture store (mismatched approver variant)"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
 	}

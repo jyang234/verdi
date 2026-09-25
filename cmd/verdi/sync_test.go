@@ -776,6 +776,7 @@ func TestCheckFetchedToolPin_AbsentCarrierRendersThroughTheSeam(t *testing.T) {
 // port collapsed the multi-verdicts.json artifact to a single bundle, or
 // errored on the duplicate.
 func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	const specRef = "spec/close-fixture"
@@ -858,6 +859,7 @@ func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
 // still prevents them from becoming positive proof. A locally fabricated
 // bundle can never fold as trusted.
 func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	const specRef = "spec/close-fixture"

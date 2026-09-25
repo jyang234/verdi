@@ -54,8 +54,9 @@ func constitutionStoreFiles(t *testing.T) map[string]string {
 
 func buildConstitutionRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{Files: constitutionStoreFiles(t), Message: "adopt constitution"}})
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: constitutionStoreFiles(t), Message: "adopt constitution"}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 func writeConstitutionRequestFile(t *testing.T, dir, name string, body map[string]interface{}) string {
@@ -75,6 +76,7 @@ func writeConstitutionRequestFile(t *testing.T, dir, name string, body map[strin
 // inspect surface: exit 0, a decodable result naming both the accepted and
 // proposed constitution states, and no worktree/HEAD side effect.
 func TestContextConstitutionE2E_InspectHappyPath(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
 	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{
@@ -118,6 +120,7 @@ func TestContextConstitutionE2E_InspectHappyPath(t *testing.T) {
 // call (exit 0), and a real stale-head verdict (exit 1) on a second call
 // whose Expected.Head no longer names the branch's real HEAD.
 func TestContextConstitutionE2E_ProposeThenStaleHead(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
 
@@ -178,6 +181,7 @@ func TestContextConstitutionE2E_ProposeThenStaleHead(t *testing.T) {
 // TestContextConstitutionE2E_OutFile proves the --out path writes the exact
 // canonical result to the named file and leaves stdout empty.
 func TestContextConstitutionE2E_OutFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
 	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{
@@ -215,6 +219,7 @@ func TestContextConstitutionE2E_OutFile(t *testing.T) {
 // stdout or --out) against the MCP tool's own text content item, for each of
 // the three operations MCP registers.
 func TestContextConstitution_CLIAndMCPRecordsAreByteIdentical(t *testing.T) {
+	t.Parallel()
 	repo := buildConstitutionRepo(t)
 	root, err := store.FindRoot(repo.Dir)
 	if err != nil {
@@ -487,6 +492,7 @@ func TestContextConstitution_FailureStdoutWriteFailurePreservesRepositoryEffects
 // contract existed — is refused operationally (exit 2) before any store
 // access, rather than read as whichever version this build implements.
 func TestContextConstitutionE2E_UnversionedRequestRefused(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
 	reqPath := writeConstitutionRequestFile(t, repo.Dir, "unversioned.json", map[string]interface{}{})
@@ -507,6 +513,7 @@ func TestContextConstitutionE2E_UnversionedRequestRefused(t *testing.T) {
 // contract: an unrecognized `context constitution` operation fails closed
 // operationally before any store access.
 func TestContextConstitutionE2E_UnknownSubcommand_ExitTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
 

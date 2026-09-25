@@ -62,8 +62,7 @@ func buildRuntimeCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	// Pin the projector's default-branch resolution for the C1 pre-closure
 	// precondition (no origin remote in a fixturegit repo).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                                         "schema: verdi.layout/v1\nforge: github\n",
 			".verdi/specs/active/loan-mgmt/spec.md":                     featureV1SpecMD,
@@ -72,6 +71,8 @@ func buildRuntimeCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "runtime close fixture: feature + story declaring evidence: [runtime]",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // writeRuntimeCloseGateReport mirrors close_test.go's own

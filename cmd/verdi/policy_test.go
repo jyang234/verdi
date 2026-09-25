@@ -127,7 +127,7 @@ func TestPolicyAdopt_UsageAndFlagShape(t *testing.T) {
 func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
 	if code != 0 {
@@ -216,7 +216,7 @@ func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 func TestPolicyAdopt_PreStagedUnrelatedChangeStaysOutOfTheAdoptCommit(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 
 	if err := os.WriteFile(filepath.Join(repo.Dir, "notes.md"), []byte("unrelated work in progress\n"), 0o644); err != nil {
@@ -252,7 +252,7 @@ func TestPolicyAdopt_PreStagedUnrelatedChangeStaysOutOfTheAdoptCommit(t *testing
 func TestPolicyAdopt_TeamRequiresOwnerAndProposesOnly(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile", "team", "--owner", "platform-team")
@@ -287,7 +287,6 @@ func TestPolicyAdopt_TeamRequiresOwnerAndProposesOnly(t *testing.T) {
 // — main untouched, no policy/adopt branch, clean working tree.
 func TestPolicyAdopt_OverrideRecordedAndSynthesisRefusedBeforeBranching(t *testing.T) {
 	bin := buildVerdiBinary(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	pinGitCommitIdentity(t)
 
 	t.Run("benign override recorded", func(t *testing.T) {
@@ -306,6 +305,7 @@ func TestPolicyAdopt_OverrideRecordedAndSynthesisRefusedBeforeBranching(t *testi
 			},
 			Message: "init store with a benign policy-starter override",
 		}})
+		pinFixtureDefaultBranch(t, repo.Dir)
 
 		code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
 		if code != 0 {
@@ -374,7 +374,7 @@ func TestPolicyAdopt_OverrideRecordedAndSynthesisRefusedBeforeBranching(t *testi
 func TestPolicyAdopt_NoLocalIdentityRefusesSolo(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	clearLocalOperatorGitIdentity(t, repo.Dir)
 
 	code, _, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
@@ -428,7 +428,7 @@ func TestPolicyAdopt_NoLocalIdentityRefusesSolo(t *testing.T) {
 func TestPolicyAdopt_NoCommitterIdentityRefusesBeforeWriting(t *testing.T) {
 	bin := buildVerdiBinary(t) // built BEFORE the identity is masked: `go build` is not what is under test
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	clearLocalOperatorGitIdentity(t, repo.Dir)
 	// Every scope git could mint an identity from, closed: no global or
 	// system config, and names exported EMPTY rather than left unset (an
@@ -476,7 +476,7 @@ func TestPolicyAdopt_NoCommitterIdentityRefusesBeforeWriting(t *testing.T) {
 func TestPolicyAdopt_ExistingBranchRefused(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 	gitOutput(t, repo.Dir, "branch", "policy/adopt")
 
@@ -510,13 +510,13 @@ func TestPolicyAdopt_ExistingBranchRefused(t *testing.T) {
 // written or committed onto it.
 func TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout(t *testing.T) {
 	bin := buildVerdiBinary(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	pinGitCommitIdentity(t)
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"},
 		{Files: map[string]string{".verdi/policy/constitution.md": "placeholder\n"}, Message: "main already carries a policy tree"},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	// Move the current checkout back to the pre-policy commit: "main"
 	// itself still points at the policy-carrying head (repo.Head), but
 	// the working tree this test drives adopt from does not show it yet.
@@ -549,7 +549,7 @@ func TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout(t *testing.T
 func TestPolicyAdopt_InlineFlagValuesAdoptTheTeamProfile(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile=team", "--owner=platform-team")
@@ -604,7 +604,7 @@ func TestPolicyAdopt_WriteFailureDisclosesWhatLandedAndWhereTheCheckoutIs(t *tes
 	}
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	pinGitCommitIdentity(t)
 
 	invDir := filepath.Join(repo.Dir, ".verdi", "constitution")
@@ -692,7 +692,7 @@ func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := adoptFixture(t)
-			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			pinFixtureDefaultBranch(t, repo.Dir)
 			pinGitCommitIdentity(t)
 			tc.install(t)
 
@@ -732,7 +732,6 @@ func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T
 // refusal must say that AND say where the checkout now is.
 func TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch(t *testing.T) {
 	bin := buildVerdiBinary(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	pinGitCommitIdentity(t)
 
 	canon, err := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
@@ -747,6 +746,7 @@ func TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch(t *testing.T) 
 		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"},
 		{Files: map[string]string{".verdi/templates/policy-starter.md": synth}, Message: "main gains a synthesizing policy-starter override"},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	gitOutput(t, repo.Dir, "checkout", "--quiet", repo.Heads[0])
 	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "templates")); !os.IsNotExist(err) {
 		t.Fatalf("test setup: the pre-override checkout unexpectedly carries .verdi/templates (stat err=%v)", err)
