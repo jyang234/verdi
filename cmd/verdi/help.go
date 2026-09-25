@@ -48,7 +48,7 @@ func verbHelpRequested(rest []string) bool {
 const topLevelUsage = `usage: verdi <verb> [args...]
 
 verbs:
-  lint             run every VL-001..VL-020 lint rule over the store
+  lint             run every VL-001..VL-022 and VL-026 lint rule over the store
   design           scaffold, mutate, and inspect design-branch specifications
   accept           deprecated: acceptance now follows from landing the reviewed pull request
   feature          deprecated alias for "build"
