@@ -99,6 +99,7 @@ func asPolicyConflictService(t *testing.T, provider policyconflict.VerdictProvid
 // exactly nil, the same value context_conflict.go hardcoded before this
 // wiring existed.
 func TestNewLocalContextConflictProvider_NoLocalOperatorSource_NilActors(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
@@ -165,6 +166,7 @@ func TestNewLocalContextConflictProvider_LocalOperatorSource_ResolvesActor(t *te
 // package hardcoded before this wiring existed (Actors: nil), everything
 // else equal.
 func TestContextConflict_NoLocalOperatorSource_ByteIdenticalReport(t *testing.T) {
+	t.Parallel()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})

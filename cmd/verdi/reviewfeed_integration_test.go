@@ -41,7 +41,7 @@ acceptance_criteria:
 // asserts the anchored (resolved) sticky rides its object's card and the
 // token-free comment lands in the inbox tray.
 func TestReviewFeed_Integration_ForgeFakeThroughBoard(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // adapter resolves the default branch hermetically (no git remote)
+	t.Parallel()
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -51,6 +51,7 @@ func TestReviewFeed_Integration_ForgeFakeThroughBoard(t *testing.T) {
 		},
 		Message: "seed a draft feature spec for the review-mode board",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "design/"+reviewFeedIntegSpecName)
 
 	// The forge fake stands in for a live GitLab/GitHub (no network,

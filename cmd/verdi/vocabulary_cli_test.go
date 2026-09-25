@@ -105,9 +105,10 @@ func runVerdi(t *testing.T, bin, dir string, args ...string) (int, string, strin
 // this test drives the store's ALREADY-landed bytes directly rather than
 // accepting anything first.
 func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildVocabRenameRepo(t, "pred-story", predStoryAcceptedMD, "succ-story", succStorySupersedesMD)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	// succ-story's committed bytes are landed on main by construction
 	// (buildVocabRenameRepo's own single commit); under Git-derived state
 	// (internal/specstate) that alone reads as accepted-pending-build

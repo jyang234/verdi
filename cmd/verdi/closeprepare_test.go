@@ -71,6 +71,7 @@ func TestCmdClose_PrepareParsing(t *testing.T) {
 // report before the shared review verdict. The refusal snapshot includes the
 // report bytes, active/archive trees, branches, HEAD, index, and staged paths.
 func TestClosePrepareConflictPreEffect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		verdict  policyconflict.Verdict
@@ -250,6 +251,7 @@ func TestClosePrepare_BuiltBinaryResumesCurrentJudgmentStop(t *testing.T) {
 }
 
 func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		ref      string
@@ -373,6 +375,7 @@ func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T)
 // close later freezes, so it must surface a judge timeout as the honest
 // operational expiry instead of manufacturing judgment work out of it.
 func TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
 	deps := closeDeps{
@@ -411,6 +414,7 @@ func TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding(t *testing.T) 
 // would point at the real ritual instead of at the resumable preparation
 // they were running.
 func TestRunPrepare_JudgeTimeoutResumeHintSpeaksPreparation(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	deps := closeDeps{
 		Runner:       upstream.NewFakeRunner(),
@@ -471,6 +475,7 @@ func TestPrepareAlignDeps_IsFreezeAlignDepsWithOnlyTheResumeHintOverridden(t *te
 }
 
 func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		ref      string
@@ -567,6 +572,7 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 // never a pass, so preparation must name what it is about to regenerate
 // over, before it regenerates, through the shared disclosure seam.
 func TestRunPrepare_DisclosesDispositionsBeforeRegeneratingAStaleReport(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand against the adapter" }
   - { id: f-2, kind: judged, text: "a prior semantic reading", disposition: accepted-deviation, note: "accepted for this release" }
@@ -638,6 +644,7 @@ func TestRunPrepare_DisclosesDispositionsBeforeRegeneratingAStaleReport(t *testi
 // a loss that cannot occur — diluting the computed arm, which is the genuine
 // loss. This test proves the mechanism first, then pins the corrected text.
 func TestRunPrepare_JudgedRegenerationDisclosureNamesReaffirmationNotLoss(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand" }
   - { id: judged-j-1, kind: judged, text: "a prior semantic reading", disposition: accepted-deviation, note: "accepted for this release" }
@@ -743,6 +750,7 @@ findings:
 // working-tree file a human can hand-edit and must not rely on that invariant
 // holding by construction"). This holds the same standard.
 func TestRunPrepare_DisclosesDiscardedNotResurfacedDispositions(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	const findings = `  - { id: f-1, kind: computed, text: "still open" }
 `
@@ -793,6 +801,7 @@ func TestRunPrepare_DisclosesDiscardedNotResurfacedDispositions(t *testing.T) {
 // one. A disclosure that fires unconditionally teaches operators to ignore
 // it.
 func TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		findings string
@@ -873,6 +882,7 @@ func alignFakeJudgeNoFindings(t *testing.T) []string {
 // JUDGMENT REQUIRED, the gate holds, and --force-local suppresses the publish
 // guard. The note was destroyed; the summary said nothing.
 func TestRunPrepare_ReadySummaryCountsPreparationsOwnDisclosures(t *testing.T) {
+	t.Parallel()
 	repo := readyCloseFixtureRepo(t)
 	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand" }
 `
@@ -922,6 +932,7 @@ func TestRunPrepare_ReadySummaryCountsPreparationsOwnDisclosures(t *testing.T) {
 // The rehearsal is a DISCLOSURE here exactly as it is there: no verdict moves,
 // nothing new refuses, and preparation still writes only the target report.
 func TestRunPrepare_RehearsesTheIndexGuardBeforeItWrites(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	deps := func(t *testing.T) closeDeps {
 		return closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()}
@@ -1061,6 +1072,7 @@ digest: sha256:%s
 // and must not unfreeze anything: a frozen report is immutable, and
 // deciding what to do about one is human work.
 func TestRunPrepare_FrozenLivingReportIsItsOwnOperatorState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		build func(*testing.T) *fixturegit.Repo
@@ -1139,6 +1151,7 @@ func TestRunPrepare_FrozenLivingReportIsItsOwnOperatorState(t *testing.T) {
 }
 
 func TestRunPrepare_QuotesUnsafeFindingIDInDispositionTemplate(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	const unsafeID = `finding with spaces; $(touch SHOULD_NOT_EXIST) 'quoted'`
 	findings := fmt.Sprintf("  - { id: %s, kind: computed, text: \"open finding\" }\n", strconv.Quote(unsafeID))
@@ -1165,6 +1178,7 @@ func TestRunPrepare_QuotesUnsafeFindingIDInDispositionTemplate(t *testing.T) {
 }
 
 func TestRunPrepare_FlagShapedFindingIDTemplateDispositionsIntendedFinding(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	findings := []artifact.Finding{{
 		ID:   "--amend",
@@ -1258,6 +1272,7 @@ func TestRunPrepare_FlagShapedFindingIDTemplateDispositionsIntendedFinding(t *te
 // path, and stderr says nothing — the failure detail exists only inside the
 // synthetic finding's own text.
 func TestRunPrepare_JudgeAbsenceIsNotPresentedAsHumanJudgment(t *testing.T) {
+	t.Parallel()
 	template := func(ref, id string) string {
 		return fmt.Sprintf("verdi disposition --rationale '<human-authored rationale>' -- %s %s '<human-authored-disposition:fixed|accepted-deviation>'", ref, id)
 	}
@@ -1328,6 +1343,7 @@ func TestRunPrepare_JudgeAbsenceIsNotPresentedAsHumanJudgment(t *testing.T) {
 }
 
 func TestRunPrepare_FullyDispositionedRunsAuthoritativePreflight(t *testing.T) {
+	t.Parallel()
 	t.Run("mechanical work required", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
@@ -1429,6 +1445,7 @@ func TestRunPrepare_FullyDispositionedRunsAuthoritativePreflight(t *testing.T) {
 // reaches the verb. Quoting the echoed word costs nothing and does not
 // depend on that analysis staying true.
 func TestRunPrepare_NextCommandQuotesTheRefItEchoes(t *testing.T) {
+	t.Parallel()
 	repo := readyCloseFixtureRepo(t)
 
 	var stdout, stderr bytes.Buffer
@@ -1480,6 +1497,7 @@ func prepareStoreWithoutGit(t *testing.T) string {
 // framing so the operator knows which verb refused, and must leave no report
 // behind: none of these failures has decided anything about the target.
 func TestRunPrepare_SetupFailuresReturn2BeforeAnyRefresh(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		ref        string
@@ -1565,6 +1583,7 @@ func TestRunPrepare_SetupFailuresReturn2BeforeAnyRefresh(t *testing.T) {
 // it — the exit-2 half of the same branch is proven by
 // TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding.
 func TestRunPrepare_AlignFailurePropagatesItsVerdict(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseFixtureRepo(t)
 	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
 	deps := closeDeps{Runner: upstream.NewFakeRunner(), JudgeRequired: true, Forge: forgefake.New()}
@@ -1596,6 +1615,7 @@ func TestRunPrepare_AlignFailurePropagatesItsVerdict(t *testing.T) {
 // own, so the check lives in a function that can be driven directly rather
 // than as an inline branch no test can reach.
 func TestReloadRefreshedReport(t *testing.T) {
+	t.Parallel()
 	t.Run("decodable report", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, dispositionedFindingYAML)
@@ -1660,6 +1680,7 @@ func TestReloadRefreshedReport(t *testing.T) {
 }
 
 func TestRunPrepare_OperationalErrorsReturn2WithoutMutation(t *testing.T) {
+	t.Parallel()
 	t.Run("malformed current report", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
@@ -1744,6 +1765,7 @@ findings:
 }
 
 func TestSnapshotOutsidePrepareReport_DetectsIndexAndNonBranchRefMutations(t *testing.T) {
+	t.Parallel()
 	t.Run("index", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
@@ -1836,6 +1858,7 @@ func assertPreparePreserved(t *testing.T, root, reportPath string, beforeRaw []b
 // preflight path — the "existing prepare test harness makes it cheap"
 // case the correction brief anticipated.
 func TestRunPreparePropagatesExperimentEvidenceParity(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
 		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
 	})
@@ -1876,6 +1899,7 @@ func TestRunPreparePropagatesExperimentEvidenceParity(t *testing.T) {
 // wrap over runStoryPreflightGate's own "close: --preflight:"-prefixed
 // error), not a new defect, and is deliberately not asserted away here.
 func TestRunPrepareExperimentEvidenceOperationalRefusesWithoutReady(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
 	closeExperimentWriteFixtureFile(t, repo.Dir,
 		".verdi/specs/active/exp-spike/experiments/"+closeExperimentProductionExperimentID+"/experiment.yaml",

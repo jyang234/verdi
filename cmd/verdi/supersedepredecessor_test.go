@@ -251,7 +251,7 @@ func resolveCandidate(t *testing.T, ctx context.Context, root, name string) spec
 // (predecessor reads as superseded once its successor is accepted) while
 // removing the mutation that used to produce it.
 func TestDerivedSupersession_FeaturePredecessor(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -262,6 +262,7 @@ func TestDerivedSupersession_FeaturePredecessor(t *testing.T) {
 			Message: "predecessor + validly superseding successor, both landed on the default branch",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	predPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "pred-feature", "spec.md")
@@ -297,7 +298,7 @@ func TestDerivedSupersession_FeaturePredecessor(t *testing.T) {
 // which carries no `supersession:` block at all must NOT derive the
 // predecessor's Superseded state — it stays AcceptedPendingBuild.
 func TestDerivedSupersession_ObjectFragmentEdgeDoesNotSupersede(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -308,6 +309,7 @@ func TestDerivedSupersession_ObjectFragmentEdgeDoesNotSupersede(t *testing.T) {
 			Message: "predecessor + a successor carrying only a decision-level fragment edge",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	result := resolveCandidate(t, ctx, repo.Dir, "pred-feature")
@@ -325,7 +327,7 @@ func TestDerivedSupersession_ObjectFragmentEdgeDoesNotSupersede(t *testing.T) {
 // reinvented: I-40 forbids inventing any NEW story-supersession mechanism,
 // since a story spec can never carry a `supersession:` block.
 func TestDerivedSupersession_LegacySupersededStoryPreserved(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -336,6 +338,7 @@ func TestDerivedSupersession_LegacySupersededStoryPreserved(t *testing.T) {
 			Message: "legacy-superseded story predecessor, landed on the default branch",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	result := resolveCandidate(t, ctx, repo.Dir, "pred-story")

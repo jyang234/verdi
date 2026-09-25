@@ -336,13 +336,9 @@ func decodeWorkflow(t *testing.T, path string) workflowDoc {
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)
 	}
-	generic, err := artifact.DecodeYAMLLoose(raw)
+	top, err := decodeWorkflowTree(raw)
 	if err != nil {
-		t.Fatalf("parsing %s as YAML: %v", path, err)
-	}
-	top, ok := asMap(generic)
-	if !ok {
-		t.Fatalf("parsing %s: top-level document is not a mapping (got %T)", path, generic)
+		t.Fatalf("parsing %s: %v", path, err)
 	}
 
 	var doc workflowDoc
@@ -357,6 +353,22 @@ func decodeWorkflow(t *testing.T, path string) workflowDoc {
 		doc.Concurrency = &conc
 	}
 	return doc
+}
+
+// decodeWorkflowTree decodes raw through the same loose-decode seam and
+// returns its top-level mapping as the generic tree, before any conversion
+// into workflowDoc. A caller that must see every key and value, not only the
+// fields workflowDoc models, reads this tree (verifyworkflow_test.go).
+func decodeWorkflowTree(raw []byte) (map[string]interface{}, error) {
+	generic, err := artifact.DecodeYAMLLoose(raw)
+	if err != nil {
+		return nil, fmt.Errorf("as YAML: %w", err)
+	}
+	top, ok := asMap(generic)
+	if !ok {
+		return nil, fmt.Errorf("top-level document is not a mapping (got %T)", generic)
+	}
+	return top, nil
 }
 
 // decodeConcurrency handles both `concurrency:` forms (see
@@ -681,17 +693,18 @@ func workflowPath(root, file string) string {
 }
 
 // TestGolangciLintPinIsLockstepWithMakefile closes the drift the Makefile's
-// own head comment and verify.yml's head comment both warn about in prose
-// and neither enforces: `make verify`'s lint step runs whatever
-// golangci-lint the workflow installed, so if the Makefile's pin is bumped
-// and the workflows are not, CI silently lints with the OLD linter while
-// every other test stays green. The Makefile is read as the single source
-// of truth and both the install step's `@<version>` AND the cache key's
-// `<version>` are asserted against it, in both workflows that carry the
-// pattern.
+// own head comment warns about in prose and does not enforce: `make lint`
+// runs whatever golangci-lint the workflow installed, so if the Makefile's
+// pin is bumped and the workflows are not, CI silently lints with the OLD
+// linter while every other test stays green. The Makefile is read as the
+// single source of truth and both the install step's `@<version>` AND the
+// cache key's `<version>` are asserted against it, in both workflows that
+// carry the pattern.
 //
-// verify.yml is asserted here but never modified by this task — it uses the
-// identical cache/install step pair, so covering it costs one table row.
+// Both workflows install it in their `static` gate job. verify.yml's gate
+// jobs must equal merge-gate.yml's in every key and value (SI-267,
+// verifyworkflow_test.go), so its row is implied by merge-gate.yml's; it
+// stays as the one row that names the pin itself.
 func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 	pin := makefileGolangciPin(t)
 
@@ -710,8 +723,9 @@ func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 	}{
 		// merge-gate.yml's lint runs in its static-checks job (SI-266);
 		// TestMergeGateGateJobsUsePinnedSetup proves `make lint` runs there.
+		// verify.yml runs the same static job (SI-267).
 		{"merge-gate.yml", "merge-gate.yml", mergeGateLintJob},
-		{"verify.yml", "verify.yml", "verify"},
+		{"verify.yml", "verify.yml", mergeGateLintJob},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -856,6 +870,18 @@ const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
 	" test-cmd=${{ needs.test-cmd.result }}" +
 	" test-cross=${{ needs.test-cross.result }}" +
 	" test-rest=${{ needs.test-rest.result }}"
+
+// verdictRunFor derives the verdict call over gates: the committed script,
+// then one `<job>=${{ needs.<job>.result }}` argument per gate job, sorted by
+// job key. merge-gate.yml's aggregator and verify.yml's evidence job (SI-267)
+// both run exactly this text.
+func verdictRunFor(gates []string) string {
+	run := mergeGateVerdictScript
+	for _, g := range slices.Sorted(slices.Values(gates)) {
+		run += " " + g + "=${{ needs." + g + ".result }}"
+	}
+	return run
+}
 
 // mergeGateCanaryRun is the aggregator's canary step, pinned exactly. It runs
 // before the verdict and feeds the script a failure between two successes,
@@ -1004,11 +1030,7 @@ func TestMergeGateAggregatorDecidesOverEveryGateJob(t *testing.T) {
 		t.Errorf("merge-gate.yml: %q must run with `if: always()` exactly (a failed dependency otherwise skips it, and a skipped required check passes), got %q", mergeGateAggregatorJob, agg.If)
 	}
 
-	derived := mergeGateVerdictScript
-	for _, g := range gates {
-		derived += " " + g + "=${{ needs." + g + ".result }}"
-	}
-	if derived != mergeGateVerdictRun {
+	if derived := verdictRunFor(gates); derived != mergeGateVerdictRun {
 		t.Errorf("the pinned verdict command must pass exactly one argument per gate job:\n got pinned %q\nwant derived %q", mergeGateVerdictRun, derived)
 	}
 
@@ -1226,34 +1248,54 @@ func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 	}
 }
 
-// TestMergeGateStepsAreWhitelisted is the step-level whitelist net, over
-// every job. An action step may carry {uses, with, name} and a command step
-// {run, name}: `continue-on-error: true` reports a step green over a failed
-// gate, `if:` skips it, and `env:`/`shell:`/`working-directory:` change what
-// it runs, so none may appear. No step may suffix `|| true`, and evidence
-// production and upload stay verify.yml's push-only duty.
-func TestMergeGateStepsAreWhitelisted(t *testing.T) {
-	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+// stepKeyProblem is the step-level whitelist net for one step. It returns ""
+// when step carries exactly one of `uses:` or `run:`, an action step adds
+// nothing but `with:` and `name:`, and a command step nothing but `name:`;
+// otherwise it returns why not, naming the step. `continue-on-error: true`
+// reports a step green over a failure, `if:` skips it, and
+// `env:`/`shell:`/`working-directory:` change what it runs, so none may
+// appear. merge-gate.yml's steps and verify.yml's evidence job (SI-267) are
+// both held to it.
+func stepKeyProblem(step workflowStep) string {
 	usesAllowed := []string{"name", "uses", "with"}
 	runAllowed := []string{"name", "run"}
+	hasUses := slices.Contains(step.Keys, "uses")
+	hasRun := slices.Contains(step.Keys, "run")
+	switch {
+	case hasUses == hasRun:
+		return fmt.Sprintf("(name %q): must carry exactly one of `uses:` or `run:`, got keys %v", step.Name, step.Keys)
+	case hasUses:
+		if extra := keysOutside(step.Keys, usesAllowed); len(extra) != 0 {
+			return fmt.Sprintf("(uses %q): key(s) %v are not whitelisted — an action step may declare only %v", step.Uses, extra, usesAllowed)
+		}
+	default:
+		if extra := keysOutside(step.Keys, runAllowed); len(extra) != 0 {
+			return fmt.Sprintf("(run %q): key(s) %v are not whitelisted — a command step may declare only %v", strings.TrimSpace(step.Run), extra, runAllowed)
+		}
+	}
+	return ""
+}
+
+// TestMergeGateStepsAreWhitelisted is the step-level whitelist net, over
+// every job: every step passes stepKeyProblem. No step may suffix `|| true`,
+// and evidence production and upload stay verify.yml's push-only duty.
+func TestMergeGateStepsAreWhitelisted(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 	for _, key := range jobKeys(doc.Jobs) {
 		for i, step := range doc.Jobs[key].Steps {
+			if problem := stepKeyProblem(step); problem != "" {
+				t.Errorf("job %q step %d %s", key, i, problem)
+			}
 			hasUses := slices.Contains(step.Keys, "uses")
 			hasRun := slices.Contains(step.Keys, "run")
 			switch {
 			case hasUses == hasRun:
-				t.Errorf("job %q step %d (name %q): must carry exactly one of `uses:` or `run:`, got keys %v", key, i, step.Name, step.Keys)
+				// stepKeyProblem reported it; neither check below applies.
 			case hasUses:
-				if extra := keysOutside(step.Keys, usesAllowed); len(extra) != 0 {
-					t.Errorf("job %q step %d (uses %q): key(s) %v are not whitelisted — an action step may declare only %v", key, i, step.Uses, extra, usesAllowed)
-				}
 				if strings.HasPrefix(step.Uses, "actions/upload-artifact") {
 					t.Errorf("job %q step %d uploads an artifact (%q) — evidence upload stays verify.yml's push-only duty", key, i, step.Uses)
 				}
 			case hasRun:
-				if extra := keysOutside(step.Keys, runAllowed); len(extra) != 0 {
-					t.Errorf("job %q step %d (run %q): key(s) %v are not whitelisted — a command step may declare only %v", key, i, strings.TrimSpace(step.Run), extra, runAllowed)
-				}
 				compact := strings.Join(strings.Fields(step.Run), " ")
 				if strings.Contains(compact, "|| true") || strings.Contains(compact, "||true") {
 					t.Errorf("job %q step %d (run %q) suffixes `|| true`, which reports the step green whatever the gate says", key, i, strings.TrimSpace(step.Run))

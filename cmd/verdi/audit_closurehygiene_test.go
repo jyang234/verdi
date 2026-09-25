@@ -89,6 +89,7 @@ body
 // (co-2: byte-for-byte unchanged by this addition), and that the run
 // exits 1 for the closure-hygiene finding.
 func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
+	t.Parallel()
 	// residue.effectiveStates now routes every closure-hygiene decision
 	// through internal/specstate, which resolves the default branch through
 	// its own precedence chain rather than trusting anything the caller
@@ -96,7 +97,6 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 	// origin remote, so CI_DEFAULT_BRANCH is the hermetic pin every other
 	// cmd/verdi fixture builder needing the same resolution already uses
 	// (e.g. closefeature_test.go's buildCloseFeatureRepo).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -112,6 +112,7 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 			Message: "seed an exemption-threshold-crossing corpus alongside an in-flight story",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	root := repo.Dir
 	ctx := context.Background()
 
@@ -187,7 +188,7 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 // for any of the three sections to find prints every section's own
 // "clean" disclosure and exits 0.
 func TestRunAudit_ClosureHygieneSection_Clean(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -195,6 +196,7 @@ func TestRunAudit_ClosureHygieneSection_Clean(t *testing.T) {
 		},
 		Message: "an ordinary in-flight story, nothing contradicts it",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
 	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
@@ -255,7 +257,7 @@ func TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch(t *testing.T) 
 // scanWorktrees propagated the `git status` failure as an operational error
 // and `verdi audit` exited 2, killing all three sections' reports.
 func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -263,6 +265,7 @@ func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *test
 		},
 		Message: "an ordinary in-flight story; nothing contradicts it",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	root := repo.Dir
 	ctx := context.Background()
 
@@ -318,7 +321,7 @@ func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *test
 // unclosed feature, with nothing else in the corpus, is reported but
 // leaves the run CLEAN.
 func TestRunAudit_ClosureHygieneSection_PatternB_NeverFlagsAlone(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                        "data/\n",
@@ -343,6 +346,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 		},
 		Message: "a stub-complete, unclosed feature, alone",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
 	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
@@ -375,7 +379,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 // internal/residue.Result.Flagged routes and audit.go defers to (no separate
 // inline logic path).
 func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -383,6 +387,7 @@ func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T)
 		},
 		Message: "an ordinary in-flight story whose close ritual is only half-run",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	root := repo.Dir
 	ctx := context.Background()
 
@@ -447,7 +452,7 @@ func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T)
 // trailer instead — Finding 1's own "operational/disclosed, not CLEAN"
 // resolution).
 func TestRunAudit_ClosureHygieneSection_MalformedCorpusSpec_DisclosedNeverClean(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -456,6 +461,7 @@ func TestRunAudit_ClosureHygieneSection_MalformedCorpusSpec_DisclosedNeverClean(
 		},
 		Message: "seed one valid, already-accepted story alongside one malformed spec",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
 	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)

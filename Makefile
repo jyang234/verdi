@@ -1,8 +1,8 @@
 .PHONY: build test test-cmd test-cross test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
-# exact version before the lint step runs (verify.yml before `make verify`,
-# merge-gate.yml in its static job before `make lint`), so in CI the
+# exact version before the lint step runs (verify.yml and merge-gate.yml,
+# each in its static job before `make lint`), so in CI the
 # lint gate is mandatory — the `lint` target's CI=true branch refuses to pass
 # by skipping. Kept in lockstep with verdi-go's own pin so results agree
 # across the workspace if both are ever run side by side.
@@ -96,8 +96,8 @@ fmt-check:
 # verdi-go's trust-parity posture):
 #   - CI (CI=true, which GitHub Actions sets): golangci-lint is MANDATORY.
 #     Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before
-#     this target runs (verify.yml before `make verify`, merge-gate.yml in its
-#     static job before `make lint`), so a missing binary here means the
+#     this target runs (verify.yml and merge-gate.yml, each in its static job
+#     before `make lint`), so a missing binary here means the
 #     install step regressed — we exit 1 rather than pass by skipping (a
 #     silent skip would be exactly the undisclosed gap the constitution's
 #     three-valued honesty rules out).
@@ -113,7 +113,7 @@ lint:
 		fi; \
 		golangci-lint run; \
 	elif [ "$$CI" = "true" ]; then \
-		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before the lint step (verify.yml before 'make verify', merge-gate.yml before 'make lint'); a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
+		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before the lint step (verify.yml and merge-gate.yml, each in its static job before 'make lint'); a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
 		exit 1; \
 	else \
 		echo "WARNING: golangci-lint not installed locally; skipping lint (install it to gate this locally)" >&2; \
@@ -348,8 +348,8 @@ e2e-check-node:
 # waits for readiness, and tears both down after the run.
 #
 # Wave 7: now wired into `verify` (see the `verify` target below) — both
-# CI configs install Node before running it (verify.yml before `make
-# verify`, merge-gate.yml in its e2e job) so local/CI parity holds
+# CI configs install Node before running it (verify.yml and merge-gate.yml,
+# each in its e2e job) so local/CI parity holds
 # (CLAUDE.md: "CI runs exactly `make verify` — trust parity"; SI-266 reads
 # that as `make verify`'s step set). Depends on e2e-check-node so a missing
 # toolchain fails with the install message above, not a raw shell error.

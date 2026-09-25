@@ -70,7 +70,7 @@ func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
 	// than trusting any caller-passed ref; fixturegit repos carry no origin
 	// remote, so every test here that needs the precondition to actually
 	// resolve pins it.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	return repo
 }
 
@@ -84,6 +84,7 @@ func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
 // longer exercises a refusal at all — this test now builds the genuine
 // negative case, a story that exists only on an unmerged branch.
 func TestRunFeatureStart_RefusesUnlandedProposal(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files:   map[string]string{".verdi/verdi.yaml": phase7ManifestYAML},
@@ -102,7 +103,7 @@ func TestRunFeatureStart_RefusesUnlandedProposal(t *testing.T) {
 	if out, err := commit.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v\n%s", err, out)
 	}
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	before, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -137,6 +138,7 @@ func TestRunFeatureStart_RefusesUnlandedProposal(t *testing.T) {
 // (I-30's scheme-prefixed form) and prints the R4-I-6 deprecation notice
 // while still proceeding.
 func TestRunFeatureStart_Succeeds(t *testing.T) {
+	t.Parallel()
 	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 
@@ -162,6 +164,7 @@ func TestRunFeatureStart_Succeeds(t *testing.T) {
 // TestRunFeatureStart_SpecRefForm proves feature start also accepts the
 // spec-ref form (I-30's second accepted form).
 func TestRunFeatureStart_SpecRefForm(t *testing.T) {
+	t.Parallel()
 	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 
@@ -176,6 +179,7 @@ func TestRunFeatureStart_SpecRefForm(t *testing.T) {
 // TestRunFeatureStart_Negative covers runFeatureStart's own
 // operational-error path: an unresolvable story/spec ref.
 func TestRunFeatureStart_Negative(t *testing.T) {
+	t.Parallel()
 	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}

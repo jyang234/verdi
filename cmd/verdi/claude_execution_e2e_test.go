@@ -360,7 +360,7 @@ func buildClaudeCompileRepo(t *testing.T, specFiles map[string]string) *fixtureg
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
 	}
@@ -1251,11 +1251,16 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		fake.global = resumeCheckpoint.revision.TerminalGlobalSequence
 	}
 
+	// ANTHROPIC_API_KEY only needs to be visible to the exec'd verdi child
+	// below (context_execution.go reads it there, once, to classify and
+	// forward it into the sealed provider launch) — never the test process
+	// itself, so it is threaded through runSealedContextBinaryWithFilesEnv's
+	// extraEnv rather than t.Setenv (lane R4 test-speed contract step 1).
+	apiKey := claudeE2EAPIKey
 	if options.noAPIKey {
-		t.Setenv("ANTHROPIC_API_KEY", "")
-	} else {
-		t.Setenv("ANTHROPIC_API_KEY", claudeE2EAPIKey)
+		apiKey = ""
 	}
+	apiKeyEnv := []string{"ANTHROPIC_API_KEY=" + apiKey}
 
 	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
@@ -1285,7 +1290,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		outPath = filepath.Join(providerRoot, "result.json")
 		args = append(args, "--out", outPath)
 	}
-	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, fixture.requestBytes, []*os.File{childFile}, args...)
+	observation := runSealedContextBinaryWithFilesEnv(t, bin, fixture.root, fixture.requestBytes, []*os.File{childFile}, apiKeyEnv, args...)
 	if err := <-served; err != nil {
 		t.Fatalf("claude lifecycle controller: %v; observation=%#v", err, observation)
 	}
@@ -1487,6 +1492,7 @@ func readClaudeFixtureLines(path string) []string {
 // ordinary (non-frozen) behavioral test; the frozen AC-1 behavioral producer
 // executes these rows by name.
 func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("sealed_start_drives_the_public_claude_assembly", func(t *testing.T) {

@@ -37,6 +37,10 @@ func configureContextConflictJudge(t *testing.T, repo *fixturegit.Repo, command 
 	repo.Head = commitAllOnCurrentBranch(t, repo.Dir, "configure conflict judge")
 }
 
+// TestContextConflictBuiltBinary must stay serial (no t.Parallel): its
+// "timeout" subtest requires the run to return within 4s, against a floor of
+// about 3s (the 1s judge_timeout_seconds plus internal/align/judge.go's 2s
+// cmd.WaitDelay), and under parallel CPU load it overran that bound (4.31s).
 func TestContextConflictBuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 
