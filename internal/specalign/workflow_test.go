@@ -857,6 +857,18 @@ const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
 	" test-cross=${{ needs.test-cross.result }}" +
 	" test-rest=${{ needs.test-rest.result }}"
 
+// mergeGateCanaryRun is the aggregator's canary step, pinned exactly. It runs
+// before the verdict and feeds the script a known-failing result: a script
+// that exits 0 on it (a rewrite that loses its failure flag in a subshell,
+// say) would pass every real result too, so the canary fails the required
+// context instead. TestMergeGateVerdictCanary runs this text against the real
+// script and against broken ones.
+const mergeGateCanaryRun = "if " + mergeGateVerdictScript + " probe=failure; then\n" +
+	"  echo \"merge-gate: canary FAILED: the verdict script passed a failing result, so its verdict cannot be trusted\" >&2\n" +
+	"  exit 1\n" +
+	"fi\n" +
+	"echo \"merge-gate: canary OK: the verdict script fails a failing result\""
+
 // mergeGatePostVerifyCommands are the steps that ran after `make verify` in
 // the single-job gate: build the binary, then lint this repo's store with it
 // in the pull-request context. They stay on the required path as the final
@@ -966,10 +978,13 @@ func TestMergeGateJobsAreWhitelisted(t *testing.T) {
 // aggregator `needs:` exactly the set of gate jobs, so no gate can be left
 // off the required path. Its `if:` is exactly `always()`: without it, a
 // failed dependency would make GitHub skip the aggregator, and a skipped
-// required check does not block a merge. Its steps are exactly a checkout
-// and the committed verdict script, called with the pinned text, which
-// passes one `<job>=<result>` argument per needed job and fails unless every
-// result is `success`.
+// required check does not block a merge. Its steps are exactly a checkout,
+// the pinned canary, which fails the job unless the verdict script fails a
+// known-failing result, and the committed verdict script, called with the
+// pinned text, which passes one `<job>=<result>` argument per needed job and
+// fails unless every result is `success`. Neither step can be skipped or
+// soften a failure: TestMergeGateStepsAreWhitelisted allows a command step
+// only `run:` and `name:`, so no `if:` and no `continue-on-error:`.
 func TestMergeGateAggregatorDecidesOverEveryGateJob(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 	agg, ok := doc.Jobs[mergeGateAggregatorJob]
@@ -995,13 +1010,16 @@ func TestMergeGateAggregatorDecidesOverEveryGateJob(t *testing.T) {
 		t.Errorf("the pinned verdict command must pass exactly one argument per gate job:\n got pinned %q\nwant derived %q", mergeGateVerdictRun, derived)
 	}
 
-	if len(agg.Steps) != 2 {
-		t.Fatalf("merge-gate.yml: %q must have exactly 2 steps (checkout, verdict), got %d: %+v", mergeGateAggregatorJob, len(agg.Steps), agg.Steps)
+	if len(agg.Steps) != 3 {
+		t.Fatalf("merge-gate.yml: %q must have exactly 3 steps (checkout, canary, verdict), got %d: %+v", mergeGateAggregatorJob, len(agg.Steps), agg.Steps)
 	}
 	if co := agg.Steps[0]; co.Uses != "actions/checkout@v4" || len(co.With) != 0 {
 		t.Errorf("merge-gate.yml: %q step 0 must be a plain actions/checkout@v4, got uses %q with %v", mergeGateAggregatorJob, co.Uses, co.With)
 	}
-	if got := strings.TrimSpace(agg.Steps[1].Run); got != mergeGateVerdictRun {
+	if got := strings.TrimSpace(agg.Steps[1].Run); got != mergeGateCanaryRun {
+		t.Errorf("merge-gate.yml: %q step 1 must be the canary, running exactly\n  %q\ngot\n  %q", mergeGateAggregatorJob, mergeGateCanaryRun, got)
+	}
+	if got := strings.TrimSpace(agg.Steps[2].Run); got != mergeGateVerdictRun {
 		t.Errorf("merge-gate.yml: %q decision step must run exactly\n  %q\ngot\n  %q", mergeGateAggregatorJob, mergeGateVerdictRun, got)
 	}
 

@@ -11,6 +11,7 @@ package specalign
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,97 @@ func TestMergeGateVerdictScript(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("output does not name %q:\n%s", want, out)
 				}
+			}
+		})
+	}
+}
+
+// runCanary runs the aggregator's pinned canary step in dir the way a GitHub
+// Actions `run:` step with no `shell:` runs on ubuntu-latest, `bash -e`, and
+// returns its exit code and combined output.
+func runCanary(t *testing.T, dir string) (int, string) {
+	t.Helper()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatalf("bash is required to run the merge-gate canary step: %v", err)
+	}
+	cmd := exec.Command(bash, "--noprofile", "--norc", "-e", "-c", mergeGateCanaryRun)
+	cmd.Dir = dir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err = cmd.Run()
+	if err == nil {
+		return 0, out.String()
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode(), out.String()
+	}
+	t.Fatalf("running the canary in %s: %v", dir, err)
+	return -1, ""
+}
+
+// TestMergeGateVerdictCanary runs the canary step's pinned text against the
+// real verdict script and against broken stand-ins. It must pass over the
+// real script and fail over any script that exits 0 on a failing result,
+// such as a loop whose failure flag is lost in a pipeline's subshell. A
+// script that fails everything leaves the canary green: the verdict step
+// after it then fails the required context on its own.
+func TestMergeGateVerdictCanary(t *testing.T) {
+	cases := []struct {
+		name     string
+		script   string // "" runs against the real repository
+		wantCode int
+		wantOut  string
+	}{
+		{
+			name:     "the real script fails the probe, so the canary passes",
+			wantCode: 0,
+			wantOut:  "canary OK",
+		},
+		{
+			name:     "a script that passes every result fails the canary",
+			script:   "#!/bin/sh\nexit 0\n",
+			wantCode: 1,
+			wantOut:  "canary FAILED",
+		},
+		{
+			name: "a failure flag lost in a pipeline subshell fails the canary",
+			script: "#!/bin/sh\nfailed=0\n" +
+				"printf '%s\\n' \"$@\" | while IFS= read -r arg; do\n" +
+				"\t[ \"${arg#*=}\" = success ] || failed=1\n" +
+				"done\n" +
+				"exit \"$failed\"\n",
+			wantCode: 1,
+			wantOut:  "canary FAILED",
+		},
+		{
+			name:     "a script that fails every result leaves the canary green",
+			script:   "#!/bin/sh\nexit 1\n",
+			wantCode: 0,
+			wantOut:  "canary OK",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := verdiRepoRoot
+			if tc.script != "" {
+				dir = t.TempDir()
+				path := filepath.Join(dir, filepath.FromSlash(mergeGateVerdictScript))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(tc.script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, out := runCanary(t, dir)
+			if code != tc.wantCode {
+				t.Errorf("canary exit = %d, want %d; output:\n%s", code, tc.wantCode, out)
+			}
+			if !strings.Contains(out, tc.wantOut) {
+				t.Errorf("canary output does not contain %q:\n%s", tc.wantOut, out)
 			}
 		})
 	}

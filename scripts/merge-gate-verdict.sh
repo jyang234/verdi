@@ -13,7 +13,10 @@
 #
 # The call's exact text is pinned by internal/specalign's
 # TestMergeGateAggregatorDecidesOverEveryGateJob, and this script's behavior
-# by TestMergeGateVerdictScript.
+# by TestMergeGateVerdictScript. Before the verdict, merge-gate.yml's canary
+# step runs this script on a known-failing result and fails the job unless it
+# exits non-zero (TestMergeGateVerdictCanary), so a rewrite that loses the
+# failure flag cannot pass the gate.
 set -u
 
 if [ "$#" -eq 0 ]; then

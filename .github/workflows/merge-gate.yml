@@ -50,7 +50,11 @@
 # does not block a merge. Its one decision is scripts/merge-gate-verdict.sh,
 # which fails unless every gate job's result is `success`: a failed,
 # cancelled, or skipped job, or a job missing from `needs:` (its result
-# expands to ""), fails the required context.
+# expands to ""), fails the required context. A canary step runs first: it
+# feeds the script a known-failing result and fails the job unless the
+# script exits non-zero, so a script broken into passing everything (a
+# failure flag lost in a pipeline subshell, say) cannot pass the gate over
+# a failed job. Neither step has an `if:` or `continue-on-error:`.
 #
 # internal/specalign/workflow_test.go is the parity guard for all of this:
 # the gate jobs run exactly VERIFY_STEPS (with `test` as its shards) plus
@@ -178,5 +182,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Prove the verdict script fails a failing result
+        run: |
+          if scripts/merge-gate-verdict.sh probe=failure; then
+            echo "merge-gate: canary FAILED: the verdict script passed a failing result, so its verdict cannot be trusted" >&2
+            exit 1
+          fi
+          echo "merge-gate: canary OK: the verdict script fails a failing result"
       - name: Require every gate job to succeed
         run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }}
