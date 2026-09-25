@@ -1,32 +1,218 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 )
 
-// fakeObjSupersedeStart is a substitutable starter: it counts calls and
-// answers with a canned set of serves or an error, the same shape as the
-// other subprocess fixtures' fake starters.
-type fakeObjSupersedeStart struct {
-	calls  int
-	serves map[string]*objSupersedeServe
-	err    error
+// objSupersedeRootCommit is every scenario store's root commit, pinned
+// literally (lane L3d review I-2): internal/objsupersede/scenario's own
+// wantRootCommit, which every committed frozen stamp names.
+const objSupersedeRootCommit = "d49dd630388ff05fe4cd7d4084c785045ba15689"
+
+// objSupersedeGolden is the endpoint's JSON contract per store, written out
+// independently of the production table (lane L3d review I-4, M-5): every
+// key, in order, and every value, with the three per-run values replaced by
+// placeholders — {url} (the store's verdi serve), {docs} (its docs site),
+// and {docs_commit} (main's commit, checked against scenario.Build
+// separately). A renamed json tag, a dropped key, or a wrong fact fails
+// here, where the TypeScript consumer would otherwise break silently.
+var objSupersedeGolden = map[string]string{
+	"accepted": `{
+  "scenario": "accepted", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "main", "main_branch": "main", "design_branch": "design/successor",
+  "successor": "spec/successor", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}b/design%2Fsuccessor/board/spec/successor", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/",
+    "spec/successor": "{docs}a/spec/successor/document/"
+  }
+}`,
+	"chain": `{
+  "scenario": "chain", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "main", "main_branch": "main", "design_branch": "design/successor-v3",
+  "successor": "spec/successor-v3", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "spec/successor-v3#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor-v3#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "main", "spec": "spec/successor-v3", "url": "{url}board/spec/successor-v3", "not_a_surface": ""},
+    "design": {"branch": "design/successor-v3", "spec": "spec/successor-v3", "url": "{url}b/design%2Fsuccessor-v3/board/spec/successor-v3", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "spec/successor-v3", "url": "{url}board/spec/successor-v3", "not_a_surface": ""}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/",
+    "spec/successor": "{docs}a/spec/successor/document/",
+    "spec/successor-v2": "{docs}a/spec/successor-v2/document/",
+    "spec/successor-v3": "{docs}a/spec/successor-v3/document/"
+  }
+}`,
+	"chain-drop": `{
+  "scenario": "chain-drop", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "main", "main_branch": "main", "design_branch": "design/successor-v2",
+  "successor": "spec/successor-v2", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor-v2#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "main", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
+    "design": {"branch": "design/successor-v2", "spec": "spec/successor-v2", "url": "{url}b/design%2Fsuccessor-v2/board/spec/successor-v2", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/",
+    "spec/successor": "{docs}a/spec/successor/document/",
+    "spec/successor-v2": "{docs}a/spec/successor-v2/document/"
+  }
+}`,
+	"proposed": `{
+  "scenario": "proposed", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "design/successor", "main_branch": "main", "design_branch": "design/successor",
+  "successor": "spec/successor", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": "no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/"
+  }
+}`,
+	"no-conflict": `{
+  "scenario": "no-conflict", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "design/successor", "main_branch": "main", "design_branch": "design/successor",
+  "successor": "spec/successor", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": ""},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": "no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/"
+  }
+}`,
+	"chain-not-in-force": `{
+  "scenario": "chain-not-in-force", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "design/successor-v2", "main_branch": "main", "design_branch": "design/successor-v2",
+  "successor": "spec/successor-v2", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#ac-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#ac-1",
+     "decision": "spec/successor-v2#dc-3", "establishing_decision": "spec/successor#dc-3", "conflict": ""},
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "decision": "spec/successor-v2#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "decision": "spec/successor-v2#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+  ],
+  "boards": {
+    "checkout": {"branch": "design/successor-v2", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
+    "design": {"branch": "design/successor-v2", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "spec/successor", "url": "{url}b/main/board/spec/successor", "not_a_surface": ""}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/",
+    "spec/successor": "{docs}a/spec/successor/document/"
+  }
+}`,
 }
 
-func (s *fakeObjSupersedeStart) start(context.Context) (map[string]*objSupersedeServe, error) {
+// objSupersedeObjectText is each closed object's own text as the committed
+// records declare it (testdata/objsupersede/records/specs/closed-*.md) —
+// what the docs site must render on the object's document page.
+var objSupersedeObjectText = map[string]string{
+	"spec/closed-feature#ac-1": "an operator can read the governed records",
+	"spec/closed-feature#dc-1": "the governed records are listed newest first",
+	"spec/closed-story#ac-1":   "the record list renders every governed record",
+}
+
+// objSupersedeBoardTitle is each successor spec's title as its record
+// declares it: the board's exact <h1>.
+var objSupersedeBoardTitle = map[string]string{
+	"spec/successor":    "Successor",
+	"spec/successor-v2": "Successor v2",
+	"spec/successor-v3": "Successor v3",
+}
+
+// compactJSON compacts raw so two renderings of the same JSON compare
+// byte for byte.
+func compactJSON(t *testing.T, raw []byte) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		t.Fatalf("compacting %s: %v", raw, err)
+	}
+	return b.String()
+}
+
+// fakeObjSupersedeStart is a substitutable starter: it counts calls and
+// answers with a canned run or an error, the same shape as the other
+// subprocess fixtures' fake starters.
+type fakeObjSupersedeStart struct {
+	calls int
+	run   *objSupersedeRun
+	err   error
+}
+
+func (s *fakeObjSupersedeStart) start(context.Context) (*objSupersedeRun, error) {
 	s.calls++
-	return s.serves, s.err
+	return s.run, s.err
 }
 
 func getObjSupersedeFixture(t *testing.T, f *objSupersedeFixture, method string) *httptest.ResponseRecorder {
@@ -37,10 +223,10 @@ func getObjSupersedeFixture(t *testing.T, f *objSupersedeFixture, method string)
 	return rec
 }
 
-func canonicalObjSupersedeServes() map[string]*objSupersedeServe {
-	return map[string]*objSupersedeServe{
+func canonicalObjSupersedeRun() *objSupersedeRun {
+	return &objSupersedeRun{stores: map[string]*objSupersedeStore{
 		"accepted": {info: objSupersedeStoreInfo{Scenario: "accepted", URL: "http://127.0.0.1:41001/", Checkout: "main"}},
-	}
+	}}
 }
 
 // TestObjSupersedeFixture_Handler_LazyStartOnce pins the handler's
@@ -48,7 +234,7 @@ func canonicalObjSupersedeServes() map[string]*objSupersedeServe {
 // the body is the started stores' JSON, and every later GET returns the
 // same info without starting again.
 func TestObjSupersedeFixture_Handler_LazyStartOnce(t *testing.T) {
-	fake := &fakeObjSupersedeStart{serves: canonicalObjSupersedeServes()}
+	fake := &fakeObjSupersedeStart{run: canonicalObjSupersedeRun()}
 	f := newObjSupersedeFixture(testModuleRoot)
 	f.start = fake.start
 	if fake.calls != 0 {
@@ -99,27 +285,34 @@ func TestObjSupersedeFixture_Handler_Negative_StartFails(t *testing.T) {
 		t.Fatalf("retry: status = %d, starter calls = %d; want 500 and a second attempt", rec.Code, fake.calls)
 	}
 
-	fake.err, fake.serves = nil, nil
-	rec = getObjSupersedeFixture(t, f, http.MethodGet)
-	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "no stores") {
-		t.Fatalf("nil serves: status = %d body = %q, want 500 naming the missing stores", rec.Code, rec.Body.String())
+	for _, run := range []*objSupersedeRun{nil, {}} {
+		fake.err, fake.run = nil, run
+		rec = getObjSupersedeFixture(t, f, http.MethodGet)
+		if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "no stores") {
+			t.Fatalf("run %+v: status = %d body = %q, want 500 naming the missing stores", run, rec.Code, rec.Body.String())
+		}
 	}
 	f.stop() // never started: safe
 }
 
 // TestObjSupersedeFixture_ZeroValue_DefaultsToRealStart: a struct literal
 // with no starter never nil-panics — ensureStarted defaults to the real
-// sequence, which here discloses its own build/materialize failure as a
-// 500 (the module root carries no corpus), and stop stays safe.
+// sequence, which here discloses its own failure as a 500 (the module
+// root carries no scenario fixture) and leaves no scratch behind, and
+// stop stays safe.
 func TestObjSupersedeFixture_ZeroValue_DefaultsToRealStart(t *testing.T) {
-	f := &objSupersedeFixture{moduleRoot: t.TempDir()}
+	tmp := t.TempDir()
+	f := &objSupersedeFixture{moduleRoot: t.TempDir(), tmpRoot: tmp}
 	t.Cleanup(f.stop)
 	rec := getObjSupersedeFixture(t, f, http.MethodGet)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "loading the objsupersede scenario manifest") {
+		t.Fatalf("status = %d body = %q, want 500 naming the manifest", rec.Code, rec.Body.String())
 	}
 	if f.start == nil {
 		t.Fatal("ensureStarted left start unset")
+	}
+	if entries, _ := os.ReadDir(tmp); len(entries) != 0 {
+		t.Fatalf("a failed start left scratch behind: %v", entries)
 	}
 	var zero objSupersedeFixture
 	zero.stop() // never started, no starter: safe
@@ -128,7 +321,7 @@ func TestObjSupersedeFixture_ZeroValue_DefaultsToRealStart(t *testing.T) {
 // TestObjSupersedeFixture_Handler_Negative_WrongMethod: a non-GET request
 // is refused before any start.
 func TestObjSupersedeFixture_Handler_Negative_WrongMethod(t *testing.T) {
-	fake := &fakeObjSupersedeStart{serves: canonicalObjSupersedeServes()}
+	fake := &fakeObjSupersedeStart{run: canonicalObjSupersedeRun()}
 	f := newObjSupersedeFixture(testModuleRoot)
 	f.start = fake.start
 	rec := getObjSupersedeFixture(t, f, http.MethodPost)
@@ -140,16 +333,30 @@ func TestObjSupersedeFixture_Handler_Negative_WrongMethod(t *testing.T) {
 	}
 }
 
-// TestObjSupersedeFixture_Stop pins stop's contract on fake serves: it
-// cancels every store's context, waits for each exit, and is idempotent.
+// fakeObjSupersedeProc is a stand-in serve whose cancel counts its calls
+// and "exits" at once.
+func fakeObjSupersedeProc(calls *int) *objSupersedeProc {
+	p := &objSupersedeProc{exited: make(chan struct{})}
+	p.cancel = func() { *calls++; close(p.exited) }
+	return p
+}
+
+// TestObjSupersedeFixture_Stop pins stop's contract: it cancels every
+// store's serve and waits for its exit, closes every docs site, removes
+// the run's scratch directory, and is idempotent.
 func TestObjSupersedeFixture_Stop(t *testing.T) {
-	cancelled := map[string]int{}
-	doneA, doneB := make(chan error, 1), make(chan error, 1)
-	serves := map[string]*objSupersedeServe{
-		"accepted": {info: objSupersedeStoreInfo{Scenario: "accepted"}, cancel: func() { cancelled["accepted"]++; doneA <- nil }, done: doneA},
-		"chain":    {info: objSupersedeStoreInfo{Scenario: "chain"}, cancel: func() { cancelled["chain"]++; doneB <- nil }, done: doneB},
+	var callsA, callsB int
+	scratch := t.TempDir()
+	site, err := serveObjSupersedeSite(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	fake := &fakeObjSupersedeStart{serves: serves}
+	run := &objSupersedeRun{scratch: scratch, stores: map[string]*objSupersedeStore{
+		"accepted": {info: objSupersedeStoreInfo{Scenario: "accepted"}, serve: fakeObjSupersedeProc(&callsA), site: site},
+		"chain":    {info: objSupersedeStoreInfo{Scenario: "chain"}, serve: fakeObjSupersedeProc(&callsB)},
+	}}
+	siteURL := site.url
+	fake := &fakeObjSupersedeStart{run: run}
 	f := newObjSupersedeFixture(testModuleRoot)
 	f.start = fake.start
 	if rec := getObjSupersedeFixture(t, f, http.MethodGet); rec.Code != http.StatusOK {
@@ -157,12 +364,18 @@ func TestObjSupersedeFixture_Stop(t *testing.T) {
 	}
 
 	f.stop()
-	if cancelled["accepted"] != 1 || cancelled["chain"] != 1 {
-		t.Fatalf("cancelled = %+v, want each store cancelled exactly once", cancelled)
+	if callsA != 1 || callsB != 1 {
+		t.Fatalf("cancel calls = %d, %d; want each store's serve cancelled exactly once", callsA, callsB)
+	}
+	if _, err := http.Get(siteURL); err == nil {
+		t.Fatalf("docs site %s still answers after stop", siteURL)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch %s survived stop: %v", scratch, err)
 	}
 	f.stop()
-	if cancelled["accepted"] != 1 || cancelled["chain"] != 1 {
-		t.Fatalf("second stop cancelled again: %+v, want idempotent", cancelled)
+	if callsA != 1 || callsB != 1 {
+		t.Fatalf("second stop cancelled again: %d, %d; want idempotent", callsA, callsB)
 	}
 }
 
@@ -180,184 +393,643 @@ func TestControlServer_WiresObjSupersedeFixture(t *testing.T) {
 	}
 }
 
-// objSupersedeExpected pins, per store, the facts objSupersedeStores'
-// startAll must report — independent of the production maps above, so a
-// typo in either one is caught.
-var objSupersedeExpected = map[string]objSupersedeStoreInfo{
-	"accepted": {
-		Scenario: "accepted", Checkout: "main", MainBranch: "main",
-		Successor: "spec/successor", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
-	"chain": {
-		Scenario: "chain", Checkout: "main", MainBranch: "main",
-		Successor: "spec/successor-v3", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
-	"chain-drop": {
-		Scenario: "chain-drop", Checkout: "main", MainBranch: "main",
-		Successor: "spec/successor-v2", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
-	"proposed": {
-		Scenario: "proposed", Checkout: "design/successor", MainBranch: "main", DesignBranch: "design/successor",
-		Successor: "spec/successor", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
-	"no-conflict": {
-		Scenario: "no-conflict", Checkout: "design/successor", MainBranch: "main", DesignBranch: "design/successor",
-		Successor: "spec/successor", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
-	"chain-not-in-force": {
-		Scenario: "chain-not-in-force", Checkout: "design/successor-v2", MainBranch: "main", DesignBranch: "design/successor-v2",
-		Successor: "spec/successor-v2", SupersededDecision: objSupersedeClosedDecision, SupersededCriterion: objSupersedeClosedCriterion,
-	},
+// TestObjSupersedeStoreInfo_MatchesGolden pins newObjSupersedeStoreInfo,
+// the pure assembly of every store's JSON, against the independent golden
+// — each store's checkout read from the committed manifest, the URLs and
+// commit passed as the golden's own placeholders — and pins that the
+// provisioned store list, the facts table, and the golden name the same
+// six stores. Negative: an unknown store has no facts.
+func TestObjSupersedeStoreInfo_MatchesGolden(t *testing.T) {
+	m, err := scenario.Load(filepath.Join(testModuleRoot, "testdata", "objsupersede"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden, facts []string
+	for name := range objSupersedeGolden {
+		golden = append(golden, name)
+	}
+	for name := range objSupersedeFactsByStore {
+		facts = append(facts, name)
+	}
+	stores := slices.Clone(objSupersedeStores)
+	sort.Strings(golden)
+	sort.Strings(facts)
+	sort.Strings(stores)
+	if !reflect.DeepEqual(stores, golden) || !reflect.DeepEqual(facts, golden) {
+		t.Fatalf("stores %v, facts %v, golden %v: want the same six", stores, facts, golden)
+	}
+	for _, name := range objSupersedeStores {
+		info, err := newObjSupersedeStoreInfo(name, m.Scenarios[name].Checkout, m.Commit.InitialBranch, "{docs_commit}", "{url}", "{docs}")
+		if err != nil {
+			t.Fatalf("store %q: %v", name, err)
+		}
+		got, err := json.Marshal(info)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g, w := compactJSON(t, got), compactJSON(t, []byte(objSupersedeGolden[name])); g != w {
+			t.Errorf("store %q:\n got %s\nwant %s", name, g, w)
+		}
+	}
+	if _, err := newObjSupersedeStoreInfo("no-such-store", "main", "main", "c", "u", "d"); err == nil {
+		t.Fatal("an unknown store assembled info")
+	}
 }
 
-// branchBoardPath mirrors internal/workbench's BranchBoardHref: the
-// branch rides one path segment with its slashes percent-encoded.
-func branchBoardPath(branch, slug string) string {
-	return "b/" + url.PathEscape(branch) + "/board/spec/" + slug
+// TestExcludeObjSupersedeDataZone: the data zone is excluded through the
+// repository's own .git/info/exclude — nothing committed, so no SHA moves
+// — so a serve's lock files read as a clean checkout (lane L3d review
+// I-3). Negative: a directory that is no git repository is an error.
+func TestExcludeObjSupersedeDataZone(t *testing.T) {
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted").Dir
+	head, _ := gitOutput(ctx, repo, "rev-parse", "HEAD")
+	if err := os.MkdirAll(filepath.Join(repo, ".verdi", "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".verdi", "data", "writer.lock"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if porcelain, _ := gitOutput(ctx, repo, "status", "--porcelain", "--untracked-files=all"); porcelain == "" {
+		t.Fatal("control: the data file should read as untracked before the exclusion")
+	}
+	if err := excludeObjSupersedeDataZone(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	if porcelain, _ := gitOutput(ctx, repo, "status", "--porcelain", "--untracked-files=all"); porcelain != "" {
+		t.Fatalf("status after excluding the data zone = %q, want clean", porcelain)
+	}
+	if after, _ := gitOutput(ctx, repo, "rev-parse", "HEAD"); after != head {
+		t.Fatalf("HEAD moved from %s to %s: the exclusion must not commit", head, after)
+	}
+	if err := excludeObjSupersedeDataZone(ctx, t.TempDir()); err == nil {
+		t.Fatal("excluding the data zone of a non-repository succeeded")
+	}
+}
+
+// TestServeObjSupersedeSite serves a built directory on loopback until
+// stop, which is idempotent and nil-safe. Negative: a page the site does
+// not have is a 404.
+func TestServeObjSupersedeSite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("site home"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site, err := serveObjSupersedeSite(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(site.stop)
+	if !strings.HasPrefix(site.url, "http://127.0.0.1:") || !strings.HasSuffix(site.url, "/") {
+		t.Fatalf("url = %q, want a loopback base URL", site.url)
+	}
+	if status, body := httpGetBody(t, site.url); status != http.StatusOK || body != "site home" {
+		t.Fatalf("GET / = %d %q", status, body)
+	}
+	if status, _ := httpGetBody(t, site.url+"a/spec/nowhere/"); status != http.StatusNotFound {
+		t.Fatalf("GET a missing page = %d, want 404", status)
+	}
+	site.stop()
+	site.stop()
+	if _, err := http.Get(site.url); err == nil {
+		t.Fatal("the site still answers after stop")
+	}
+	var none *objSupersedeSite
+	none.stop()
+}
+
+// TestStartObjSupersedeServe_Negative: a binary that cannot start is an
+// error, and one that exits before answering healthz fails at once —
+// naming the exit — rather than after the whole readiness wait.
+func TestStartObjSupersedeServe_Negative(t *testing.T) {
+	ctx := context.Background()
+	if _, err := startObjSupersedeServe(ctx, filepath.Join(t.TempDir(), "no-such-verdi"), t.TempDir()); err == nil {
+		t.Fatal("starting a missing binary succeeded")
+	}
+	falseBin, err := exec.LookPath("false")
+	if err != nil {
+		t.Fatalf("no false binary: %v", err)
+	}
+	began := time.Now()
+	_, err = startObjSupersedeServe(ctx, falseBin, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "exited before answering healthz") {
+		t.Fatalf("err = %v, want the early exit named", err)
+	}
+	if took := time.Since(began); took > 10*time.Second {
+		t.Fatalf("an exited serve took %s to fail, want well under the 20s readiness wait", took)
+	}
+	var none *objSupersedeProc
+	none.stop()
+}
+
+// copyObjSupersedeBinary returns a buildBinary step that installs the
+// already-built bin at out instead of running go build again.
+func copyObjSupersedeBinary(bin string) func(context.Context, string, string) error {
+	return func(_ context.Context, _, out string) error {
+		if err := os.Link(bin, out); err == nil {
+			return nil
+		}
+		data, err := os.ReadFile(bin)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(out, data, 0o755)
+	}
+}
+
+// TestObjSupersedeFixture_StartAll_Negative drives startAll's failure paths
+// with the real steps (lane L3d review I-5): each row fails at a chosen
+// store AFTER the earlier stores are fully up — real `verdi serve`
+// subprocesses and real docs sites — and proves the partial failure reaps
+// every one of them and removes the run's scratch. It also proves the
+// fixture reads its scenario data from moduleRoot, not from the source
+// file's location (review M-2: a -trimpath build would lose the latter).
+func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
+	neutralizeCIEnvForTest(t)
+	ctx := context.Background()
+	moduleRoot := absModuleRoot(t)
+	bin := filepath.Join(t.TempDir(), "verdi")
+	if err := buildBinary(ctx, moduleRoot, bin); err != nil {
+		t.Fatal(err)
+	}
+	falseBin, err := exec.LookPath("false")
+	if err != nil {
+		t.Fatalf("no false binary: %v", err)
+	}
+	// storeOf names the store a step's directory belongs to:
+	// <scratch>/<store>/{repo,main,site}.
+	storeOf := func(dir string) string { return filepath.Base(filepath.Dir(dir)) }
+
+	tests := []struct {
+		name       string
+		moduleRoot string
+		stores     []string
+		bad        func(*objSupersedeSteps)
+		want       string
+		wantServes int // stores fully up before the failure: reaping must not be vacuous
+		wantSites  int
+	}{
+		{name: "the manifest is read from moduleRoot", moduleRoot: t.TempDir(), want: "loading the objsupersede scenario manifest"},
+		{name: "the binary build fails", bad: func(s *objSupersedeSteps) {
+			s.buildBinary = func(context.Context, string, string) error { return errors.New("boom") }
+		}, want: "building verdi binary for the objsupersede fixture: boom"},
+		{name: "a store is missing from the manifest", stores: []string{"accepted", "no-such-scenario"},
+			want: `scenario "no-such-scenario" is not defined in the manifest`, wantServes: 1, wantSites: 1},
+		{name: "materialize fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+			s.materialize = func(ctx context.Context, fixtureDir, repoDir, name string) (*scenario.Repo, error) {
+				if name == "chain" {
+					repoDir = filepath.Join(repoDir, "missing") // the real replay, into a directory that does not exist
+				}
+				return scenario.Materialize(ctx, fixtureDir, repoDir, name)
+			}
+		}, want: `materializing objsupersede scenario "chain"`, wantServes: 1, wantSites: 1},
+		{name: "the docs build fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+			s.buildSite = func(ctx context.Context, opts dex.Options) error {
+				if storeOf(opts.Root) == "chain" {
+					opts.Commit = "refs/heads/no-such-branch" // the real build, at a commit that does not resolve
+				}
+				return dex.Build(ctx, opts)
+			}
+		}, want: `building the docs site for objsupersede scenario "chain"`, wantServes: 1, wantSites: 1},
+		{name: "the serve exits before healthz", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+			start := s.startServe
+			s.startServe = func(ctx context.Context, binPath, root string) (*objSupersedeProc, error) {
+				if storeOf(root) == "chain" {
+					binPath = falseBin // the real start, of a binary that exits at once
+				}
+				return start(ctx, binPath, root)
+			}
+		}, want: `starting verdi serve for objsupersede scenario "chain": verdi serve exited before answering healthz`, wantServes: 1, wantSites: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			var serves []*objSupersedeProc
+			var sites []*objSupersedeSite
+			steps := objSupersedeSteps{
+				buildBinary: copyObjSupersedeBinary(bin),
+				serveSite: func(dir string) (*objSupersedeSite, error) {
+					s, err := serveObjSupersedeSite(dir)
+					if err == nil {
+						sites = append(sites, s)
+					}
+					return s, err
+				},
+				startServe: func(ctx context.Context, binPath, root string) (*objSupersedeProc, error) {
+					p, err := startObjSupersedeServe(ctx, binPath, root)
+					if err == nil {
+						serves = append(serves, p)
+					}
+					return p, err
+				},
+			}
+			if tc.bad != nil {
+				tc.bad(&steps)
+			}
+			root := moduleRoot
+			if tc.moduleRoot != "" {
+				root = tc.moduleRoot
+			}
+			f := newObjSupersedeFixture(root)
+			f.names, f.tmpRoot, f.steps = tc.stores, tmp, steps
+			t.Cleanup(f.stop)
+
+			run, err := f.startAll(ctx)
+			if run != nil {
+				// A start that wrongly succeeds is never cached in f, so f.stop
+				// cannot reach it: reap it here rather than leak its serves.
+				t.Cleanup(func() {
+					stopObjSupersedeStores(run.stores)
+					_ = os.RemoveAll(run.scratch)
+				})
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("startAll = %+v, %v; want an error containing %q", run, err, tc.want)
+			}
+			if len(serves) != tc.wantServes || len(sites) != tc.wantSites {
+				t.Fatalf("%d serves and %d docs sites came up before the failure, want %d and %d", len(serves), len(sites), tc.wantServes, tc.wantSites)
+			}
+			for _, p := range serves {
+				select {
+				case <-p.exited:
+				default:
+					t.Errorf("serve pid %d (%s) is still running after the failed start", p.pid, p.url)
+				}
+				if _, err := http.Get(p.url + "healthz"); err == nil {
+					t.Errorf("serve %s still answers after the failed start", p.url)
+				}
+			}
+			for _, s := range sites {
+				if _, err := http.Get(s.url); err == nil {
+					t.Errorf("docs site %s still answers after the failed start", s.url)
+				}
+			}
+			if entries, _ := os.ReadDir(tmp); len(entries) != 0 {
+				t.Errorf("the failed start left scratch behind: %v", entries)
+			}
+		})
+	}
 }
 
 // TestObjSupersedeFixture_Handler_Happy is the real witness through the
-// SHIPPED binary: the handler materializes all six scenario stores
-// (scenario.Materialize) and starts a real `verdi serve` subprocess over
-// each, and every store's reported facts and board routes are reachable —
-// the checked-out branch's own board, and (for proposed/no-conflict) the
-// default branch's board showing nothing yet for the not-yet-accepted
-// successor, and (for accepted/chain/chain-drop) the original proposing
-// design branch's board still reachable through the per-branch route
-// after its merge.
+// SHIPPED binary: the handler materializes all six scenario stores, builds
+// each one's docs site from main, and serves each board, and then —
+//
+//   - the body matches the golden contract exactly (keys and values);
+//   - every fact in it re-derives from the SERVED repository's own records;
+//   - every board URL renders its spec on a CLEAN working tree, and every
+//     not-a-surface view says why;
+//   - every docs page renders, every closed object's text renders on its
+//     document page (so an absence asserted there can fail), and each
+//     docs site is main's, not the checkout's;
+//   - after all that serving, the served repositories are still
+//     scenario.Build's, SHA for SHA, from the pinned root, each docs site
+//     was built at main's own commit in a detached checkout, and no served
+//     checkout is dirty.
 func TestObjSupersedeFixture_Handler_Happy(t *testing.T) {
 	neutralizeCIEnvForTest(t)
+	ctx := context.Background()
 	f := newObjSupersedeFixture(absModuleRoot(t))
+	f.tmpRoot = t.TempDir()
 	t.Cleanup(f.stop)
 
 	rec := getObjSupersedeFixture(t, f, http.MethodGet)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	var info objSupersedeFixtureInfo
-	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+	var raw struct {
+		Stores map[string]json.RawMessage `json:"stores"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
 		t.Fatalf("decoding body: %v: %s", err, rec.Body.String())
 	}
-	if len(info.Stores) != len(objSupersedeStores) {
-		t.Fatalf("got %d stores, want %d: %+v", len(info.Stores), len(objSupersedeStores), info.Stores)
+	if len(raw.Stores) != len(objSupersedeStores) {
+		t.Fatalf("got %d stores, want %d", len(raw.Stores), len(objSupersedeStores))
 	}
 	for _, name := range objSupersedeStores {
-		got, ok := info.Stores[name]
-		if !ok {
-			t.Fatalf("missing store %q in %+v", name, info.Stores)
+		t.Run(name, func(t *testing.T) {
+			var got objSupersedeStoreInfo
+			if err := json.Unmarshal(raw.Stores[name], &got); err != nil {
+				t.Fatalf("decoding store %q: %v", name, err)
+			}
+			for _, base := range []string{got.URL, got.DocsURL} {
+				if !strings.HasPrefix(base, "http://127.0.0.1:") || !strings.HasSuffix(base, "/") {
+					t.Fatalf("base URL %q is not a loopback base", base)
+				}
+			}
+			if len(got.DocsCommit) != 40 {
+				t.Fatalf("docs_commit = %q, want a full commit", got.DocsCommit)
+			}
+			masked := strings.NewReplacer(got.URL, "{url}", got.DocsURL, "{docs}", got.DocsCommit, "{docs_commit}").Replace(string(raw.Stores[name]))
+			if g, w := compactJSON(t, []byte(masked)), compactJSON(t, []byte(objSupersedeGolden[name])); g != w {
+				t.Errorf("served JSON:\n got %s\nwant %s", g, w)
+			}
+			store := f.run.stores[name]
+			checkObjSupersedeRecords(t, ctx, store.root, got)
+			checkObjSupersedeBoards(t, got)
+			checkObjSupersedeDocs(t, got)
+			checkObjSupersedeServedSHAs(t, ctx, name, store, got)
+			for _, dir := range []string{store.root, store.docsRoot} {
+				if porcelain, err := gitOutput(ctx, dir, "status", "--porcelain", "--untracked-files=all"); err != nil || porcelain != "" {
+					t.Errorf("%s is dirty after serving: %q, %v", dir, porcelain, err)
+				}
+			}
+		})
+	}
+}
+
+// checkObjSupersedeServedSHAs is the SHA proof over the store startAll
+// actually serves (review I-2): its branches and remote-tracking refs are
+// scenario.Build's exactly, every Base and Step commit of Build is there,
+// its root is the pinned d49dd630, its checkout is the manifest's, and the
+// docs site was built at main's commit from a detached checkout.
+func checkObjSupersedeServedSHAs(t *testing.T, ctx context.Context, name string, store *objSupersedeStore, got objSupersedeStoreInfo) {
+	t.Helper()
+	want := scenario.Build(t, name)
+	if len(want.Base) == 0 || want.Base[0] != objSupersedeRootCommit {
+		t.Fatalf("scenario.Build(%q) root = %v, want %s", name, want.Base, objSupersedeRootCommit)
+	}
+	refs := func(dir string) string {
+		out, err := gitOutput(ctx, dir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes")
+		if err != nil {
+			t.Fatal(err)
 		}
-		want := objSupersedeExpected[name]
-		want.URL = got.URL // URL is dynamic (ephemeral port); compared separately below
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("store %q = %+v, want %+v", name, got, want)
+		return out
+	}
+	if served, built := refs(store.root), refs(want.Dir); served != built {
+		t.Errorf("served refs:\n%s\nwant scenario.Build's:\n%s", served, built)
+	}
+	for _, sha := range append(slices.Clone(want.Base), want.Steps...) {
+		if kind, err := gitOutput(ctx, store.root, "cat-file", "-t", sha); err != nil || kind != "commit" {
+			t.Errorf("served store lacks Build's commit %s: %q, %v", sha, kind, err)
 		}
-		if !strings.HasPrefix(got.URL, "http://127.0.0.1:") {
-			t.Errorf("store %q URL = %q, want a loopback URL", name, got.URL)
+	}
+	if root, _ := gitOutput(ctx, store.root, "rev-list", "--max-parents=0", "refs/heads/main"); root != objSupersedeRootCommit {
+		t.Errorf("served root commit = %q, want %s", root, objSupersedeRootCommit)
+	}
+	if head, _ := gitOutput(ctx, store.root, "rev-parse", "--abbrev-ref", "HEAD"); head != got.Checkout {
+		t.Errorf("served checkout = %q, want %q", head, got.Checkout)
+	}
+	if main, _ := gitOutput(ctx, want.Dir, "rev-parse", "refs/heads/main"); got.DocsCommit != main {
+		t.Errorf("docs_commit = %q, want Build's main %s", got.DocsCommit, main)
+	}
+	if head, _ := gitOutput(ctx, store.docsRoot, "rev-parse", "HEAD"); head != got.DocsCommit {
+		t.Errorf("docs checkout HEAD = %q, want %s", head, got.DocsCommit)
+	}
+	if branch, err := gitOutput(ctx, store.docsRoot, "symbolic-ref", "-q", "HEAD"); err == nil {
+		t.Errorf("docs checkout is on %q, want a detached HEAD (never a named-branch worktree of main)", branch)
+	}
+}
+
+// supersedesEdges maps each object a spec's decisions supersede to the
+// deciding decision's ref.
+func supersedesEdges(spec *objsupersede.Spec) map[string]string {
+	edges := map[string]string{}
+	if spec == nil {
+		return edges
+	}
+	for _, d := range spec.FM.Decisions {
+		for _, l := range d.Links {
+			if string(l.Type) == "supersedes" && strings.Contains(l.Ref, "#") {
+				edges[l.Ref] = "spec/" + spec.Name + "#" + d.ID
+			}
 		}
+	}
+	return edges
+}
+
+// checkObjSupersedeRecords re-derives the store's facts from the served
+// repository's own committed records — never from the production table
+// (review M-5): the conflicts and the successor every one resolves to,
+// every decision-to-object edge of the successor under test and of the
+// establishing successor, each object's challenging conflict, the design
+// branch that proposed the successor, and main's own successor specs,
+// which set the docs pages and main's board.
+func checkObjSupersedeRecords(t *testing.T, ctx context.Context, root string, got objSupersedeStoreInfo) {
+	t.Helper()
+	recs, err := objsupersede.ReadRecords(ctx, objsupersede.WorkTree{Root: root})
+	if err != nil || len(recs.Failures) != 0 {
+		t.Fatalf("reading the served records: %v %+v", err, recs)
+	}
+	var conflicts []string
+	challenged := map[string]string{}
+	for _, c := range recs.Conflicts {
+		conflicts = append(conflicts, c.FM.ID)
+		if c.FM.ResolvedBy != got.EstablishingSuccessor {
+			t.Errorf("%s resolved_by = %q, want establishing_successor %q", c.FM.ID, c.FM.ResolvedBy, got.EstablishingSuccessor)
+		}
+		for _, l := range c.FM.Links {
+			if string(l.Type) == "challenges" {
+				challenged[l.Ref] = c.FM.ID
+			}
+		}
+	}
+	if !reflect.DeepEqual(conflicts, got.Conflicts) {
+		t.Errorf("conflicts = %v, want the records' %v", got.Conflicts, conflicts)
+	}
+	slug := func(ref string) string { return strings.TrimPrefix(ref, "spec/") }
+	successor := recs.Specs[slug(got.Successor)]
+	if successor == nil || successor.Archived {
+		t.Fatalf("successor %q is not an active spec at the checkout", got.Successor)
+	}
+	head, establishing := supersedesEdges(successor), supersedesEdges(recs.Specs[slug(got.EstablishingSuccessor)])
+	objects := map[string]bool{}
+	for o := range head {
+		objects[o] = true
+	}
+	for o := range establishing {
+		objects[o] = true
+	}
+	var want []objSupersedeSupersession
+	for o := range objects {
+		want = append(want, objSupersedeSupersession{Object: o, Decision: head[o], EstablishingDecision: establishing[o], Conflict: challenged[o]})
+	}
+	sort.Slice(want, func(i, j int) bool { return want[i].Object < want[j].Object })
+	var gotPairs []objSupersedeSupersession
+	for _, p := range got.Supersessions {
+		p.ObjectDocsURL = ""
+		gotPairs = append(gotPairs, p)
+	}
+	if !reflect.DeepEqual(gotPairs, want) {
+		t.Errorf("supersessions = %+v, want the records' %+v", gotPairs, want)
 	}
 
-	// Each store's own checked-out branch renders its successor's board.
-	titles := map[string]string{
-		"spec/successor":    "Successor",
-		"spec/successor-v2": "Successor v2",
-		"spec/successor-v3": "Successor v3",
+	// The design branch is the one whose own tip commit proposed the
+	// successor under test.
+	touched, err := gitOutput(ctx, root, "diff-tree", "--no-commit-id", "--name-only", "-r", "refs/heads/"+got.DesignBranch)
+	if err != nil || !slices.Contains(strings.Split(touched, "\n"), successor.Path) {
+		t.Errorf("design branch %q's tip does not propose %s: %q, %v", got.DesignBranch, successor.Path, touched, err)
 	}
-	for _, name := range objSupersedeStores {
-		s := info.Stores[name]
-		slug := strings.TrimPrefix(s.Successor, "spec/")
-		status, page := httpGetBody(t, s.URL+"board/spec/"+slug)
-		if status != http.StatusOK {
-			t.Errorf("store %q: GET board/spec/%s = %d, want 200", name, slug, status)
+
+	// main's own successor specs: active specs whose decisions supersede a
+	// closed object. They, with the closed specs, are the docs pages; main's
+	// board is one of them, or not a surface when there is none.
+	mainRecs, err := objsupersede.ReadRecords(ctx, objsupersede.CommitTree{Root: root, Commit: got.MainBranch})
+	if err != nil || len(mainRecs.Failures) != 0 {
+		t.Fatalf("reading main's records: %v %+v", err, mainRecs)
+	}
+	docs := map[string]bool{}
+	for o := range objects {
+		docs[strings.SplitN(o, "#", 2)[0]] = true
+	}
+	var mainSuccessors []string
+	for name, spec := range mainRecs.Specs {
+		if !spec.Archived && len(supersedesEdges(spec)) > 0 {
+			mainSuccessors = append(mainSuccessors, "spec/"+name)
+			docs["spec/"+name] = true
+		}
+	}
+	var gotDocs, wantDocs []string
+	for ref := range got.Docs {
+		gotDocs = append(gotDocs, ref)
+	}
+	for ref := range docs {
+		wantDocs = append(wantDocs, ref)
+	}
+	sort.Strings(gotDocs)
+	sort.Strings(wantDocs)
+	if !reflect.DeepEqual(gotDocs, wantDocs) {
+		t.Errorf("docs pages = %v, want the closed specs and main's successors %v", gotDocs, wantDocs)
+	}
+	switch mainBoard := got.Boards.Main; {
+	case len(mainSuccessors) == 0 && mainBoard.NotASurface == "":
+		t.Errorf("main carries no successor, yet its board %+v is handed out as a surface", mainBoard)
+	case len(mainSuccessors) > 0 && !slices.Contains(mainSuccessors, mainBoard.Spec):
+		t.Errorf("main board spec %q is none of main's successors %v", mainBoard.Spec, mainSuccessors)
+	case got.Checkout == got.MainBranch && mainBoard.Spec != got.Successor:
+		t.Errorf("checkout is main, yet main's board shows %q, not the successor %q", mainBoard.Spec, got.Successor)
+	}
+}
+
+// checkObjSupersedeBoards GETs every board view: a surface renders its
+// spec's exact title on a clean working tree (review I-3: the serve's own
+// data zone must not read as uncommitted changes); a not-a-surface view
+// carries no URL and says why. Where main's board is reached through
+// /b/main while the checkout is elsewhere, a spec only the checkout has
+// must 404 there — proof /b/main is main, not the serving checkout.
+func checkObjSupersedeBoards(t *testing.T, got objSupersedeStoreInfo) {
+	t.Helper()
+	views := []struct {
+		role string
+		v    objSupersedeBoard
+	}{{"checkout", got.Boards.Checkout}, {"design", got.Boards.Design}, {"main", got.Boards.Main}}
+	for _, view := range views {
+		v := view.v
+		if v.NotASurface != "" {
+			if v.URL != "" || v.Spec != "" {
+				t.Errorf("%s board %+v: a view that is not a surface must carry no URL or spec", view.role, v)
+			}
 			continue
 		}
-		if want := titles[s.Successor]; want != "" && !strings.Contains(page, want) {
-			t.Errorf("store %q: board/spec/%s missing title %q", name, slug, want)
-		}
-	}
-
-	// proposed and no-conflict: the default branch shows nothing yet for
-	// the not-yet-accepted successor (design §8's "not yet accepted" case).
-	for _, name := range []string{"proposed", "no-conflict"} {
-		s := info.Stores[name]
-		status, _ := httpGetBody(t, s.URL+branchBoardPath(s.MainBranch, "successor"))
-		if status == http.StatusOK {
-			t.Errorf("store %q: /b/%s/board/spec/successor = 200, want the default branch to show nothing pre-acceptance", name, s.MainBranch)
-		}
-	}
-
-	// accepted, chain, and chain-drop: the original proposing design
-	// branch (design/successor) still resolves and its board is still
-	// reachable through the per-branch route after the merge — the same
-	// mechanism proposed/no-conflict rely on for their default-branch view,
-	// proven here on the branch that actually merged.
-	for _, name := range []string{"accepted", "chain", "chain-drop"} {
-		s := info.Stores[name]
-		status, page := httpGetBody(t, s.URL+branchBoardPath("design/successor", "successor"))
+		status, page := httpGetBody(t, v.URL)
 		if status != http.StatusOK {
-			t.Errorf("store %q: /b/design%%2Fsuccessor/board/spec/successor = %d, want 200", name, status)
+			t.Errorf("%s board %s = %d, want 200", view.role, v.URL, status)
 			continue
 		}
-		if !strings.Contains(page, "Successor") {
-			t.Errorf("store %q: per-branch board missing the spec title", name)
+		if title := "<h1>" + objSupersedeBoardTitle[v.Spec] + "</h1>"; !strings.Contains(page, title) {
+			t.Errorf("%s board %s lacks %s", view.role, v.URL, title)
+		}
+		if !strings.Contains(page, `data-testid="asd-posture-tree" data-dirty="clean"`) {
+			t.Errorf("%s board %s does not show a clean working tree", view.role, v.URL)
+		}
+		if strings.Contains(page, `data-testid="uncommitted-indicator">`) {
+			t.Errorf("%s board %s shows the uncommitted-changes indicator", view.role, v.URL)
+		}
+	}
+	if main := got.Boards.Main; main.URL != "" && got.Checkout != got.MainBranch {
+		prefix := strings.TrimSuffix(main.URL, strings.TrimPrefix(main.Spec, "spec/"))
+		onlyCheckout := strings.TrimPrefix(got.Successor, "spec/")
+		if status, _ := httpGetBody(t, prefix+onlyCheckout); status != http.StatusNotFound {
+			t.Errorf("%s%s = %d, want 404: /b/%s must render main, not the checkout", prefix, onlyCheckout, status, got.MainBranch)
+		}
+		if status, _ := httpGetBody(t, got.Boards.Checkout.URL); status != http.StatusOK {
+			t.Errorf("control: the checkout's own board %s = %d, want 200", got.Boards.Checkout.URL, status)
 		}
 	}
 }
 
-// TestObjSupersedeStores_MaterializeMatchesScenarioBuildAndLintsClean is
-// the Contract's SHA-reproduction and lint-clean proof: for every needed
-// store, an INDEPENDENT scenario.Materialize into its own directory
-// reproduces exactly the root and step SHAs scenario.Build (the Go test
-// suite's own helper) produces, and every branch scenario.Materialize
-// left in that repository lints clean in-process — the same call
-// `verdi lint` itself makes (cmd/verdi/lint.go). The L3c report's re-review
-// a found all six of these variants lint-clean; none is an intended
-// refusal, so no branch here is exempted.
-func TestObjSupersedeStores_MaterializeMatchesScenarioBuildAndLintsClean(t *testing.T) {
+// checkObjSupersedeDocs GETs every docs page and every closed object's page
+// (review C-1, I-1): each is served, stamped with main's commit (the build
+// used dex.Options.Commit, never the wall clock), and renders the object's
+// own text at its anchor — the positive control that makes an absence
+// asserted on the same page able to fail. A successor the checkout has but
+// main does not is absent from the docs site: it is main's.
+func checkObjSupersedeDocs(t *testing.T, got objSupersedeStoreInfo) {
+	t.Helper()
+	stamp := "main @ " + got.DocsCommit[:7]
+	for ref, u := range got.Docs {
+		status, page := httpGetBody(t, u)
+		if status != http.StatusOK {
+			t.Errorf("docs page for %s (%s) = %d, want 200", ref, u, status)
+			continue
+		}
+		if !strings.Contains(page, stamp) {
+			t.Errorf("docs page for %s lacks the build stamp %q", ref, stamp)
+		}
+	}
+	for _, p := range got.Supersessions {
+		page, id, _ := strings.Cut(p.ObjectDocsURL, "#")
+		status, body := httpGetBody(t, page)
+		if status != http.StatusOK {
+			t.Errorf("object page %s = %d, want 200", p.ObjectDocsURL, status)
+			continue
+		}
+		if !strings.Contains(body, `<a id="`+id+`"></a>`) || !strings.Contains(body, objSupersedeObjectText[p.Object]) {
+			t.Errorf("object page %s does not render %s's text %q at its anchor", p.ObjectDocsURL, p.Object, objSupersedeObjectText[p.Object])
+		}
+	}
+	if _, onMain := got.Docs[got.Successor]; !onMain {
+		if status, _ := httpGetBody(t, got.DocsURL+"a/"+got.Successor+"/"); status != http.StatusNotFound {
+			t.Errorf("docs site has %s (%d), which only the checkout carries: want 404, the site is main's", got.Successor, status)
+		}
+	}
+}
+
+// TestObjSupersedeStores_LintClean: every branch of every provisioned
+// scenario lints clean in-process — the same call `verdi lint` makes
+// (cmd/verdi/lint.go) — and, as the negative control that proves the call
+// sees the store at all (review M-1), a refusal scenario lints dirty with
+// VL-026. The six are align non-resolutions at most (no-conflict,
+// chain-not-in-force), never lint refusals: VL-026 checks shape only.
+func TestObjSupersedeStores_LintClean(t *testing.T) {
 	ctx := context.Background()
-	fixtureDir := scenario.Dir()
+	rows := map[string][]string{"top-level-supersedes": {"VL-026"}}
 	for _, name := range objSupersedeStores {
+		rows[name] = nil
+	}
+	names := make([]string, 0, len(rows))
+	for name := range rows {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		wantRules := rows[name]
 		t.Run(name, func(t *testing.T) {
-			want := scenario.Build(t, name)
-
-			got, err := scenario.Materialize(ctx, fixtureDir, t.TempDir(), name)
-			if err != nil {
-				t.Fatalf("Materialize(%q): %v", name, err)
+			dir := scenario.Build(t, name).Dir
+			branches, err := gitOutput(ctx, dir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+			if err != nil || branches == "" {
+				t.Fatalf("listing branches: %q, %v", branches, err)
 			}
-			if !reflect.DeepEqual(got.Base, want.Base) {
-				t.Errorf("store %q: Base = %v, want %v", name, got.Base, want.Base)
-			}
-			if !reflect.DeepEqual(got.Steps, want.Steps) {
-				t.Errorf("store %q: Steps = %v, want %v", name, got.Steps, want.Steps)
-			}
-			if len(got.Base) == 0 {
-				t.Fatalf("store %q: no base commits", name)
-			}
-			t.Logf("store %q: root = %s", name, got.Base[0])
-
-			branches, err := gitOutput(ctx, got.Dir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
-			if err != nil {
-				t.Fatalf("listing branches: %v", err)
-			}
-			if branches == "" {
-				t.Fatalf("store %q: no local branches", name)
-			}
+			var rules []string
 			for _, branch := range strings.Split(branches, "\n") {
-				branch = strings.TrimSpace(branch)
-				if branch == "" {
-					continue
-				}
-				if err := runGit(ctx, got.Dir, nil, "checkout", "-q", branch); err != nil {
+				if err := runGit(ctx, dir, nil, "checkout", "-q", branch); err != nil {
 					t.Fatalf("checking out %s: %v", branch, err)
 				}
-				findings, err := lint.NewEngine().Run(ctx, got.Dir, lint.BuildContext(ctx, got.Dir), lint.Options{})
+				findings, err := lint.NewEngine().Run(ctx, dir, lint.BuildContext(ctx, dir), lint.Options{})
 				if err != nil {
-					t.Fatalf("store %q branch %s: lint.Run: %v", name, branch, err)
+					t.Fatalf("branch %s: lint.Run: %v", branch, err)
 				}
 				for _, f := range findings {
-					if f.Severity != lint.SeverityDisclosure {
-						t.Errorf("store %q branch %s: unexpected lint finding: %s", name, branch, f.String())
+					if f.Severity == lint.SeverityViolation && !slices.Contains(rules, f.Rule) {
+						rules = append(rules, f.Rule)
 					}
 				}
+			}
+			sort.Strings(rules)
+			if !reflect.DeepEqual(rules, wantRules) {
+				t.Fatalf("violations %v, want %v", rules, wantRules)
 			}
 		})
 	}
