@@ -25,8 +25,9 @@ build:
 # documented cache bypass) for EXACTLY these — test-cross runs all of them
 # but internal/specalign, which spec-align runs — keeping honest caching for
 # the provably-not-blind majority. TestGateCacheHonesty_CrossBinaryPkgsRunFresh
-# fails if any of them runs without -count=1 in `make test` or `make verify`. In-package cmd/verdi exec tests are NOT blind
-# (their buildID covers cmd/verdi's own sources) and are deliberately absent.
+# fails if any of them runs without -count=1 in `make test` or `make verify`.
+# In-package cmd/verdi exec tests are NOT blind (their buildID covers
+# cmd/verdi's own sources) and are deliberately absent.
 # TestGateCacheHonesty_CrossBinaryPkgsListInSync (internal/specalign) fails if a
 # package that builds+execs cmd/verdi from outside cmd/verdi is missing here.
 # cmd/e2eharness joined with the unproven-board fixture (MVP release amendment
@@ -345,8 +346,8 @@ e2e-check-node:
 # CI configs install Node before running it (verify.yml before `make
 # verify`, merge-gate.yml in its e2e job) so local/CI parity holds
 # (CLAUDE.md: "CI runs exactly `make verify` — trust parity"; SI-266 reads
-# that as `make verify`'s step set). Depends on e2e-check-node so a missing toolchain fails
-# with the install message above, not a raw shell error.
+# that as `make verify`'s step set). Depends on e2e-check-node so a missing
+# toolchain fails with the install message above, not a raw shell error.
 #
 # VERDI_E2E_PORT_BASE (D6-28): the harness (cmd/e2eharness/ports.go) and
 # this suite's runner (e2e/ports.ts) both hard-code 4173/4174/4177 unless
