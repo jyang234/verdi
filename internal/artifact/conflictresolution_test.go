@@ -1,0 +1,319 @@
+package artifact
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// conflictDoc builds a conflict frontmatter document for the closed-spec
+// object supersession tests: status, one `challenges` link per ref, the
+// frozen stamp a resolved conflict requires, and any extra lines (such as
+// resolved_by).
+func conflictDoc(status string, refs []string, extra string) []byte {
+	var b strings.Builder
+	b.WriteString("id: conflict/closed-object-replaced\nkind: conflict\ntitle: \"A successor replaces a closed criterion\"\n")
+	b.WriteString("status: " + status + "\nowners: [platform-team]\nlinks:\n")
+	for _, r := range refs {
+		fmt.Fprintf(&b, "  - { type: challenges, ref: %q }\n", r)
+	}
+	if status != "open" {
+		b.WriteString("frozen: { at: 2026-09-25, commit: 3e91ab2 }\n")
+	}
+	b.WriteString(extra)
+	return []byte(b.String())
+}
+
+// TestLink_ValidateFor_Happy: a conflict's `challenges` link may target an
+// object fragment of a spec (02 §Link taxonomy, the `challenges` row and the
+// paragraph after the closed spec-object edge vocabulary); whole-artifact
+// challenges and the closed five-value vocabulary keep working everywhere.
+func TestLink_ValidateFor_Happy(t *testing.T) {
+	cases := []struct {
+		owner Kind
+		link  Link
+	}{
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/home-status-glance#ac-1"}},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/workbench-legibility#dc-4"}},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/stale-decline"}},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "adr/0001-old"}},
+		{KindConflict, Link{Type: LinkSupersedes, Ref: "spec/loan-update#ac-1"}},
+		{KindSpec, Link{Type: LinkImplements, Ref: "spec/loan-update#ac-1"}},
+		{KindSpec, Link{Type: LinkChallenges, Ref: "adr/0001-old"}},
+		{KindADR, Link{Type: LinkSupersedes, Ref: "adr/0001-old"}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.owner)+"/"+string(tc.link.Type)+"/"+tc.link.Ref, func(t *testing.T) {
+			if err := tc.link.ValidateFor(tc.owner); err != nil {
+				t.Fatalf("ValidateFor(%s, %+v): %v", tc.owner, tc.link, err)
+			}
+		})
+	}
+}
+
+// TestLink_ValidateFor_Negative: a fragment `challenges` link fails closed on
+// every kind but a conflict, a conflict's fragment challenge must name a spec
+// object, and every other non-vocabulary fragment link still fails closed on a
+// conflict too.
+func TestLink_ValidateFor_Negative(t *testing.T) {
+	cases := []struct {
+		owner Kind
+		link  Link
+		want  string
+	}{
+		{KindSpec, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindADR, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindDiagram, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindAttestation, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindWaiver, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindReaffirmation, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindObligation, Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{Kind("bogus"), Link{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "adr/0001-old#dc-1"}, "02 §Link taxonomy"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "diagram/loan-flow#ac-1"}, "02 §Link taxonomy"},
+		{KindConflict, Link{Type: LinkVerifies, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindConflict, Link{Type: LinkAnnotates, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindConflict, Link{Type: LinkImpacts, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindConflict, Link{Type: LinkDerivedFrom, Ref: "spec/loan-update#ac-1"}, "closed spec-object edge vocabulary"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: ""}, "empty ref"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "not-a-ref"}, "missing the '/'"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/loan-update#"}, "trailing '#'"},
+		{KindConflict, Link{Type: LinkChallenges, Ref: "spec/loan-update#AC_1"}, "invalid fragment object id"},
+		{KindConflict, Link{Type: "bogus", Ref: "spec/loan-update#ac-1"}, "unknown link type"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.owner)+"/"+string(tc.link.Type)+"/"+tc.link.Ref, func(t *testing.T) {
+			err := tc.link.ValidateFor(tc.owner)
+			if err == nil {
+				t.Fatalf("ValidateFor(%s, %+v): want error, got nil", tc.owner, tc.link)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateFor(%s, %+v) = %q, want it to contain %q", tc.owner, tc.link, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestLink_ValidateFor_IsValidateElsewhere proves ValidateFor behaves exactly
+// like Link.Validate (same verdict, same diagnostic) for every owner kind and
+// link except a conflict's fragment `challenges` link — the one context 02
+// §Link taxonomy widens — so the closed five-value vocabulary is unchanged in
+// every other context.
+func TestLink_ValidateFor_IsValidateElsewhere(t *testing.T) {
+	owners := []Kind{KindSpec, KindADR, KindDiagram, KindAttestation, KindWaiver, KindConflict, KindReaffirmation, KindObligation, Kind("bogus")}
+	var links []Link
+	for _, lt := range []LinkType{
+		LinkImplements, LinkResolves, LinkSupersedes, LinkExempts, LinkVerifies, LinkDerivedFrom,
+		LinkAnnotates, LinkDependsOn, LinkStory, LinkImpacts, LinkChallenges, "bogus",
+	} {
+		for _, ref := range []string{
+			"", "not-a-ref", "spec/foo", "spec/foo@3e91ab2", "adr/0001-old", "spec/loan-update#ac-1",
+			"adr/0001-old#dc-1", "spec/loan-update#", "jira:LOAN-1482", "svc/loansvc/boundary-contract",
+		} {
+			links = append(links, Link{Type: lt, Ref: ref})
+		}
+	}
+	errText := func(err error) string {
+		if err == nil {
+			return "<nil>"
+		}
+		return err.Error()
+	}
+	for _, owner := range owners {
+		for _, l := range links {
+			if owner == KindConflict && l.Type == LinkChallenges {
+				if ref, err := ParseRef(l.Ref); err == nil && ref.Fragment() {
+					continue // the one widened context, covered by the tables above
+				}
+			}
+			if got, want := errText(l.ValidateFor(owner)), errText(l.Validate()); got != want {
+				t.Errorf("ValidateFor(%s, %+v) = %s, Validate() = %s", owner, l, got, want)
+			}
+		}
+	}
+}
+
+// TestDecodeConflict_FragmentChallenges_Happy: a conflict filed under 03
+// §Challenging closed decisions may name closed-spec objects as fragments,
+// and a superseded one may carry resolved_by (02 §Kind registry; SI-269).
+// resolved_by's presence is VL-026's, not the decode's.
+func TestDecodeConflict_FragmentChallenges_Happy(t *testing.T) {
+	cases := []struct {
+		name, status   string
+		refs           []string
+		extra          string
+		wantResolvedBy string
+	}{
+		{"open, filed early", "open", []string{"spec/home-status-glance#ac-1"}, "", ""},
+		{"superseded with resolved_by", "superseded", []string{"spec/home-status-glance#ac-1", "spec/home-status-glance#dc-2"}, "resolved_by: spec/home-status-v2\n", "spec/home-status-v2"},
+		{"superseded without resolved_by", "superseded", []string{"spec/home-status-glance#ac-1"}, "", ""},
+		{"dismissed", "dismissed", []string{"spec/home-status-glance#ac-1"}, "", ""},
+		{"mixed fragment and whole-artifact challenges", "superseded", []string{"spec/home-status-glance#ac-1", "spec/home-status-glance"}, "resolved_by: spec/home-status-v2\n", "spec/home-status-v2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm, err := DecodeConflict(conflictDoc(tc.status, tc.refs, tc.extra))
+			if err != nil {
+				t.Fatalf("DecodeConflict: %v", err)
+			}
+			if fm.ResolvedBy != tc.wantResolvedBy {
+				t.Fatalf("ResolvedBy = %q, want %q", fm.ResolvedBy, tc.wantResolvedBy)
+			}
+		})
+	}
+}
+
+// TestDecodeConflict_FragmentChallenges_Negative: a conflict's fragment
+// challenge names a spec object; any other kind's fragment fails closed.
+func TestDecodeConflict_FragmentChallenges_Negative(t *testing.T) {
+	for _, ref := range []string{"adr/0001-old#dc-1", "diagram/loan-flow#ac-1", "spec/home-status-glance#"} {
+		t.Run(ref, func(t *testing.T) {
+			if _, err := DecodeConflict(conflictDoc("open", []string{ref}, "")); err == nil {
+				t.Fatalf("DecodeConflict(challenges %q): want error, got nil", ref)
+			}
+		})
+	}
+}
+
+// TestDecodeConflict_ResolvedBy_Negative: per SI-269 resolved_by is accepted
+// only on a superseded conflict whose challenges name an object fragment,
+// and only as an unpinned spec/<name> ref with no fragment. Every other use
+// fails closed, citing 02 §Kind registry.
+func TestDecodeConflict_ResolvedBy_Negative(t *testing.T) {
+	fragment := []string{"spec/home-status-glance#ac-1"}
+	const (
+		status = "whose status is superseded"
+		scope  = "whose challenges links name an object fragment"
+		shape  = "must be an unpinned spec/<name> ref"
+	)
+	cases := []struct {
+		name, status string
+		refs         []string
+		resolvedBy   string
+		want         string
+	}{
+		{"open conflict", "open", fragment, "spec/home-status-v2", status},
+		{"dismissed conflict", "dismissed", fragment, "spec/home-status-v2", status},
+		{"superseded with only whole-artifact challenges", "superseded", []string{"spec/home-status-glance", "adr/0001-old"}, "spec/home-status-v2", scope},
+		{"pinned ref", "superseded", fragment, "spec/home-status-v2@3e91ab2", shape},
+		{"fragment ref", "superseded", fragment, "spec/home-status-v2#dc-1", shape},
+		{"pinned fragment ref", "superseded", fragment, "spec/home-status-v2@3e91ab2#dc-1", shape},
+		{"adr ref", "superseded", fragment, "adr/0002-outbox-events", shape},
+		{"conflict ref", "superseded", fragment, "conflict/other-conflict", shape},
+		{"external ref", "superseded", fragment, "svc/loansvc/boundary-contract", shape},
+		{"tracker ref", "superseded", fragment, "jira:LOAN-1482", shape},
+		{"bare name", "superseded", fragment, "home-status-v2", shape},
+		{"not kebab-case", "superseded", fragment, "spec/Home_Status", shape},
+		{"unknown kind", "superseded", fragment, "specs/home-status-v2", shape},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeConflict(conflictDoc(tc.status, tc.refs, fmt.Sprintf("resolved_by: %q\n", tc.resolvedBy)))
+			if err == nil {
+				t.Fatalf("DecodeConflict(resolved_by %q): want error, got nil", tc.resolvedBy)
+			}
+			for _, want := range []string{"resolved_by", "02 §Kind registry", tc.want} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("DecodeConflict(resolved_by %q) = %q, want it to contain %q", tc.resolvedBy, err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestDecodeConflict_ResolvedBy_StrictDecodeOnly: lint decodes through
+// DecodeStrict alone, which knows the field on a conflict.
+func TestDecodeConflict_ResolvedBy_StrictDecodeOnly(t *testing.T) {
+	var fm ConflictFrontmatter
+	doc := conflictDoc("superseded", []string{"spec/home-status-glance#ac-1"}, "resolved_by: spec/home-status-v2\n")
+	if err := DecodeStrict(doc, &fm); err != nil {
+		t.Fatalf("DecodeStrict: %v", err)
+	}
+	if fm.ResolvedBy != "spec/home-status-v2" {
+		t.Fatalf("ResolvedBy = %q, want spec/home-status-v2", fm.ResolvedBy)
+	}
+}
+
+// storyWithTopLevelLink adds l after the story fixture's one top-level link
+// (its required implements edge).
+func storyWithTopLevelLink(t *testing.T, l string) []byte {
+	t.Helper()
+	const implements = "  - { type: implements, ref: \"spec/loan-update#ac-1\" }\n"
+	if strings.Count(storySpecYAML, implements) != 1 {
+		t.Fatal("storySpecYAML no longer carries the one top-level implements link this test extends")
+	}
+	return []byte(strings.Replace(storySpecYAML, implements, implements+l, 1))
+}
+
+// TestFragmentChallenges_RefusedOutsideConflict: only a conflict's `links:`
+// may carry a fragment `challenges` edge; a feature's or story's top-level
+// links, a decision object's links, and an ADR's links still fail closed with
+// the closed-vocabulary diagnostic. Each case has a control proving the same
+// document decodes with a whole-artifact challenge or a vocabulary edge.
+func TestFragmentChallenges_RefusedOutsideConflict(t *testing.T) {
+	const fragment = "  - { type: challenges, ref: \"spec/home-status-glance#ac-1\" }\n"
+	const whole = "  - { type: challenges, ref: \"spec/home-status-glance\" }\n"
+	decisionWith := func(linkType string) []byte {
+		return []byte(featureSpecDraftYAML + "decisions:\n  - { id: dc-1, text: \"replace ac-1\", anchor: \"#dc-1\", links: [ { type: " + linkType + ", ref: \"spec/home-status-glance#ac-1\" } ] }\n")
+	}
+	cases := []struct {
+		name          string
+		decode        func([]byte) error
+		refused, ctrl []byte
+	}{
+		{"feature top-level", decodeSpecErr, []byte(featureSpecDraftYAML + "links:\n" + fragment), []byte(featureSpecDraftYAML + "links:\n" + whole)},
+		{"story top-level", decodeSpecErr, storyWithTopLevelLink(t, fragment), storyWithTopLevelLink(t, whole)},
+		{"feature decision", decodeSpecErr, decisionWith("challenges"), decisionWith("supersedes")},
+		{"adr", decodeADRErr, []byte(adrProposedYAML + "links:\n" + fragment), []byte(adrProposedYAML + "links:\n" + whole)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.decode(tc.ctrl); err != nil {
+				t.Fatalf("control decode: %v", err)
+			}
+			err := tc.decode(tc.refused)
+			if err == nil {
+				t.Fatal("fragment challenges outside a conflict: want error, got nil")
+			}
+			if !strings.Contains(err.Error(), "closed spec-object edge vocabulary") {
+				t.Fatalf("error %q does not cite the closed spec-object edge vocabulary", err)
+			}
+		})
+	}
+}
+
+// TestResolvedBy_OnlyOnConflict: resolved_by is a conflict field; strict
+// decode (KnownFields) refuses it on a spec or an ADR. Each case has a
+// control proving the same document decodes without it.
+func TestResolvedBy_OnlyOnConflict(t *testing.T) {
+	const line = "resolved_by: spec/home-status-v2\n"
+	cases := []struct {
+		name   string
+		decode func([]byte) error
+		doc    string
+	}{
+		{"feature spec", decodeSpecErr, featureSpecDraftYAML},
+		{"story spec", decodeSpecErr, storySpecYAML},
+		{"component spec", decodeSpecErr, componentSpecActiveYAML},
+		{"proposed adr", decodeADRErr, adrProposedYAML},
+		{"accepted adr", decodeADRErr, adrAcceptedYAML},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.decode([]byte(tc.doc)); err != nil {
+				t.Fatalf("control decode: %v", err)
+			}
+			err := tc.decode([]byte(tc.doc + line))
+			if err == nil {
+				t.Fatal("resolved_by outside a conflict: want error, got nil")
+			}
+			if !strings.Contains(err.Error(), "resolved_by") {
+				t.Fatalf("error %q does not name resolved_by", err)
+			}
+		})
+	}
+}
+
+func decodeSpecErr(b []byte) error { _, err := DecodeSpec(b); return err }
+
+func decodeADRErr(b []byte) error { _, err := DecodeADR(b); return err }
