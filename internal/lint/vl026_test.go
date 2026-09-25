@@ -79,6 +79,29 @@ func TestVL026_ClosedSpec(t *testing.T) {
 	}
 }
 
+// TestVL026_ConflictSuperseded pins VL-026's one read of a conflict's own
+// status enum (open -> superseded | dismissed, 02 §Kind registry): only
+// the exact value superseded counts, as decode's enum does.
+func TestVL026_ConflictSuperseded(t *testing.T) {
+	cases := []struct {
+		status artifact.Status
+		want   bool
+	}{
+		{status: "superseded", want: true},
+		{status: "open"},
+		{status: "dismissed"},
+		{status: "Superseded"},
+		{status: ""},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			if got := vl026ConflictSuperseded(&artifact.ConflictFrontmatter{Status: tc.status}); got != tc.want {
+				t.Fatalf("vl026ConflictSuperseded(status %q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestVL026_Clauses drives every clause a–g through its happy and negative
 // paths. Each case adds its subject documents to cssBase and names the
 // exact clause letters VL-026 must report (nil: none), plus substrings

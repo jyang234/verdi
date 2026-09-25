@@ -167,7 +167,7 @@ func (vl026) checkConflict(snap *Snapshot, d *Document) []Finding {
 		findings = append(findings, vl026Finding(d, "d", fmt.Sprintf("fragment challenges name objects of %d artifacts (%s), but a conflict's fragment challenges all name objects of one spec (02 §Link taxonomy; VL-026)", len(names), strings.Join(names, ", ")), nil))
 	}
 
-	if d.Conflict.Status == "superseded" && len(named) > 0 {
+	if vl026ConflictSuperseded(d.Conflict) && len(named) > 0 {
 		switch {
 		case d.Conflict.ResolvedBy == "":
 			// vocab:identity — conflict status and field ids (status: superseded, resolved_by), quoting 02 §Kind registry
@@ -184,6 +184,16 @@ func (vl026) checkConflict(snap *Snapshot, d *Document) []Finding {
 		findings = append(findings, vl026Finding(d, "f", fmt.Sprintf("%v (02 §Link taxonomy; SI-269; VL-026)", err), nil))
 	}
 	return findings
+}
+
+// vl026ConflictSuperseded reports whether conflict c's own status is
+// superseded. c.Status is the conflict's frontmatter enum (open ->
+// superseded | dismissed, 02 §Kind registry), not a feature or story
+// lifecycle state, so reading it decides no acceptance or closure. This is
+// VL-026's one read of it, the single site specalign's lifecycle-decision
+// audit allowlists (SI-277).
+func vl026ConflictSuperseded(c *artifact.ConflictFrontmatter) bool {
+	return c.Status == "superseded"
 }
 
 // vl026FragmentRef parses l's ref and reports whether it names an object
