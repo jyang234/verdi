@@ -116,11 +116,14 @@ func TestSpecMRGate_ReviewThreads_UnresolvedBlocks(t *testing.T) {
 	if got != 1 {
 		t.Fatalf("runSpecMRGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "review threads resolved") {
-		t.Fatalf("stdout = %q, want it to name the review-thread condition", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "gate: FAIL") {
-		t.Fatalf("stdout = %q, want a final gate: FAIL line", stdout.String())
+	for _, w := range []string{
+		"[PASS] 1. spec-MR: declared decision conflicts resolved and judged findings dispositioned",
+		"[FAIL] 2. spec-MR: review threads resolved",
+		"gate: FAIL",
+	} {
+		if !strings.Contains(stdout.String(), w) {
+			t.Fatalf("stdout = %q, want it to contain %q (the review-thread condition alone fails)", stdout.String(), w)
+		}
 	}
 }
 
