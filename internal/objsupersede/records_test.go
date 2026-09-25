@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -122,6 +125,34 @@ func TestReadRecords_WorkTreeAndCommit(t *testing.T) {
 	}
 	if recs := mustRead(t, WorkTree{Root: t.TempDir()}); len(recs.Specs)+len(recs.Conflicts)+len(recs.Failures) != 0 {
 		t.Errorf("an empty directory read records: %+v", recs)
+	}
+}
+
+// TestReadRecords_Parity reads one committed tree through both readers,
+// with records whose names git quotes in a plain listing (review a I-1):
+// the records and failures must be equal, and neither reader may skip one.
+func TestReadRecords_Parity(t *testing.T) {
+	repo := scenario.Build(t, "proposed")
+	for p, from := range map[string]string{
+		".verdi/conflicts/successor-closed-feature-2é.md": ".verdi/conflicts/successor-closed-feature.md",
+		".verdi/specs/active/café/spec.md":                ".verdi/specs/active/successor/spec.md",
+	} {
+		raw, err := os.ReadFile(filepath.Join(repo.Dir, from))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo.Dir, p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo.Dir, p), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, repo.Dir, "add", "-A")
+	gitIn(t, repo.Dir, "commit", "-q", "--no-verify", "-m", "Add oddly named records")
+	work, commit := mustRead(t, WorkTree{Root: repo.Dir}), mustRead(t, CommitTree{Root: repo.Dir, Commit: "HEAD"})
+	if len(work.Failures) != 2 || !reflect.DeepEqual(work, commit) {
+		t.Fatalf("readers differ on one tree:\nwork   %v\ncommit %v", work.Failures, commit.Failures)
 	}
 }
 

@@ -131,27 +131,26 @@ func TestHistory_Establishment(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// acceptBroken accepts design/successor together with an undecodable
-	// spec (review b I-1's witness).
+	// acceptBroken and acceptOddName accept design/successor together with
+	// one more record: an undecodable spec (review b I-1's witness), or a
+	// conflict under a name git quotes whose id disagrees with it (review a
+	// I-1's witness).
 	acceptBroken := func(t *testing.T, dir string) {
-		broken := filepath.Join(dir, ".verdi", "specs", "active", "zz-broken", "spec.md")
-		if err := os.MkdirAll(filepath.Dir(broken), 0o755); err != nil {
+		acceptRecord(t, dir, ".verdi/specs/active/zz-broken/spec.md", "---\nid: [\n---\n")
+	}
+	acceptOddName := func(t *testing.T, dir string) {
+		raw, err := os.ReadFile(filepath.Join(dir, ".verdi/conflicts/successor-closed-feature.md"))
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(broken, []byte("---\nid: [\n---\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitIn(t, dir, "add", "-A")
-		gitIn(t, dir, "commit", "-q", "--no-verify", "-m", "Add an undecodable spec")
-		gitIn(t, dir, "checkout", "-q", "main")
-		gitIn(t, dir, "merge", "-q", "--no-ff", "--no-verify", "-m", "Accept spec/successor", "design/successor")
-		gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "main")
+		acceptRecord(t, dir, ".verdi/conflicts/successor-closed-feature-2é.md", string(raw))
 	}
 	tests := []struct {
 		name, scenario, successor string
 		prep                      func(*testing.T, string)
-		object                    artifact.Ref
-		want                      Establishment // Detail: its required prefix
+
+		object artifact.Ref
+		want   Establishment // Detail: its required prefix
 	}{
 		{"in force", "", "successor", nil, obj("closed-feature", "dc-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
 		{"in force, criterion", "", "successor", nil, obj("closed-story", "ac-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
@@ -160,6 +159,7 @@ func TestHistory_Establishment(t *testing.T) {
 		{"records did not match at acceptance", "unrelated-accepted", "unrelated", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"}},
 		{"acceptance unproven: no default branch", "accepted", "successor", noBranchRepo, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: noBranch}},
 		{"acceptance unproven: a record fails decode at acceptance", "proposed", "successor", acceptBroken, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at the acceptance commit: .verdi/specs/active/zz-broken/spec.md: "}},
+		{"acceptance unproven: a record under a quoted name fails at acceptance", "proposed", "successor", acceptOddName, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at the acceptance commit: .verdi/conflicts/successor-closed-feature-2é.md: id conflict/successor-closed-feature disagrees"}},
 		{"acceptance unproven: an unreadable acceptance commit", "accepted", "successor", unreadable, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "objsupersede: reading .verdi/conflicts/successor-closed-story.md: "}},
 	}
 	for _, tc := range tests {
@@ -178,6 +178,24 @@ func TestHistory_Establishment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// acceptRecord commits one more record on design/successor and accepts
+// that branch into main with a --no-ff merge.
+func acceptRecord(t *testing.T, dir, path, content string) {
+	t.Helper()
+	full := filepath.Join(dir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-q", "--no-verify", "-m", "Add "+path)
+	gitIn(t, dir, "checkout", "-q", "main")
+	gitIn(t, dir, "merge", "-q", "--no-ff", "--no-verify", "-m", "Accept spec/successor", "design/successor")
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "main")
 }
 
 func gitOut(t *testing.T, dir string, args ...string) string {

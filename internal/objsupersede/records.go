@@ -72,9 +72,21 @@ func (w WorkTree) ReadFile(_ context.Context, p string) ([]byte, error) {
 // repository at Root, through internal/gitx.
 type CommitTree struct{ Root, Commit string }
 
-// Files implements TreeReader.
+// Files implements TreeReader through a NUL-terminated listing, so a path
+// git would quote in a plain listing (a non-ASCII byte, a quote, a control
+// character) is listed as written, never skipped (lane L3 review a I-1).
 func (c CommitTree) Files(ctx context.Context, dir string) ([]string, error) {
-	return gitx.LsTree(ctx, c.Root, c.Commit, dir)
+	entries, err := gitx.LsTreeEntries(ctx, c.Root, c.Commit)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.Path == dir || strings.HasPrefix(e.Path, dir+"/") {
+			out = append(out, e.Path)
+		}
+	}
+	return out, nil
 }
 
 // ReadFile implements TreeReader.
