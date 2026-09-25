@@ -49,6 +49,7 @@ func readMaterializedRecords(t *testing.T, root, specKey, commit, name string) [
 // operational failure. The record is kept on disk, annotated with the
 // quarantine reason, and sync itself exits 0.
 func TestRunSync_CIFetch_QuarantinesUnreachableCommitRecord(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -85,6 +86,7 @@ func TestRunSync_CIFetch_QuarantinesUnreachableCommitRecord(t *testing.T) {
 // reachable (here, HEAD itself) is left entirely unquarantined, and sync
 // prints no quarantine disclosure at all.
 func TestRunSync_CIFetch_ReachableRecord_NotQuarantined(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 
@@ -118,6 +120,7 @@ func TestRunSync_CIFetch_ReachableRecord_NotQuarantined(t *testing.T) {
 // runtime.json record referencing an unreachable commit is quarantined
 // exactly the same way.
 func TestRunSync_CIFetch_QuarantineAppliesToRuntimeJSON(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -146,6 +149,7 @@ func TestRunSync_CIFetch_QuarantineAppliesToRuntimeJSON(t *testing.T) {
 // byte identical to what was fetched, even in the same commit directory
 // as a verdicts.json that DID get quarantined.
 func TestRunSync_CIFetch_NonRecordFilesUntouchedByQuarantine(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -187,6 +191,7 @@ func TestRunSync_CIFetch_NonRecordFilesUntouchedByQuarantine(t *testing.T) {
 // The undecodable file is quarantined-by-default (kept verbatim on disk,
 // never dropped), sync exits 0, and stdout notes it.
 func TestRunSync_CIFetch_UndecodableFetchedFile_NotOperational(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -226,6 +231,7 @@ func TestRunSync_CIFetch_UndecodableFetchedFile_NotOperational(t *testing.T) {
 // "re-syncing did not help" shape at exit-1 severity). sync exits 0 (not 1),
 // disclosing that the quarantined record was excluded from the verdict.
 func TestRunSync_CIFetch_QuarantinedFailRecord_ExcludedFromVerdict(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -265,6 +271,7 @@ func TestRunSync_CIFetch_QuarantinedFailRecord_ExcludedFromVerdict(t *testing.T)
 // render) surfaces it as undecodable. Before the fix (a) failed: LoadRecords on
 // the reachable dir returned an operational error, so the stdout claim was false.
 func TestRunSync_CIFetch_UndecodableUnderReachableDir_RoundTripsToClosureDisclosure(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root)
 	ctx := context.Background()
@@ -326,6 +333,7 @@ func TestRunSync_CIFetch_UndecodableUnderReachableDir_RoundTripsToClosureDisclos
 // The fetched-tree key alone decides the class; both cases seed one undecodable
 // record file and assert the right variant is present and the wrong one absent.
 func TestRunSync_CIFetch_UndecodableDisclosure_AccuratePerKeyClass(t *testing.T) {
+	t.Parallel()
 	// Truncated verdicts.json — fails strict decode, the exact
 	// stale-poisoned-bundle debris shape quarantineUnreachable keeps verbatim.
 	const malformed = `[{"schema":"verdi.evidence/v1"`
@@ -390,6 +398,7 @@ func TestRunSync_CIFetch_UndecodableDisclosure_AccuratePerKeyClass(t *testing.T)
 // walks it). Input order is preserved so the disclosure lines stay
 // deterministic.
 func TestClassifyUndecodableKeys(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		in          []string
@@ -452,6 +461,7 @@ func TestClassifyUndecodableKeys(t *testing.T) {
 // records (one fail, one pass) are both excluded from the verdict scan; the
 // disclosure line names "(1 carried fail)".
 func TestEvaluateTree_QuarantinedExclusion_NamesFailCount(t *testing.T) {
+	t.Parallel()
 	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	quarantined := func(verdict string) string {
 		return `{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"` + verdict + `",` +

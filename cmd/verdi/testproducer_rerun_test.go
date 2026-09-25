@@ -176,6 +176,7 @@ const withdrawnPass = "the earlier pass record for this producer at this commit 
 // store root with no go.mod each withdraw the earlier pass: no record is left
 // and the disclosure says so. Every write stays canonical JSON.
 func TestProduceGoTestEvidence_RerunAtSameCommit(t *testing.T) {
+	t.Parallel()
 	const ref = "go-test:pkg/a:TestA"
 	cases := []struct {
 		name        string
@@ -241,6 +242,7 @@ func TestProduceGoTestEvidence_RerunAtSameCommit(t *testing.T) {
 // attempt 2's record and still matches its obligation; the absent one has no
 // record, reads producer-missing, and is the only one disclosed.
 func TestProduceGoTestEvidence_MixedRerun(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	const refA, refB = "go-test:pkg/a:TestA", "go-test:pkg/a:TestB"
@@ -297,6 +299,7 @@ func TestProduceGoTestEvidence_MixedRerun(t *testing.T) {
 // verdicts.json byte for byte, even though it holds a record for a producer
 // this run withdrew from the first spec.
 func TestProduceGoTestEvidence_RerunPreservesUnmanagedRecords(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	const refA, refB, refLint = "go-test:pkg/a:TestA", "go-test:pkg/a:TestB", "go-test:pkg/a:TestLint"
@@ -383,6 +386,7 @@ func TestProduceGoTestEvidence_RerunPreservesUnmanagedRecords(t *testing.T) {
 // commit, withdraws nothing: its spec's verdicts.json is not rewritten, and the
 // disclosure says only that the test did not run.
 func TestProduceGoTestEvidence_AbsentWithoutEarlierRecordLeavesFileUntouched(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	writeTestProducerObligation(t, root, "story-a", "ac-1", "behavioral", "go-test:pkg/a:TestA", "verify")
@@ -418,6 +422,7 @@ func TestProduceGoTestEvidence_AbsentWithoutEarlierRecordLeavesFileUntouched(t *
 // record; or an existing verdicts.json that cannot be decoded, for the spec
 // sorted after one whose record would have changed.
 func TestProduceGoTestEvidence_OperationalErrorWritesNothing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		streamB    []byte // attempt 2's stream for ./pkg/b
@@ -473,6 +478,7 @@ func TestProduceGoTestEvidence_OperationalErrorWritesNothing(t *testing.T) {
 // ref, the producer ref of every selected obligation: two obligations sharing
 // one ref name it once, and a spec with no selected obligation has no entry.
 func TestGoTestManagedSubset(t *testing.T) {
+	t.Parallel()
 	sel := func(spec, ac, ref string) selectedGoTestObligation {
 		return selectedGoTestObligation{testProducerCandidate: testProducerCandidate{SpecName: spec, ACID: ac, ProducerRef: ref}}
 	}
@@ -500,6 +506,7 @@ func TestGoTestManagedSubset(t *testing.T) {
 // record this run withdrew for its own producer in its own spec, and is left
 // exactly as detected when nothing of its own was withdrawn.
 func TestDiscloseGoTestAbsence(t *testing.T) {
+	t.Parallel()
 	const ref = "go-test:pkg/a:TestA"
 	s := selectedGoTestObligation{
 		testProducerCandidate: testProducerCandidate{SpecName: "story-a", ACID: "ac-1", Kind: artifact.EvidenceBehavioral, ProducerRef: ref, ObligationID: "obligation/story-a--ac-1--behavioral"},

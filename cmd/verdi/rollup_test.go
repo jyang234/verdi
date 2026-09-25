@@ -103,6 +103,7 @@ func writeRollupDerived(t *testing.T, root, commit, verdict string) {
 // for the same commit) fires exactly one more comment; a further
 // unchanged republish fires none.
 func TestRunRollup_FakeProvider_EndToEnd(t *testing.T) {
+	t.Parallel()
 	repo := buildRollupFixtureRepo(t)
 	writeRollupDerived(t, repo.Dir, repo.Head, "pass")
 
@@ -320,6 +321,7 @@ func TestCmdRollup_Negative(t *testing.T) {
 // is concretely *fake.Provider so a caller (runClose) can seed/inspect it
 // directly in hermetic tests.
 func TestBuildProviderRegistry_FakeMode(t *testing.T) {
+	t.Parallel()
 	m, err := store.DecodeManifest([]byte("schema: verdi.layout/v1\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"))
 	if err != nil {
 		t.Fatalf("DecodeManifest: %v", err)
@@ -338,6 +340,7 @@ func TestBuildProviderRegistry_FakeMode(t *testing.T) {
 // or absent) still wires the real Jira adapter — this addition must not
 // change existing behavior for every store that never sets mode:.
 func TestBuildProviderRegistry_RealModeUnchanged(t *testing.T) {
+	t.Parallel()
 	m, err := store.DecodeManifest([]byte("schema: verdi.layout/v1\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"))
 	if err != nil {
 		t.Fatalf("DecodeManifest: %v", err)

@@ -38,9 +38,15 @@ CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./int
 # serve them a stale cached PASS, so -count=1 re-executes exactly those
 # packages against the freshly built binary. `./...` semantics are otherwise
 # unchanged — honest caching stands for every provably-not-blind package.
+# -parallel 4 caps concurrent t.Parallel() tests and subtests within each
+# test binary, at the vCPU count of this public repo's GitHub-hosted
+# ubuntu-latest runners (lane T1 test-speed contract step 4). It does not
+# limit how many package binaries run at once: that is -p, left at its
+# default (GOMAXPROCS), so a machine with more cores than CI still runs more
+# packages concurrently than CI does.
 test:
-	go test -race ./...
-	go test -race -count=1 $(CROSS_BINARY_PKGS)
+	go test -race -parallel 4 ./...
+	go test -race -count=1 -parallel 4 $(CROSS_BINARY_PKGS)
 
 vet:
 	go vet ./...

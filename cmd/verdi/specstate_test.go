@@ -273,6 +273,7 @@ func TestCmdSpecState_Negative(t *testing.T) {
 
 // TestRunSpecVerb_Usage pins spec's own subcommand-shape check.
 func TestRunSpecVerb_Usage(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runSpecVerb(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("runSpecVerb(no args) = %d, want 2", got)

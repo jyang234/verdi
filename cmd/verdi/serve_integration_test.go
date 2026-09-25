@@ -13,7 +13,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -23,7 +22,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -49,6 +47,7 @@ func (f readinessSnapshotBuilderFunc) Build(ctx context.Context, root, requestPa
 }
 
 func TestServeContextRequestFlagGrammar(t *testing.T) {
+	t.Parallel()
 	t.Run("one request in either flag position preserves HTTP behavior", func(t *testing.T) {
 		for _, tc := range []struct {
 			name string
@@ -164,6 +163,7 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 }
 
 func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	lockPath := store.WriterLockPath(root)
 	var calls []string
@@ -217,6 +217,7 @@ func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
 }
 
 func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T) {
+	t.Parallel()
 	var serverEffects int
 	deps := serveCommandDeps{
 		findRoot: func(string) (string, error) { return t.TempDir(), nil },
@@ -728,43 +729,12 @@ func TestServeContextRequestReadinessReachesGetDocumentOverSocket(t *testing.T) 
 	}
 }
 
-var (
-	buildOnce sync.Once
-	builtBin  string
-	buildErr  error
-)
-
-// buildVerdiBinary builds the real verdi binary once per test run
-// (shared across every test in this file via sync.Once) and returns its
-// path.
-func buildVerdiBinary(t *testing.T) string {
-	t.Helper()
-	buildOnce.Do(func() {
-		// t.TempDir() is per-test and would be removed at test cleanup,
-		// which would delete the shared binary out from under later
-		// tests in this file — build into a fresh, unmanaged temp dir
-		// instead (shared for the whole test binary's run).
-		binDir, err := os.MkdirTemp("", "verdi-bin")
-		if err != nil {
-			buildErr = err
-			return
-		}
-		bin := filepath.Join(binDir, "verdi")
-		cmd := exec.Command("go", "build", "-o", bin, ".")
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
-		if err := cmd.Run(); err != nil {
-			buildErr = fmt.Errorf("building verdi binary: %w\n%s", err, out.String())
-			return
-		}
-		builtBin = bin
-	})
-	if buildErr != nil {
-		t.Fatalf("buildVerdiBinary: %v", buildErr)
-	}
-	return builtBin
-}
+// buildVerdiBinary (the shared build-once helper every test in this
+// package that execs the built binary uses) and TestMain (which removes
+// its temp directory at process exit) now live in build_shared_test.go —
+// lane T1 test-speed contract step 1: this was the only file that cached
+// the build; the helper moved so every other builder in the package could
+// share it too.
 
 // newIntegrationStoreRoot builds a minimal, real store root (a real git
 // checkout via internal/fixturegit — no golden SHAs pinned or asserted;
@@ -872,6 +842,7 @@ func ndjsonRPC(t *testing.T, w io.Writer, sc *bufio.Scanner, id int, method stri
 // started while A is still the writer, is proven to fail rather than
 // silently becoming a second writer.
 func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := newIntegrationStoreRoot(t)
 
@@ -980,6 +951,7 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 // process B, started against the same root afterward, must take over the
 // lock (I-12) and become the new writer.
 func TestLockTakeover_AfterSIGKILL(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := newIntegrationStoreRoot(t)
 
@@ -1023,6 +995,7 @@ func TestLockTakeover_AfterSIGKILL(t *testing.T) {
 // socket->stdout direction ending when serve dies; a naive
 // wait-for-both-directions shutdown would hang here forever.
 func TestShim_ExitsPromptlyWhenServeDies(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := newIntegrationStoreRoot(t)
 
@@ -1116,6 +1089,7 @@ func toolCallResultText(t *testing.T, result map[string]any) string {
 // remain the SAME continuously-held open file (never released and
 // recreated) across the whole served call.
 func TestServeMutateDraftUsesHeldWriterLock(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, head, base := designMutateStore(t)
 

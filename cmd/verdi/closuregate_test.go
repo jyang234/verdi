@@ -121,6 +121,7 @@ func closureGateQuarantineRecordJSON(commit string) string {
 // a per-AC disclosed-unproven line naming the excluded record — rather
 // than leaving the gap looking like no evidence was ever produced.
 func TestRunClosureGate_UnreachableCommitRecord_NeverOperational(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -170,6 +171,7 @@ func closureGateQuarantineFailRecordJSON(commit string) string {
 // quarantineDisclosures skipped every evidenced/waived AC, so the fail record
 // vanished with zero disclosure.
 func TestRunClosureGate_QuarantinedFailAgainstMetAC_Disclosed(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -204,6 +206,7 @@ func TestRunClosureGate_QuarantinedFailAgainstMetAC_Disclosed(t *testing.T) {
 // derived record already carries one — the realistic end state after a
 // real sync run quarantined it.
 func TestRunClosureGate_QuarantinedRecord_SurfacesSyncReason(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -240,6 +243,7 @@ func TestRunClosureGate_QuarantinedRecord_SurfacesSyncReason(t *testing.T) {
 // sole record is excluded on the annotation signal) AND disclose the excluded
 // record even though its directory is reachable.
 func TestRunClosureGate_AnnotatedRecordUnderReachableDir_ExcludedAndDisclosed(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -357,6 +361,7 @@ func TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational(t *testing
 // directory alone, so this record was loaded and silently marked ac-1 proven —
 // X-11b's false-green family surviving at the precise seam ac-2 hardens.
 func TestRunClosureGate_UnreachableRecordProvenanceUnderReachableDir_DisclosesUnproven(t *testing.T) {
+	t.Parallel()
 	repo := buildClosureGateQuarantineRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
 	ctx := context.Background()
@@ -535,6 +540,7 @@ func alignFakeJudgeDrifted(t *testing.T) []string {
 // reroll: never decremented (the laundering drain this story closes) and
 // never inflated.
 func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}

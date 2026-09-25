@@ -143,6 +143,7 @@ func copyTree(t *testing.T, src, dst string) {
 //     order is fully determined by the source sort alone: dropping the
 //     sort.Strings reds it deterministically, not flakily.
 func TestSupersededStoryRefs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   map[string][]string
@@ -516,6 +517,7 @@ stub_reconciliation.blocked: true
 // TestCmdMatrix_StatusLine_Superseded's story-rung proof. Empty ACs/stubs
 // keep it a focused rendering unit test: the only claim is the status line.
 func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	// The status the caller resolved (I2: effectiveMatrixStatus — a landed
 	// legacy `status: superseded` projects Superseded via the projector's

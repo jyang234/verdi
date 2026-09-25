@@ -38,6 +38,7 @@ func buildObligationAuthorRepo(t *testing.T, extra map[string]string) *fixturegi
 // prove frozen" case, or diffBase pointing at a commit that never had the
 // file) — the verb writes a fresh, decodable, unauthored scaffold.
 func TestRunObligationAuthor_Create(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationAuthorRepo(t, nil)
 	ctx := context.Background()
 
@@ -68,6 +69,7 @@ func TestRunObligationAuthor_Create(t *testing.T) {
 // one-shot "already exists" refusal: calling the verb a second time against
 // the same, still-unfrozen path overwrites it.
 func TestRunObligationAuthor_Regenerate(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationAuthorRepo(t, nil)
 	ctx := context.Background()
 
@@ -114,6 +116,7 @@ func TestRunObligationAuthor_Regenerate(t *testing.T) {
 // Context.DiffBase, rather than fabricating a real origin/main remote)
 // refuses outright, exit 2, naming the path, leaving the tree untouched.
 func TestRunObligationAuthor_RefusesOnAlreadyFrozen(t *testing.T) {
+	t.Parallel()
 	frozenObligationMD := `---
 id: obligation/widget-story--ac-1--static
 kind: obligation
@@ -166,6 +169,7 @@ else must treat this as immutable.
 // unprovable at the DEFAULT-BRANCH step) is unchanged — this is about a Show
 // error AFTER a base resolved.
 func TestRunObligationAuthor_OperationalGitError_RefusesNeverGuesses(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationAuthorRepo(t, nil)
 	ctx := context.Background()
 
@@ -196,6 +200,7 @@ func TestRunObligationAuthor_OperationalGitError_RefusesNeverGuesses(t *testing.
 // obligation-author-before-push workflow spec/obligation-seam's outcome
 // describes.
 func TestRunObligationAuthor_NotYetFrozen_SameFileAbsentAtDiffBase(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationAuthorRepo(t, nil)
 	ctx := context.Background()
 
@@ -335,6 +340,7 @@ func TestObligationFrozenProbeBase_ResolvedNameUnresolvableRef_RefusesOperationa
 // TestRunObligationAuthor_Negative covers the refusal/error paths that
 // never write anything.
 func TestRunObligationAuthor_Negative(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationAuthorRepo(t, nil)
 	ctx := context.Background()
 
@@ -372,6 +378,7 @@ func TestRunObligationAuthor_Negative(t *testing.T) {
 // pin the verb's own argument-shape checks (mirroring
 // TestCmdAccept_UsageNegative/TestRun_AcceptDispatchesToRealVerb's style).
 func TestRunObligationVerb_Usage(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runObligationVerb(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("runObligationVerb(no args) = %d, want 2", got)
@@ -384,6 +391,7 @@ func TestRunObligationVerb_Usage(t *testing.T) {
 }
 
 func TestCmdObligationScaffold_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdObligationScaffold(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdObligationScaffold(no args) = %d, want 2", got)
@@ -496,6 +504,7 @@ func assertUnresolvedObligationQuality(t *testing.T, ob *artifact.ObligationFron
 // the same story after the first scaffold writes nothing new and reports
 // every pair as already present.
 func TestRunObligationScaffold_SecondRunIsIdempotent(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, nil)
 	ctx := context.Background()
 
@@ -540,6 +549,7 @@ func TestRunObligationScaffold_SecondRunIsIdempotent(t *testing.T) {
 // existing, hand-authored obligation is byte-identical after the run and
 // only the still-missing pair is scaffolded.
 func TestRunObligationScaffold_NeverOverwritesAnAuthoredFile(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, map[string]string{
 		".verdi/obligations/widget-story/ac-1--static.md": preExistingAc1StaticMD,
 	})
@@ -569,6 +579,7 @@ func TestRunObligationScaffold_NeverOverwritesAnAuthoredFile(t *testing.T) {
 // story ref fails closed (operational, exit 2) rather than silently doing
 // nothing.
 func TestRunObligationScaffold_UnknownStoryFailsClosed(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, nil)
 	ctx := context.Background()
 
@@ -583,6 +594,7 @@ func TestRunObligationScaffold_UnknownStoryFailsClosed(t *testing.T) {
 // target (no ac/kind obligations ever apply, dc-3) fails closed rather
 // than silently no-op'ing.
 func TestRunObligationScaffold_NonStorySpecFailsClosed(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, nil)
 	ctx := context.Background()
 
@@ -603,6 +615,7 @@ func TestRunObligationScaffold_NonStorySpecFailsClosed(t *testing.T) {
 // (buildstart.go's established pattern), never through raw status or a
 // merge-base approximation. Table-drives every non-Proposed state.
 func TestRunObligationScaffold_AcceptedStoryRefusesMutation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		state specstate.State
@@ -633,6 +646,7 @@ func TestRunObligationScaffold_AcceptedStoryRefusesMutation(t *testing.T) {
 // unprovable Git-derived state (no default branch resolvable, ...) refuses
 // operationally (exit 2) rather than guessing either way.
 func TestRunObligationScaffold_UnprovenRefusesOperationally(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, nil)
 	ctx := context.Background()
 	resolver := fakeScaffoldResolver{result: specstate.Result{State: specstate.Unproven, Relation: specstate.RelationUnproven, Disclosures: []string{"no default branch could be resolved"}}}
@@ -665,6 +679,7 @@ func TestRunObligationScaffold_UnprovenRefusesOperationally(t *testing.T) {
 // checkout) is the safety net now, not this command — the same posture
 // `verdi obligation author`'s own regenerate case already has.
 func TestRunObligationScaffold_PartialFailureLeavesResidue(t *testing.T) {
+	t.Parallel()
 	repo := buildObligationSeamStoryRepo(t, map[string]string{
 		".verdi/obligations/widget-story/ac-2--behavioral.md": malformedAc2BehavioralMD,
 	})
@@ -699,6 +714,7 @@ func TestRunObligationScaffold_PartialFailureLeavesResidue(t *testing.T) {
 }
 
 func TestCmdObligationAuthor_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdObligationAuthor(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdObligationAuthor(no args) = %d, want 2", got)
@@ -765,6 +781,7 @@ func TestRun_ObligationDispatchesToRealVerb(t *testing.T) {
 // rendering helpers both callers share) but no longer calls the seam
 // itself.
 func TestObligationRender_SingleSharedSeam_PackageWide(t *testing.T) {
+	t.Parallel()
 	renderSeamCallSites := map[string]bool{
 		"obligation.go": true,
 	}
@@ -806,6 +823,7 @@ func TestObligationRender_SingleSharedSeam_PackageWide(t *testing.T) {
 }
 
 func TestObligationAuthor_AtomicWrite_NoDirectCreateTemp(t *testing.T) {
+	t.Parallel()
 	for _, f := range []string{"obligation.go", "acceptobligation.go"} {
 		data, err := os.ReadFile(f)
 		if err != nil {

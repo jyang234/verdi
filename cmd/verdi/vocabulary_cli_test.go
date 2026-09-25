@@ -179,6 +179,7 @@ acceptance_criteria:
 // judged-article-agreement-approximation-undisclosed), never the
 // formerly-bare "a feature spec … a story spec".
 func TestVocabularyCLI_RenamedClassWordRefusals(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{

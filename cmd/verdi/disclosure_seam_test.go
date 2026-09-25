@@ -214,6 +214,7 @@ func listAnnotationsReviewUnavailable(t *testing.T, b *mcpserve.Backend) string 
 // rung-3 finding: see conflict/disclosure-seam-rename-insufficient, where
 // the equivalent exerciser genuinely failed before this seam existed).
 func TestDisclosureSeam_AC2_EquivalentStatesProduceIdenticalText(t *testing.T) {
+	t.Parallel()
 	const (
 		rule = "999"
 		text = "the same required input is absent"

@@ -159,6 +159,7 @@ func writeContextRequestFile(t *testing.T, dir, name string, data []byte) string
 // would compile, be handed to this helper by the command, and silently
 // map to exit 2 (an operational failure) instead of exit 1 (a verdict).
 func TestContextExitCode(t *testing.T) {
+	t.Parallel()
 	refusals := []struct {
 		name string
 		err  error
@@ -1149,6 +1150,7 @@ func contextRunGit(t *testing.T, dir string, args ...string) {
 // nothing — an empty root, a root that is "/", and a message that never
 // mentions the checkout at all.
 func TestRedactCheckoutRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {

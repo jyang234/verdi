@@ -224,6 +224,7 @@ func TestRunAudit_ClosureHygieneSection_Clean(t *testing.T) {
 // defaultBranchRef prints the disclosure line, never a guessed clean
 // report, and never flags.
 func TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/.gitignore": "data/\n"},
 		Message: "root",

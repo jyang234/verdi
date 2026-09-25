@@ -62,6 +62,7 @@ func materializeExecutionWorkspace(t *testing.T, root, runID, headSHA string) st
 // reclaim line, prints the grown (closed-triple) scope disclosure, and
 // actually removes the workspace from disk.
 func TestGc_CLI_ExecutionSlice_ReclaimsReleasedWorkspace(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, headSHA := gcExecutionCLIFixture(t)
 
@@ -100,6 +101,7 @@ func TestGc_CLI_ExecutionSlice_ReclaimsReleasedWorkspace(t *testing.T) {
 // `verdi gc` keeps a materialized-but-never-released execution workspace,
 // disclosing keep-not-eligible, and leaves it on disk.
 func TestGc_CLI_ExecutionSlice_KeepsNonReleasedWorkspace(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, headSHA := gcExecutionCLIFixture(t)
 
@@ -131,6 +133,7 @@ func TestGc_CLI_ExecutionSlice_KeepsNonReleasedWorkspace(t *testing.T) {
 // execution slice's own reclaim/keep lines even when a live, releasable
 // execution workspace exists.
 func TestGc_CLI_ReclaimUnmanaged_DisclosesExecutionSliceNotRun(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, headSHA := gcExecutionCLIFixture(t)
 
@@ -178,6 +181,7 @@ func TestGc_CLI_ReclaimUnmanaged_DisclosesExecutionSliceNotRun(t *testing.T) {
 // every keep and partial, are folded into their own disclosed line and
 // never fail the run).
 func TestGc_CLI_ExecutionSlice_ThreeRunLifecycle_ReclaimThenOrphanedThenSteadyState(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, headSHA := gcExecutionCLIFixture(t)
 

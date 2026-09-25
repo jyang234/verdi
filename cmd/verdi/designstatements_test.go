@@ -544,6 +544,7 @@ func TestRunDesignStart_DeferStatements_DisclosesAndKeepsPlaceholders(t *testing
 // never reach provider title resolution or baseline regeneration, the
 // two effects the preparation boundary now runs strictly before.
 func TestRunDesignStart_StatementFlags_Negative(t *testing.T) {
+	t.Parallel()
 	manifest := phase7Manifest(t)
 	ctx := context.Background()
 
@@ -711,6 +712,7 @@ func TestRunDesignStart_TTYInterview_CollectsStatements(t *testing.T) {
 // interview refuses (exit 2) rather than silently landing a partial or
 // empty statement.
 func TestRunDesignStart_TTYInterview_Aborted(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
@@ -899,6 +901,7 @@ func TestRun_DesignStart_TTYInterview_BuiltBinary(t *testing.T) {
 // moved: a runtime that resolves the provider BEFORE reaching this
 // refusal would otherwise make the RED run itself egress.
 func TestRun_DesignStart_NoTTY_NoFlags_Refuses_BuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
 

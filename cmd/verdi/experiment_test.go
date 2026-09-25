@@ -43,6 +43,7 @@ func runExperimentBuiltBinary(t *testing.T, bin, dir string, stdin []byte, args 
 }
 
 func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	operations := []string{
 		"inspect", "discover-capabilities", "validate-draft", "review-registration", "status", "explain-result",
@@ -74,6 +75,7 @@ func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
 var experimentUsageRowRe = regexp.MustCompile(`\n {7}context, experiment(,|\n)`)
 
 func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, t.TempDir(), nil, "definitely-not-a-verb")
 	if code != 2 || stdout != "" {
@@ -727,6 +729,7 @@ func experimentFixtureCommitEnvironment(base []string) []string {
 }
 
 func TestExperimentInventoryBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, t.TempDir(), nil, "experiment")

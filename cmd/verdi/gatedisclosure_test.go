@@ -31,6 +31,7 @@ func quarRec(verdict artifact.EvidenceVerdict, witness, quarReason string) artif
 // record naming it, a FAIL as adverse and only saying "does not read violated"
 // when the AC does not itself already read violated.
 func TestQuarantineDisclosures_MetACFailAndLegibility(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		status     evidence.Status
