@@ -389,9 +389,21 @@ func readSpecByName(root, name string) (*artifact.SpecFrontmatter, string, error
 	return nil, "", nil
 }
 
-// readTreeFile reads the repo-relative path p from tr. found is false when
-// the tree holds nothing at p; an entry at p that is not a regular file, or
-// a path through a link, is an error, never followed.
+// readTreeFile reads the repo-relative path p from tr: the one reader of a
+// declared edge's target document, over the working tree for align and the
+// head commit for the gate's recompute. found is false when the tree holds
+// nothing at p. An entry at p that is not a regular file — a symlink, or a
+// path through a symlinked directory — is an error ("<p> is not a regular
+// file"), never followed, so align and the gate read a target identically:
+// the working tree could follow a link whose commit tree entry is only the
+// link text.
+//
+// This departs from the computation before lane L4, which read targets with
+// os.ReadFile and so followed a link: a `supersedes` edge to a symlinked
+// ADR whose linked-to document was superseded resolved SUPERSEDED. Such an
+// edge is now unresolved, "could not resolve target: <p> is not a regular
+// file" (L4 review a, M-2; pinned by TestComputeDecisionEdges_TreeTargets).
+// This repository commits no symlink (no mode-120000 entry).
 func readTreeFile(ctx context.Context, tr objsupersede.TreeReader, p string) ([]byte, bool, error) {
 	files, err := tr.Files(ctx, p)
 	if err != nil {

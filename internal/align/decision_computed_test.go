@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -36,7 +37,13 @@ func adrDoc(name, status string) string {
 // supersedes/exempts target (a decision fragment) for another spec's edges.
 func writeActiveSpec(t *testing.T, root, name, decisionID string) {
 	t.Helper()
-	writeTreeFile(t, root, ".verdi/specs/active/"+name+"/spec.md", "---\nid: spec/"+name+"\nkind: spec\ntitle: \""+name+"\"\nclass: feature\nstatus: draft\nowners: [platform-team]\n"+
+	writeZoneSpec(t, root, "active", name, decisionID)
+}
+
+// writeZoneSpec is writeActiveSpec in the given zone (active or archive).
+func writeZoneSpec(t *testing.T, root, zone, name, decisionID string) {
+	t.Helper()
+	writeTreeFile(t, root, ".verdi/specs/"+zone+"/"+name+"/spec.md", "---\nid: spec/"+name+"\nkind: spec\ntitle: \""+name+"\"\nclass: feature\nstatus: draft\nowners: [platform-team]\n"+
 		"acceptance_criteria:\n  - { id: ac-1, text: \"t\", evidence: [static] }\n"+
 		"decisions:\n  - { id: "+decisionID+", text: \"some decision\", anchor: \"#"+decisionID+"\" }\n---\nbody\n")
 }
@@ -156,6 +163,93 @@ func TestComputeDecisionEdges_EarlierComputationUnchanged(t *testing.T) {
 				t.Fatalf("establisher calls = %d, want 0 (no carried edge)", est.calls)
 			}
 		})
+	}
+}
+
+// TestComputeDecisionEdges_TreeTargets pins how the computed section reads
+// a declared edge's target through the TreeReader, identically from the
+// working tree (align) and the head commit (the gate's recompute): a spec
+// target in the archive zone is read, never dangling; an `exempts` edge to
+// an object its spec does not declare is dangling; and a target that is a
+// symlink, or sits under a symlinked directory, is never followed — "is not
+// a regular file" (L4 review a, M-1 and M-2).
+func TestComputeDecisionEdges_TreeTargets(t *testing.T) {
+	const notRegular = "decision dc-1 supersedes adr/old: could not resolve target: .verdi/adr/old.md is not a regular file"
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, root string)
+		link  artifact.Link
+		want  artifact.ConflictFinding
+	}{
+		{"exempts to an archived spec's declared object resolves",
+			func(t *testing.T, root string) { writeZoneSpec(t, root, "archive", "old-feature", "dc-9") },
+			artifact.Link{Type: artifact.LinkExempts, Ref: "spec/old-feature#dc-9", Note: "excused"},
+			artifact.ConflictFinding{ID: "edge-dc-1-exempts-spec--old-feature-dc-9", Kind: artifact.FindingComputed, Text: "decision dc-1 exempts spec/old-feature: resolved (EXEMPT)",
+				Disposition: artifact.ConflictExempt, Note: "excused", TargetRef: "spec/old-feature"}},
+		{"a whole-spec supersedes target in the archive is read, never dangling",
+			func(t *testing.T, root string) { writeZoneSpec(t, root, "archive", "old-feature", "dc-9") },
+			artifact.Link{Type: artifact.LinkSupersedes, Ref: "spec/old-feature"},
+			artifact.ConflictFinding{ID: "edge-dc-1-supersedes-spec--old-feature", Kind: artifact.FindingComputed, TargetRef: "spec/old-feature",
+				Text: "decision dc-1 supersedes spec/old-feature: unresolved — supersedes edges targeting a non-ADR decision cannot be computed-resolved (no independent status field, 02 §Kind registry); resolve via the judged section or file a conflict directly (03 §Challenging closed decisions)"}},
+		{"exempts to an undeclared object of a spec is dangling",
+			func(t *testing.T, root string) { writeActiveSpec(t, root, "other-feature", "dc-9") },
+			artifact.Link{Type: artifact.LinkExempts, Ref: "spec/other-feature#dc-77", Note: "excused"},
+			artifact.ConflictFinding{ID: "edge-dc-1-exempts-spec--other-feature-dc-77", Kind: artifact.FindingComputed, TargetRef: "spec/other-feature",
+				Text: "decision dc-1 exempts spec/other-feature#dc-77: dangling — target does not exist in the committed corpus"}},
+		{"a symlinked ADR target is not a regular file",
+			func(t *testing.T, root string) {
+				writeTreeFile(t, root, "elsewhere/old.md", adrDoc("old", "superseded"))
+				symlink(t, "../../elsewhere/old.md", filepath.Join(root, ".verdi", "adr", "old.md"))
+			},
+			artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/old"},
+			artifact.ConflictFinding{ID: "edge-dc-1-supersedes-adr--old", Kind: artifact.FindingComputed, Text: notRegular, TargetRef: "adr/old"}},
+		{"an ADR target under a symlinked directory is not a regular file",
+			func(t *testing.T, root string) {
+				writeTreeFile(t, root, "elsewhere/old.md", adrDoc("old", "superseded"))
+				symlink(t, "../elsewhere", filepath.Join(root, ".verdi", "adr"))
+			},
+			artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/old"},
+			artifact.ConflictFinding{ID: "edge-dc-1-supersedes-adr--old", Kind: artifact.FindingComputed, Text: notRegular, TargetRef: "adr/old"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Message: "scaffold", Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}}})
+			tc.setup(t, repo.Dir)
+			writeDecisionSpec(t, repo.Dir, "my-feature", tc.link)
+			commitAll(t, repo.Dir, "targets")
+			for _, tr := range []objsupersede.TreeReader{objsupersede.WorkTree{Root: repo.Dir}, objsupersede.CommitTree{Root: repo.Dir, Commit: "HEAD"}} {
+				got := computeEdges(t, tr, "my-feature", &fakeEstablisher{})
+				if !reflect.DeepEqual(got, []artifact.ConflictFinding{tc.want}) {
+					t.Fatalf("%T findings:\n got %+v\nwant [%+v]", tr, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// symlink creates the symbolic link newname -> oldname, and its parent
+// directory.
+func symlink(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(newname), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(oldname, newname); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// commitAll stages every working-tree change in dir, symlinks included, and
+// commits it.
+func commitAll(t *testing.T, dir, message string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"-c", "user.name=Verdi Fixture", "-c", "user.email=fixture@verdi.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "-m", message},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
 	}
 }
 
