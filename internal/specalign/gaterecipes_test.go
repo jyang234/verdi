@@ -320,14 +320,21 @@ func TestGateParity_VerifyRunsOnlyItsStepLoop(t *testing.T) {
 	}
 }
 
-// mutateMakefile returns makefile with the first from replaced by to, failing
-// the test if from is absent, so a stale mutation cannot pass as a clean one.
+// mutateSource returns text with the first from replaced by to, failing the
+// test if from is absent, so a stale mutation cannot pass as a clean one. what
+// names text in that failure.
+func mutateSource(t *testing.T, what, text, from, to string) string {
+	t.Helper()
+	if !strings.Contains(text, from) {
+		t.Fatalf("mutation target %q is not in %s; update this case", from, what)
+	}
+	return strings.Replace(text, from, to, 1)
+}
+
+// mutateMakefile is mutateSource over the Makefile.
 func mutateMakefile(t *testing.T, makefile, from, to string) string {
 	t.Helper()
-	if !strings.Contains(makefile, from) {
-		t.Fatalf("mutation target %q is not in the Makefile; update this case", from)
-	}
-	return strings.Replace(makefile, from, to, 1)
+	return mutateSource(t, "the Makefile", makefile, from, to)
 }
 
 // TestGateParity_VerifyRuleProblemsFound is verifyRuleProblems' negative path,
