@@ -141,9 +141,11 @@ func numberSpecMRConditions(conds []gateCondition) {
 // other text written onto a computed finding therefore cannot supply a
 // missing target, conflict, or successor. A carried replacement needs the
 // default branch's first-parent history (SI-270): where it is missing (a
-// shallow clone) the recompute reads "acceptance unproven", so the gate
-// never passes on an unproven acceptance. The judged section is judge
-// output and is not recomputed.
+// shallow clone, or a default branch that cannot be resolved) the recompute
+// reads "acceptance unproven", so the gate never passes on an unproven
+// acceptance, and a difference it causes names the missing history rather
+// than advising a re-align that cannot restore it (recomputeHint). The
+// judged section is judge output and is not recomputed.
 func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head string) (gateCondition, error) {
 	name := "spec-MR: declared decision conflicts resolved and judged findings dispositioned"
 	path := store.DecisionConflictReportPath(root, store.ZoneActive, specName)
@@ -175,7 +177,11 @@ func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head st
 		return gateCondition{}, fmt.Errorf("recomputing the decision-conflict report's computed section at %s: %w", head, err)
 	}
 	if diffs := diffComputedFindings(decoded.Findings, recomputed); len(diffs) > 0 {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("the report's computed section differs from the records at %s: %s (run `verdi align` again)", head, strings.Join(diffs, "; "))}, nil
+		msgs := make([]string, len(diffs))
+		for i, d := range diffs {
+			msgs[i] = d.msg
+		}
+		return gateCondition{Name: name, Reason: fmt.Sprintf("the report's computed section differs from the records at %s: %s %s", head, strings.Join(msgs, "; "), recomputeHint(diffs, recomputed))}, nil
 	}
 
 	ok, undispositioned := align.DecisionReviewReady(decoded)
@@ -183,6 +189,63 @@ func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head st
 		return gateCondition{Name: name, Reason: fmt.Sprintf("undispositioned/unresolved finding(s): %v", undispositioned)}, nil
 	}
 	return gateCondition{Name: name, OK: true}, nil
+}
+
+// computedDiff is one difference diffComputedFindings names: the id of the
+// finding it concerns, and the message naming it.
+type computedDiff struct{ id, msg string }
+
+// recomputeHint is the remedy a recomputed difference's reason ends with:
+// re-run `verdi align`, unless the records at the head leave an acceptance
+// unproven for a differing finding — history this checkout lacks (a
+// shallow clone, an unresolvable default branch; SI-270), which re-running
+// align here cannot restore. The hint then names that missing history, each
+// differing finding with its witness, and advises a re-align only for any
+// other difference.
+func recomputeHint(diffs []computedDiff, recomputed []artifact.ConflictFinding) string {
+	witness := map[string]string{}
+	for _, f := range recomputed {
+		if w, ok := acceptanceUnprovenWitness(f); ok {
+			if _, seen := witness[f.ID]; !seen {
+				witness[f.ID] = w
+			}
+		}
+	}
+	var missing []string
+	named, other := map[string]bool{}, false
+	for _, d := range diffs {
+		w, ok := witness[d.id]
+		switch {
+		case !ok:
+			other = true
+		case !named[d.id]:
+			named[d.id] = true
+			missing = append(missing, d.id+": "+w)
+		}
+	}
+	if len(missing) == 0 {
+		return "(run `verdi align` again)"
+	}
+	hint := "(this checkout cannot prove an acceptance, and re-running `verdi align` cannot restore the missing history: " + strings.Join(missing, "; ")
+	if other {
+		hint += "; run `verdi align` again for the other differences"
+	}
+	return hint + ")"
+}
+
+// acceptanceUnprovenWitness returns the witness of a recomputed computed
+// finding whose records leave an establishing successor's acceptance
+// unproven (objsupersede.ReasonAcceptanceUnproven: the text the core
+// renders, "acceptance unproven: <witness>", its prefix derived from the
+// core rather than restated), and false for every other finding.
+func acceptanceUnprovenWitness(f artifact.ConflictFinding) (string, bool) {
+	const marker = "\x00"
+	text, err := objsupersede.Result{Outcome: objsupersede.Unresolved, Reason: objsupersede.ReasonAcceptanceUnproven, Detail: marker}.Text()
+	prefix, ok := strings.CutSuffix(text, marker)
+	if err != nil || !ok || f.Kind != artifact.FindingComputed || f.Dispositioned() {
+		return "", false
+	}
+	return strings.CutPrefix(f.Text, prefix)
 }
 
 // diffComputedFindings names every difference between a report's computed
@@ -193,7 +256,7 @@ func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head st
 // are not compared. An empty result means the sections are equal.
 // TestDiffComputedFindings_ComparesEveryField fails when
 // artifact.ConflictFinding gains a field this does not compare.
-func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []string {
+func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []computedDiff {
 	byID := func(fs []artifact.ConflictFinding) (map[string][]artifact.ConflictFinding, []string) {
 		m := map[string][]artifact.ConflictFinding{}
 		var order []string
@@ -215,15 +278,15 @@ func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []str
 			order = append(order, id)
 		}
 	}
-	var diffs []string
+	var diffs []computedDiff
 	for _, id := range order {
 		g, w := got[id], want[id]
 		for i := 0; i < len(g) || i < len(w); i++ {
 			switch {
 			case i >= len(g):
-				diffs = append(diffs, fmt.Sprintf("missing computed finding %s (the records compute %q)", id, w[i].Text))
+				diffs = append(diffs, computedDiff{id, fmt.Sprintf("missing computed finding %s (the records compute %q)", id, w[i].Text)})
 			case i >= len(w):
-				diffs = append(diffs, fmt.Sprintf("extra computed finding %s (the records do not compute it)", id))
+				diffs = append(diffs, computedDiff{id, fmt.Sprintf("extra computed finding %s (the records do not compute it)", id)})
 			default:
 				g, w := g[i], w[i]
 				for _, fd := range []struct {
@@ -237,7 +300,7 @@ func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []str
 					{"routed_owners", listOrNone(g.RoutedOwners), listOrNone(w.RoutedOwners), slices.Equal(g.RoutedOwners, w.RoutedOwners)},
 				} {
 					if !fd.equal {
-						diffs = append(diffs, fmt.Sprintf("%s: %s is %s, the records compute %s", id, fd.field, fd.got, fd.want))
+						diffs = append(diffs, computedDiff{id, fmt.Sprintf("%s: %s is %s, the records compute %s", id, fd.field, fd.got, fd.want)})
 					}
 				}
 			}

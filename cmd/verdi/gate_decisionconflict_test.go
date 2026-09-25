@@ -15,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/store"
@@ -430,55 +431,138 @@ func TestSpecMRGate_RecomputesAtHeadCommit(t *testing.T) {
 	}
 }
 
-// TestSpecMRGate_ShallowCloneNeverPassesCarried proves the gate never
-// passes on an unproven acceptance (SI-270, L3 review O-2): a carried
-// result needs the default branch's first-parent history, so in a shallow
-// clone the recompute reads "acceptance unproven" — a report aligned with
-// full history then differs and fails naming it, and a report aligned in
-// the shallow clone leaves the edges unresolved.
-func TestSpecMRGate_ShallowCloneNeverPassesCarried(t *testing.T) {
-	t.Parallel()
-	full, fullReport := alignScenario(t, "chain", "design/successor-v2")
-	if fm := decodeDecisionReportFile(t, fullReport); gdcFinding(t, fm, gdcDC1).Disposition != artifact.ConflictSuperseded {
-		t.Fatalf("full-history align did not resolve the carried edge: %+v", fm.Findings)
+// TestSpecMRGate_MissingHistoryNeverPassesCarried proves the gate never
+// passes on an unproven acceptance (SI-270, L3 review O-2, L4 review b
+// M-3): a carried result needs the default branch's first-parent history,
+// so where it is missing — a shallow clone, or a default branch that cannot
+// be resolved — the recompute reads "acceptance unproven". A report aligned
+// with full history then differs and fails naming the missing history,
+// never advising a re-align that cannot restore it; a report aligned
+// without the history leaves the edges unresolved.
+func TestSpecMRGate_MissingHistoryNeverPassesCarried(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	const carries = "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"
+	for _, h := range []struct {
+		name    string
+		lose    func(t *testing.T, full string) string // the checkout the gate runs in, lacking the history
+		witness string
+	}{
+		{"a shallow clone", func(t *testing.T, full string) string {
+			shallow := filepath.Join(t.TempDir(), "shallow")
+			gdcGit(t, full, "clone", "-q", "--depth=1", "--no-single-branch", "--branch=design/successor-v2", "file://"+full, shallow)
+			if gdcGit(t, shallow, "rev-parse", "--is-shallow-repository") != "true" {
+				t.Fatal("test setup: the clone is not shallow")
+			}
+			gdcGit(t, shallow, "remote", "set-head", "origin", "main")
+			return shallow
+		}, "shallow history: the first-parent chain of "},
+		{"a default branch that cannot be resolved", func(t *testing.T, full string) string {
+			gdcGit(t, full, "update-ref", "-d", "refs/remotes/origin/main")
+			return full
+		}, "the default branch could not be resolved (no CI_DEFAULT_BRANCH, no configured remote HEAD, and no single origin/main or origin/master)"},
+	} {
+		t.Run(h.name, func(t *testing.T) {
+			full, fullReport := alignScenario(t, "chain", "design/successor-v2")
+			if fm := decodeDecisionReportFile(t, fullReport); gdcFinding(t, fm, gdcDC1).Text != carries || gdcFinding(t, fm, gdcDC1).Disposition != artifact.ConflictSuperseded {
+				t.Fatalf("full-history align did not resolve the carried edge: %+v", fm.Findings)
+			}
+			data, err := os.ReadFile(fullReport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := h.lose(t, full)
+			report := store.DecisionConflictReportPath(dir, store.ZoneActive, "successor-v2")
+			if err := os.WriteFile(report, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				name      string
+				align     bool
+				want, not []string
+			}{
+				{"a report aligned with full history", false, []string{
+					gdcDC1 + `: text is "` + carries + `", the records compute "acceptance unproven: ` + h.witness,
+					"(this checkout cannot prove an acceptance, and re-running `verdi align` cannot restore the missing history: " + gdcDC1 + ": " + h.witness,
+					"; " + gdcDC2 + ": " + h.witness,
+				}, []string{"run `verdi align` again"}},
+				{"a report aligned without the history", true, []string{"undispositioned/unresolved finding(s): [" + gdcDC1 + " " + gdcDC2 + "]"}, nil},
+			} {
+				if tc.align {
+					var stdout, stderr bytes.Buffer
+					if got := runDesignAlign(context.Background(), dir, false, alignDeps{ModelDigest: testResolveModelDigest(t, dir)}, &stdout, &stderr); got != 0 {
+						t.Fatalf("%s: runDesignAlign = %d; stderr=%s", tc.name, got, stderr.String())
+					}
+					dispositionJudged(t, report)
+				}
+				var stdout, stderr bytes.Buffer
+				if got := runSpecMRGate(context.Background(), dir, "design/successor-v2", nil, "main", &stdout, &stderr); got != 1 {
+					t.Fatalf("%s: runSpecMRGate = %d, want 1; stdout=%s stderr=%s", tc.name, got, stdout.String(), stderr.String())
+				}
+				for _, w := range tc.want {
+					if !strings.Contains(stdout.String(), w) {
+						t.Fatalf("%s: stdout = %s\nwant it to contain %q", tc.name, stdout.String(), w)
+					}
+				}
+				for _, n := range tc.not {
+					if strings.Contains(stdout.String(), n) {
+						t.Fatalf("%s: stdout = %s\nwant it not to contain %q: re-aligning cannot restore missing history", tc.name, stdout.String(), n)
+					}
+				}
+			}
+		})
 	}
-	shallow := filepath.Join(t.TempDir(), "shallow")
-	gdcGit(t, full, "clone", "-q", "--depth=1", "--no-single-branch", "--branch=design/successor-v2", "file://"+full, shallow)
-	if gdcGit(t, shallow, "rev-parse", "--is-shallow-repository") != "true" {
-		t.Fatal("test setup: the clone is not shallow")
-	}
-	gdcGit(t, shallow, "remote", "set-head", "origin", "main")
-	report := store.DecisionConflictReportPath(shallow, store.ZoneActive, "successor-v2")
-	data, err := os.ReadFile(fullReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(report, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+}
 
+// TestSpecMRGate_SpecNotRecomputable proves the gate fails closed, naming
+// the cause (exit 1), when the design branch's spec cannot be recomputed
+// at the head commit although the working tree holds a decodable one: a
+// spec committed in a form that fails strict decode, and a spec that was
+// never committed.
+func TestSpecMRGate_SpecNotRecomputable(t *testing.T) {
+	t.Parallel()
+	undecodable := strings.Replace(gateSpecMD("draft"), "\nkind: spec\n", "\nkind: spec\nbogus_field: x\n", 1)
+	if undecodable == gateSpecMD("draft") {
+		t.Fatal("test setup: the spec was not made undecodable")
+	}
 	for _, tc := range []struct {
 		name  string
-		align bool
-		want  string
+		build func(t *testing.T) *fixturegit.Repo
+		want  []string
 	}{
-		{"a report aligned with full history", false, gdcDC1 + `: text is "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)", the records compute "acceptance unproven: shallow history`},
-		{"a report aligned in the shallow clone", true, "undispositioned/unresolved finding(s): [" + gdcDC1 + " " + gdcDC2 + "]"},
+		{"the spec does not decode at the head commit", func(t *testing.T) *fixturegit.Repo {
+			return buildDesignGateRepoWith(t, undecodable, nil)
+		}, []string{"records that do not decode: .verdi/specs/active/stale-decline/spec.md", "bogus_field"}},
+		{"the spec is absent at the head commit", func(t *testing.T) *fixturegit.Repo {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Message: "scaffold", Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n"}}})
+			checkoutBranch(t, repo.Dir, "design/stale-decline")
+			return repo
+		}, []string{"spec/stale-decline"}},
 	} {
-		if tc.align {
-			var stdout, stderr bytes.Buffer
-			if got := runDesignAlign(context.Background(), shallow, false, alignDeps{ModelDigest: testResolveModelDigest(t, shallow)}, &stdout, &stderr); got != 0 {
-				t.Fatalf("%s: runDesignAlign = %d; stderr=%s", tc.name, got, stderr.String())
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := tc.build(t)
+			specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "spec.md")
+			if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
+				t.Fatal(err)
 			}
-			dispositionJudged(t, report)
-		}
-		var stdout, stderr bytes.Buffer
-		if got := runSpecMRGate(context.Background(), shallow, "design/successor-v2", nil, "main", &stdout, &stderr); got != 1 {
-			t.Fatalf("%s: runSpecMRGate = %d, want 1; stdout=%s stderr=%s", tc.name, got, stdout.String(), stderr.String())
-		}
-		if !strings.Contains(stdout.String(), tc.want) {
-			t.Fatalf("%s: stdout = %s\nwant it to contain %q", tc.name, stdout.String(), tc.want)
-		}
+			if err := os.WriteFile(specPath, []byte(gateSpecMD("draft")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeDecisionConflictReport(t, repo.Dir, repo.Head, "  - { id: f-1, kind: judged, text: t, disposition: no-conflict, note: n }\n")
+			var stdout, stderr bytes.Buffer
+			if got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", nil, "main", &stdout, &stderr); got != 1 {
+				t.Fatalf("runSpecMRGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+			}
+			want := append([]string{
+				"[FAIL] 1. spec-MR: declared decision conflicts resolved and judged findings dispositioned",
+				"the computed section cannot be recomputed from the records at " + repo.Head,
+			}, tc.want...)
+			for _, w := range want {
+				if !strings.Contains(stdout.String(), w) {
+					t.Fatalf("stdout = %s\nwant it to contain %q", stdout.String(), w)
+				}
+			}
+		})
 	}
 }
 
@@ -550,11 +634,20 @@ func TestDiffComputedFindings(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := diffComputedFindings(tc.reported, []artifact.ConflictFinding{tc.recomputed}); !reflect.DeepEqual(got, tc.want) {
+			if got := diffMessages(diffComputedFindings(tc.reported, []artifact.ConflictFinding{tc.recomputed})); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("diffs = %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
+
+// diffMessages returns the messages of ds, in order.
+func diffMessages(ds []computedDiff) []string {
+	var out []string
+	for _, d := range ds {
+		out = append(out, d.msg)
+	}
+	return out
 }
 
 // TestDiffComputedFindings_ComparesEveryField guards design §5's "fails on
@@ -582,7 +675,7 @@ func TestDiffComputedFindings_ComparesEveryField(t *testing.T) {
 			default:
 				t.Fatalf("artifact.ConflictFinding.%s is a %s: extend diffComputedFindings and this guard to compare it", field.Name, v.Type())
 			}
-			diffs := strings.Join(diffComputedFindings([]artifact.ConflictFinding{changed}, []artifact.ConflictFinding{base}), "; ")
+			diffs := strings.Join(diffMessages(diffComputedFindings([]artifact.ConflictFinding{changed}, []artifact.ConflictFinding{base})), "; ")
 			name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
 			want := "e-1: " + name + " is "
 			if name == "id" || name == "kind" {
@@ -590,6 +683,92 @@ func TestDiffComputedFindings_ComparesEveryField(t *testing.T) {
 			}
 			if !strings.Contains(diffs, want) {
 				t.Fatalf("changing artifact.ConflictFinding.%s gives diffs %q, want one containing %q: the gate's recompute must compare every field (design §5)", field.Name, diffs, want)
+			}
+		})
+	}
+}
+
+// TestAcceptanceUnprovenWitness pins how the gate tells a recomputed
+// finding whose records leave an acceptance unproven (missing history,
+// SI-270) from every other computed finding: only the core's
+// acceptance-unproven text yields its witness; every other reason, both
+// resolved outcomes, a dispositioned finding, a judged finding, and an
+// earlier-computation edge text do not.
+func TestAcceptanceUnprovenWitness(t *testing.T) {
+	t.Parallel()
+	const witness = "shallow history: the first-parent chain of refs/remotes/origin/main is incomplete"
+	result := func(o objsupersede.Outcome, r objsupersede.Reason) objsupersede.Result {
+		return objsupersede.Result{Spec: "s", Edge: "spec/t#dc-1", Outcome: o, Reason: r, Conflict: "c", Other: "o", Predecessor: "p", Since: "2024-02-15", Detail: witness}
+	}
+	type row struct {
+		name    string
+		finding artifact.ConflictFinding
+		want    bool
+	}
+	var rows []row
+	for _, r := range []objsupersede.Reason{
+		objsupersede.ReasonPinned, objsupersede.ReasonRecordsUndecodable, objsupersede.ReasonTargetMissing, objsupersede.ReasonTargetNotClosed,
+		objsupersede.ReasonObjectNotDeclared, objsupersede.ReasonObjectNotTarget, objsupersede.ReasonAlreadySuperseded, objsupersede.ReasonNoConflict,
+		objsupersede.ReasonConflictNotSuperseded, objsupersede.ReasonResolvedByOther, objsupersede.ReasonMultipleConflicts,
+		objsupersede.ReasonConflictSpansSpecs, objsupersede.ReasonCarryMismatch, objsupersede.ReasonEstablisherNotAccepted,
+		objsupersede.ReasonEstablisherNotInForce, objsupersede.ReasonAcceptanceUnproven, objsupersede.ReasonUnmatchedChallenge,
+	} {
+		text, err := result(objsupersede.Unresolved, r).Text()
+		if err != nil {
+			t.Fatalf("%s: %v", r, err)
+		}
+		rows = append(rows, row{string(r), artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: text}, r == objsupersede.ReasonAcceptanceUnproven})
+	}
+	for _, o := range []objsupersede.Outcome{objsupersede.ResolvedNew, objsupersede.ResolvedCarried} {
+		text, err := result(o, "").Text()
+		if err != nil {
+			t.Fatalf("%s: %v", o, err)
+		}
+		rows = append(rows, row{string(o), artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: text, Disposition: artifact.ConflictSuperseded, Note: "n"}, false})
+	}
+	unproven := "acceptance unproven: " + witness
+	rows = append(rows,
+		row{"a dispositioned finding", artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: unproven, Disposition: artifact.ConflictSuperseded, Note: "typed"}, false},
+		row{"a judged finding", artifact.ConflictFinding{ID: "j-1", Kind: artifact.FindingJudged, Text: unproven}, false},
+		row{"an ADR edge", artifact.ConflictFinding{ID: "e-1", Kind: artifact.FindingComputed, Text: `decision dc-1 supersedes adr/a: unresolved — target ADR status is "accepted", want "superseded" (the supersession has not landed)`}, false},
+	)
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := acceptanceUnprovenWitness(tc.finding)
+			if ok != tc.want || (ok && got != witness) {
+				t.Fatalf("acceptanceUnprovenWitness(%q) = %q, %v; want the witness: %v", tc.finding.Text, got, ok, tc.want)
+			}
+		})
+	}
+}
+
+// TestRecomputeHint pins the remedy a recomputed difference ends with:
+// re-align, unless a differing finding's recompute is an unproven
+// acceptance — missing history, named with its witness, which re-aligning
+// cannot restore — and a re-align only for the other differences.
+func TestRecomputeHint(t *testing.T) {
+	t.Parallel()
+	const lead = "(this checkout cannot prove an acceptance, and re-running `verdi align` cannot restore the missing history: "
+	unproven := func(id, witness string) artifact.ConflictFinding {
+		return artifact.ConflictFinding{ID: id, Kind: artifact.FindingComputed, Text: "acceptance unproven: " + witness}
+	}
+	carried := artifact.ConflictFinding{ID: "e-3", Kind: artifact.FindingComputed, Text: "carries the replacement established by spec/s (conflict/c, since 2024-02-15)", Disposition: artifact.ConflictSuperseded, Note: "n"}
+	recomputed := []artifact.ConflictFinding{unproven("e-1", "shallow history: w1"), unproven("e-2", "no branch: w2"), carried}
+	tests := []struct {
+		name  string
+		diffs []computedDiff
+		want  string
+	}{
+		{"no unproven acceptance differs", []computedDiff{{"e-3", "m"}}, "(run `verdi align` again)"},
+		{"an extra finding", []computedDiff{{"e-9", "m"}}, "(run `verdi align` again)"},
+		{"one unproven acceptance, named once for two fields", []computedDiff{{"e-1", "text"}, {"e-1", "disposition"}}, lead + "e-1: shallow history: w1)"},
+		{"two unproven acceptances", []computedDiff{{"e-1", "m"}, {"e-2", "m"}}, lead + "e-1: shallow history: w1; e-2: no branch: w2)"},
+		{"missing history and another difference", []computedDiff{{"e-1", "m"}, {"e-3", "m"}}, lead + "e-1: shallow history: w1; run `verdi align` again for the other differences)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := recomputeHint(tc.diffs, recomputed); got != tc.want {
+				t.Fatalf("recomputeHint = %q, want %q", got, tc.want)
 			}
 		})
 	}
