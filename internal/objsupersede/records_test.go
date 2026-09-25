@@ -53,6 +53,19 @@ func (f failTree) ReadFile(ctx context.Context, p string) ([]byte, error) {
 	return f.memTree.ReadFile(ctx, p)
 }
 
+// listFailTree lists like memTree but fails listing one directory.
+type listFailTree struct {
+	memTree
+	dir string
+}
+
+func (f listFailTree) Files(ctx context.Context, dir string) ([]TreeFile, error) {
+	if dir == f.dir {
+		return nil, errors.New("listing on fire")
+	}
+	return f.memTree.Files(ctx, dir)
+}
+
 // layerTree is the committed fixture's base tree with the named layers
 // written over it, as one tree.
 func layerTree(t *testing.T, layers ...string) memTree {
@@ -225,8 +238,40 @@ func TestReadRecords_Failures(t *testing.T) {
 			}
 		})
 	}
-	tree := layerTree(t, "successor")
-	if _, err := ReadRecords(context.Background(), failTree{tree, ".verdi/specs/active/successor/spec.md"}); err == nil {
-		t.Error("an operational read error was not returned")
+}
+
+// TestReadRecords_OperationalErrors pins that a read or listing error is
+// returned as an error, never downgraded to a Failure or ignored (review a
+// M-6).
+func TestReadRecords_OperationalErrors(t *testing.T) {
+	tree := layerTree(t, "successor", "conflict-feature")
+	locked := t.TempDir()
+	dir := filepath.Join(locked, ".verdi", "specs", "active", "locked")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	tests := []struct {
+		name string
+		tr   TreeReader
+	}{
+		{"a spec read error", failTree{tree, ".verdi/specs/active/successor/spec.md"}},
+		{"a conflict read error", failTree{tree, ".verdi/conflicts/successor-closed-feature.md"}},
+		{"a specs listing error", listFailTree{tree, specsDir}},
+		{"a conflicts listing error", listFailTree{tree, conflictsDir}},
+		{"a working-tree walk error", WorkTree{Root: locked}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "a working-tree walk error" && os.Geteuid() == 0 {
+				t.Skip("root reads a mode-0 directory, so no walk error can be provoked this way")
+			}
+			if recs, err := ReadRecords(context.Background(), tc.tr); err == nil {
+				t.Fatalf("no error; records %+v", recs)
+			}
+		})
 	}
 }

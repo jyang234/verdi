@@ -87,6 +87,60 @@ func TestFirstParentPathCommits_RefForms(t *testing.T) {
 	}
 }
 
+// TestFirstParentPathCommits_Topologies pins the other ways a path reaches
+// the default branch (lane L3 review a M-6): a squash merge lists the
+// squash commit and never the design commits; a fast-forward puts the
+// design commit itself on the first-parent chain; an `-s ours` merge brings
+// the path in nowhere.
+func TestFirstParentPathCommits_Topologies(t *testing.T) {
+	isolateGitConfig(t)
+	const p = "active/s/spec.md"
+	design := func(t *testing.T, dir string, contents ...string) string {
+		runFor(t, dir, "checkout", "-q", "-b", "design/s")
+		var last string
+		for _, c := range contents {
+			last = commitFile(t, dir, p, c, "write s")
+		}
+		runFor(t, dir, "checkout", "-q", "main")
+		return last
+	}
+	tests := []struct {
+		name  string
+		build func(t *testing.T, dir string) []string
+	}{
+		{"squash merge", func(t *testing.T, dir string) []string {
+			design(t, dir, "v1\n", "v2\n")
+			commitFile(t, dir, "main.txt", "main\n", "advance main")
+			runFor(t, dir, "merge", "-q", "--squash", "design/s")
+			runFor(t, dir, "commit", "-q", "--no-verify", "-m", "squash s")
+			return []string{headOf(t, dir)}
+		}},
+		{"fast-forward", func(t *testing.T, dir string) []string {
+			d := design(t, dir, "v1\n")
+			runFor(t, dir, "merge", "-q", "--ff-only", "design/s")
+			return []string{d}
+		}},
+		{"-s ours merge", func(t *testing.T, dir string) []string {
+			design(t, dir, "v1\n")
+			runFor(t, dir, "merge", "-q", "-s", "ours", "--no-edit", "design/s")
+			return []string{}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"base.txt": "base\n"}, Message: "root"}}).Dir
+			if err := os.MkdirAll(filepath.Join(dir, "active", "s"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			want := tc.build(t, dir)
+			got, err := FirstParentPathCommits(context.Background(), dir, "main", p)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %v, %v; want %v", got, err, want)
+			}
+		})
+	}
+}
+
 func TestFirstParentPathCommits_Negative(t *testing.T) {
 	isolateGitConfig(t)
 	top := buildFirstParentTopology(t)
