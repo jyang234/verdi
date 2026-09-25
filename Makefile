@@ -390,8 +390,10 @@ e2e-setup: e2e-check-node
 # an exact testMatch (it also refuses a name that is not a spec file under
 # e2e/tests/, and a name listed twice). internal/specalign's
 # e2eshards_test.go reads the lists through `make -n` and fails unless the
-# three shards partition e2e/tests/*.spec.ts, each with its own ports and
-# output directory.
+# three shards partition every file Playwright collects under e2e/tests/
+# (which it matches with spec or test in any letter case, so a new
+# 99-x.Spec.ts or 99-x.test.ts runs in no shard and fails the guard until it
+# is renamed to *.spec.ts), each with its own ports and output directory.
 #
 # The lists are chosen by the per-file test time of the serial suite at
 # 704cac30 (757s over 67 files; 50-design-workbench.spec.ts alone is 153s):

@@ -11,12 +11,14 @@
 // This file proves, from each target's `make -n` output rather than a
 // hand-copied list, that:
 //
-//   - the three shards partition e2e/tests/*.spec.ts: every spec file runs in
-//     exactly one shard, and a listed name that is not a spec file, is not in
-//     e2e/tests/, or is listed twice fails, as do an empty shard and the
-//     sentinel make yields for an empty remainder;
-//   - no file that Playwright would collect lies outside that domain: a nested
-//     or *.test.ts file would run in the whole suite and in no shard;
+//   - the three shards partition every file Playwright collects under
+//     e2e/tests/ when the suite runs whole, matched as it matches them (spec or
+//     test in any letter case, hidden files and subdirectories included): each
+//     runs in exactly one shard, so a collected file no shard can list, such as
+//     a nested, *.test.ts, or *.Spec.ts file, fails as running in no shard; a
+//     listed name that is not a spec file, is not in e2e/tests/, or is listed
+//     twice fails, as do an empty shard and the sentinel make yields for an
+//     empty remainder;
 //   - every Playwright test run has the shard command's shape and ends at its
 //     output directory, so no trailing argument narrows what a shard runs;
 //   - each shard has its own port range and output directory, and installs
@@ -93,9 +95,14 @@ var playwrightTestRE = regexp.MustCompile(`playwright[ \t]+test\b`)
 // restricted alphabet keeps the name a literal in Playwright's testMatch.
 var e2eSpecNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.spec\.ts$`)
 
-// playwrightTestFileRE is Playwright's default testMatch,
-// `**/*.@(spec|test).?(c|m)[jt]s?(x)`, as a regexp over a file's base name.
-var playwrightTestFileRE = regexp.MustCompile(`\.(spec|test)\.(c|m)?[jt]sx?$`)
+// playwrightTestFileRE is, over a file's base name, what Playwright collects
+// from a test directory by default: its default testMatch,
+// `**/*.@(spec|test).?(c|m)[jt]s?(x)`, which it matches with minimatch's
+// nocase and dot options, so `.Spec.` and a hidden file match too; and only a
+// file whose extension is one it loads, which it compares case-sensitively, so
+// `.spec.TS` does not (playwright 1.61.1: createFileMatcher and
+// collectFilesForProject).
+var playwrightTestFileRE = regexp.MustCompile(`\.(?i:spec|test)\.[cm]?[jt]sx?$`)
 
 // parseE2EShardRuns returns every shard command in a make dry-run transcript,
 // in order. Every Playwright test run in the transcript must have the shard
@@ -135,23 +142,23 @@ func lineAround(s string, i int) string {
 	return strings.TrimSpace(s[start:end])
 }
 
-// e2eSpecDomain splits files, every file under e2e/tests/ as a slash-separated
-// path relative to it, into the shard domain, which is the spec files directly
-// under e2e/tests/, sorted, and a problem for each other file that
-// Playwright's default testMatch would collect: the whole suite would run it,
-// and no shard could select it. An empty domain is a problem too.
+// e2eSpecDomain returns the shard domain of files, every file under e2e/tests/
+// as a slash-separated path relative to it: each file Playwright collects when
+// the suite runs whole (playwrightTestFileRE), sorted. The shards must
+// partition it, so a collected file no shard can list (nested, *.test.ts,
+// *.Spec.ts, hidden, or named outside e2eSpecNameRE's alphabet) fails as
+// running in no shard. An empty domain is a problem. The domain over-reaches
+// in one way that fails closed: the walk does not skip node_modules
+// directories, which Playwright does.
 func e2eSpecDomain(files []string) (specs, problems []string) {
 	for _, f := range files {
-		switch {
-		case !strings.Contains(f, "/") && e2eSpecNameRE.MatchString(f):
+		if playwrightTestFileRE.MatchString(path.Base(f)) {
 			specs = append(specs, f)
-		case playwrightTestFileRE.MatchString(path.Base(f)):
-			problems = append(problems, fmt.Sprintf("e2e/tests/%s is a test file Playwright collects when the suite runs whole, but it is not a *.spec.ts file (named only by letters, digits, dots, dashes, and underscores) directly under e2e/tests/, so no e2e shard can select it", f))
 		}
 	}
 	slices.Sort(specs)
 	if len(specs) == 0 {
-		problems = append(problems, "e2e/tests/ holds no *.spec.ts file, so every e2e shard would pass over nothing")
+		problems = append(problems, "e2e/tests/ holds no test file Playwright collects, so every e2e shard would pass over nothing")
 	}
 	return specs, problems
 }
@@ -160,8 +167,9 @@ func e2eSpecDomain(files []string) (specs, problems []string) {
 // fail to partition specs, the shard domain: a shard that lists no file; a
 // listed name that is not a spec file name (make's empty-remainder sentinel
 // among them) or is not in the domain; a file listed twice or in two shards; a
-// file in no shard; port ranges that overlap or leave the valid range; and two
-// shards sharing an output directory.
+// file in no shard, with how to fix one no shard can list; port ranges that
+// overlap or leave the valid range; and two shards sharing an output
+// directory.
 func e2eShardProblems(runs []namedE2ERun, specs []string) []string {
 	var problems []string
 	owner := map[string]string{}
@@ -199,9 +207,14 @@ func e2eShardProblems(runs []namedE2ERun, specs []string) []string {
 		outputs[r.Run.Output] = r.Target
 	}
 	for _, name := range specs {
-		if _, ok := owner[name]; !ok {
-			problems = append(problems, fmt.Sprintf("%s runs in no e2e shard", name))
+		if _, ok := owner[name]; ok {
+			continue
 		}
+		if e2eSpecNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("%s runs in no e2e shard", name))
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("%s runs in no e2e shard: Playwright collects it when the suite runs whole, but a shard can list only a *.spec.ts file directly under e2e/tests/, named by letters, digits, dots, dashes, and underscores; rename or move it", name))
 	}
 	return problems
 }
@@ -431,27 +444,37 @@ func TestE2EShards_SpecDomain(t *testing.T) {
 			wantSpecs: []string{"00-a.spec.ts", "10-b.spec.ts"},
 		},
 		{
-			name:      "a nested spec file would run whole but in no shard",
+			name:      "a nested spec file is collected",
 			files:     []string{"00-a.spec.ts", "sub/01-b.spec.ts"},
-			wantSpecs: []string{"00-a.spec.ts"},
-			wantProb:  []string{"e2e/tests/sub/01-b.spec.ts is a test file Playwright collects"},
+			wantSpecs: []string{"00-a.spec.ts", "sub/01-b.spec.ts"},
 		},
 		{
-			name:      "a *.test.ts file would run whole but in no shard",
-			files:     []string{"00-a.spec.ts", "01-b.test.ts", "02-c.spec.js"},
-			wantSpecs: []string{"00-a.spec.ts"},
-			wantProb:  []string{"e2e/tests/01-b.test.ts", "e2e/tests/02-c.spec.js"},
+			name:      "spec or test in any letter case is collected",
+			files:     []string{"00-a.spec.ts", "01-b.Spec.ts", "02-c.SPEC.ts", "03-d.test.ts", "04-e.Test.ts", "05-f.sPeC.ts"},
+			wantSpecs: []string{"00-a.spec.ts", "01-b.Spec.ts", "02-c.SPEC.ts", "03-d.test.ts", "04-e.Test.ts", "05-f.sPeC.ts"},
 		},
 		{
-			name:      "a spec file name outside the literal alphabet",
-			files:     []string{"00-a.spec.ts", "01 b.spec.ts"},
-			wantSpecs: []string{"00-a.spec.ts"},
-			wantProb:  []string{"e2e/tests/01 b.spec.ts"},
+			name: "every extension Playwright loads is collected",
+			files: []string{"00-a.spec.js", "01-b.spec.ts", "02-c.spec.jsx", "03-d.spec.tsx", "04-e.spec.cjs", "05-f.spec.cts",
+				"06-g.spec.mjs", "07-h.spec.mts", "08-i.test.cjsx", "09-j.test.ctsx", "10-k.test.mjsx", "11-l.test.mtsx"},
+			wantSpecs: []string{"00-a.spec.js", "01-b.spec.ts", "02-c.spec.jsx", "03-d.spec.tsx", "04-e.spec.cjs", "05-f.spec.cts",
+				"06-g.spec.mjs", "07-h.spec.mts", "08-i.test.cjsx", "09-j.test.ctsx", "10-k.test.mjsx", "11-l.test.mtsx"},
 		},
 		{
-			name:     "no spec file at all",
+			name:      "a hidden spec file and one outside the literal alphabet are collected",
+			files:     []string{"00-a.spec.ts", ".01-b.spec.ts", "02 c.spec.ts"},
+			wantSpecs: []string{".01-b.spec.ts", "00-a.spec.ts", "02 c.spec.ts"},
+		},
+		{
+			name: "an extension in another case, and near misses, are not collected",
+			files: []string{"00-a.spec.ts", "01-b.spec.TS", "02-c.Spec.Ts", "03-d.spec.d.ts", "04-e.specs.ts", "spec.ts",
+				"05-f.spec.ts.snap", "06-g.spec.json", "07-h.spec.tss", "08-i.spec-ts"},
+			wantSpecs: []string{"00-a.spec.ts"},
+		},
+		{
+			name:     "no test file at all",
 			files:    []string{"fixtures.ts"},
-			wantProb: []string{"holds no *.spec.ts file"},
+			wantProb: []string{"holds no test file Playwright collects"},
 		},
 	}
 	for _, tc := range cases {
@@ -490,12 +513,32 @@ func TestE2EShards_ShardProblems(t *testing.T) {
 			return r
 		}
 	}
+	unchanged := func(r []namedE2ERun) []namedE2ERun { return r }
 	cases := []struct {
 		name   string
+		extra  []string // domain files beyond specs
 		mutate func(runs []namedE2ERun) []namedE2ERun
 		want   []string // a substring of each problem, in order; nil wants none
 	}{
-		{name: "a partition", mutate: func(r []namedE2ERun) []namedE2ERun { return r }},
+		{name: "a partition", mutate: unchanged},
+		{
+			name:   "a collected *.Spec.ts file no shard can list",
+			extra:  []string{"99-x.Spec.ts"},
+			mutate: unchanged,
+			want:   []string{"99-x.Spec.ts runs in no e2e shard: Playwright collects it"},
+		},
+		{
+			name:   "a collected nested spec file no shard can list",
+			extra:  []string{"sub/01-x.spec.ts"},
+			mutate: unchanged,
+			want:   []string{"sub/01-x.spec.ts runs in no e2e shard: Playwright collects it"},
+		},
+		{
+			name:   "a shard that lists a *.Spec.ts file",
+			extra:  []string{"99-x.Spec.ts"},
+			mutate: addSpec(2, "99-x.Spec.ts"),
+			want:   []string{`e2e-3 lists "99-x.Spec.ts", which is not a spec file name`, "99-x.Spec.ts runs in no e2e shard"},
+		},
 		{
 			name:   "a file listed in two shards",
 			mutate: addSpec(1, "10-b.spec.ts"),
@@ -557,7 +600,7 @@ func TestE2EShards_ShardProblems(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			problems := e2eShardProblems(tc.mutate(partition()), specs)
+			problems := e2eShardProblems(tc.mutate(partition()), append(slices.Clone(specs), tc.extra...))
 			if len(problems) != len(tc.want) {
 				t.Fatalf("problems = %q, want %d containing %q", problems, len(tc.want), tc.want)
 			}
