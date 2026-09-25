@@ -229,8 +229,10 @@ func isCriterionOrDecision(fm *artifact.SpecFrontmatter, id string) bool {
 }
 
 // decisionEdge reports whether fm declares decision id (any id when id is
-// "") carrying the unpinned `supersedes` edge to object: the same link type
-// and ref (SI-274(4)).
+// "") carrying a `supersedes` edge whose ref equals object: the same link
+// type and ref (SI-274(4)). A pinned object matches only the same pinned
+// ref; SI-275's in-force check passes S_k's edges as written, pinned or
+// not, and every other caller an unpinned object.
 func decisionEdge(fm *artifact.SpecFrontmatter, id string, object artifact.Ref) bool {
 	if object.Name == "" {
 		return false

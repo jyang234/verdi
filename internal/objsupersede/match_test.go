@@ -308,16 +308,17 @@ func mConflict(name, resolvedBy string, challenges ...string) *Conflict {
 	return &Conflict{Name: name, FM: fm}
 }
 
-// mClosed is a closed feature t declaring ac-1, dc-1, and dc-2.
-func mClosed() *Spec {
-	t := mSpec("t", nil, mDec("dc-1"), mDec("dc-2"))
+// mClosed is a closed feature declaring ac-1, dc-1, and dc-2.
+func mClosed(name string) *Spec {
+	t := mSpec(name, nil, mDec("dc-1"), mDec("dc-2"))
 	t.Archived = true
 	t.FM.AcceptanceCriteria = []artifact.AcceptanceCriterion{{ID: "ac-1"}}
 	return t
 }
 
+// mRecs holds the closed specs t and u, plus specs and conflicts.
 func mRecs(conflicts []*Conflict, specs ...*Spec) *Records {
-	r := &Records{Specs: map[string]*Spec{"t": mClosed()}, Conflicts: conflicts}
+	r := &Records{Specs: map[string]*Spec{"t": mClosed("t"), "u": mClosed("u")}, Conflicts: conflicts}
 	for _, s := range specs {
 		r.Specs[s.Name] = s
 	}
@@ -344,11 +345,24 @@ func TestEvaluate_Establisher(t *testing.T) {
 	predEdge := mRecs([]*Conflict{mConflict("c1", "s1", o)},
 		mSpec("s1", nil, mDec("dc-1", "spec/t#dc-2")), mCarries(mSpec("s2", []string{"s1"}, mDec("dc-1", o)), "dc-1"),
 		mCarries(mSpec("s3", []string{"s2"}, mDec("dc-1", o)), "dc-1"))
-	// s2 classifies dc-1 as added: step 1 breaks on classification.
-	class := mRecs([]*Conflict{mConflict("c1", "s1", o)},
-		mSpec("s1", nil, mDec("dc-1", o)), mSpec("s2", []string{"s1"}, mDec("dc-1", o)),
-		mCarries(mSpec("s3", []string{"s2"}, mDec("dc-1", o)), "dc-1"))
-	class.Specs["s2"].FM.Supersession = &artifact.Supersession{Added: []string{"dc-1"}}
+	// carry: s3 carries dc-1 from s2, which carries it from s1; c1 names s1,
+	// plus extra conflicts.
+	carry := func(extra ...*Conflict) *Records {
+		return mRecs(append([]*Conflict{mConflict("c1", "s1", o)}, extra...),
+			mSpec("s1", nil, mDec("dc-1", o)), mCarries(mSpec("s2", []string{"s1"}, mDec("dc-1", o)), "dc-1"),
+			mCarries(mSpec("s3", []string{"s2"}, mDec("dc-1", o)), "dc-1"))
+	}
+	spans := carry()
+	spans.Conflicts[0].FM.Links = append(spans.Conflicts[0].FM.Links, artifact.Link{Type: artifact.LinkChallenges, Ref: "spec/u#dc-1"})
+	outsider := carry(mConflict("cx", "x", o))
+	outsider.Specs["x"] = mSpec("x", nil, mDec("dc-9", o))
+	// class: s2 classifies dc-1 as added, so step 1 breaks on classification.
+	withClass := func(extra ...*Conflict) *Records {
+		r := carry(extra...)
+		r.Specs["s2"].FM.Supersession = &artifact.Supersession{Added: []string{"dc-1"}}
+		return r
+	}
+	class := withClass()
 	tests := []struct {
 		name     string
 		recs     *Records
@@ -365,6 +379,12 @@ func TestEvaluate_Establisher(t *testing.T) {
 		{"no member in force wins over a broken step", class, fakeEst{"s1": notIn}, "s3", "dc-1", want{Unresolved, ReasonEstablisherNotInForce, "s1", "c1", "", "no conflict challenges spec/t#ac-1"}},
 		{"condition 9: classification broken at step 1", class, fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{Unresolved, ReasonCarryMismatch, "s2", "c1", "s1", ""}},
 		{"condition 9: predecessor edge broken at step 1", predEdge, fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{Unresolved, ReasonCarryMismatch, "s2", "c1", "s1", ""}},
+		{"two named members unproven: the earliest is named", three, fakeEst{"s1": {Reason: ReasonAcceptanceUnproven, Detail: "witness s1"}, "s2": {Reason: ReasonAcceptanceUnproven, Detail: "witness s2"}}, "s3", "dc-1", want{Unresolved, ReasonAcceptanceUnproven, "s1", "c1", "", "witness s1"}},
+		{"SI-274(1) on the carried path: S_k's second conflict for T", carry(mConflict("c1b", "s1", "spec/t#ac-1")), fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{Unresolved, ReasonMultipleConflicts, "s1", "c1", "", ""}},
+		{"SI-274(2) on the carried path: S_k's conflict spans two specs", spans, fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{Unresolved, ReasonConflictSpansSpecs, "", "c1", "", ""}},
+		{"SI-274(1) wins over a broken step on the carried path", withClass(mConflict("c1b", "s1", "spec/t#ac-1")), fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{Unresolved, ReasonMultipleConflicts, "s1", "c1", "", ""}},
+		{"a named member not in force never blocks the carry (R3)", carry(mConflict("c2", "s2", o), mConflict("c2b", "s2", "spec/t#ac-1")), fakeEst{"s1": day("2024-02-15"), "s2": notIn}, "s3", "dc-1", want{ResolvedCarried, "", "s1", "c1", "", ""}},
+		{"condition 5 never refuses a carried edge", outsider, fakeEst{"s1": day("2024-02-15")}, "s3", "dc-1", want{ResolvedCarried, "", "s1", "c1", "", ""}},
 		{"in force without a date is unproven", three, fakeEst{"s1": {Commit: "c"}}, "s2", "dc-1", want{Unresolved, ReasonAcceptanceUnproven, "s1", "c1", "", "spec/s1 is reported in force without a YYYY-MM-DD acceptance date"}},
 		{"in force with a malformed date is unproven", three, fakeEst{"s1": day("15 Feb 2024")}, "s2", "dc-1", want{Unresolved, ReasonAcceptanceUnproven, "s1", "c1", "", "spec/s1 is reported in force without a YYYY-MM-DD acceptance date"}},
 		{"a foreign reason is never passed through", three, fakeEst{"s1": {Reason: ReasonNoConflict}}, "s2", "dc-1", want{Unresolved, ReasonAcceptanceUnproven, "s1", "c1", "", `the establishment of spec/s1 answered "no-conflict"`}},
@@ -433,6 +453,10 @@ func TestInForceAt(t *testing.T) {
 		}
 	}
 	const o, p = "spec/t#dc-1", "spec/t#ac-1"
+	// s1 supersedes an object of t and one of u; its conflict for u leaves
+	// u#ac-1 without an edge.
+	twoSpecs := mRecs([]*Conflict{mConflict("c1", "s1", o), mConflict("c2", "s1", "spec/u#dc-1", "spec/u#ac-1")},
+		mSpec("s1", nil, mDec("dc-1", o), mDec("dc-2", "spec/u#dc-1")))
 	// v2 carries dc-1 from s1 and newly issues dc-3 with its own conflict.
 	carriesAndIssues := mRecs([]*Conflict{mConflict("c1", "s1", o), mConflict("c2", "v2", p)},
 		mSpec("s1", nil, mDec("dc-1", o)), mCarries(mSpec("v2", []string{"s1"}, mDec("dc-1", o), mDec("dc-3", p)), "dc-1"))
@@ -457,6 +481,8 @@ func TestInForceAt(t *testing.T) {
 		{"a decode failure is unproven, naming the path", accepted, func(r *Records) {
 			r.Failures = []string{".verdi/specs/active/zz/spec.md: broken"}
 		}, nil, "successor", obj("closed-feature", "dc-1"), ReasonAcceptanceUnproven, "records do not decode at the acceptance commit: .verdi/specs/active/zz/spec.md: broken"},
+		{"completeness is scoped to T: a gap over another closed spec", nil, nil, twoSpecs, "s1", obj("t", "dc-1"), "", ""},
+		{"completeness is scoped to T: a gap over T itself", nil, nil, twoSpecs, "s1", obj("u", "dc-1"), ReasonEstablisherNotInForce, "conflict/c2 challenges spec/u#ac-1, but spec/s1 carries no matching edge"},
 		{"the successor absent from its acceptance tree", accepted, nil, nil, "nowhere", obj("closed-feature", "dc-1"), ReasonAcceptanceUnproven, "spec/nowhere is not in its acceptance commit's tree"},
 	}
 	for _, tc := range tests {
