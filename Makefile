@@ -1,4 +1,4 @@
-.PHONY: build test test-cmd test-cross test-slow test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
+.PHONY: build test test-cmd test-cross test-slow test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e-setup e2e-1 e2e-2 e2e-3 e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
 # exact version before the lint step runs (verify.yml and merge-gate.yml,
@@ -349,14 +349,14 @@ showcase-coverage:
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
 	printf '%s\n' "$$out" | scripts/require-pass.sh '$(SHOWCASE_REQUIRED_TESTS)'
 
-# e2e-check-node is verify's Node/Playwright preflight: CLAUDE.md made
-# e2e a merge blocker ("every browser-facing behavioral path ... a
+# e2e-check-node is the e2e shards' Node/Playwright preflight: CLAUDE.md
+# made e2e a merge blocker ("every browser-facing behavioral path ... a
 # Playwright e2e test"), so a missing Node toolchain must FAIL verify
 # loudly, never silently skip e2e (a silent skip would be exactly the
 # kind of undisclosed gap the constitution's three-valued honesty rules
-# out). Checked separately from `e2e` itself so the failure message is
-# about the missing toolchain, not a confusing `npm: command not found`
-# buried in `cd e2e && npm install`'s output.
+# out). Checked separately from e2e-setup so the failure message is about
+# the missing toolchain, not a confusing `npm: command not found` buried in
+# `cd e2e && npm install`'s output.
 e2e-check-node:
 	@if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then \
 		echo "ERROR: node/npm not found — e2e (verdi/e2e/, Playwright) is a merge blocker per CLAUDE.md's testing regime, not optional." >&2; \
@@ -364,39 +364,169 @@ e2e-check-node:
 		exit 1; \
 	fi
 
-# e2e runs the Playwright suite under e2e/ (PLAN.md Phase 10 deliverable
-# 4): `npm install` then `npx playwright install --with-deps chromium`
-# then `npx playwright test`. e2e/playwright.config.ts's webServer stanza
-# does the rest — builds the real verdi binary, provisions a scratch
-# store, starts `verdi serve` plus a static server over a built dex site,
-# waits for readiness, and tears both down after the run.
+# The Playwright suite under e2e/ (PLAN.md Phase 10 deliverable 4) runs as
+# three shards, e2e-1, e2e-2, and e2e-3 (SI-268, owner directive 2026-09-25,
+# BL-73). Each is its own VERIFY_STEPS entry and its own CI gate job; each
+# gets its own `go run ./cmd/e2eharness` (e2e/playwright.config.ts's
+# webServer), and so its own verdi binary, scratch store, and servers. A
+# shard's spec files run serially in file-name order against its one store,
+# exactly as the whole suite once did against its own.
 #
-# Wave 7: now wired into `verify` (see the `verify` target below) — both
-# CI configs install Node before running it (verify.yml and merge-gate.yml,
-# each in its e2e job) so local/CI parity holds
-# (CLAUDE.md: "CI runs exactly `make verify` — trust parity"; SI-266 reads
-# that as `make verify`'s step set). Depends on e2e-check-node so a missing
-# toolchain fails with the install message above, not a raw shell error.
+# e2e-setup is the shards' shared prerequisite: the Node check, then `npm
+# install` and `npx playwright install --with-deps chromium` in e2e/. Make
+# builds a prerequisite once per invocation, so `make e2e` installs once
+# before its three concurrent shards, and no two installs run in e2e/ at the
+# same time. Each e2e-N step of `make verify` is its own invocation and
+# installs again (a no-op once installed).
+e2e-setup: e2e-check-node
+	cd e2e && npm install && npx playwright install --with-deps chromium
+
+# The shards' spec files. E2E_SHARD_1 and E2E_SHARD_2 are explicit;
+# E2E_SHARD_3 is every *.spec.ts file under e2e/tests/ that they do not list,
+# so a new spec file always runs, in shard 3. If that remainder is empty, it
+# is the single word e2e-shard-3-list-failed, which playwright.config.ts
+# refuses: the shard fails loudly instead of testing nothing. Each target
+# passes its list as VERDI_E2E_SPECS, which playwright.config.ts turns into
+# an exact testMatch (it also refuses a name that is not a spec file under
+# e2e/tests/, and a name listed twice). internal/specalign's
+# e2eshards_test.go reads the lists through `make -n` and fails unless the
+# three shards partition e2e/tests/*.spec.ts, each with its own ports and
+# output directory.
 #
-# VERDI_E2E_PORT_BASE (D6-28): the harness (cmd/e2eharness/ports.go) and
-# this suite's runner (e2e/ports.ts) both hard-code 4173/4174/4177 unless
-# this var is set, in which case every port derives from it as base,
-# base+1, base+2 in lockstep on both sides — letting concurrent `make
-# verify` runs in sibling git worktrees each claim a disjoint port range
-# instead of racing for the same three. It is a plain env var, not a make
-# variable, so it needs no plumbing here: export it before invoking make
-# (e.g. `VERDI_E2E_PORT_BASE=4300 make e2e`) and the recipe's child
-# processes (npm/npx/go run) inherit it automatically. Unset: unchanged
-# behavior.
-e2e: e2e-check-node
-	cd e2e && npm install && npx playwright install --with-deps chromium && npx playwright test
+# The lists are chosen by the per-file test time of the serial suite at
+# 704cac30 (757s over 67 files; 50-design-workbench.spec.ts alone is 153s):
+#   shard 1  10 through 32, the board suites up to the scoping yarn  263s
+#   shard 2  33 through 49                                            246s
+#   shard 3  00 through 06, and 50 onward                             248s
+# plus each shard's own setup and harness start. Rebalance when a CI e2e job
+# finishes more than a minute after the others; shard 3 grows with every new
+# spec file.
+#
+# Dependency chains: a few spec files depend on state an earlier file left
+# in the store. Each chain stays inside one shard, in its original order
+# (Playwright runs a shard's files in file-name order). When these lists
+# were chosen, each shard passed alone on its own fresh store (93, 127, and
+# 110 tests: the suite's 330).
+#   - 30 -> 31 -> 32, in shard 1. 32-board-scoping-yarn.spec.ts lines 9-12:
+#     "This suite runs after 30/31 in the shared store, so
+#     SHOWCASE.DESIGN_SPEC already carries the stubs suite 30 graduated". A
+#     shard that began at 32 failed its :100, :128, and :168 tests (probe
+#     at 704cac30).
+#   - 13 -> 26 -> 28, 29, in shard 1. 28-board-pin-import.spec.ts lines
+#     68-69 and 29-board-trash.spec.ts lines 21-23 need a card for
+#     adr/0001-outbox-events, held up by "the fixture's exempts edge" or "an
+#     earlier suite file's re-drawn one". 26-board-deletion.spec.ts retypes
+#     the fixture's edge (line 99) and then removes it (lines 123-125 and
+#     146); 13-board-scratch-tier.spec.ts lines 120-123 graduate a
+#     decision->ADR thread into the typed exempts edge that keeps the card.
+#     26, 28, 29 alone fail 28:60 and 29:143 with the card gone; with 13
+#     first, all 23 tests pass.
+E2E_SHARD_1 := \
+  10-board-projection.spec.ts \
+  11-board-git-affordance.spec.ts \
+  12-board-type-picker.spec.ts \
+  13-board-scratch-tier.spec.ts \
+  14-board-layout-stability.spec.ts \
+  15-board-review-mode.spec.ts \
+  16-dex-v2.spec.ts \
+  17-board-positions.spec.ts \
+  18-dex-by-story.spec.ts \
+  19-disclosures.spec.ts \
+  20-board-drag-robustness.spec.ts \
+  21-board-document-edges.spec.ts \
+  22-board-collision-free.spec.ts \
+  23-board-dialog-usability.spec.ts \
+  24-board-sticky-types.spec.ts \
+  25-board-ref-peek.spec.ts \
+  26-board-deletion.spec.ts \
+  27-board-legibility.spec.ts \
+  28-board-pin-import.spec.ts \
+  29-board-trash.spec.ts \
+  30-board-scoping-canvas.spec.ts \
+  31-board-stub-instantiate.spec.ts \
+  32-board-scoping-yarn.spec.ts
+E2E_SHARD_2 := \
+  33-board-expand.spec.ts \
+  34-board-superseded-status.spec.ts \
+  35-board-obligation-graduate.spec.ts \
+  36-board-obligation-wall.spec.ts \
+  37-board-diagram-editor.spec.ts \
+  37-board-wall-badges.spec.ts \
+  37-directory-home.spec.ts \
+  38-board-evidence-slot.spec.ts \
+  38-board-size-smell.spec.ts \
+  38-derivation-drawer.spec.ts \
+  38-draft-boards.spec.ts \
+  39-diagram-tier.spec.ts \
+  40-showcase-draft.spec.ts \
+  41-showcase-ladder-badge.spec.ts \
+  42-matrix-preview.spec.ts \
+  43-family-board-links.spec.ts \
+  43-home-status-glance.spec.ts \
+  43-tool-view-exit.spec.ts \
+  44-branch-family-links.spec.ts \
+  45-vocabulary.spec.ts \
+  46-board-refresh-interaction.spec.ts \
+  47-board-statusless-lifecycle.spec.ts \
+  47-board-sticky-keys.spec.ts \
+  48-board-creation-form.spec.ts \
+  49-readiness-pilot.spec.ts
+E2E_SHARD_3 = $(or $(filter-out $(E2E_SHARD_1) $(E2E_SHARD_2),$(sort $(notdir $(wildcard e2e/tests/*.spec.ts)))),e2e-shard-3-list-failed)
+
+# e2e_shard is one shard's Playwright command, run in e2e/: $(1) is the
+# shard's number, $(2) its VERDI_E2E_PORT_BASE, and $(3) its spec files.
+# VERDI_E2E_PORT_BASE (D6-28; cmd/e2eharness/ports.go, e2e/ports.ts) moves
+# the harness's four ports to base..base+3. Each shard sets its own fixed
+# base and its own --output directory (Playwright empties it when a run
+# starts), so the three shards never collide when they run at once. A
+# VERDI_E2E_PORT_BASE exported before make does not reach a shard: the
+# shard's own value wins. The E2E_RUN_N variables are the one definition of
+# each shard's command, used by e2e-N and by e2e.
+e2e_shard = VERDI_E2E_PORT_BASE=$(2) VERDI_E2E_SPECS='$(strip $(3))' npx playwright test --output=test-results/e2e-$(1)
+E2E_RUN_1 = $(call e2e_shard,1,21000,$(E2E_SHARD_1))
+E2E_RUN_2 = $(call e2e_shard,2,22000,$(E2E_SHARD_2))
+E2E_RUN_3 = $(call e2e_shard,3,23000,$(E2E_SHARD_3))
+
+e2e-1: e2e-setup
+	cd e2e && $(E2E_RUN_1)
+
+e2e-2: e2e-setup
+	cd e2e && $(E2E_RUN_2)
+
+e2e-3: e2e-setup
+	cd e2e && $(E2E_RUN_3)
+
+# e2e runs the whole suite as the three shards at once, a local convenience
+# and not a gate step (make verify runs the shards one after another, CI in
+# three jobs). GNU make 3.81, which macOS ships, has no --output-sync, so
+# every line a shard prints carries its name ("[e2e-2] ..."). Each shard's
+# exit status and seconds are kept apart from its output, and the target
+# ends with one summary line per shard; it fails if any shard failed or
+# left no status. internal/specalign holds this recipe to the gate recipes'
+# rules (TestGateParity_GateRecipesNeverIgnoreErrors) and proves it fails
+# over a failed shard (TestE2EShards_SuiteFailsWhenAnyShardFails).
+e2e: e2e-setup
+	@cd e2e && tmp=$$(mktemp -d) && start=$$(date +%s) && \
+	shard() { n=$$1; shift; { s=$$(date +%s); "$$@" 2>&1; echo "$$? $$(( $$(date +%s) - s ))" > "$$tmp/$$n"; } | awk -v p="[e2e-$$n] " '{ print p $$0; fflush() }'; } && \
+	{ shard 1 env $(E2E_RUN_1) & shard 2 env $(E2E_RUN_2) & shard 3 env $(E2E_RUN_3) & wait; }; \
+	failed=""; \
+	echo "e2e: the three shards ran at once in $$(( $$(date +%s) - start ))s:"; \
+	for n in 1 2 3; do \
+		rc=missing; secs=?; \
+		if [ -s "$$tmp/$$n" ]; then read rc secs < "$$tmp/$$n"; fi; \
+		printf '  e2e-%s  exit %-7s %ss\n' "$$n" "$$rc" "$$secs"; \
+		if [ "$$rc" != 0 ]; then failed="$$failed e2e-$$n"; fi; \
+	done; \
+	rm -rf "$$tmp"; \
+	if [ -n "$$failed" ]; then echo "e2e: FAILED:$$failed" >&2; exit 1; fi; \
+	echo "e2e OK"
 
 # verify is the full gate (CLAUDE.md: "grows — never shrinks — to
 # include integration, e2e, and spec-align by the end of the build").
-# e2e runs LAST: it is by far the slowest step (browser install + a real
-# server round-trip) and every faster gate should fail first when
-# something's broken, so a run that fails early doesn't pay e2e's cost
-# for nothing.
+# The e2e shards run LAST: they are by far the slowest steps (browser
+# install + a real server round-trip) and every faster gate should fail
+# first when something's broken, so a run that fails early doesn't pay
+# e2e's cost for nothing.
 #
 # The gate runs its steps SERIALLY through a recursive make and records the
 # wall-clock of every step (process-audit PA-025: gate duration was measured
@@ -409,7 +539,9 @@ e2e: e2e-check-node
 # VERIFY_STEPS lists `test` as its shards (test-cmd test-cross test-slow
 # test-rest), not as `test`, because `test` also runs spec-align, which keeps
 # its own named step here; listing `test` would run internal/specalign twice
-# (SI-266).
+# (SI-266). It lists the e2e shards (e2e-1 e2e-2 e2e-3), not `e2e`, which
+# runs the same three concurrently (SI-268); local `make verify` stays serial
+# and fail-fast.
 #
 # The pull-request gate (.github/workflows/merge-gate.yml) runs exactly these
 # steps, split across parallel jobs, plus the post-verify self-lint; its
@@ -426,17 +558,17 @@ e2e: e2e-check-node
 #   - any line names MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, or GOFLAGS, or assigns
 #     SHELL, .SHELLFLAGS, or MAKE;
 #   - a recipe line of a gate target (a VERIFY_STEPS entry, a test shard,
-#     test, verify, or anything they pull in) carries a `-` prefix, written,
-#     through a leading variable, or on any line of a define value the line
-#     reaches; or runs a sub-make with -i, -k, -n, -t, or -q, written or in a
-#     value the line reaches;
+#     test, verify, the whole-suite e2e, or anything they pull in) carries a
+#     `-` prefix, written, through a leading variable, or on any line of a
+#     define value the line reaches; or runs a sub-make with -i, -k, -n, -t,
+#     or -q, written or in a value the line reaches;
 #   - a gate target's recipe cannot be read.
 # TestGateParity_GateVariablesAssignedOnceAndNothingIncluded fails unless
 # VERIFY_STEPS, CROSS_BINARY_PKGS, TEST_CMD_PKGS, SPEC_ALIGN_PKGS,
-# TEST_SLOW_PKGS, and TEST_REST_PKGS are each assigned exactly once, with `=`
-# or `:=`, and the Makefile includes or evals no other makefile text: the
-# guards read only the first assignment, and only this file.
-VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-slow test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
+# TEST_SLOW_PKGS, TEST_REST_PKGS, and E2E_SHARD_1..3 are each assigned exactly
+# once, with `=` or `:=`, and the Makefile includes or evals no other makefile
+# text: the guards read only the first assignment, and only this file.
+VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-slow test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e-1 e2e-2 e2e-3
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 
 verify:

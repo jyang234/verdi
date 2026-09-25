@@ -23,11 +23,12 @@
 # it will report.
 #
 # Parallel shape (SI-266, owner directive 2026-09-24; SI-268, owner
-# directive 2026-09-25, split test-slow out). The gate is exactly `make
-# verify`'s step set plus the post-verify self-lint (`go build` the binary,
-# then `verdi lint` in the pull-request context, which exercises I-14's
-# CI-context lint baselines against a real GITHUB_BASE_REF), split across
-# parallel gate jobs so the wall clock is the slowest job, not the sum:
+# directive 2026-09-25, split test-slow and the e2e shards out). The gate is
+# exactly `make verify`'s step set plus the post-verify self-lint (`go build`
+# the binary, then `verdi lint` in the pull-request context, which exercises
+# I-14's CI-context lint baselines against a real GITHUB_BASE_REF), split
+# across nine parallel gate jobs so the wall clock is the slowest job, not
+# the sum:
 #   static      build, fmt-check, vet, lint, lint-store, lint-showcase,
 #               showcase-coverage, then the self-lint;
 #   test-cmd    the cmd/verdi test shard;
@@ -39,11 +40,14 @@
 #               runner they replay from the test cache instead of running
 #               twice;
 #   spec-align  internal/specalign, the one gate that runs it;
-#   e2e         the Playwright suite.
+#   e2e-1, e2e-2, e2e-3
+#               the Playwright suite's three shards, each over its own spec
+#               files and its own fresh store (the Makefile's E2E_SHARD_N).
 # Each gate job repeats the setup the single job had (full-history
-# checkout, Go 1.25, Node 22 where e2e runs, the pinned golangci-lint where
-# lint runs), carries no `name:`, `if:`, or `continue-on-error:`, and runs
-# each make step as its own exact `run:` command.
+# checkout, Go 1.25, Node 22 where an e2e shard runs, the pinned
+# golangci-lint where lint runs), carries no `name:`, `if:`, or
+# `continue-on-error:`, and runs each make step as its own exact `run:`
+# command.
 #
 # The required context is the `merge-gate` job alone: job key `merge-gate`,
 # no `name:` override, so GitHub reports it as exactly "merge-gate". It
@@ -60,7 +64,7 @@
 # pass the gate over a failed job. Neither step has an `if:` or
 # `continue-on-error:`.
 #
-# internal/specalign is the parity guard for all of this, in five files:
+# internal/specalign is the parity guard for all of this, in six files:
 #   workflow_test.go           the gate jobs run exactly VERIFY_STEPS (with
 #                              `test` as its shards) plus the post-verify
 #                              steps, each once; a step that replays another
@@ -70,9 +74,12 @@
 #                              pinned canary, and the pinned verdict call; and
 #                              every document, job, and step key is
 #                              whitelisted;
-#   testshards_test.go         the shards partition `go list ./...`, each
+#   testshards_test.go         the Go shards partition `go list ./...`, each
 #                              package executes once under -race, and the
 #                              cross-binary packages always run fresh;
+#   e2eshards_test.go          the e2e shards partition e2e/tests/*.spec.ts,
+#                              each spec file in exactly one shard, with its
+#                              own ports and output directory;
 #   gaterecipes_test.go        `make verify` runs only its step loop, and no
 #                              gate recipe can pass over a failed command;
 #   makefilevars_test.go       the gate variables are assigned once, and the
@@ -186,7 +193,7 @@ jobs:
           go-version: "1.25"
       - run: make spec-align
 
-  e2e:
+  e2e-1:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -203,10 +210,48 @@ jobs:
           # browser binaries themselves (~/.cache/ms-playwright).
           cache: npm
           cache-dependency-path: e2e/package-lock.json
-      - run: make e2e
+      - run: make e2e-1
+
+  e2e-2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache. Does NOT cache the downloaded Playwright
+          # browser binaries themselves (~/.cache/ms-playwright).
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: make e2e-2
+
+  e2e-3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache. Does NOT cache the downloaded Playwright
+          # browser binaries themselves (~/.cache/ms-playwright).
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: make e2e-3
 
   merge-gate:
-    needs: [static, test-cmd, test-cross, test-slow, test-rest, spec-align, e2e]
+    needs: [static, test-cmd, test-cross, test-slow, test-rest, spec-align, e2e-1, e2e-2, e2e-3]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -219,4 +264,4 @@ jobs:
           fi
           echo "merge-gate: canary OK: the verdict script fails a failing result"
       - name: Require every gate job to succeed
-        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}
+        run: scripts/merge-gate-verdict.sh e2e-1=${{ needs.e2e-1.result }} e2e-2=${{ needs.e2e-2.result }} e2e-3=${{ needs.e2e-3.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}

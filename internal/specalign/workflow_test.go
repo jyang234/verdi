@@ -864,7 +864,9 @@ const mergeGateLintJob = "static"
 // `<job>=<result>` argument per gate job, sorted by job key. A job missing
 // from `needs:` expands to an empty result, which the script fails.
 const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
-	" e2e=${{ needs.e2e.result }}" +
+	" e2e-1=${{ needs.e2e-1.result }}" +
+	" e2e-2=${{ needs.e2e-2.result }}" +
+	" e2e-3=${{ needs.e2e-3.result }}" +
 	" spec-align=${{ needs.spec-align.result }}" +
 	" static=${{ needs.static.result }}" +
 	" test-cmd=${{ needs.test-cmd.result }}" +
@@ -907,14 +909,18 @@ var mergeGatePostVerifyCommands = []string{
 	"./.build/verdi lint",
 }
 
-// verifyGateFloor is every gate `make verify` ran when the gate went parallel,
-// with `test` expanded to its shards. The gate grows and never shrinks, so
-// expanded VERIFY_STEPS must keep every one of these; adding a gate needs no
-// edit here, and removing one fails.
+// verifyGateFloor is every gate `make verify` runs since SI-268 split the Go
+// tests and the Playwright suite once more, with `test` expanded to its
+// shards. The gate grows and never shrinks, so expanded VERIFY_STEPS must keep
+// every one of these; adding a gate needs no edit here, and removing one
+// fails. The e2e shards replace the single `e2e` step, which is now a
+// convenience target outside the gate; e2eshards_test.go proves the three
+// shards together run every spec file exactly once.
 var verifyGateFloor = []string{
 	"build", "fmt-check", "vet", "lint",
 	"test-cmd", "test-cross", "test-slow", "test-rest",
-	"fixture", "lint-store", "spec-align", "lint-showcase", "showcase-coverage", "e2e",
+	"fixture", "lint-store", "spec-align", "lint-showcase", "showcase-coverage",
+	"e2e-1", "e2e-2", "e2e-3",
 }
 
 // jobKeys returns the job ids of jobs, sorted so comparisons and failure
@@ -1194,12 +1200,19 @@ func TestMergeGateParity_CacheReplaysRunAfterTheirExecutorInOneJob(t *testing.T)
 	}
 }
 
+// runsPlaywright reports whether a gate job's command runs the Playwright
+// suite: one of the e2e shards (SI-268) or the whole-suite convenience target.
+func runsPlaywright(cmd string) bool {
+	target, ok := strings.CutPrefix(cmd, "make ")
+	return ok && (target == e2eSuiteTarget || slices.Contains(e2eShardTargets, target))
+}
+
 // TestMergeGateGateJobsUsePinnedSetup proves each gate job carries today's
 // pinned setup: it starts with a full-history checkout and Go 1.25, uses no
 // action outside the pinned set, passes each action exactly its pinned
 // inputs, finishes setup before its first gate command, installs Node 22
-// wherever `make e2e` runs, and caches and installs the pinned golangci-lint
-// wherever `make lint` runs — which must be the static job.
+// wherever an e2e shard runs, and caches and installs the pinned
+// golangci-lint wherever `make lint` runs — which must be the static job.
 func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 	pin := makefileGolangciPin(t)
@@ -1235,8 +1248,8 @@ func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 			t.Errorf("merge-gate.yml: job %q has a setup step (index %d) after its first gate command (index %d)", key, lastSetup, firstGate)
 		}
 		runs := runCommands(steps)
-		if slices.Contains(runs, "make e2e") && findStep(steps, "actions/setup-node@v4") == nil {
-			t.Errorf("merge-gate.yml: job %q runs make e2e without actions/setup-node@v4 (Node 22)", key)
+		if slices.ContainsFunc(runs, runsPlaywright) && findStep(steps, "actions/setup-node@v4") == nil {
+			t.Errorf("merge-gate.yml: job %q runs an e2e shard without actions/setup-node@v4 (Node 22)", key)
 		}
 		if slices.Contains(runs, "make lint") {
 			if findCacheStep(steps, "golangci-lint") == nil || !slices.Contains(runs, install) {
