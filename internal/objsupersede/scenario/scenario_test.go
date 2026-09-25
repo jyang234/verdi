@@ -97,43 +97,52 @@ func step(m map[string]any, scenario string, i int) map[string]any {
 }
 
 func TestLoad_Negative(t *testing.T) {
+	const identity, twoOps, badMove = "commit needs a name, an email, and an initial branch", "exactly one", "needs two distinct clean relative paths"
 	tests := []struct {
 		name   string
 		mutate func(m map[string]any)
+		want   string // the error's own check, so no other check masks it (re-review a m-4)
 	}{
-		{"unknown field", func(m map[string]any) { m["extra"] = 1 }},
-		{"no identity email", func(m map[string]any) { obj(m, "commit")["email"] = "" }},
-		{"no base step", func(m map[string]any) { m["base"] = []any{} }},
-		{"a base step off the initial branch", func(m map[string]any) { step(m, "", 0)["branch"] = "design/x" }},
-		{"undefined base layer", func(m map[string]any) { step(m, "", 1)["layers"] = []any{"nope"} }},
+		{"unknown field", func(m map[string]any) { m["extra"] = 1 }, `"extra"`},
+		{"no identity name", func(m map[string]any) { obj(m, "commit")["name"] = "" }, identity},
+		{"no identity email", func(m map[string]any) { obj(m, "commit")["email"] = "" }, identity},
+		{"no base step", func(m map[string]any) { m["base"] = []any{} }, "no base step"},
+		{"a base step off the initial branch", func(m map[string]any) { step(m, "", 0)["branch"] = "design/x" }, "base step 0 must write layers or move paths on main"},
+		{"a base step that merges", func(m map[string]any) {
+			delete(step(m, "", 2), "moves")
+			step(m, "", 2)["merge"] = "main"
+		}, "base step 2 must write layers or move paths on main"},
+		{"undefined base layer", func(m map[string]any) { step(m, "", 1)["layers"] = []any{"nope"} }, `base step 1: layer "nope" is not defined`},
 		{"missing record file", func(m map[string]any) {
 			obj(obj(m, "layers"), "unrelated")[".verdi/specs/active/unrelated/spec.md"] = "specs/no-such.md"
-		}},
+		}, `layer "unrelated": stat`},
 		{"unclean repo path", func(m map[string]any) {
 			obj(m, "layers")["x"] = map[string]any{"../unrelated/spec.md": "specs/unrelated.md"}
-		}},
-		{"absolute repo path", func(m map[string]any) { obj(m, "layers")["x"] = map[string]any{"/abs/spec.md": "specs/unrelated.md"} }},
-		{"undefined step layer", func(m map[string]any) { step(m, "accepted", 0)["layers"] = []any{"no-such-layer"} }},
-		{"non-UTC date", func(m map[string]any) { step(m, "accepted", 1)["date"] = "2024-02-15T09:00:00+01:00" }},
-		{"malformed author date", func(m map[string]any) { step(m, "chain", 1)["author_date"] = "yesterday" }},
-		{"merge and layers together", func(m map[string]any) { step(m, "accepted", 1)["layers"] = []any{"successor"} }},
-		{"no operation", func(m map[string]any) { delete(step(m, "accepted", 0), "layers") }},
-		{"an unclean move", func(m map[string]any) { step(m, "", 2)["moves"].([]any)[0].(map[string]any)["to"] = "../x" }},
+		}, `repo path "../unrelated/spec.md" is not a clean relative path`},
+		{"absolute repo path", func(m map[string]any) { obj(m, "layers")["x"] = map[string]any{"/abs/spec.md": "specs/unrelated.md"} }, `repo path "/abs/spec.md" is not a clean relative path`},
+		{"undefined step layer", func(m map[string]any) { step(m, "accepted", 0)["layers"] = []any{"no-such-layer"} }, `layer "no-such-layer" is not defined`},
+		{"non-UTC date", func(m map[string]any) { step(m, "accepted", 1)["date"] = "2024-02-15T09:00:00+01:00" }, "is not UTC"},
+		{"malformed author date", func(m map[string]any) { step(m, "chain", 1)["author_date"] = "yesterday" }, `date "yesterday"`},
+		{"merge and layers together", func(m map[string]any) { step(m, "accepted", 1)["layers"] = []any{"successor"} }, twoOps},
+		{"no operation", func(m map[string]any) { delete(step(m, "accepted", 0), "layers") }, twoOps},
+		{"an unclean move", func(m map[string]any) { step(m, "", 2)["moves"].([]any)[0].(map[string]any)["to"] = "../x" }, badMove},
 		{"a move onto itself", func(m map[string]any) {
 			mv := step(m, "", 2)["moves"].([]any)[0].(map[string]any)
 			mv["to"] = mv["from"]
-		}},
-		{"a step without a branch", func(m map[string]any) { step(m, "accepted", 0)["branch"] = "" }},
-		{"a step without a message", func(m map[string]any) { step(m, "accepted", 0)["message"] = "" }},
-		{"a scenario without a checkout", func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["checkout"] = "" }},
-		{"a scenario without steps", func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["steps"] = []any{} }},
-		{"a merge of a branch no step commits to", func(m map[string]any) { step(m, "accepted", 1)["merge"] = "design/nowhere" }},
-		{"a checkout no step commits to", func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["checkout"] = "design/nowhere" }},
+		}, badMove},
+		{"a step without a branch", func(m map[string]any) { step(m, "accepted", 0)["branch"] = "" }, `scenario "accepted" step 0: a step needs a branch and a message`},
+		{"a step without a message", func(m map[string]any) { step(m, "accepted", 0)["message"] = "" }, `scenario "accepted" step 0: a step needs a branch and a message`},
+		{"a scenario without a checkout", func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["checkout"] = "" }, `scenario "accepted" needs a checkout branch and at least one step`},
+		{"a scenario without steps", func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["steps"] = []any{} }, `scenario "accepted" needs a checkout branch and at least one step`},
+		{"a merge of a branch no step commits to", func(m map[string]any) { step(m, "accepted", 1)["merge"] = "design/nowhere" }, `merges "design/nowhere" before any step commits to it`},
+		{"a checkout no step commits to", func(m map[string]any) {
+			obj(obj(m, "scenarios"), "accepted")["checkout"] = "design/nowhere"
+		}, `checks out "design/nowhere", which no step commits to`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Load(mutated(t, tc.mutate)); err == nil {
-				t.Fatal("Load accepted a broken manifest")
+			if _, err := Load(mutated(t, tc.mutate)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load: %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
@@ -279,6 +288,37 @@ func TestMaterialize_ManifestDrivesCommits(t *testing.T) {
 	}
 	if _, err := Materialize(ctx, Dir(), t.TempDir(), "no-such-scenario"); err == nil {
 		t.Fatal("an undefined scenario materialized")
+	}
+}
+
+// TestMaterialize_GitErrors pins that a failing git step is returned as an
+// error naming its command, never ignored (lane L3 re-review a m-5).
+func TestMaterialize_GitErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(m map[string]any)
+		want   string
+	}{
+		{"a move of a missing path", func(m map[string]any) {
+			step(m, "", 2)["moves"].([]any)[0].(map[string]any)["from"] = ".verdi/specs/active/nowhere"
+		}, "scenario: git mv .verdi/specs/active/nowhere"},
+		{"a commit with nothing to commit", func(m map[string]any) { step(m, "accepted", 0)["layers"] = []any{"store"} }, "scenario: git commit"},
+		{"a merge that conflicts", func(m map[string]any) {
+			steps := step(m, "accepted", 0)
+			obj(obj(m, "scenarios"), "accepted")["steps"] = []any{
+				map[string]any{"branch": "design/a", "date": steps["date"], "message": "Write successor", "layers": []any{"successor"}},
+				map[string]any{"branch": "main", "date": steps["date"], "message": "Write it otherwise", "layers": []any{"successor-edited"}},
+				map[string]any{"branch": "main", "date": steps["date"], "message": "Merge", "merge": "design/a"},
+			}
+		}, "scenario: git merge"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Materialize(context.Background(), mutated(t, tc.mutate), t.TempDir(), "accepted")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Materialize: %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }
 
