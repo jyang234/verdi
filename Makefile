@@ -505,8 +505,10 @@ e2e-3: e2e-setup
 # exit status and seconds are kept apart from its output, and the target
 # ends with one summary line per shard; it fails if any shard failed or
 # left no status. internal/specalign holds this recipe to the gate recipes'
-# rules (TestGateParity_GateRecipesNeverIgnoreErrors) and proves it fails
-# over a failed shard (TestE2EShards_SuiteFailsWhenAnyShardFails).
+# rules (TestGateParity_GateRecipesNeverIgnoreErrors), and runs it over fake
+# shards to prove it fails when any one shard fails alone or all three fail
+# (TestE2EShards_SuiteFailsWhenAnyShardFails); no test makes a shard leave no
+# status.
 e2e: e2e-setup
 	@cd e2e && tmp=$$(mktemp -d) && start=$$(date +%s) && \
 	shard() { n=$$1; shift; { s=$$(date +%s); "$$@" 2>&1; echo "$$? $$(( $$(date +%s) - s ))" > "$$tmp/$$n"; } | awk -v p="[e2e-$$n] " '{ print p $$0; fflush() }'; } && \

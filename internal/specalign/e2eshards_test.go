@@ -23,8 +23,8 @@
 //     output directory, so no trailing argument narrows what a shard runs;
 //   - each shard has its own port range and output directory, and installs
 //     its setup exactly once, before Playwright runs;
-//   - `make e2e` runs exactly the three shard commands, and fails with a
-//     per-shard summary when any shard fails;
+//   - `make e2e` runs exactly the three shard commands, and fails, with a
+//     per-shard summary, when any one shard fails alone or all three fail;
 //   - VERIFY_STEPS lists the three shards and not `e2e`.
 //
 // What it cannot prove without Node is that playwright.config.ts honors
@@ -671,9 +671,11 @@ echo "fake playwright: shard $shard passed"
 }
 
 // TestE2EShards_SuiteFailsWhenAnyShardFails runs the real `make e2e` recipe
-// over fake node, npm, and npx, and proves it fails when any shard fails,
-// passes only when all three pass, prefixes each shard's output with its
-// name, and ends with a summary line per shard.
+// over fake node, npm, and npx, and proves it fails when any one shard fails
+// alone and when all three fail, passes when all three pass, prefixes each
+// shard's output with its name, and ends with a summary line per shard. No
+// case makes a shard leave no status, which the recipe also counts as a
+// failure.
 func TestE2EShards_SuiteFailsWhenAnyShardFails(t *testing.T) {
 	bin := t.TempDir()
 	for name, body := range fakeE2ETools {
@@ -687,8 +689,9 @@ func TestE2EShards_SuiteFailsWhenAnyShardFails(t *testing.T) {
 		wantOK  bool
 	}{
 		{name: "every shard passes", failing: "", wantOK: true},
-		{name: "the middle shard fails", failing: "2", wantOK: false},
-		{name: "the last shard fails", failing: "3", wantOK: false},
+		{name: "the first shard fails alone", failing: "1", wantOK: false},
+		{name: "the second shard fails alone", failing: "2", wantOK: false},
+		{name: "the third shard fails alone", failing: "3", wantOK: false},
 		{name: "every shard fails", failing: "1 2 3", wantOK: false},
 	}
 	for _, tc := range cases {
