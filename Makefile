@@ -96,9 +96,11 @@ fmt-check:
 # verdi-go's trust-parity posture):
 #   - CI (CI=true, which GitHub Actions sets): golangci-lint is MANDATORY.
 #     Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before
-#     `make verify`, so a missing binary here means the install step regressed
-#     — we exit 1 rather than pass by skipping (a silent skip would be exactly
-#     the undisclosed gap the constitution's three-valued honesty rules out).
+#     this target runs (verify.yml before `make verify`, merge-gate.yml in its
+#     static job before `make lint`), so a missing binary here means the
+#     install step regressed — we exit 1 rather than pass by skipping (a
+#     silent skip would be exactly the undisclosed gap the constitution's
+#     three-valued honesty rules out).
 #   - Locally: warn-if-missing, so a fresh clone without the tool can still run
 #     the rest of `make verify`; install golangci-lint to gate lint locally.
 # When the tool IS present, a version drift from the CI pin is a loud warning
@@ -111,7 +113,7 @@ lint:
 		fi; \
 		golangci-lint run; \
 	elif [ "$$CI" = "true" ]; then \
-		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before 'make verify'; a missing binary means that step regressed. Refusing to pass by skipping." >&2; \
+		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before the lint step (verify.yml before 'make verify', merge-gate.yml before 'make lint'); a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
 		exit 1; \
 	else \
 		echo "WARNING: golangci-lint not installed locally; skipping lint (install it to gate this locally)" >&2; \
@@ -220,9 +222,9 @@ spec-align:
 SHOWCASE_REQUIRED_TESTS := TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestShowcaseCoverage_DetectsGapsCoversAllClasses TestShowcaseCoverage_RealEnumerationDetectsGaps TestShowcaseCoverage_EnumerationIsComplete TestShowcaseCoverage_RequiredListInSync TestShowcaseCoverage_GuardScriptBites TestReadmeExamplesFresh
 
 # lint-showcase and showcase-coverage are named gates over
-# internal/showcasealign (same rationale as spec-align: `test` already runs
-# this package, but a named target makes CI failure output name the gate
-# instead of burying it in the full `go test -race ./...` output).
+# internal/showcasealign: the test-cross shard already runs this whole
+# package, but a named target makes CI failure output name the gate instead
+# of burying it in test-cross's output for every cross-binary package.
 #
 # lint-showcase runs TestShowcaseLintClean: the showcase corpus's own
 # internal consistency check (`verdi lint` exits 0 against a freshly
