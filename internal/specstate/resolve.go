@@ -123,10 +123,12 @@ func parseCandidatePath(path string) (zone, string, error) {
 }
 
 // successorCorpus is the default-branch spec corpus — BOTH zones, see
-// specZonesPrefix — decoded at most once per ResolveMany call (and, through
-// the Projector's corpus cache, at most once per store root and
-// default-branch commit while that entry stays cached), over EVERY
-// spec.md path with no exclusion at scan time (fix-round-1 finding 1:
+// specZonesPrefix — built at most once per ResolveMany call (by one scan,
+// or two when a scan pinned to the resolved commit fails and successors
+// scans again at the ref) and, through the Projector's corpus cache, at
+// most once per store root and default-branch commit while that entry
+// stays cached. It is decoded over EVERY spec.md path with no exclusion
+// at scan time (fix-round-1 finding 1:
 // batch-wide exclusion at scan time hid a landed successor whenever it
 // happened to also be one of the SAME call's own candidates, and silently
 // dropped a malformed candidate's own decode failure from ever becoming a
@@ -334,11 +336,15 @@ func (p Projector) successors(ctx context.Context, root string, branch Branch) (
 	return corpus, nil
 }
 
-// ResolveMany projects every candidate's effective state, reading and
-// strict-decoding the default-branch active-spec corpus AT MOST ONCE for
-// the whole call, never once per candidate — batch consumers therefore
-// never trigger an O(specs²) Git+decode scan. The scan is built lazily,
-// the first time some candidate actually needs a supersession answer (an
+// ResolveMany projects every candidate's effective state, building the
+// default-branch successor corpus AT MOST ONCE for the whole call, never
+// once per candidate — batch consumers therefore never trigger an
+// O(specs²) Git+decode scan. Building it takes one read-and-strict-decode
+// scan, except when a scan pinned to the resolved commit fails: then
+// successors scans a second time at the ref, and the call gets that
+// second scan's error (or, should it succeed, its corpus). The scan is
+// built lazily, the first time some candidate actually needs a
+// supersession answer (an
 // active-zone candidate whose exact bytes are already provably reachable
 // from the default branch): a call resolving only new proposals, diverged
 // candidates, or archive-zone candidates never touches the corpus at all.

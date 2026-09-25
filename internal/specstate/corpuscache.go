@@ -40,8 +40,9 @@ type corpusEntry struct {
 // A failed scan is never stored: it leaves no entry, and the next get for
 // that key scans again. Concurrent gets for a missing key share one scan:
 // the first caller runs it and the others wait, then read the stored entry
-// or, when that scan failed, run their own. Construct with newCorpusCache;
-// the zero value has no flight map and no limit.
+// or, when that scan failed, run their own. newCorpusCache is required:
+// the zero value is not usable, since its first miss writes to a nil
+// flight map and panics.
 type corpusCache struct {
 	limit int
 
