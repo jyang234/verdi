@@ -1,14 +1,49 @@
 {
   "base": [
-    "store",
-    "closed"
+    {
+      "branch": "main",
+      "date": "2024-01-01T00:00:00Z",
+      "layers": [
+        "store"
+      ],
+      "message": "Base layer store"
+    },
+    {
+      "branch": "main",
+      "date": "2024-01-01T00:00:00Z",
+      "layers": [
+        "closed"
+      ],
+      "message": "Base layer closed"
+    },
+    {
+      "author_date": "2024-01-09T09:00:00Z",
+      "branch": "main",
+      "date": "2024-01-10T09:00:00Z",
+      "message": "Close spec/closed-feature and spec/closed-story",
+      "moves": [
+        {
+          "from": ".verdi/specs/active/closed-feature",
+          "to": ".verdi/specs/archive/closed-feature"
+        },
+        {
+          "from": ".verdi/specs/active/closed-story",
+          "to": ".verdi/specs/archive/closed-story"
+        }
+      ]
+    }
   ],
+  "commit": {
+    "email": "fixture@verdi.invalid",
+    "initial_branch": "main",
+    "name": "Verdi Fixture"
+  },
   "layers": {
     "closed": {
       ".verdi/obligations/closed-story/ac-1--attestation.md": "obligations/closed-story-ac-1-attestation.md",
-      ".verdi/specs/active/other-feature/spec.md": "specs/other-feature.md",
-      ".verdi/specs/archive/closed-feature/spec.md": "specs/closed-feature.md",
-      ".verdi/specs/archive/closed-story/spec.md": "specs/closed-story.md"
+      ".verdi/specs/active/closed-feature/spec.md": "specs/closed-feature.md",
+      ".verdi/specs/active/closed-story/spec.md": "specs/closed-story.md",
+      ".verdi/specs/active/other-feature/spec.md": "specs/other-feature.md"
     },
     "conflict-feature": {
       ".verdi/conflicts/successor-closed-feature.md": "conflicts/successor-closed-feature.md"
@@ -71,6 +106,9 @@
     "successor-not-closed": {
       ".verdi/specs/active/successor/spec.md": "specs/successor-not-closed.md"
     },
+    "successor-sibling": {
+      ".verdi/specs/active/successor/spec.md": "specs/successor-sibling.md"
+    },
     "successor-top-level": {
       ".verdi/specs/active/successor/spec.md": "specs/successor-top-level.md"
     },
@@ -82,6 +120,9 @@
     },
     "successor-v2-drops": {
       ".verdi/specs/active/successor-v2/spec.md": "specs/successor-v2-drops.md"
+    },
+    "successor-v2-sibling": {
+      ".verdi/specs/active/successor-v2/spec.md": "specs/successor-v2-sibling.md"
     },
     "successor-v3": {
       ".verdi/specs/active/successor-v3/spec.md": "specs/successor-v3.md"
@@ -149,6 +190,7 @@
           "message": "Propose spec/successor"
         },
         {
+          "author_date": "2024-02-14T09:00:00Z",
           "branch": "main",
           "date": "2024-02-15T09:00:00Z",
           "merge": "design/successor",
@@ -224,6 +266,35 @@
           "date": "2024-03-15T09:00:00Z",
           "merge": "design/successor-v2",
           "message": "Accept spec/successor-v2"
+        }
+      ]
+    },
+    "chain-not-in-force": {
+      "checkout": "design/successor-v2",
+      "steps": [
+        {
+          "branch": "design/successor",
+          "date": "2024-02-01T09:00:00Z",
+          "layers": [
+            "successor-sibling",
+            "conflict-feature",
+            "conflict-story"
+          ],
+          "message": "Propose spec/successor"
+        },
+        {
+          "branch": "main",
+          "date": "2024-02-15T09:00:00Z",
+          "merge": "design/successor",
+          "message": "Accept spec/successor"
+        },
+        {
+          "branch": "design/successor-v2",
+          "date": "2024-03-01T09:00:00Z",
+          "layers": [
+            "successor-v2-sibling"
+          ],
+          "message": "Propose spec/successor-v2"
         }
       ]
     },

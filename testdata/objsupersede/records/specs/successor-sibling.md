@@ -3,18 +3,17 @@ id: spec/successor
 kind: spec
 title: "Successor"
 owners: [platform-team]
-class: story
-story: jira:CS-4
+class: feature
 problem: { text: "the governed-record list is hard to scan", anchor: problem }
 outcome: { text: "operators scan governed records by owner", anchor: outcome }
-links:
-  - { type: implements, ref: "spec/other-feature#ac-1" }
-  - { type: supersedes, ref: "spec/closed-feature#dc-1" }
 acceptance_criteria:
   - { id: ac-1, text: "an operator can scan governed records grouped by owner", evidence: [attestation], anchor: ac-1 }
 decisions:
-  - { id: dc-1, text: "governed records are grouped by owner, replacing newest-first order", anchor: dc-1 }
+  - { id: dc-1, text: "governed records are grouped by owner, replacing newest-first order", anchor: dc-1, links: [ { type: supersedes, ref: "spec/closed-feature#dc-1" } ] }
   - { id: dc-2, text: "the grouped list replaces the server-rendered record list", anchor: dc-2, links: [ { type: supersedes, ref: "spec/closed-story#ac-1" } ] }
+  - { id: dc-3, text: "the grouped list drops the separate record reader", anchor: dc-3, links: [ { type: supersedes, ref: "spec/closed-feature#ac-1" } ] }
+stubs:
+  - { slug: owner-groups, acceptance_criteria: [ac-1] }
 ---
 # Successor
 
@@ -39,3 +38,7 @@ newest-first order, because owners look for their own records first.
 
 The grouped list replaces spec/closed-story's server-rendered record list;
 ac-1 above restates what that criterion required and the successor keeps.
+
+## DC-3
+
+The grouped list drops spec/closed-feature's separate record reader.

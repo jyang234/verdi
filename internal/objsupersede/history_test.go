@@ -42,9 +42,9 @@ func TestHistory_Acceptance(t *testing.T) {
 		name, dir, spec string
 		want            Fact
 	}{
-		{"accepted by merge; the in-place edit does not move it", chain.Dir, "successor", Fact{State: FactProven, Commit: chain.Steps[1], Date: "2024-02-15"}},
+		{"accepted by merge, dated by its committer date; the in-place edit does not move it", chain.Dir, "successor", Fact{State: FactProven, Commit: chain.Steps[1], Date: "2024-02-15"}},
 		{"a revision", chain.Dir, "successor-v2", Fact{State: FactProven, Commit: chain.Steps[4], Date: "2024-03-15"}},
-		{"archive zone", chain.Dir, "closed-feature", Fact{State: FactProven, Commit: chain.Base[1], Date: "2024-01-01"}},
+		{"accepted in the active zone; the later archive move does not move it", chain.Dir, "closed-feature", Fact{State: FactProven, Commit: chain.Base[1], Date: "2024-01-01"}},
 		{"only on a design branch", proposed.Dir, "successor", Fact{State: FactAbsent}},
 		{"never written", chain.Dir, "nowhere", Fact{State: FactAbsent}},
 	}
@@ -97,7 +97,8 @@ func TestHistory_Closed(t *testing.T) {
 		want            Fact
 		witness         string // unproven: the witness's required substring
 	}{
-		{"closed feature", repo.Dir, "closed-feature", Fact{State: FactProven, Commit: repo.Base[1], Date: "2024-01-01"}, ""},
+		{"closed feature: the archive move, not its acceptance", repo.Dir, "closed-feature", Fact{State: FactProven, Commit: repo.Base[2], Date: "2024-01-10"}, ""},
+		{"closed story: the archive move, by its committer date", repo.Dir, "closed-story", Fact{State: FactProven, Commit: repo.Base[2], Date: "2024-01-10"}, ""},
 		{"an accepted, unclosed spec", repo.Dir, "other-feature", Fact{State: FactAbsent}, ""},
 		{"shallow history", shallow, "closed-feature", Fact{State: FactUnproven}, "shallow history"},
 		{"no default branch", unresolved.Dir, "closed-feature", Fact{State: FactUnproven}, "no default branch"},
@@ -195,13 +196,16 @@ func TestEvaluate_Scenarios(t *testing.T) {
 	ctx := context.Background()
 	chain := scenario.Build(t, "chain")
 	tests := []struct {
-		name, scenario, branch, spec string
-		want                         string
+		name, scenario, branch, spec, dc string
+		want                             string
 	}{
-		{"proposed successor", "proposed", "", "successor", "records match; takes effect when spec/successor is accepted"},
-		{"S2 carries S1's replacement", "chain", "design/successor-v2", "successor-v2", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
-		{"S3 amends and still carries it", "chain", "design/successor-v3", "successor-v3", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
-		{"unrelated reuse", "unrelated", "", "unrelated", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
+		{"proposed successor", "proposed", "", "successor", "dc-1", "records match; takes effect when spec/successor is accepted"},
+		{"S2 carries S1's replacement", "chain", "design/successor-v2", "successor-v2", "dc-1", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
+		{"S3 amends and still carries it", "chain", "design/successor-v3", "successor-v3", "dc-1", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
+		{"S3 amends the closed criterion's replacement and still carries it", "chain", "design/successor-v3", "successor-v3", "dc-2", "carries the replacement established by spec/successor (conflict/successor-closed-story, since 2024-02-15)"},
+		{"S1 was not in force for T at acceptance: a sibling edge had no conflict", "chain-not-in-force", "", "successor-v2", "dc-1", "spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
+		{"the same S1 was in force for another closed spec", "chain-not-in-force", "", "successor-v2", "dc-2", "carries the replacement established by spec/successor (conflict/successor-closed-story, since 2024-02-15)"},
+		{"unrelated reuse", "unrelated", "", "unrelated", "dc-1", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -216,7 +220,7 @@ func TestEvaluate_Scenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := result(t, res, "dc-1").Text()
+			got, err := result(t, res, tc.dc).Text()
 			if err != nil || got != tc.want {
 				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
 			}

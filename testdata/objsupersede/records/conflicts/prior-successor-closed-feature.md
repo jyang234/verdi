@@ -7,7 +7,7 @@ status: superseded
 resolved_by: spec/prior-successor
 links:
   - { type: challenges, ref: "spec/closed-feature#dc-1" }
-frozen: { at: 2024-02-01, commit: d49dd630388ff05fe4cd7d4084c785045ba15689 }
+frozen: { at: 2024-01-15, commit: d49dd630388ff05fe4cd7d4084c785045ba15689 }
 ---
 # prior-successor-closed-feature
 

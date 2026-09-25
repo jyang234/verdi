@@ -10,12 +10,12 @@ acceptance_criteria:
   - { id: ac-1, text: "an operator can scan governed records grouped by owner", evidence: [attestation], anchor: ac-1 }
 decisions:
   - { id: dc-1, text: "governed records are grouped by owner and sorted by owner name, replacing newest-first order", anchor: dc-1, links: [ { type: supersedes, ref: "spec/closed-feature#dc-1" } ] }
-  - { id: dc-2, text: "the grouped list replaces the server-rendered record list", anchor: dc-2, links: [ { type: supersedes, ref: "spec/closed-story#ac-1" } ] }
+  - { id: dc-2, text: "the grouped list replaces the server-rendered record list and pages by owner", anchor: dc-2, links: [ { type: supersedes, ref: "spec/closed-story#ac-1" } ] }
 links:
   - { type: supersedes, ref: "spec/successor-v2" }
 supersession:
-  carried: [ac-1, dc-2]
-  amended: [ { id: dc-1, note: "groups are sorted by owner name" } ]
+  carried: [ac-1]
+  amended: [ { id: dc-1, note: "groups are sorted by owner name" }, { id: dc-2, note: "the grouped list pages by owner" } ]
 stubs:
   - { slug: owner-groups, acceptance_criteria: [ac-1] }
 ---
@@ -40,5 +40,6 @@ newest-first order, because owners look for their own records first.
 
 ## DC-2
 
-The grouped list replaces spec/closed-story's server-rendered record list;
-ac-1 above restates what that criterion required and the successor keeps.
+The grouped list replaces spec/closed-story's server-rendered record list
+and pages by owner; ac-1 above restates what that criterion required and the
+successor keeps.

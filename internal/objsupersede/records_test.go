@@ -46,18 +46,26 @@ func (f failTree) ReadFile(ctx context.Context, p string) ([]byte, error) {
 	return f.memTree.ReadFile(ctx, p)
 }
 
-// layerTree is the committed fixture's named layers, as one tree.
+// layerTree is the committed fixture's base tree with the named layers
+// written over it, as one tree.
 func layerTree(t *testing.T, layers ...string) memTree {
 	t.Helper()
 	m, err := scenario.Load(scenario.Dir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := m.Files(scenario.Dir(), append([]string{"store", "closed"}, layers...)...)
+	base, err := m.BaseFiles(scenario.Dir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return memTree(files)
+	files, err := m.Files(scenario.Dir(), layers...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, c := range files {
+		base[p] = c
+	}
+	return memTree(base)
 }
 
 func mustRead(t *testing.T, tr TreeReader) *Records {
