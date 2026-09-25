@@ -27,7 +27,7 @@ func TestLoad_CommittedManifest(t *testing.T) {
 	want := []string{"accepted", "already-superseded", "chain", "chain-drop", "conflict-dismissed", "conflict-open",
 		"conflict-spans-specs", "constraint-target", "feature-fragment-link", "no-conflict", "proposed",
 		"resolved-by-other", "target-not-closed", "top-level-supersedes", "undeclared-object",
-		"unmatched-challenge", "unrelated"}
+		"unmatched-challenge", "unrelated", "unrelated-accepted"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("scenarios %v, want %v", names, want)
 	}
