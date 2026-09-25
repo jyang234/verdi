@@ -238,9 +238,11 @@ func provisionShowcaseStore(t *testing.T) (storeRoot string) {
 // "mark done" defer, which would leave the Once permanently reporting
 // "done" with showcaseTemplate still nil, wedging every later caller
 // behind a silently-broken cache instead of retrying. With a plain Mutex,
-// showcaseTemplate is only ever assigned AFTER a build fully succeeds, so
-// a Goexit mid-build leaves it nil (Unlock still runs, via its own defer,
-// so no deadlock) and the next caller retries the build cleanly.
+// showcaseTemplate and showcaseTemplateDir are only ever assigned AFTER a
+// build and its copy fully succeed, so a Goexit mid-build leaves both unset
+// (Unlock still runs, via its own defer, so no deadlock; a half-copied
+// directory is removed by ensureShowcaseTemplate's own defer) and the next
+// caller retries the build cleanly.
 var (
 	showcaseTemplateMu  sync.Mutex
 	showcaseTemplateDir string
@@ -271,9 +273,20 @@ func ensureShowcaseTemplate(t *testing.T) *fixturegit.Repo {
 	if err != nil {
 		t.Fatalf("ensureShowcaseTemplate: mkdtemp: %v", err)
 	}
-	showcaseTemplateDir = dir
+	// Until the copy succeeds, dir is this call's to remove: a failure
+	// (t.Fatalf's runtime.Goexit still runs this defer) must not leave it
+	// behind, and TestMain never sees it because showcaseTemplateDir is
+	// assigned only after the copy completes.
+	copied := false
+	defer func() {
+		if !copied {
+			_ = os.RemoveAll(dir)
+		}
+	}()
 	copyDirTree(t, built.Dir, dir)
+	copied = true
 
+	showcaseTemplateDir = dir
 	showcaseTemplate = &fixturegit.Repo{Dir: dir, Head: built.Head, Heads: append([]string(nil), built.Heads...)}
 	return showcaseTemplate
 }
