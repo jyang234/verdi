@@ -11,11 +11,21 @@ import (
 // frozen stamp a resolved conflict requires, and any extra lines (such as
 // resolved_by).
 func conflictDoc(status string, refs []string, extra string) []byte {
+	links := make([]Link, len(refs))
+	for i, r := range refs {
+		links[i] = Link{Type: LinkChallenges, Ref: r}
+	}
+	return conflictDocWithLinks(status, links, extra)
+}
+
+// conflictDocWithLinks is conflictDoc with the `links:` block given link by
+// link, so a test can mix `challenges` with other link types.
+func conflictDocWithLinks(status string, links []Link, extra string) []byte {
 	var b strings.Builder
 	b.WriteString("id: conflict/closed-object-replaced\nkind: conflict\ntitle: \"A successor replaces a closed criterion\"\n")
 	b.WriteString("status: " + status + "\nowners: [platform-team]\nlinks:\n")
-	for _, r := range refs {
-		fmt.Fprintf(&b, "  - { type: challenges, ref: %q }\n", r)
+	for _, l := range links {
+		fmt.Fprintf(&b, "  - { type: %s, ref: %q }\n", l.Type, l.Ref)
 	}
 	if status != "open" {
 		b.WriteString("frozen: { at: 2026-09-25, commit: 3e91ab2 }\n")
@@ -266,6 +276,36 @@ func TestDecodeConflict_ResolvedBy_Negative(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("DecodeConflict(resolved_by %q) = %q, want it to contain %q", tc.resolvedBy, err, want)
 				}
+			}
+		})
+	}
+}
+
+// TestDecodeConflict_ResolvedBy_ScopeCountsOnlyChallenges: SI-269 scopes
+// resolved_by to a superseded conflict whose `challenges` name an object
+// fragment, so a fragment reached through any other link type does not
+// bring resolved_by into scope. Each refused document's control swaps only
+// that link's type to `challenges` and decodes.
+func TestDecodeConflict_ResolvedBy_ScopeCountsOnlyChallenges(t *testing.T) {
+	const (
+		whole    = "spec/home-status-glance"
+		fragment = "spec/home-status-glance#ac-1"
+		extra    = "resolved_by: spec/home-status-v2\n"
+		scope    = "is accepted only on a conflict whose challenges links name an object fragment, and none of this conflict's do"
+	)
+	for _, lt := range []LinkType{LinkDependsOn, LinkSupersedes, LinkImplements} {
+		t.Run(string(lt), func(t *testing.T) {
+			ctrl := []Link{{Type: LinkChallenges, Ref: whole}, {Type: LinkChallenges, Ref: fragment}}
+			if _, err := DecodeConflict(conflictDocWithLinks("superseded", ctrl, extra)); err != nil {
+				t.Fatalf("control decode (fragment through challenges): %v", err)
+			}
+			refused := []Link{{Type: LinkChallenges, Ref: whole}, {Type: lt, Ref: fragment}}
+			_, err := DecodeConflict(conflictDocWithLinks("superseded", refused, extra))
+			if err == nil {
+				t.Fatalf("DecodeConflict(fragment only through %s, resolved_by): want error, got nil", lt)
+			}
+			if !strings.Contains(err.Error(), scope) {
+				t.Fatalf("DecodeConflict(fragment only through %s, resolved_by) = %q, want it to contain %q", lt, err, scope)
 			}
 		})
 	}
