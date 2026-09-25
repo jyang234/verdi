@@ -146,7 +146,11 @@ type DecisionView struct {
 	Edge     string // the edge's ref, as written
 	Object   string // the edge's object, unpinned: "spec/T#o"
 	State    DecisionState
-	Conflict string // "conflict/<name>" the evaluation rests on, when it names one
+	// Conflict is "conflict/<name>": for a new replacement in force, the
+	// conflict that established it, as at its spec's acceptance commit
+	// (SI-279); otherwise the one the evaluation rests on, when it names
+	// one.
+	Conflict string
 	// Carried: in force or proposed, the edge carries a replacement an
 	// earlier revision established (SI-265). Establisher and Since name
 	// the establishing successor ("spec/S_k", S itself for a new
@@ -338,11 +342,12 @@ func (m *memo) closedDate(ctx context.Context, t *Spec) Fact {
 }
 
 // decisionView is the view of one evaluated edge. A new replacement is in
-// force when its establishment is; before its spec's acceptance it is
-// proposed only while §3's whole match for its spec and closed spec holds
-// in this tree (SI-275), since a record set that does not match is never
-// shown as a supersession (§6). A carried edge is in force once its own
-// revision is accepted, and proposed before.
+// force when its establishment is (inForce), whatever this tree's
+// evaluation says; before its spec's acceptance it is proposed only while
+// §3's whole match for its spec and closed spec holds in this tree
+// (SI-275), since a record set that does not match is never shown as a
+// supersession (§6). A carried edge is in force once its own revision is
+// accepted, and proposed before.
 func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error) {
 	ref, err := artifact.ParseRef(r.Edge)
 	if err != nil {
@@ -350,6 +355,13 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 	}
 	object := artifact.Ref{Kind: ref.Kind, Name: ref.Name, Object: ref.Object}
 	v := DecisionView{Decision: objectRef(r.Spec, r.Decision), Edge: r.Edge, Object: object.String()}
+	if e, ok := m.inForce(ctx, r, ref, object); ok {
+		// The conflict as it stood at the acceptance commit (SI-279), where
+		// inForceAt proved the one superseded conflict naming r.Spec.
+		c := m.accepted(ctx, r.Spec).recs.namedBy(object, r.Spec)
+		v.State, v.Conflict, v.Establisher, v.Since = DecisionInForce, "conflict/"+c.Name, "spec/"+r.Spec, e.Date
+		return v, nil
+	}
 	if r.Conflict != "" {
 		v.Conflict = "conflict/" + r.Conflict
 	}
@@ -367,20 +379,16 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 		default:
 			fail = Result{Spec: r.Spec, Edge: r.Edge, Outcome: Unresolved, Reason: ReasonAcceptanceUnproven, Detail: acc.Witness}
 		}
-	case ResolvedNew:
-		switch e := checked(r.Spec, m.Establishment(ctx, r.Spec, object)); e.Reason {
-		case "":
-			v.State, v.Establisher, v.Since = DecisionInForce, "spec/"+r.Spec, e.Date
-			return v, nil
-		case ReasonEstablisherNotAccepted:
+	case ResolvedNew: // not in force (inForce): proposed, or not established
+		e := checked(r.Spec, m.Establishment(ctx, r.Spec, object))
+		if e.Reason == ReasonEstablisherNotAccepted {
 			v.State = DecisionProposed
 			if reason, detail := m.recs.inForceAt(ctx, r.Spec, object); reason != "" {
 				v.State, v.Reason = DecisionNotEstablished, detail
 			}
 			return v, nil
-		default:
-			fail = Result{Spec: r.Spec, Edge: r.Edge, Outcome: Unresolved, Reason: e.Reason, Other: r.Spec, Detail: e.Detail}
 		}
+		fail = Result{Spec: r.Spec, Edge: r.Edge, Outcome: Unresolved, Reason: e.Reason, Other: r.Spec, Detail: e.Detail}
 	}
 	text, err := fail.Text()
 	if err != nil {
@@ -388,6 +396,24 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 	}
 	v.State, v.Reason = DecisionNotEstablished, text
 	return v, nil
+}
+
+// inForce reports whether r's edge is its spec's own replacement in force:
+// not a carried candidate in this tree (SI-273), whose spec's
+// establishment of object held at its acceptance commit (SI-270, SI-275).
+// A supersession in force is permanent (design §4, SI-261), so a later
+// record of this tree, a proposed rival (condition 5) or a later
+// duplicate conflict (SI-274(1)), never unseats it or names the rival.
+// A pinned edge is never resolved (SI-271), and records that do not decode
+// leave every edge of this tree dependent on them (SI-274(6)): neither is
+// read in force.
+func (m *memo) inForce(ctx context.Context, r Result, edge, object artifact.Ref) (Establishment, bool) {
+	if r.Outcome == ResolvedCarried || edge.Pinned() || len(m.recs.Failures) > 0 ||
+		m.recs.carriedCandidate(m.recs.chain(r.Spec), r.Decision, object) {
+		return Establishment{}, false
+	}
+	e := checked(r.Spec, m.Establishment(ctx, r.Spec, object))
+	return e, e.Reason == ""
 }
 
 // objectView is the view of t's object id: superseded when exactly one

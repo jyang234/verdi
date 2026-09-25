@@ -152,6 +152,22 @@ func TestIndex_ObjectViews(t *testing.T) {
 			return h
 		}, "", "", ObjectView{Object: vo, State: ObjectUnproven, Witness: "spec/s1: acceptance unproven: witness s1"},
 			"supersession unproven: spec/s1: acceptance unproven: witness s1"},
+		{"two successors unproven: the first in sorted order, whatever the conflicts' order", func() *fakeHist {
+			h := hist(mRecs([]*Conflict{mConflict("c0", "x", vo), c1()}, s1(vo), mSpec("x", nil, mDec("dc-1", vo))))
+			h.unproven["s1"], h.unproven["x"] = "witness s1", "witness x"
+			return h
+		}, "", "", ObjectView{Object: vo, State: ObjectUnproven, Witness: "spec/s1: acceptance unproven: witness s1"},
+			"supersession unproven: spec/s1: acceptance unproven: witness s1"},
+		{"a proposed rival: the successor in force is still named", func() *fakeHist {
+			h := hist(mRecs([]*Conflict{c1(), mConflict("cx", "x", vo)}, s1(vo), mSpec("x", nil, mDec("dc-1", vo))), "s1", vDay1)
+			h.at["s1"] = one()
+			return h
+		}, "", "", superseded, vGov + vBy},
+		{"a later duplicate conflict: the conflict as it stood at acceptance (SI-279)", func() *fakeHist {
+			h := hist(mRecs([]*Conflict{mConflict("c0", "s1", vo), c1()}, s1(vo)), "s1", vDay1)
+			h.at["s1"] = one()
+			return h
+		}, "", "", superseded, vGov + vBy},
 		{"two successors in force (SI-274(8))", func() *fakeHist {
 			x, cx := mSpec("x", nil, mDec("dc-1", vo)), mConflict("cx", "x", vo)
 			h := hist(mRecs([]*Conflict{c1(), cx}, s1(vo), x), "s1", vDay1, "x", "2024-03-01")
@@ -269,6 +285,23 @@ func TestIndex_DecisionViews(t *testing.T) {
 	notEst := func(conflict, reason string) DecisionView {
 		return DecisionView{Decision: "spec/s1#dc-1", Edge: vo, Object: vo, State: DecisionNotEstablished, Conflict: conflict, Reason: reason}
 	}
+	// inForce is s1's new replacement in force, with the conflict c1 that
+	// established it at s1's acceptance commit (SI-279).
+	inForce := DecisionView{Decision: "spec/s1#dc-1", Edge: vo, Object: vo, State: DecisionInForce, Conflict: "conflict/c1", Establisher: "spec/s1", Since: vDay1}
+	rival := func() *Spec { return mSpec("x", nil, mDec("dc-1", vo)) }
+	// inForceAt holds s1 in force at its acceptance commit, whose records
+	// are one's, whatever the evaluated tree holds.
+	inForceAt := func(tree *Records) *fakeHist {
+		h := hist(tree, "s1", vDay1)
+		h.at["s1"] = one()
+		return h
+	}
+	const broken = ".verdi/conflicts/x.md: broken"
+	undecodable := func() *Records {
+		r := one()
+		r.Failures = []string{broken}
+		return r
+	}
 	const carriesLine = " | carries the replacement established by spec/s1 (conflict/c1, since 2024-02-15)"
 	tests := []struct {
 		name      string
@@ -326,6 +359,49 @@ func TestIndex_DecisionViews(t *testing.T) {
 		}, "", []DecisionView{view(DecisionProposed), {Decision: "spec/s1#dc-1", Edge: "spec/u#dc-1", Object: "spec/u#dc-1", State: DecisionProposed, Conflict: "conflict/cu"}},
 			"proposed — supersedes spec/t#dc-1 when spec/s1 is accepted"},
 		{"a decision with no fragment edge", func() *fakeHist { return hist(one()) }, "s1#dc-9", nil, ""},
+		// A supersession in force is permanent (design §4, SI-261): a
+		// later record in the evaluated tree never unseats the establishing
+		// successor's decision, nor names a rival as its superseder.
+		{"in force: a proposed rival never unseats it", func() *fakeHist {
+			return inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+		}, "", []DecisionView{inForce}, "supersedes spec/t#dc-1"},
+		{"in force: a later duplicate conflict (SI-274(1)) never unseats it; its conflict as at acceptance", func() *fakeHist {
+			return inForceAt(mRecs([]*Conflict{mConflict("c0", "s1", vo), c1(vo)}, s1(mDec("dc-1", vo))))
+		}, "", []DecisionView{inForce}, "supersedes spec/t#dc-1"},
+		{"in force: another successor also in force (SI-274(8))", func() *fakeHist {
+			cx := mConflict("cx", "x", vo)
+			h := hist(mRecs([]*Conflict{c1(vo), cx}, s1(mDec("dc-1", vo)), rival()), "s1", vDay1, "x", "2024-03-01")
+			h.at["s1"], h.at["x"] = one(), mRecs([]*Conflict{cx}, rival())
+			return h
+		}, "", []DecisionView{inForce}, "supersedes spec/t#dc-1"},
+		{"not in force at its acceptance: a later duplicate conflict reads not established", func() *fakeHist {
+			h := inForceAt(mRecs([]*Conflict{mConflict("c0", "s1", vo), c1(vo)}, s1(mDec("dc-1", vo))))
+			h.at["s1"].Conflicts[0].FM.Status = "open"
+			return h
+		}, "", []DecisionView{notEst("conflict/c0", "more than one superseded conflict names spec/s1 for spec/t")},
+			"supersession not established: more than one superseded conflict names spec/s1 for spec/t"},
+		{"not in force at its acceptance: a rival reads not established", func() *fakeHist {
+			h := inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+			h.at["s1"].Conflicts[0].FM.Status = "open"
+			return h
+		}, "", []DecisionView{notEst("conflict/cx", "the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)")},
+			"supersession not established: the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)"},
+		{"undecodable records (SI-274(6)), though in force at acceptance", func() *fakeHist { return inForceAt(undecodable()) }, "",
+			[]DecisionView{notEst("", "records do not decode: "+broken)}, "supersession not established: records do not decode: " + broken},
+		{"undecodable records (SI-274(6)) before acceptance", func() *fakeHist { return hist(undecodable()) }, "",
+			[]DecisionView{notEst("", "records do not decode: "+broken)}, "supersession not established: records do not decode: " + broken},
+		{"a pinned edge, though its spec is in force at acceptance (SI-271)", func() *fakeHist {
+			return inForceAt(mRecs([]*Conflict{c1(vo)}, s1(mDec("dc-1", "spec/t@0a1b2c3#dc-1"))))
+		}, "", []DecisionView{{Decision: "spec/s1#dc-1", Edge: "spec/t@0a1b2c3#dc-1", Object: vo, State: DecisionNotEstablished,
+			Reason: "the edge spec/t@0a1b2c3#dc-1 is pinned; a closed spec's object is superseded only by an unpinned ref"}},
+			"supersession not established: the edge spec/t@0a1b2c3#dc-1 is pinned; a closed spec's object is superseded only by an unpinned ref"},
+		{"a carried candidate takes the carried path, though its spec is in force at acceptance (SI-273)", func() *fakeHist {
+			s2, c2 := mCarries(mSpec("s2", []string{"s1"}, mDec("dc-1", vo)), "dc-1"), mConflict("c2", "s2", vo)
+			h := hist(mRecs([]*Conflict{c1(vo), c2}, s1(mDec("dc-1", vo)), s2), "s2", "2024-03-15")
+			h.at["s2"] = mRecs([]*Conflict{c2}, s1(mDec("dc-1", vo)), s2)
+			return h
+		}, "s2#dc-1", []DecisionView{{Decision: "spec/s2#dc-1", Edge: vo, Object: vo, State: DecisionNotEstablished, Conflict: "conflict/c1", Reason: "spec/s1 is not accepted"}},
+			"supersession not established: spec/s1 is not accepted"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -519,6 +595,11 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
 			{"", "successor#dc-3", "supersession not established: no conflict challenges spec/closed-feature#ac-1"},
 		}},
+		{"a proposed rival on the design branch never unseats the successor in force", "already-superseded", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-01-15 by spec/prior-successor#dc-1"},
+			{"", "prior-successor#dc-1", "supersedes spec/closed-feature#dc-1"},
+			{"", "successor#dc-1", "supersession not established: the object spec/closed-feature#dc-1 is already superseded by spec/prior-successor (conflict/prior-successor-closed-feature)"},
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -539,6 +620,7 @@ func TestIndex_Scenarios(t *testing.T) {
 					var all []string
 					for _, v := range x.Decisions(spec, id) {
 						all = append(all, lines(t, v))
+						agrees(t, x, v)
 					}
 					got = strings.Join(all, " || ")
 				}
@@ -547,6 +629,25 @@ func TestIndex_Scenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// agrees fails t unless a new replacement's in-force decision view agrees
+// with its object's view in the same index (lane L3c review F-1): the
+// object is superseded by the decision's spec, through the same conflict,
+// since the same date.
+func agrees(t *testing.T, x *Index, v DecisionView) {
+	t.Helper()
+	if v.State != DecisionInForce || v.Carried {
+		return
+	}
+	ref, err := artifact.ParseRef(v.Object)
+	if err != nil {
+		t.Fatalf("object %q: %v", v.Object, err)
+	}
+	o := x.Object(ref.Name, ref.Object)
+	if o.State != ObjectSuperseded || !strings.HasPrefix(o.By, v.Establisher+"#") || o.Conflict != v.Conflict || o.Since != v.Since {
+		t.Errorf("%s in force disagrees with its object's view:\n decision %+v\n object   %+v", v.Decision, v, o)
 	}
 }
 
