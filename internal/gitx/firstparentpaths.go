@@ -23,11 +23,15 @@ var ErrShallowHistory = errors.New("gitx: history is shallow; the first-parent c
 // only these commits (SI-270's acceptance point).
 //
 // Paths match byte for byte, never as a glob. An empty list is not an error.
-// ref must name one revision (not an option, not a range), at least one
-// non-empty path is required, and a shallow repository is refused with
-// ErrShallowHistory.
+// ref must name one commit: it is refused when shaped like an option, a
+// negation (^ref), a range (a..b, a...b, ref^!, ref^-, ref^@), or a path
+// (rev:path), and is then resolved to one full commit id, which is walked
+// (`rev-parse --verify <ref>^{commit}`); anything else fails closed. At
+// least one non-empty path is required, and a shallow repository is refused
+// with ErrShallowHistory.
 func FirstParentPathCommits(ctx context.Context, dir, ref string, paths ...string) ([]string, error) {
-	if ref == "" || strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") {
+	if ref == "" || strings.HasPrefix(ref, "-") || strings.HasPrefix(ref, "^") || strings.ContainsAny(ref, ":") ||
+		strings.Contains(ref, "..") || strings.Contains(ref, "^!") || strings.Contains(ref, "^-") || strings.Contains(ref, "^@") {
 		return nil, fmt.Errorf("gitx: FirstParentPathCommits: invalid ref %q", ref)
 	}
 	if len(paths) == 0 {
@@ -45,8 +49,16 @@ func FirstParentPathCommits(ctx context.Context, dir, ref string, paths ...strin
 	if shallow {
 		return nil, fmt.Errorf("gitx: FirstParentPathCommits(%s) in %s: %w", ref, dir, ErrShallowHistory)
 	}
-	args := append([]string{"--literal-pathspecs", "rev-list", "--first-parent", "--reverse", ref, "--"}, paths...)
-	out, err := run(ctx, dir, args...)
+	out, err := run(ctx, dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("gitx: FirstParentPathCommits(%s): %w", ref, err)
+	}
+	commit := strings.TrimSuffix(string(out), "\n")
+	if !isFullObjectID(commit) {
+		return nil, fmt.Errorf("gitx: FirstParentPathCommits(%s): resolved to %q, not one full commit id", ref, commit)
+	}
+	args := append([]string{"--literal-pathspecs", "rev-list", "--first-parent", "--reverse", commit, "--"}, paths...)
+	out, err = run(ctx, dir, args...)
 	if err != nil {
 		return nil, fmt.Errorf("gitx: FirstParentPathCommits(%s -- %v): %w", ref, paths, err)
 	}

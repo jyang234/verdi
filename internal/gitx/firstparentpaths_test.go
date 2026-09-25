@@ -71,6 +71,22 @@ func TestFirstParentPathCommits_Happy(t *testing.T) {
 	}
 }
 
+// TestFirstParentPathCommits_RefForms pins that ref names one commit: a
+// branch name or a full commit id walks the same chain (lane L3 review a
+// M-1).
+func TestFirstParentPathCommits_RefForms(t *testing.T) {
+	isolateGitConfig(t)
+	top := buildFirstParentTopology(t)
+	for _, ref := range []string{"main", top.mov} {
+		t.Run(ref, func(t *testing.T) {
+			got, err := FirstParentPathCommits(context.Background(), top.dir, ref, "active/s/spec.md")
+			if err != nil || !reflect.DeepEqual(got, []string{top.merge, top.edit, top.mov}) {
+				t.Fatalf("got %v, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestFirstParentPathCommits_Negative(t *testing.T) {
 	isolateGitConfig(t)
 	top := buildFirstParentTopology(t)
@@ -84,6 +100,12 @@ func TestFirstParentPathCommits_Negative(t *testing.T) {
 		{name: "empty ref", dir: top.dir, ref: "", paths: []string{"a"}},
 		{name: "option-shaped ref", dir: top.dir, ref: "--all", paths: []string{"a"}},
 		{name: "range-shaped ref", dir: top.dir, ref: "main..main", paths: []string{"a"}},
+		{name: "range to another ref", dir: top.dir, ref: "main..x", paths: []string{"active/s/spec.md"}},
+		{name: "negated ref", dir: top.dir, ref: "^main", paths: []string{"active/s/spec.md"}},
+		{name: "parents-excluded shorthand", dir: top.dir, ref: "main^!", paths: []string{"active/s/spec.md"}},
+		{name: "first-parent range shorthand", dir: top.dir, ref: "main^-", paths: []string{"active/s/spec.md"}},
+		{name: "all-parents shorthand", dir: top.dir, ref: "main^@", paths: []string{"active/s/spec.md"}},
+		{name: "a tree path, not a commit", dir: top.dir, ref: "main:active", paths: []string{"active/s/spec.md"}},
 		{name: "no paths", dir: top.dir, ref: "main"},
 		{name: "empty path", dir: top.dir, ref: "main", paths: []string{""}},
 		{name: "unknown ref", dir: top.dir, ref: "no-such-branch", paths: []string{"a"}},
