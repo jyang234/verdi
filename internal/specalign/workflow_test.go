@@ -858,12 +858,14 @@ const mergeGateVerdictRun = "scripts/merge-gate-verdict.sh" +
 	" test-rest=${{ needs.test-rest.result }}"
 
 // mergeGateCanaryRun is the aggregator's canary step, pinned exactly. It runs
-// before the verdict and feeds the script a known-failing result: a script
-// that exits 0 on it (a rewrite that loses its failure flag in a subshell,
-// say) would pass every real result too, so the canary fails the required
-// context instead. TestMergeGateVerdictCanary runs this text against the real
-// script and against broken ones.
-const mergeGateCanaryRun = "if " + mergeGateVerdictScript + " probe=failure; then\n" +
+// before the verdict and feeds the script a failure between two successes,
+// the shape of the real call when one gate job in the middle fails. A script
+// that exits 0 on it would pass that real call too: one that loses its
+// failure flag in a subshell, lets the last result win, or lets the first
+// result win. So the canary fails the required context instead.
+// TestMergeGateVerdictCanary runs this text against the real script and
+// against those broken ones.
+const mergeGateCanaryRun = "if " + mergeGateVerdictScript + " probe-a=success probe-b=failure probe-c=success; then\n" +
 	"  echo \"merge-gate: canary FAILED: the verdict script passed a failing result, so its verdict cannot be trusted\" >&2\n" +
 	"  exit 1\n" +
 	"fi\n" +
@@ -980,9 +982,9 @@ func TestMergeGateJobsAreWhitelisted(t *testing.T) {
 // failed dependency would make GitHub skip the aggregator, and a skipped
 // required check does not block a merge. Its steps are exactly a checkout,
 // the pinned canary, which fails the job unless the verdict script fails a
-// known-failing result, and the committed verdict script, called with the
-// pinned text, which passes one `<job>=<result>` argument per needed job and
-// fails unless every result is `success`. Neither step can be skipped or
+// failure between two successes, and the committed verdict script, called
+// with the pinned text, which passes one `<job>=<result>` argument per needed
+// job and fails unless every result is `success`. Neither step can be skipped or
 // soften a failure: TestMergeGateStepsAreWhitelisted allows a command step
 // only `run:` and `name:`, so no `if:` and no `continue-on-error:`.
 func TestMergeGateAggregatorDecidesOverEveryGateJob(t *testing.T) {

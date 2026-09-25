@@ -164,10 +164,12 @@ func runCanary(t *testing.T, dir string) (int, string) {
 
 // TestMergeGateVerdictCanary runs the canary step's pinned text against the
 // real verdict script and against broken stand-ins. It must pass over the
-// real script and fail over any script that exits 0 on a failing result,
-// such as a loop whose failure flag is lost in a pipeline's subshell. A
-// script that fails everything leaves the canary green: the verdict step
-// after it then fails the required context on its own.
+// real script and fail over any script that exits 0 when a failure sits
+// between successes: one that passes everything, one whose failure flag is
+// lost in a pipeline's subshell, one where the last result wins (a later
+// success resets the flag), and one where the first result wins. A script
+// that fails everything leaves the canary green: the verdict step after it
+// then fails the required context on its own.
 func TestMergeGateVerdictCanary(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -193,6 +195,26 @@ func TestMergeGateVerdictCanary(t *testing.T) {
 				"\t[ \"${arg#*=}\" = success ] || failed=1\n" +
 				"done\n" +
 				"exit \"$failed\"\n",
+			wantCode: 1,
+			wantOut:  "canary FAILED",
+		},
+		{
+			name: "a script where the last result wins fails the canary",
+			script: "#!/bin/sh\nfailed=0\n" +
+				"for arg in \"$@\"; do\n" +
+				"\tif [ \"${arg#*=}\" = success ]; then failed=0; else failed=1; fi\n" +
+				"done\n" +
+				"exit \"$failed\"\n",
+			wantCode: 1,
+			wantOut:  "canary FAILED",
+		},
+		{
+			name: "a script where the first result wins fails the canary",
+			script: "#!/bin/sh\n" +
+				"for arg in \"$@\"; do\n" +
+				"\tif [ \"${arg#*=}\" = success ]; then exit 0; else exit 1; fi\n" +
+				"done\n" +
+				"exit 1\n",
 			wantCode: 1,
 			wantOut:  "canary FAILED",
 		},

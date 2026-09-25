@@ -51,10 +51,12 @@
 # which fails unless every gate job's result is `success`: a failed,
 # cancelled, or skipped job, or a job missing from `needs:` (its result
 # expands to ""), fails the required context. A canary step runs first: it
-# feeds the script a known-failing result and fails the job unless the
-# script exits non-zero, so a script broken into passing everything (a
-# failure flag lost in a pipeline subshell, say) cannot pass the gate over
-# a failed job. Neither step has an `if:` or `continue-on-error:`.
+# feeds the script a failure between two successes, the shape of the real
+# call when a middle gate job fails, and fails the job unless the script
+# exits non-zero. So a script broken into passing that call (a failure flag
+# lost in a pipeline subshell, or the last or first result winning) cannot
+# pass the gate over a failed job. Neither step has an `if:` or
+# `continue-on-error:`.
 #
 # internal/specalign/workflow_test.go is the parity guard for all of this:
 # the gate jobs run exactly VERIFY_STEPS (with `test` as its shards) plus
@@ -184,7 +186,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prove the verdict script fails a failing result
         run: |
-          if scripts/merge-gate-verdict.sh probe=failure; then
+          if scripts/merge-gate-verdict.sh probe-a=success probe-b=failure probe-c=success; then
             echo "merge-gate: canary FAILED: the verdict script passed a failing result, so its verdict cannot be trusted" >&2
             exit 1
           fi
