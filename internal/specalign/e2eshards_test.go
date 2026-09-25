@@ -17,6 +17,8 @@
 //     sentinel make yields for an empty remainder;
 //   - no file that Playwright would collect lies outside that domain: a nested
 //     or *.test.ts file would run in the whole suite and in no shard;
+//   - every Playwright test run has the shard command's shape and ends at its
+//     output directory, so no trailing argument narrows what a shard runs;
 //   - each shard has its own port range and output directory, and installs
 //     its setup exactly once, before Playwright runs;
 //   - `make e2e` runs exactly the three shard commands, and fails with a
@@ -74,8 +76,13 @@ type namedE2ERun struct {
 
 // e2eShardRunRE matches one shard command exactly as the Makefile's e2e_shard
 // template spells it: the port base, the quoted spec list, and the output
-// directory.
-var e2eShardRunRE = regexp.MustCompile(`VERDI_E2E_PORT_BASE=(\S*) ` + e2eSpecsEnvVar + `='([^']*)' npx playwright test --output=(\S+)`)
+// directory, which must end the command. Playwright takes any further word as
+// an argument (a --grep-invert, a --list, or a positional file filter can run
+// fewer tests than the list names, or none), so the output directory must be
+// followed by the end of the line or a shell control operator. What follows a
+// control operator is another command; whether it can hide the shard's
+// failure is the gate-recipe guard's concern (BL-74), not this pattern's.
+var e2eShardRunRE = regexp.MustCompile(`(?m)VERDI_E2E_PORT_BASE=(\S*) ` + e2eSpecsEnvVar + `='([^']*)' npx playwright test --output=([^\s;&|()]+)[ \t]*(?:$|[;&|)])`)
 
 // playwrightTestRE finds any Playwright test run in a dry-run transcript,
 // whatever its shape.
@@ -92,14 +99,15 @@ var playwrightTestFileRE = regexp.MustCompile(`\.(spec|test)\.(c|m)?[jt]sx?$`)
 
 // parseE2EShardRuns returns every shard command in a make dry-run transcript,
 // in order. Every Playwright test run in the transcript must have the shard
-// command's shape: one that does not (no spec list, say, which runs the whole
-// suite) is an error, as is a spec list the shell computes at recipe time, a
-// port base that is not an integer, or a spec list that is not a shard's.
+// command's shape, ending at its output directory: one that does not (no spec
+// list, say, which runs the whole suite, or a trailing argument that narrows
+// it) is an error, as is a spec list the shell computes at recipe time, a port
+// base that is not an integer, or a spec list that is not a shard's.
 func parseE2EShardRuns(dry string) ([]e2eShardRun, error) {
 	locs := e2eShardRunRE.FindAllStringSubmatchIndex(dry, -1)
 	for _, p := range playwrightTestRE.FindAllStringIndex(dry, -1) {
 		if !slices.ContainsFunc(locs, func(loc []int) bool { return loc[0] <= p[0] && p[1] <= loc[1] }) {
-			return nil, fmt.Errorf("a Playwright test run does not have the shard command's shape (VERDI_E2E_PORT_BASE=<n> %s='<spec files>' npx playwright test --output=<dir>), so which spec files it runs cannot be read: %q", e2eSpecsEnvVar, lineAround(dry, p[0]))
+			return nil, fmt.Errorf("a Playwright test run does not have the shard command's shape (VERDI_E2E_PORT_BASE=<n> %s='<spec files>' npx playwright test --output=<dir>, with no argument after the output directory), so which tests it runs cannot be read: %q", e2eSpecsEnvVar, lineAround(dry, p[0]))
 		}
 	}
 	runs := make([]e2eShardRun, 0, len(locs))
@@ -329,9 +337,35 @@ func TestE2EShards_ParseShardRuns(t *testing.T) {
 			},
 		},
 		{
+			name: "a shard command that ends the transcript, with no newline",
+			dry:  setup + "cd e2e && VERDI_E2E_PORT_BASE=21000 VERDI_E2E_SPECS='10-a.spec.ts' npx playwright test --output=test-results/e2e-1",
+			want: []e2eShardRun{{PortBase: 21000, Specs: []string{"10-a.spec.ts"}, Output: "test-results/e2e-1"}},
+		},
+		{
 			name: "setup alone runs no shard",
 			dry:  setup,
 			want: []e2eShardRun{},
+		},
+		{
+			name:    "trailing flags that deselect every test and pass",
+			dry:     setup + "cd e2e && VERDI_E2E_PORT_BASE=21000 VERDI_E2E_SPECS='10-a.spec.ts' npx playwright test --output=test-results/e2e-1 --grep-invert=. --pass-with-no-tests\n",
+			wantErr: "does not have the shard command's shape",
+		},
+		{
+			name:    "a trailing positional filter that narrows the shard",
+			dry:     setup + "cd e2e && VERDI_E2E_PORT_BASE=21000 VERDI_E2E_SPECS='10-a.spec.ts 11-b.spec.ts' npx playwright test --output=test-results/e2e-1 10-a\n",
+			wantErr: "does not have the shard command's shape",
+		},
+		{
+			name:    "a trailing --list, which runs no test",
+			dry:     setup + "cd e2e && VERDI_E2E_PORT_BASE=21000 VERDI_E2E_SPECS='10-a.spec.ts' npx playwright test --output=test-results/e2e-1 --list\n",
+			wantErr: "does not have the shard command's shape",
+		},
+		{
+			name: "a trailing flag on one of the concurrent suite's commands",
+			dry: "{ shard 1 env VERDI_E2E_PORT_BASE=21000 VERDI_E2E_SPECS='10-a.spec.ts' npx playwright test --output=test-results/e2e-1 --list & " +
+				"shard 2 env VERDI_E2E_PORT_BASE=22000 VERDI_E2E_SPECS='20-b.spec.ts' npx playwright test --output=test-results/e2e-2 & wait; }\n",
+			wantErr: "--output=test-results/e2e-1 --list",
 		},
 		{
 			name: "an empty spec list parses, for the partition check to refuse",
