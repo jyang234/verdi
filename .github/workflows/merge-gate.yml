@@ -58,13 +58,27 @@
 # pass the gate over a failed job. Neither step has an `if:` or
 # `continue-on-error:`.
 #
-# internal/specalign/workflow_test.go is the parity guard for all of this:
-# the gate jobs run exactly VERIFY_STEPS (with `test` as its shards) plus
-# the post-verify steps, each once; a step that replays another step's
-# packages from the test cache runs in that step's job, after it;
-# `merge-gate` needs exactly the gate jobs, with `if: always()` and the
-# pinned verdict call; and every document, job, and step key is
-# whitelisted. Change this file and the Makefile's VERIFY_STEPS together.
+# internal/specalign is the parity guard for all of this, in five files:
+#   workflow_test.go           the gate jobs run exactly VERIFY_STEPS (with
+#                              `test` as its shards) plus the post-verify
+#                              steps, each once; a step that replays another
+#                              step's packages from the test cache runs in
+#                              that step's job, after it; `merge-gate` needs
+#                              exactly the gate jobs, with `if: always()`, the
+#                              pinned canary, and the pinned verdict call; and
+#                              every document, job, and step key is
+#                              whitelisted;
+#   testshards_test.go         the shards partition `go list ./...`, each
+#                              package executes once under -race, and the
+#                              cross-binary packages always run fresh;
+#   gaterecipes_test.go        `make verify` runs only its step loop, and no
+#                              gate recipe can pass over a failed command;
+#   makefilevars_test.go       the gate variables are assigned once, and the
+#                              Makefile includes nothing the guards cannot
+#                              read;
+#   mergegate_verdict_test.go  the verdict script and the canary each fail a
+#                              failing result.
+# Change this file and the Makefile's VERIFY_STEPS together.
 #
 # Evidence production/upload is deliberately NOT here. That stays
 # verify.yml's push-only duty (see verify.yml's own head comment on why

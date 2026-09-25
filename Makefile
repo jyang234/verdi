@@ -394,10 +394,23 @@ e2e: e2e-check-node
 # That parity holds only while `make verify` runs VERIFY_STEPS and nothing
 # else, so verify takes no prerequisites and its recipe below is pinned
 # (TestGateParity_VerifyRunsOnlyItsStepLoop): add a check to VERIFY_STEPS,
-# never to verify's rule. No recipe line of a gate target starts with a `-`
-# prefix, and the Makefile declares no .IGNORE
-# (TestGateParity_GateRecipesNeverIgnoreErrors): either lets a step pass over
-# a failed command where `make -n` cannot show it.
+# never to verify's rule. Two more guards read this file's source for what
+# `make -n` cannot show. TestGateParity_GateRecipesNeverIgnoreErrors fails if:
+#   - the Makefile declares .IGNORE, .ONESHELL, .POSIX, .SILENT, or
+#     .RECIPEPREFIX;
+#   - any line names MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, or GOFLAGS, or assigns
+#     SHELL, .SHELLFLAGS, or MAKE;
+#   - a recipe line of a gate target (a VERIFY_STEPS entry, a test shard,
+#     test, verify, or anything they pull in) carries a `-` prefix, written,
+#     through a leading variable, or on any line of a define value the line
+#     reaches; or runs a sub-make with -i, -k, -n, -t, or -q, written or in a
+#     value the line reaches;
+#   - a gate target's recipe cannot be read.
+# TestGateParity_GateVariablesAssignedOnceAndNothingIncluded fails unless
+# VERIFY_STEPS, CROSS_BINARY_PKGS, TEST_CMD_PKGS, SPEC_ALIGN_PKGS, and
+# TEST_REST_PKGS are each assigned exactly once, with `=` or `:=`, and the
+# Makefile includes or evals no other makefile text: the guards read only the
+# first assignment, and only this file.
 VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 
