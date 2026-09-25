@@ -8,9 +8,12 @@
 //     never see verify's own prerequisites or recipe. A prerequisite, or an
 //     extra command in the recipe, would run under `make verify` but in no
 //     pull-request gate job.
-//   - Error ignoring. A `-` recipe prefix, or a `.IGNORE` special target, makes
-//     make treat a failed command as a success, and `make -n` strips the prefix
-//     from what it prints.
+//   - Error ignoring. A `-` recipe prefix, whether written or reached through a
+//     leading variable, makes make treat a failed command as a success, and
+//     `make -n` strips the prefix from what it prints. So do `.IGNORE`, make
+//     flags set from the Makefile (MAKEFLAGS, or -i, -k, -n, -t, -q on a
+//     sub-make), and the special targets and shell settings that change how a
+//     recipe's failure is seen.
 //
 // This file reads the Makefile source for both.
 package specalign
@@ -53,7 +56,8 @@ var makeDirectives = []string{"include", "-include", "sinclude", "export", "unex
 // subset of GNU make's grammar a hand-written Makefile uses:
 //
 //   - a tab-led line inside a rule's context is a recipe line, and a trailing
-//     backslash continues it onto the next physical line;
+//     backslash continues it onto the next physical line; outside a rule's
+//     context, a tab-led line is an ordinary makefile line;
 //   - blank lines, comment lines, and conditional directives do not end a
 //     recipe; any other non-tab line does;
 //   - a non-tab line is a rule when a colon that is not part of an assignment
@@ -69,15 +73,13 @@ func parseMakeRules(makefile string) []makeRule {
 	for i := 0; i < len(lines); i++ {
 		start := i
 		line := lines[i]
-		if strings.HasPrefix(line, "\t") {
+		if strings.HasPrefix(line, "\t") && cur >= 0 {
 			text := strings.TrimPrefix(line, "\t")
 			for strings.HasSuffix(lines[i], `\`) && i+1 < len(lines) {
 				i++
 				text += "\n" + strings.TrimPrefix(lines[i], "\t")
 			}
-			if cur >= 0 {
-				rules[cur].Recipe = append(rules[cur].Recipe, recipeLine{Line: start + 1, Text: text})
-			}
+			rules[cur].Recipe = append(rules[cur].Recipe, recipeLine{Line: start + 1, Text: text})
 			continue
 		}
 		text := line
@@ -218,6 +220,11 @@ func TestGateParity_ParseMakeRules(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "a tab-led rule line after an assignment is a rule, not a recipe",
+			src:  "X := 1\n\ttest-rest: ; -go test\n",
+			want: []rule{{2, []string{"test-rest"}, "", []string{"-go test"}}},
+		},
+		{
 			name: "a continued rule line is one rule",
 			src:  "a: b \\\n  c\n\td\n",
 			want: []rule{{1, []string{"a"}, "b c", []string{"d"}}},
@@ -353,29 +360,130 @@ func TestGateParity_VerifyRuleProblemsFound(t *testing.T) {
 	}
 }
 
-// ignoresErrors reports whether a recipe line's command prefix, the run of
-// `@`, `+`, `-`, and blanks make strips before running it, contains `-`: make
-// then treats the command's failure as success.
-func ignoresErrors(line string) bool {
-	for _, c := range line {
-		switch c {
-		case '-':
-			return true
-		case '@', '+', ' ', '\t':
-		default:
-			return false
+// recipePrefixProblem says why make would ignore a recipe line's failure, or
+// returns "" when it would not. After expanding a recipe line, make strips a
+// leading run of `@`, `+`, `-`, and blanks, and a `-` in that run makes it
+// ignore the command's failure. A line that starts with a variable reference is
+// expanded here with every value the Makefile gives that variable, including
+// target-specific and define values. A reference the Makefile does not resolve
+// is reported, because the guard cannot clear it: a function or substitution
+// reference, a variable assigned nowhere, or one set by the shell (`!=`).
+// $(MAKE) and the automatic variables never expand to a prefix.
+func recipePrefixProblem(line string, assigns []makeAssignment, depth int) string {
+	rest := strings.TrimLeft(line, "@+ \t")
+	switch {
+	case strings.HasPrefix(rest, "-"):
+		return "starts with a `-` prefix, so make ignores its failure"
+	case !strings.HasPrefix(rest, "$") || strings.HasPrefix(rest, "$$"):
+		return ""
+	case depth >= 4:
+		return "starts with variable references nested too deep for the guard to resolve"
+	}
+	const unproven = "so the guard cannot prove it adds no `-` prefix"
+	name, after, ok := leadingReference(rest)
+	if !ok {
+		ref, _, _ := strings.Cut(rest, " ")
+		return fmt.Sprintf("starts with %s, a function or substitution reference, %s", ref, unproven)
+	}
+	if name == "MAKE" || (len(name) == 1 && strings.Contains("@<^*?+|%", name)) {
+		return ""
+	}
+	values := assignmentsOf(assigns, name)
+	if len(values) == 0 {
+		return fmt.Sprintf("starts with $(%s), which the Makefile never assigns, %s", name, unproven)
+	}
+	for _, a := range values {
+		if a.Op == "!=" {
+			return fmt.Sprintf("starts with $(%s), which line %d sets from the shell, %s", name, a.Line, unproven)
+		}
+		if why := recipePrefixProblem(a.Value+after, assigns, depth+1); why != "" {
+			return fmt.Sprintf("starts with $(%s), which line %d sets to %q, so it %s", name, a.Line, a.Value, why)
 		}
 	}
-	return false
+	return ""
 }
 
-// dotIgnoreRE finds the `.IGNORE` special target on a non-comment line.
-var dotIgnoreRE = regexp.MustCompile(`(^|[\s:])\.IGNORE([\s:]|$)`)
+// leadingReference splits the make variable reference off the front of s,
+// which starts with a single `$`: `$(NAME)`, `${NAME}`, or the one-character
+// `$N`. It reports false for a function call, a substitution reference, or an
+// unterminated reference.
+func leadingReference(s string) (name, rest string, ok bool) {
+	if len(s) < 2 || s[1] == ' ' || s[1] == '\t' || s[1] == '\n' {
+		return "", "", false
+	}
+	closer := map[byte]byte{'(': ')', '{': '}'}[s[1]]
+	if closer == 0 {
+		return s[1:2], s[2:], true
+	}
+	end := strings.IndexByte(s, closer)
+	if end < 0 {
+		return "", "", false
+	}
+	name = s[2:end]
+	if name == "" || strings.ContainsAny(name, " \t,:=$(){}") {
+		return "", "", false
+	}
+	return name, s[end+1:], true
+}
+
+// makeInvocationRE finds a make invocation in recipe text: $(MAKE), ${MAKE},
+// or a bare `make` command word.
+var makeInvocationRE = regexp.MustCompile("(?:^|[\\s;&|(`])(?:\\$\\(MAKE\\)|\\$\\{MAKE\\}|make)[ \\t]")
+
+// makeMaskingLongFlags are the long forms of make's -i, -k, -n, -t, and -q.
+var makeMaskingLongFlags = []string{"--ignore-errors", "--keep-going", "--just-print", "--dry-run", "--recon", "--touch", "--question"}
+
+// makeInvocationProblem says why a make invocation in recipe text could pass
+// without running its recipes or over their failures, or returns "". It
+// refuses -i, -k, -n, -t, and -q, alone or in a short-flag cluster; their long
+// forms and any abbreviation GNU make would accept for them; and a make
+// variable among the arguments, whose flags the guard cannot read.
+func makeInvocationProblem(text string) string {
+	text = strings.ReplaceAll(text, "\\\n", " ")
+	for _, loc := range makeInvocationRE.FindAllStringIndex(text, -1) {
+		for _, tok := range splitShellArgs(text[loc[1]:]) {
+			switch {
+			case strings.HasPrefix(tok, "$(") || strings.HasPrefix(tok, "${"):
+				return "passes make a variable reference whose flags the guard cannot read"
+			case strings.HasPrefix(tok, "--"):
+				opt, _, _ := strings.Cut(tok, "=")
+				for _, long := range makeMaskingLongFlags {
+					if len(opt) > 2 && strings.HasPrefix(long, opt) {
+						return fmt.Sprintf("runs make with %s (%s)", tok, long)
+					}
+				}
+			case strings.HasPrefix(tok, "-") && strings.ContainsAny(tok[1:], "iknqt"):
+				return fmt.Sprintf("runs make with %s, which carries -i, -k, -n, -t, or -q", tok)
+			}
+		}
+	}
+	return ""
+}
+
+// makeSpecialTargetRE finds, on a non-comment line, a special target that
+// changes how make runs recipes or reports their failures: .IGNORE ignores
+// failed commands; .ONESHELL runs a recipe in one shell, whose status is only
+// its last command's; .POSIX changes how the shell runs each line; .SILENT
+// hides the commands that ran.
+var makeSpecialTargetRE = regexp.MustCompile(`(^|[\s:])\.(IGNORE|ONESHELL|POSIX|SILENT)([\s:]|$)`)
+
+// makeFlagsVarRE finds make's own flag variables. Set from the Makefile,
+// -i, -k, -n, -t, or -q there ignores failures or skips recipes, and `make -n`
+// cannot show it.
+var makeFlagsVarRE = regexp.MustCompile(`\b(MAKEFLAGS|MFLAGS|GNUMAKEFLAGS)\b`)
+
+// makeShellVars choose the shell that runs every recipe and its flags, which
+// decide whether a failed command fails the recipe.
+var makeShellVars = []string{"SHELL", ".SHELLFLAGS"}
 
 // errorIgnoringGateRecipes returns every way the Makefile source lets a gate
-// target succeed over a failed command: a `.IGNORE` special target anywhere,
-// or a recipe line of a root target, or of any prerequisite a root pulls in,
-// whose prefix carries `-`. A gate target with no rule, or with neither a
+// target succeed over a failed command. Across the whole file it refuses the
+// special targets in makeSpecialTargetRE, any mention of make's flag
+// variables, and any assignment of SHELL or .SHELLFLAGS. For each recipe line
+// of a root target, or of any prerequisite a root pulls in, it refuses a `-`
+// prefix, written or reached through a leading variable
+// (recipePrefixProblem), and a make invocation carrying -i, -k, -n, -t, or -q
+// (makeInvocationProblem). A gate target with no rule, or with neither a
 // recipe nor a prerequisite, is reported too: its recipe cannot be read, so
 // it cannot be cleared.
 func errorIgnoringGateRecipes(makefile string, roots []string) []string {
@@ -384,8 +492,17 @@ func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
-		if dotIgnoreRE.MatchString(line) {
-			problems = append(problems, fmt.Sprintf("line %d declares .IGNORE, which makes make ignore failed commands: %q", i+1, strings.TrimSpace(line)))
+		if m := makeSpecialTargetRE.FindStringSubmatch(line); m != nil {
+			problems = append(problems, fmt.Sprintf("line %d declares .%s, which changes whether make sees or reports a failed command: %q", i+1, m[2], strings.TrimSpace(line)))
+		}
+		if m := makeFlagsVarRE.FindString(line); m != "" {
+			problems = append(problems, fmt.Sprintf("line %d names %s: make flags set from the Makefile (-i, -k, -n, -t, -q) ignore failures or skip recipes where make -n cannot show it: %q", i+1, m, strings.TrimSpace(line)))
+		}
+	}
+	assigns := parseMakeAssignments(makefile)
+	for _, name := range makeShellVars {
+		for _, a := range assignmentsOf(assigns, name) {
+			problems = append(problems, fmt.Sprintf("line %d assigns %s, which decides whether a failed command fails its recipe", a.Line, name))
 		}
 	}
 
@@ -416,9 +533,12 @@ func errorIgnoringGateRecipes(makefile string, roots []string) []string {
 				if strings.TrimSpace(l.Text) != "" {
 					readable = true
 				}
-				if ignoresErrors(l.Text) {
-					first, _, _ := strings.Cut(l.Text, "\n")
-					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q starts with a `-` prefix, so make ignores its failure and the gate goes green over it", l.Line, target, first))
+				first, _, _ := strings.Cut(l.Text, "\n")
+				if why := recipePrefixProblem(l.Text, assigns, 0); why != "" {
+					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q %s", l.Line, target, first, why))
+				}
+				if why := makeInvocationProblem(l.Text); why != "" {
+					problems = append(problems, fmt.Sprintf("line %d: gate target %s's recipe line %q %s, so the step can pass without running or over a failure", l.Line, target, first, why))
 				}
 			}
 		}
@@ -439,8 +559,10 @@ func gateRoots(t *testing.T, makefile string) []string {
 
 // TestGateParity_GateRecipesNeverIgnoreErrors proves no gate target can go
 // green over a failed command through the Makefile source, which `make -n`
-// cannot show: no `.IGNORE`, and no `-` prefix on any recipe line of a gate
-// target or of a prerequisite it pulls in.
+// cannot show: no `.IGNORE`, `.ONESHELL`, `.POSIX`, or `.SILENT`, no make
+// flag variables, no SHELL or .SHELLFLAGS, and, on any recipe line of a gate
+// target or of a prerequisite it pulls in, no `-` prefix (written or through
+// a leading variable) and no sub-make with -i, -k, -n, -t, or -q.
 func TestGateParity_GateRecipesNeverIgnoreErrors(t *testing.T) {
 	makefile := readMakefile(t)
 	for _, p := range errorIgnoringGateRecipes(makefile, gateRoots(t, makefile)) {
@@ -469,6 +591,28 @@ func TestGateParity_ErrorIgnoringRecipesFound(t *testing.T) {
 		{".IGNORE for every target", "\ntidy:\n", "\n.IGNORE:\n\ntidy:\n", ".IGNORE"},
 		{".IGNORE for one target", "\ntidy:\n", "\n.IGNORE: test-rest\n\ntidy:\n", ".IGNORE"},
 		{"a gate target's rule is gone", "\nlint-showcase:\n", "\nlint-showcase-x:\n", "lint-showcase"},
+		{"MAKEFLAGS appended", "\ntidy:\n", "\nMAKEFLAGS += -i\n\ntidy:\n", "names MAKEFLAGS"},
+		{"MAKEFLAGS set", "\ntidy:\n", "\nMAKEFLAGS := -k\n\ntidy:\n", "names MAKEFLAGS"},
+		{"MAKEFLAGS exported", "\ntidy:\n", "\nexport MAKEFLAGS = -n\n\ntidy:\n", "names MAKEFLAGS"},
+		{"MAKEFLAGS for one target", "\ntest-rest:\n", "\ntest-rest: MAKEFLAGS += -t\ntest-rest:\n", "names MAKEFLAGS"},
+		{"GNUMAKEFLAGS set", "\ntidy:\n", "\nGNUMAKEFLAGS := -q\n\ntidy:\n", "names GNUMAKEFLAGS"},
+		{".ONESHELL", "\ntidy:\n", "\n.ONESHELL:\n\ntidy:\n", "declares .ONESHELL"},
+		{".POSIX", "\ntidy:\n", "\n.POSIX:\n\ntidy:\n", "declares .POSIX"},
+		{".SILENT for one target", "\ntidy:\n", "\n.SILENT: test-rest\n\ntidy:\n", "declares .SILENT"},
+		{"SHELL replaced", "\ntidy:\n", "\nSHELL := /usr/bin/true\n\ntidy:\n", "assigns SHELL"},
+		{".SHELLFLAGS replaced", "\ntidy:\n", "\n.SHELLFLAGS := -c\n\ntidy:\n", "assigns .SHELLFLAGS"},
+		{"a variable set to - leads a recipe line", "\ntest-rest:\n\tgo test", "\nIGN := -\ntest-rest:\n\t$(IGN)go test", "starts with $(IGN), which line"},
+		{"a target-specific ${IGN} set to - leads", "\ntest-rest:\n\tgo test", "\ntest-rest: IGN := -\ntest-rest:\n\t${IGN}go test", "starts with $(IGN), which line"},
+		{"a one-character $I set to - leads", "\ntest-rest:\n\tgo test", "\nI := -\ntest-rest:\n\t$Igo test", "starts with $(I), which line"},
+		{"a chain through an empty variable reaches -", "\ntest-rest:\n\tgo test", "\nE :=\nJ := $(E)-\ntest-rest:\n\t$(J)go test", "starts with $(J), which line"},
+		{"an unassigned variable leads", "\ntest-rest:\n\tgo test", "\ntest-rest:\n\t$(NOT_SET)go test", "never assigns"},
+		{"a function leads", "\ntest-rest:\n\tgo test", "\ntest-rest:\n\t$(if x,-)go test", "function or substitution"},
+		{"a shell-set variable leads", "\ntest-rest:\n\tgo test", "\nS != echo -\ntest-rest:\n\t$(S)go test", "from the shell"},
+		{"$(MAKE) -i in a gate recipe", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t$(MAKE) -i build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "runs make with -i,"},
+		{"bare make with a -sk cluster", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\tmake -sk build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "runs make with -sk,"},
+		{"${MAKE} --keep-going after a continuation", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\techo x; \\\n\t${MAKE} --keep-going build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "(--keep-going)"},
+		{"$(MAKE) --ign, an accepted abbreviation", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t$(MAKE) --ign build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "(--ignore-errors)"},
+		{"$(MAKE) $(FLAGS)", "\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "\t$(MAKE) $(FLAGS) build\n\tgo test -race -parallel 4 $(TEST_CMD_PKGS)", "variable reference whose flags"},
 		{"control: - on a target outside the gate", "\tgo mod tidy", "\t-go mod tidy", ""},
 		{"control: - opening a continuation line is shell text, not a prefix", "\tstatus=$$?; \\\n\tif [ \"$$status\" -ne 0 ]", "\tstatus=$$?; \\\n\t-true; if [ \"$$status\" -ne 0 ]", ""},
 		{"control: .IGNORE named in a comment", "\ntidy:\n", "\n# never declare .IGNORE: here\ntidy:\n", ""},
