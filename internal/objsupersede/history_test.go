@@ -207,6 +207,75 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// TestEvaluate_EveryScenario builds every scenario of the committed manifest
+// and pins, on its checked-out branch with the real history, each edge's
+// intended outcome and reason, in result order ("-" marks a completeness
+// result): the fixture's promise to lanes L4 and L5, machine-checked (lane
+// L3 re-review a m-6).
+func TestEvaluate_EveryScenario(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	const (
+		newE     = "resolved-new"
+		carried  = "resolved-carried"
+		happy    = "dc-1 " + newE + ", dc-2 " + newE
+		refusal1 = ", dc-2 " + newE // the other edge still resolves
+	)
+	want := map[string]struct{ spec, results string }{
+		"accepted":              {"successor", happy},
+		"already-superseded":    {"successor", "dc-1 unresolved/already-superseded" + refusal1},
+		"chain":                 {"successor-v3", "dc-1 " + carried + ", dc-2 " + carried},
+		"chain-drop":            {"successor-v2", "dc-2 " + carried},
+		"chain-not-in-force":    {"successor-v2", "dc-1 unresolved/establisher-not-in-force, dc-2 " + carried + ", dc-3 unresolved/no-conflict"},
+		"conflict-dismissed":    {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
+		"conflict-open":         {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
+		"conflict-spans-specs":  {"successor", "dc-1 unresolved/conflict-spans-specs, dc-2 unresolved/conflict-spans-specs"},
+		"constraint-target":     {"successor", "dc-1 unresolved/object-not-criterion-or-decision" + refusal1},
+		"feature-fragment-link": {"successor", happy},
+		"no-conflict":           {"successor", "dc-1 unresolved/no-conflict" + refusal1},
+		"proposed":              {"successor", happy},
+		"resolved-by-other":     {"successor", "dc-1 unresolved/resolved-by-other" + refusal1},
+		"target-not-closed":     {"successor", "dc-1 unresolved/target-not-closed" + refusal1},
+		"top-level-supersedes":  {"successor", "dc-2 " + newE},
+		"undeclared-object":     {"successor", "dc-1 unresolved/object-not-declared" + refusal1},
+		"unmatched-challenge":   {"successor", happy + ", - unresolved/unmatched-challenge"},
+		"unrelated":             {"unrelated", "dc-1 unresolved/already-superseded"},
+		"unrelated-accepted":    {"unrelated", "dc-1 unresolved/already-superseded"},
+	}
+	m, err := scenario.Load(scenario.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range m.Scenarios {
+		if _, ok := want[name]; !ok {
+			t.Errorf("scenario %q has no intended outcome here", name)
+		}
+	}
+	for name, w := range want {
+		t.Run(name, func(t *testing.T) {
+			dir := scenario.Build(t, name).Dir
+			res, err := Evaluate(ctx, mustRead(t, WorkTree{Root: dir}), w.spec, NewHistory(ctx, dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, r := range res {
+				d, o := r.Decision, string(r.Outcome)
+				if d == "" {
+					d = "-"
+				}
+				if r.Reason != "" {
+					o += "/" + string(r.Reason)
+				}
+				got = append(got, d+" "+o)
+			}
+			if strings.Join(got, ", ") != w.results {
+				t.Fatalf("spec/%s: %s\nwant %s", w.spec, strings.Join(got, ", "), w.results)
+			}
+		})
+	}
+}
+
 // TestHistory_EstablishmentBelowGitRoot pins that a store below the git
 // root reads its acceptance commit's own records (lane L3 re-review a I-A),
 // never "not in its acceptance commit's tree".
