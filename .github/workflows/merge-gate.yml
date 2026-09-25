@@ -17,20 +17,70 @@
 # leave the other's context permanently missing/pending. This workflow
 # fixes that by running on every single pull_request, unconditionally — no
 # changed-file classifier, no third-party path-filter action, no
-# conditional job, no `if:` skip logic, no concurrency-cancellation
-# cleverness. Any of those could make the required context disappear or
-# turn ambiguous for some PR shape; the whole point of this file is to be
-# the one context that is NEVER ambiguous about whether it will report.
+# concurrency-cancellation cleverness. Any of those could make the required
+# context disappear or turn ambiguous for some PR shape; the whole point of
+# this file is to be the one context that is NEVER ambiguous about whether
+# it will report.
 #
-# Steps below are copied from verify.yml's own proven sequence (job name
-# convention included: workflow name `merge-gate`, job key `merge-gate`,
-# no job-level `name:` override, so the check context GitHub reports is
-# exactly "merge-gate" — the same pattern verify.yml itself uses). This is
-# deliberately the full gate (`make verify` + a self-lint of the built
-# binary), not a lighter subset, so the required check actually proves what
-# it claims to prove for every PR shape, code or spec/doc alike.
+# Parallel shape (SI-266, owner directive 2026-09-24). The gate is exactly
+# `make verify`'s step set plus the post-verify self-lint (`go build` the
+# binary, then `verdi lint` in the pull-request context, which exercises
+# I-14's CI-context lint baselines against a real GITHUB_BASE_REF), split
+# across parallel gate jobs so the wall clock is the slowest job, not the
+# sum:
+#   static      build, fmt-check, vet, lint, lint-store, lint-showcase,
+#               showcase-coverage, then the self-lint;
+#   test-cmd    the cmd/verdi test shard;
+#   test-cross  the cross-binary test shard (always fresh, ADJ-68);
+#   test-rest   every other package's tests, then fixture, whose three
+#               packages test-rest already ran: after test-rest on the same
+#               runner they replay from the test cache instead of running
+#               twice;
+#   spec-align  internal/specalign, the one gate that runs it;
+#   e2e         the Playwright suite.
+# Each gate job repeats the setup the single job had (full-history
+# checkout, Go 1.25, Node 22 where e2e runs, the pinned golangci-lint where
+# lint runs), carries no `name:`, `if:`, or `continue-on-error:`, and runs
+# each make step as its own exact `run:` command.
 #
-# Evidence production/upload is deliberately NOT copied here. That stays
+# The required context is the `merge-gate` job alone: job key `merge-gate`,
+# no `name:` override, so GitHub reports it as exactly "merge-gate". It
+# `needs:` every gate job and runs with `if: always()` — without that, a
+# failed gate job would make GitHub SKIP it, and a skipped required check
+# does not block a merge. Its one decision is scripts/merge-gate-verdict.sh,
+# which fails unless every gate job's result is `success`: a failed,
+# cancelled, or skipped job, or a job missing from `needs:` (its result
+# expands to ""), fails the required context. A canary step runs first: it
+# feeds the script a failure between two successes, the shape of the real
+# call when a middle gate job fails, and fails the job unless the script
+# exits non-zero. So a script broken into passing that call (a failure flag
+# lost in a pipeline subshell, or the last or first result winning) cannot
+# pass the gate over a failed job. Neither step has an `if:` or
+# `continue-on-error:`.
+#
+# internal/specalign is the parity guard for all of this, in five files:
+#   workflow_test.go           the gate jobs run exactly VERIFY_STEPS (with
+#                              `test` as its shards) plus the post-verify
+#                              steps, each once; a step that replays another
+#                              step's packages from the test cache runs in
+#                              that step's job, after it; `merge-gate` needs
+#                              exactly the gate jobs, with `if: always()`, the
+#                              pinned canary, and the pinned verdict call; and
+#                              every document, job, and step key is
+#                              whitelisted;
+#   testshards_test.go         the shards partition `go list ./...`, each
+#                              package executes once under -race, and the
+#                              cross-binary packages always run fresh;
+#   gaterecipes_test.go        `make verify` runs only its step loop, and no
+#                              gate recipe can pass over a failed command;
+#   makefilevars_test.go       the gate variables are assigned once, and the
+#                              Makefile includes nothing the guards cannot
+#                              read;
+#   mergegate_verdict_test.go  the verdict script and the canary each fail a
+#                              failing result.
+# Change this file and the Makefile's VERIFY_STEPS together.
+#
+# Evidence production/upload is deliberately NOT here. That stays
 # verify.yml's push-only duty (see verify.yml's own head comment on why
 # evidence must be produced strictly after a make-verify run that already
 # gated the SAME commit on push, never a second independent PR-triggered
@@ -42,7 +92,88 @@ on:
   pull_request: {}
 
 jobs:
-  merge-gate:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # golangci-lint gate: cache then install the pinned linter (must match
+      # Makefile's GOLANGCI_LINT_VERSION) so the lint step runs the real
+      # linter. The cache key pins the version, so a hit restores the exact
+      # binary and the install is a no-op; a miss builds it once.
+      - name: Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+      - name: Install golangci-lint (pinned)
+        run: |
+          test -x "$(go env GOPATH)/bin/golangci-lint" || \
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: make build
+      - run: make fmt-check
+      - run: make vet
+      - run: make lint
+      - run: make lint-store
+      - run: make lint-showcase
+      - run: make showcase-coverage
+      - run: go build -o .build/verdi ./cmd/verdi
+      - run: ./.build/verdi lint
+
+  test-cmd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-cmd
+
+  test-cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-cross
+
+  test-rest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make test-rest
+      # fixture re-runs three of test-rest's packages with test-rest's exact
+      # flags, so here, after test-rest on the same runner, the Go test cache
+      # replays them instead of executing them twice (SI-266).
+      - run: make fixture
+
+  spec-align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: make spec-align
+
+  e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,29 +186,24 @@ jobs:
         with:
           node-version: "22"
           # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
-          # built-in npm cache, cheaper than hand-rolling actions/cache for
-          # the same thing. Does NOT cache the downloaded Playwright browser
-          # binaries themselves (~/.cache/ms-playwright); add an
-          # actions/cache step keyed on e2e/package-lock.json's hash over
-          # that path if `npx playwright install` becomes a measurable chunk
-          # of CI time — skipped for now since this is the wave-7 wiring
-          # pass, not a CI-performance pass.
+          # built-in npm cache. Does NOT cache the downloaded Playwright
+          # browser binaries themselves (~/.cache/ms-playwright).
           cache: npm
           cache-dependency-path: e2e/package-lock.json
-      # golangci-lint gate: cache then install the pinned linter (must match
-      # Makefile's GOLANGCI_LINT_VERSION) so `make verify`'s lint step runs
-      # the real linter. The cache key pins the version, so a hit restores the
-      # exact binary and the install is a no-op; a miss builds it once.
-      - name: Cache golangci-lint
-        uses: actions/cache@v4
-        with:
-          path: ~/go/bin/golangci-lint
-          key: golangci-lint-${{ runner.os }}-v2.5.0
-      - name: Install golangci-lint (pinned)
+      - run: make e2e
+
+  merge-gate:
+    needs: [static, test-cmd, test-cross, test-rest, spec-align, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove the verdict script fails a failing result
         run: |
-          test -x "$(go env GOPATH)/bin/golangci-lint" || \
-            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-      - run: make verify
-      - run: go build -o .build/verdi ./cmd/verdi
-      - run: ./.build/verdi lint
+          if scripts/merge-gate-verdict.sh probe-a=success probe-b=failure probe-c=success; then
+            echo "merge-gate: canary FAILED: the verdict script passed a failing result, so its verdict cannot be trusted" >&2
+            exit 1
+          fi
+          echo "merge-gate: canary OK: the verdict script fails a failing result"
+      - name: Require every gate job to succeed
+        run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }}
