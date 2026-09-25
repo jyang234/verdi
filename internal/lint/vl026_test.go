@@ -209,12 +209,16 @@ func TestVL026_Clauses(t *testing.T) {
 			name:    "e: superseded fragment conflict without resolved_by",
 			subject: []memDoc{cssConflict("css-subject", "superseded", "", "spec/css-closed-archive#ac-1")},
 			want:    []string{"e"},
-			msgs:    []string{"resolved_by", "§Kind registry", "VL-026"},
+			// "but no resolved_by" pins the missing-field diagnostic: an
+			// absent resolved_by is reported as absent, never as
+			// `resolved_by "" does not name a spec`.
+			msgs: []string{"but no resolved_by", "§Kind registry", "VL-026"},
 		},
 		{
 			name:    "e: superseded mixed fragment and whole-artifact conflict without resolved_by",
 			subject: []memDoc{cssConflict("css-subject", "superseded", "", "spec/css-closed-archive#ac-1", "adr/0001-css")},
 			want:    []string{"e"},
+			msgs:    []string{"but no resolved_by"},
 		},
 		{
 			name:    "e: resolved_by names a spec that does not exist",
