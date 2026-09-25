@@ -15,6 +15,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/objsupersede"
 )
 
 const decisionGeneratorVersion = "v1"
@@ -72,8 +73,8 @@ type DecisionConflictReport struct {
 // GenerateDecisionConflict runs the design-branch decision-conflict-report
 // pipeline: compute the computed section (declared-edge completeness),
 // load the ADR corpus and (for a story spec) the parent feature, run the
-// judged sweep, preserve dispositions and compute CODEOWNERS routing, and
-// render decision-conflict-report.md.
+// judged sweep, preserve the judged findings' dispositions and compute
+// their CODEOWNERS routing, and render decision-conflict-report.md.
 //
 // Returns *ErrDecisionJudgeRequiredAbsent (never wrapped further) when
 // JudgeRequired is true and no judge produced a judged section — the
@@ -98,7 +99,14 @@ func GenerateDecisionConflict(ctx context.Context, in DecisionConflictInput) (*D
 		judgeRunner = ExecJudgeRunner{}
 	}
 
-	computedFindings, err := ComputeDecisionEdges(in.Root, in.Spec)
+	specRef, err := artifact.ParseRef(in.Spec.ID)
+	if err != nil {
+		return nil, fmt.Errorf("align: GenerateDecisionConflict: spec id: %w", err)
+	}
+	// The computed section is computed from the checked-out tree's records
+	// (design §5: "the records of §3 hold in the checked-out tree"); `verdi
+	// gate` recomputes it with the same function from the head commit.
+	computedFindings, err := ComputeDecisionEdges(ctx, objsupersede.WorkTree{Root: in.Root}, specRef.Name, objsupersede.NewHistory(ctx, in.Root))
 	if err != nil {
 		return nil, err
 	}
@@ -186,15 +194,15 @@ func adrOwnersByRef(corpus []adrCorpusEntry) map[string][]string {
 	return m
 }
 
-// computeRouting fills RoutedOwners on every finding whose Disposition is
-// exempt or no-conflict and whose TargetRef resolves to an ADR in corpus
+// computeRouting fills RoutedOwners on every judged finding whose
+// Disposition is exempt or no-conflict and whose TargetRef resolves to an
+// ADR in corpus (a computed exempts edge is routed by ComputeDecisionEdges
+// itself, from the same tree it computes the section from)
 // (03 §Decision-conflict gate: "An EXEMPT or no-conflict disposition of a
 // judged finding that targets an ADR is CODEOWNERS-routed to that ADR's
 // owners" — computed and disclosed here, never enforced: this function
 // only annotates the finding with the ADR's own Owners field, it never
-// calls a forge API or blocks anything). Applies uniformly to computed and
-// judged findings alike, since a computed exempts edge against an ADR is
-// exactly as CODEOWNERS-relevant as a judged one.
+// calls a forge API or blocks anything).
 func computeRouting(findings []artifact.ConflictFinding, corpus []adrCorpusEntry) []artifact.ConflictFinding {
 	owners := adrOwnersByRef(corpus)
 	out := make([]artifact.ConflictFinding, len(findings))

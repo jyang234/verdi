@@ -3,9 +3,17 @@ package align
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/objsupersede/scenario"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestGenerateDecisionConflict_JudgeSkipped_DisclosedUnprovenComplete is
@@ -14,11 +22,7 @@ import (
 // disclosed-unproven-complete, never a bare pass)".
 func TestGenerateDecisionConflict_JudgeSkipped_DisclosedUnprovenComplete(t *testing.T) {
 	root := t.TempDir()
-	spec := &artifact.SpecFrontmatter{
-		Base:   artifact.Base{ID: "spec/my-feature"},
-		Class:  artifact.ClassFeature,
-		Status: "draft",
-	}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root:   root,
@@ -58,16 +62,7 @@ func TestGenerateDecisionConflict_ComputedIncompleteBlocksReview(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "current-policy", "accepted") // not yet superseded
 
-	spec := &artifact.SpecFrontmatter{
-		Base:   artifact.Base{ID: "spec/my-feature"},
-		Class:  artifact.ClassFeature,
-		Status: "draft",
-		Decisions: []artifact.Decision{
-			{ID: "dc-1", Text: "t", Anchor: "#dc-1", Links: []artifact.Link{
-				{Type: artifact.LinkSupersedes, Ref: "adr/current-policy"},
-			}},
-		},
-	}
+	spec := writeDecisionSpec(t, root, "my-feature", artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/current-policy"})
 
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
@@ -97,11 +92,7 @@ func TestGenerateDecisionConflict_JudgedFoundAndDispositioned(t *testing.T) {
 	writeADR(t, root, "retry-policy", "accepted")
 
 	script := writeFakeJudge(t, fakeDecisionJudgeOKScript) // targets adr/retry-policy
-	spec := &artifact.SpecFrontmatter{
-		Base:   artifact.Base{ID: "spec/my-feature"},
-		Class:  artifact.ClassFeature,
-		Status: "draft",
-	}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	// First run: judged finding lands undispositioned.
 	first, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
@@ -171,7 +162,7 @@ func TestGenerateDecisionConflict_AllFourJudgedDispositions(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "retry-policy", "accepted")
 	script := writeFakeJudge(t, fakeDecisionJudgeOKScript)
-	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
@@ -197,10 +188,7 @@ func TestGenerateDecisionConflict_AllFourJudgedDispositions(t *testing.T) {
 func TestGenerateDecisionConflict_SweepProvenanceRecorded(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "retry-policy", "accepted")
-	spec := &artifact.SpecFrontmatter{
-		Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft",
-		Decisions: []artifact.Decision{{ID: "dc-1", Text: "t", Anchor: "#dc-1"}},
-	}
+	spec := writeDecisionSpec(t, root, "my-feature")
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
 		ModelDigest: testModelDigest(t),
@@ -255,7 +243,7 @@ func TestGenerateDecisionConflict_Negative_EmptyCovers(t *testing.T) {
 // computed in memory and dropped.
 func TestGenerateDecisionConflict_ModelDigestStamped(t *testing.T) {
 	root := t.TempDir()
-	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
@@ -288,7 +276,7 @@ func TestGenerateDecisionConflict_ModelDigestStamped(t *testing.T) {
 // provenance.model equal to THAT model's own digest.
 func TestGenerateDecisionConflict_ModelDigestTracksFixtureModel(t *testing.T) {
 	root := t.TempDir()
-	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	fixtureDigest := fixtureModelDigest(t)
 	canonicalDigest := testModelDigest(t)
@@ -328,7 +316,7 @@ func TestGenerateDecisionConflict_ByteIdenticalAcrossRuns(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "retry-policy", "accepted")
 	script := writeFakeJudge(t, fakeDecisionJudgeOKScript)
-	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+	spec := writeDecisionSpec(t, root, "my-feature")
 
 	run := func() []byte {
 		report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
@@ -346,5 +334,134 @@ func TestGenerateDecisionConflict_ByteIdenticalAcrossRuns(t *testing.T) {
 	second := run()
 	if !bytes.Equal(first, second) {
 		t.Fatalf("GenerateDecisionConflict not byte-identical across runs:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+}
+
+// writeDecisionSpec writes spec/<name> into root's active zone as a
+// Validate-legal component spec whose one decision, dc-1, carries links, and
+// returns it decoded: the computed section reads the evaluated spec from the
+// tree's records (objsupersede.ReadRecords), as align and the gate do.
+func writeDecisionSpec(t *testing.T, root, name string, links ...artifact.Link) *artifact.SpecFrontmatter {
+	t.Helper()
+	var ls []string
+	for _, l := range links {
+		s := fmt.Sprintf("{ type: %s, ref: %q", l.Type, l.Ref)
+		if l.Note != "" {
+			s += fmt.Sprintf(", note: %q", l.Note)
+		}
+		ls = append(ls, s+" }")
+	}
+	dc := `{ id: dc-1, text: "some decision", anchor: "#dc-1" }`
+	if len(ls) > 0 {
+		dc = `{ id: dc-1, text: "some decision", anchor: "#dc-1", links: [` + strings.Join(ls, ", ") + `] }`
+	}
+	content := "---\nid: spec/" + name + "\nkind: spec\ntitle: \"" + name + "\"\nclass: feature\nstatus: draft\nowners: [platform-team]\n" +
+		"acceptance_criteria:\n  - { id: ac-1, text: \"t\", evidence: [static] }\ndecisions:\n  - " + dc + "\n---\nbody\n"
+	path := store.ActiveSpecPath(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return loadTreeSpec(t, root, name)
+}
+
+// loadTreeSpec strict-decodes spec/<name> from root's active zone.
+func loadTreeSpec(t *testing.T, root, name string) *artifact.SpecFrontmatter {
+	t.Helper()
+	data, err := os.ReadFile(store.ActiveSpecPath(root, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+func computedOf(findings []artifact.ConflictFinding) []artifact.ConflictFinding {
+	var out []artifact.ConflictFinding
+	for _, f := range findings {
+		if f.Kind == artifact.FindingComputed {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Closed-spec object supersession finding ids and texts over the scenario
+// fixture (testdata/objsupersede).
+const (
+	cssDC1     = "edge-dc-1-supersedes-spec--closed-feature-dc-1"
+	cssDC2     = "edge-dc-2-supersedes-spec--closed-story-ac-1"
+	cssNewText = "records match; takes effect when spec/successor is accepted"
+)
+
+func cssResolved(id, text, decision, edge, target string) artifact.ConflictFinding {
+	return artifact.ConflictFinding{ID: id, Kind: artifact.FindingComputed, Text: text, Disposition: artifact.ConflictSuperseded,
+		Note: "decision " + decision + " supersedes " + edge, TargetRef: target}
+}
+
+func cssUnresolved(id, text, target string) artifact.ConflictFinding {
+	return artifact.ConflictFinding{ID: id, Kind: artifact.FindingComputed, Text: text, TargetRef: target}
+}
+
+// TestGenerateDecisionConflict_ClosedSpecObjectEdges proves align's computed
+// section evaluates a decision's `supersedes` edge to a closed spec's object
+// through internal/objsupersede (design §5, SI-262): a resolved result is
+// SUPERSEDED with the core's text verbatim, an unresolved one is
+// undispositioned with its reason's text, and the issuing successor's
+// completeness results are their own computed findings.
+func TestGenerateDecisionConflict_ClosedSpecObjectEdges(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	carried := func(conflict string) string {
+		return "carries the replacement established by spec/successor (conflict/" + conflict + ", since 2024-02-15)"
+	}
+	dc2New := cssResolved(cssDC2, cssNewText, "dc-2", "spec/closed-story#ac-1", "spec/closed-story")
+	tests := []struct {
+		name, scenario, branch, spec string
+		want                         []artifact.ConflictFinding
+	}{
+		{"new replacements of a decision and a criterion", "proposed", "", "successor", []artifact.ConflictFinding{
+			cssResolved(cssDC1, cssNewText, "dc-1", "spec/closed-feature#dc-1", "spec/closed-feature"), dc2New}},
+		{"a revision carries both replacements", "chain", "design/successor-v2", "successor-v2", []artifact.ConflictFinding{
+			cssResolved(cssDC1, carried("successor-closed-feature"), "dc-1", "spec/closed-feature#dc-1", "spec/closed-feature"),
+			cssResolved(cssDC2, carried("successor-closed-story"), "dc-2", "spec/closed-story#ac-1", "spec/closed-story")}},
+		{"no conflict", "no-conflict", "", "successor", []artifact.ConflictFinding{
+			cssUnresolved(cssDC1, "no conflict challenges spec/closed-feature#dc-1", "spec/closed-feature"), dc2New}},
+		{"a challenged fragment with no edge", "unmatched-challenge", "", "successor", []artifact.ConflictFinding{
+			cssResolved(cssDC1, cssNewText, "dc-1", "spec/closed-feature#dc-1", "spec/closed-feature"), dc2New,
+			cssUnresolved("completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1",
+				"conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge", "spec/closed-feature")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := scenario.Build(t, tc.scenario)
+			if tc.branch != "" {
+				gitCheckout(t, repo.Dir, tc.branch)
+			}
+			report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+				Root: repo.Dir, Spec: loadTreeSpec(t, repo.Dir, tc.spec), Covers: "abc1234", ModelDigest: testModelDigest(t),
+			})
+			if err != nil {
+				t.Fatalf("GenerateDecisionConflict: %v", err)
+			}
+			if got := computedOf(report.Frontmatter.Findings); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("computed findings:\n got %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func gitCheckout(t *testing.T, dir, branch string) {
+	t.Helper()
+	if out, err := exec.Command("git", "-C", dir, "checkout", "-q", branch).CombinedOutput(); err != nil {
+		t.Fatalf("git checkout %s: %v\n%s", branch, err, out)
 	}
 }
