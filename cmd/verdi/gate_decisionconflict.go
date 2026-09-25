@@ -19,15 +19,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -87,7 +90,7 @@ func runSpecMRGateWithConflict(ctx context.Context, root, branch string, f forge
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
-	cond1, err := checkDeclaredDecisionConflicts(root, specRef.Name, head)
+	cond1, err := checkDeclaredDecisionConflicts(ctx, root, specRef.Name, head)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
@@ -121,13 +124,26 @@ func numberSpecMRConditions(conds []gateCondition) {
 }
 
 // checkDeclaredDecisionConflicts is the spec-MR analogue of gate.go's
-// checkFreshFullyDispositioned: present, `covers` == head, and every
-// finding (computed — declared-edge completeness — and judged) is
-// dispositioned (align.DecisionReviewReady, decision_report.go) — 03's
-// merge-blocking condition on the spec MR. A missing report fails the
-// condition by name rather than erroring, mirroring
-// checkFreshFullyDispositioned's own "no report at all" case exactly.
-func checkDeclaredDecisionConflicts(root, specName, head string) (gateCondition, error) {
+// checkFreshFullyDispositioned: present, `covers` == head, a computed
+// section equal to the one the records at head compute, and every finding
+// (computed — declared-edge completeness — and judged) dispositioned
+// (align.DecisionReviewReady, decision_report.go) — 03's merge-blocking
+// condition on the spec MR. A missing report fails the condition by name
+// rather than erroring, mirroring checkFreshFullyDispositioned's own "no
+// report at all" case exactly.
+//
+// The gate recomputes (03 §Decision-conflict gate; design §5, SI-262): the
+// computed section is recomputed from the records of the head commit — never
+// the working tree — by align.ComputeDecisionEdges, the one computation
+// `verdi align` also runs, and any difference from the report's computed
+// findings fails the condition, naming each. A disposition, note, or any
+// other text written onto a computed finding therefore cannot supply a
+// missing target, conflict, or successor. A carried replacement needs the
+// default branch's first-parent history (SI-270): where it is missing (a
+// shallow clone) the recompute reads "acceptance unproven", so the gate
+// never passes on an unproven acceptance. The judged section is judge
+// output and is not recomputed.
+func checkDeclaredDecisionConflicts(ctx context.Context, root, specName, head string) (gateCondition, error) {
 	name := "spec-MR: declared decision conflicts resolved and judged findings dispositioned"
 	path := store.DecisionConflictReportPath(root, store.ZoneActive, specName)
 
@@ -150,9 +166,84 @@ func checkDeclaredDecisionConflicts(root, specName, head string) (gateCondition,
 		return gateCondition{Name: name, Reason: fmt.Sprintf("stale: covers %s, head is %s (run `verdi align` again)", decoded.Covers, head)}, nil
 	}
 
+	recomputed, err := align.ComputeDecisionEdges(ctx, objsupersede.CommitTree{Root: root, Commit: head}, specName, objsupersede.NewHistory(ctx, root))
+	if errors.Is(err, align.ErrSpecNotInTree) {
+		return gateCondition{Name: name, Reason: fmt.Sprintf("the computed section cannot be recomputed from the records at %s: %v", head, err)}, nil
+	}
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("recomputing the decision-conflict report's computed section at %s: %w", head, err)
+	}
+	if diffs := diffComputedFindings(decoded.Findings, recomputed); len(diffs) > 0 {
+		return gateCondition{Name: name, Reason: fmt.Sprintf("the report's computed section differs from the records at %s: %s (run `verdi align` again)", head, strings.Join(diffs, "; "))}, nil
+	}
+
 	ok, undispositioned := align.DecisionReviewReady(decoded)
 	if !ok {
 		return gateCondition{Name: name, Reason: fmt.Sprintf("undispositioned/unresolved finding(s): %v", undispositioned)}, nil
 	}
 	return gateCondition{Name: name, OK: true}, nil
+}
+
+// diffComputedFindings names every difference between a report's computed
+// findings and the recomputed ones, matched by id (and, for a repeated id,
+// by position among that id's findings): a missing or extra finding, and
+// any field that differs — text, disposition, note, target ref, or routed
+// owners. Judged findings are not compared. An empty result means the
+// sections are equal.
+func diffComputedFindings(reported, recomputed []artifact.ConflictFinding) []string {
+	byID := func(fs []artifact.ConflictFinding) (map[string][]artifact.ConflictFinding, []string) {
+		m := map[string][]artifact.ConflictFinding{}
+		var order []string
+		for _, f := range fs {
+			if f.Kind != artifact.FindingComputed {
+				continue
+			}
+			if _, seen := m[f.ID]; !seen {
+				order = append(order, f.ID)
+			}
+			m[f.ID] = append(m[f.ID], f)
+		}
+		return m, order
+	}
+	got, gotOrder := byID(reported)
+	want, order := byID(recomputed)
+	for _, id := range gotOrder {
+		if _, ok := want[id]; !ok {
+			order = append(order, id)
+		}
+	}
+	var diffs []string
+	for _, id := range order {
+		g, w := got[id], want[id]
+		for i := 0; i < len(g) || i < len(w); i++ {
+			switch {
+			case i >= len(g):
+				diffs = append(diffs, fmt.Sprintf("missing computed finding %s (the records compute %q)", id, w[i].Text))
+			case i >= len(w):
+				diffs = append(diffs, fmt.Sprintf("extra computed finding %s (the records do not compute it)", id))
+			default:
+				for _, fd := range []struct{ field, got, want string }{
+					{"text", g[i].Text, w[i].Text},
+					{"disposition", string(g[i].Disposition), string(w[i].Disposition)},
+					{"note", g[i].Note, w[i].Note},
+					{"target_ref", g[i].TargetRef, w[i].TargetRef},
+					{"routed_owners", strings.Join(g[i].RoutedOwners, ", "), strings.Join(w[i].RoutedOwners, ", ")},
+				} {
+					if fd.got != fd.want {
+						diffs = append(diffs, fmt.Sprintf("%s: %s is %s, the records compute %s", id, fd.field, quotedOrNone(fd.got), quotedOrNone(fd.want)))
+					}
+				}
+			}
+		}
+	}
+	return diffs
+}
+
+// quotedOrNone renders a compared field for a difference: quoted, or
+// "none" when empty.
+func quotedOrNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return fmt.Sprintf("%q", s)
 }

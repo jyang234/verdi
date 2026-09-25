@@ -5,13 +5,18 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // writeDecisionConflictReport writes decision-conflict-report.md directly
@@ -42,7 +47,7 @@ const gdcHeadCommit = "0000000000000000000000000000000000000c"
 func TestCheckDeclaredDecisionConflicts_NoReport(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cond, err := checkDeclaredDecisionConflicts(root, "stale-decline", gdcHeadCommit)
+	cond, err := checkDeclaredDecisionConflicts(context.Background(), root, "stale-decline", gdcHeadCommit)
 	if err != nil {
 		t.Fatalf("checkDeclaredDecisionConflicts: %v", err)
 	}
@@ -56,7 +61,7 @@ func TestCheckDeclaredDecisionConflicts_StaleCovers(t *testing.T) {
 	root := t.TempDir()
 	writeDecisionConflictReport(t, root, "0000000000000000000000000000000000000b",
 		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
-	cond, err := checkDeclaredDecisionConflicts(root, "stale-decline", gdcHeadCommit)
+	cond, err := checkDeclaredDecisionConflicts(context.Background(), root, "stale-decline", gdcHeadCommit)
 	if err != nil {
 		t.Fatalf("checkDeclaredDecisionConflicts: %v", err)
 	}
@@ -67,15 +72,15 @@ func TestCheckDeclaredDecisionConflicts_StaleCovers(t *testing.T) {
 
 func TestCheckDeclaredDecisionConflicts_UndispositionedFails(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	writeDecisionConflictReport(t, root, gdcHeadCommit,
-		"  - { id: f-1, kind: computed, text: t }\n")
-	cond, err := checkDeclaredDecisionConflicts(root, "stale-decline", gdcHeadCommit)
+	repo := buildDesignGateRepo(t)
+	writeDecisionConflictReport(t, repo.Dir, repo.Head,
+		"  - { id: f-1, kind: judged, text: t }\n")
+	cond, err := checkDeclaredDecisionConflicts(context.Background(), repo.Dir, "stale-decline", repo.Head)
 	if err != nil {
 		t.Fatalf("checkDeclaredDecisionConflicts: %v", err)
 	}
 	if cond.OK {
-		t.Fatal("OK = true, want false (undispositioned finding — unresolved declared edge)")
+		t.Fatal("OK = true, want false (undispositioned judged finding)")
 	}
 }
 
@@ -84,37 +89,81 @@ func TestCheckDeclaredDecisionConflicts_UndispositionedFails(t *testing.T) {
 // and story class alike) lives at specs/active/stale-decline, then checks
 // out the design/stale-decline branch `verdi design start` would have cut.
 func buildDesignGateRepo(t *testing.T) *fixturegit.Repo {
+	return buildDesignGateRepoWith(t, gateSpecMD("draft"), nil)
+}
+
+// buildDesignGateRepoWith is buildDesignGateRepo with the given design spec
+// and extra files (an ADR a declared edge targets).
+func buildDesignGateRepoWith(t *testing.T, spec string, extra map[string]string) *fixturegit.Repo {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{
-		{
-			Files: map[string]string{
-				".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
-				".verdi/specs/active/stale-decline/spec.md": gateSpecMD("draft"),
-			},
-			Message: "scaffold + draft design spec",
-		},
-	})
+	files := map[string]string{
+		".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
+		".verdi/specs/active/stale-decline/spec.md": spec,
+	}
+	for p, c := range extra {
+		files[p] = c
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold + draft design spec"}})
 	checkoutBranch(t, repo.Dir, "design/stale-decline")
 	return repo
 }
 
+// gdcEdgeSpecMD is a draft design spec whose decision dc-1 declares one
+// exempts edge to adr/decline-policy, with note (a resolved edge once the
+// ADR exists) or without.
+func gdcEdgeSpecMD(note string) string {
+	link := "{ type: exempts, ref: adr/decline-policy }"
+	if note != "" {
+		link = "{ type: exempts, ref: adr/decline-policy, note: \"" + note + "\" }"
+	}
+	return strings.Replace(gateSpecMD("draft"), "\n---\n# body", "\ndecisions:\n  - { id: dc-1, text: \"decline stale requests\", anchor: \"#dc-1\", links: ["+link+"] }\n---\n# body", 1)
+}
+
+const gdcDeclinePolicyADR = "---\nid: adr/decline-policy\nkind: adr\ntitle: \"Decline policy\"\nstatus: accepted\nowners: [platform-team]\ndecided: 2026-01-01\nfrozen: { at: 2026-01-01, commit: 3e91ab2 }\n---\nbody\n"
+
+// alignDesignGateRepo runs the in-process design-branch align on repo and
+// dispositions the judged absence finding by hand, returning the report path.
+func alignDesignGateRepo(t *testing.T, dir string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if got := runDesignAlign(context.Background(), dir, false, alignDeps{ModelDigest: testResolveModelDigest(t, dir)}, &stdout, &stderr); got != 0 {
+		t.Fatalf("runDesignAlign = %d; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	path := store.DecisionConflictReportPath(dir, store.ZoneActive, "stale-decline")
+	dispositionJudged(t, path)
+	return path
+}
+
+// dispositionJudged dispositions every judged finding of the report at path
+// by hand, as a reviewer does.
+func dispositionJudged(t *testing.T, path string) {
+	t.Helper()
+	editDecisionReport(t, path, func(fm *artifact.DecisionConflictFrontmatter) {
+		for i := range fm.Findings {
+			if fm.Findings[i].Kind == artifact.FindingJudged {
+				fm.Findings[i].Disposition, fm.Findings[i].Note = artifact.ConflictNoConflict, "reviewed: the sweep was skipped by configuration"
+			}
+		}
+	})
+}
+
 // TestSpecMRGate_DanglingExemptsFails proves the spec-MR path fails the gate
 // (exit 1, naming the declared-decision-conflict condition) when the
-// decision-conflict report carries a dangling declared edge — here an
-// undispositioned computed finding standing for an unresolved `exempts` edge.
+// decision-conflict report carries a dangling declared edge — an `exempts`
+// edge to an ADR that does not exist, whose computed finding align leaves
+// undispositioned.
 func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 	t.Parallel()
-	repo := buildDesignGateRepo(t)
-	writeDecisionConflictReport(t, repo.Dir, repo.Head,
-		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy is unresolved\" }\n")
+	repo := buildDesignGateRepoWith(t, gdcEdgeSpecMD("excused, see witness"), nil)
+	alignDesignGateRepo(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
 	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", nil, "main", &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runSpecMRGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "declared decision conflicts") {
-		t.Fatalf("stdout = %q, want it to name the declared-decision-conflict condition", stdout.String())
+	if !strings.Contains(stdout.String(), "undispositioned/unresolved finding(s): [edge-dc-1-exempts-adr--decline-policy]") {
+		t.Fatalf("stdout = %q, want it to name the declared-decision-conflict condition's unresolved edge", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "gate: FAIL") {
 		t.Fatalf("stdout = %q, want a final gate: FAIL line", stdout.String())
@@ -122,16 +171,17 @@ func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 }
 
 // TestSpecMRGate_ResolvedPasses proves the same path passes (exit 0) once
-// every declared edge is resolved (its finding dispositioned) — with a
-// nil forge, the review-thread condition (gate_threads.go) discloses
-// unproven (rendered through the shared internal/disclosure seam,
-// spec/disclosure-seam-v2 ac-1 — never a silent pass, constitution 2/10)
-// rather than either failing the gate or being silently skipped.
+// every declared edge is resolved (its computed finding dispositioned by
+// computation, and equal to the gate's recompute) and every judged finding
+// dispositioned — with a nil forge, the review-thread condition
+// (gate_threads.go) discloses unproven (rendered through the shared
+// internal/disclosure seam, spec/disclosure-seam-v2 ac-1 — never a silent
+// pass, constitution 2/10) rather than either failing the gate or being
+// silently skipped.
 func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 	t.Parallel()
-	repo := buildDesignGateRepo(t)
-	writeDecisionConflictReport(t, repo.Dir, repo.Head,
-		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
+	repo := buildDesignGateRepoWith(t, gdcEdgeSpecMD("excused, see witness"), map[string]string{".verdi/adr/decline-policy.md": gdcDeclinePolicyADR})
+	alignDesignGateRepo(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
 	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", nil, "main", &stdout, &stderr)
@@ -151,9 +201,8 @@ func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 // path works end to end (not just runSpecMRGate's core): a resolved report
 // exits 0.
 func TestCmdGate_SpecMR_EntryPoint(t *testing.T) {
-	repo := buildDesignGateRepo(t)
-	writeDecisionConflictReport(t, repo.Dir, repo.Head,
-		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
+	repo := buildDesignGateRepoWith(t, gdcEdgeSpecMD("n"), map[string]string{".verdi/adr/decline-policy.md": gdcDeclinePolicyADR})
+	alignDesignGateRepo(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stderr bytes.Buffer
@@ -165,10 +214,10 @@ func TestCmdGate_SpecMR_EntryPoint(t *testing.T) {
 
 func TestCheckDeclaredDecisionConflicts_AllResolvedPasses(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	writeDecisionConflictReport(t, root, gdcHeadCommit,
-		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n  - { id: f-2, kind: judged, text: t2, disposition: no-conflict, note: n2 }\n")
-	cond, err := checkDeclaredDecisionConflicts(root, "stale-decline", gdcHeadCommit)
+	repo := buildDesignGateRepoWith(t, gdcEdgeSpecMD("n"), map[string]string{".verdi/adr/decline-policy.md": gdcDeclinePolicyADR})
+	writeDecisionConflictReport(t, repo.Dir, repo.Head,
+		"  - { id: edge-dc-1-exempts-adr--decline-policy, kind: computed, text: \"decision dc-1 exempts adr/decline-policy: resolved (EXEMPT)\", disposition: exempt, note: n, target_ref: adr/decline-policy, routed_owners: [platform-team] }\n  - { id: f-2, kind: judged, text: t2, disposition: no-conflict, note: n2 }\n")
+	cond, err := checkDeclaredDecisionConflicts(context.Background(), repo.Dir, "stale-decline", repo.Head)
 	if err != nil {
 		t.Fatalf("checkDeclaredDecisionConflicts: %v", err)
 	}
@@ -197,7 +246,7 @@ func TestSpecMRGateConflictPreEffect(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := buildDesignGateRepo(t)
 			writeDecisionConflictReport(t, repo.Dir, repo.Head,
-				"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
+				"  - { id: f-1, kind: judged, text: t, disposition: no-conflict, note: n }\n")
 			installConflictPolicyStore(t, repo.Dir)
 			requestPath := contextLifecycleRequestFile(t, repo.Dir, "design-context.json", "spec/stale-decline", contextcompile.PhaseDesign, nil)
 			before := takeConflictLifecycleSnapshot(t, repo.Dir,
@@ -243,5 +292,191 @@ func TestSpecMRGateConflictPreEffect(t *testing.T) {
 				t.Fatalf("stdout = %q, want %q", stdout.String(), wantMarker)
 			}
 		})
+	}
+}
+
+// Closed-spec object supersession finding ids over the scenario fixture
+// (testdata/objsupersede).
+const (
+	gdcDC1 = "edge-dc-1-supersedes-spec--closed-feature-dc-1"
+	gdcDC2 = "edge-dc-2-supersedes-spec--closed-story-ac-1"
+)
+
+func gdcGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// alignScenario builds the named objsupersede scenario, checks out branch
+// (design/<spec>), runs the design-branch align in process, and
+// dispositions the judged sweep's absence finding by hand — a judged
+// finding, which humans disposition — so the gate turns on the computed
+// section alone. It returns the repository and the report's path.
+func alignScenario(t *testing.T, name, branch string) (dir, reportPath string) {
+	t.Helper()
+	dir = scenario.Build(t, name).Dir
+	if branch != "" {
+		gdcGit(t, dir, "checkout", "-q", branch)
+	}
+	var stdout, stderr bytes.Buffer
+	if got := runDesignAlign(context.Background(), dir, false, alignDeps{ModelDigest: testResolveModelDigest(t, dir)}, &stdout, &stderr); got != 0 {
+		t.Fatalf("runDesignAlign = %d; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	spec := strings.TrimPrefix(gdcGit(t, dir, "symbolic-ref", "--short", "HEAD"), "design/")
+	reportPath = store.DecisionConflictReportPath(dir, store.ZoneActive, spec)
+	dispositionJudged(t, reportPath)
+	return dir, reportPath
+}
+
+// editDecisionReport strict-decodes the report at path, applies edit, and
+// rewrites it as align renders it.
+func editDecisionReport(t *testing.T, path string, edit func(*artifact.DecisionConflictFrontmatter)) {
+	t.Helper()
+	fm := decodeDecisionReportFile(t, path)
+	edit(fm)
+	if err := os.WriteFile(path, align.RenderDecisionMarkdown(fm, align.RenderDecisionBody(fm.Findings)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gdcFinding(t *testing.T, fm *artifact.DecisionConflictFrontmatter, id string) *artifact.ConflictFinding {
+	t.Helper()
+	for i := range fm.Findings {
+		if fm.Findings[i].ID == id {
+			return &fm.Findings[i]
+		}
+	}
+	t.Fatalf("report has no finding %s: %+v", id, fm.Findings)
+	return nil
+}
+
+// TestSpecMRGate_RecomputesComputedSection proves design §5's "the gate
+// recomputes" (SI-262): the spec-MR condition recomputes the computed
+// section from the records at the report's head and fails on any difference
+// from the report, naming it — a typed disposition or note, other text, a
+// missing or extra finding — so no disposition can supply a missing
+// conflict. The report align wrote, with only its judged finding
+// dispositioned by hand, passes.
+func TestSpecMRGate_RecomputesComputedSection(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, scenario string
+		edit           func(*testing.T, *artifact.DecisionConflictFrontmatter)
+		wantCode       int
+		want           []string
+	}{
+		{"the report align wrote passes", "proposed", nil, 0, []string{"gate: PASS"}},
+		{"a typed disposition cannot supply a missing conflict", "no-conflict", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			f := gdcFinding(t, fm, gdcDC1)
+			f.Disposition, f.Note = artifact.ConflictSuperseded, "typed by hand"
+		}, 1, []string{gdcDC1 + `: disposition is "superseded", the records compute none`, gdcDC1 + `: note is "typed by hand", the records compute none`}},
+		{"different text", "proposed", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			gdcFinding(t, fm, gdcDC1).Text = "records match; in force"
+		}, 1, []string{gdcDC1 + `: text is "records match; in force", the records compute "records match; takes effect when spec/successor is accepted"`}},
+		{"a different note", "proposed", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			gdcFinding(t, fm, gdcDC2).Note = "signed: owner"
+		}, 1, []string{gdcDC2 + `: note is "signed: owner", the records compute "decision dc-2 supersedes spec/closed-story#ac-1"`}},
+		{"a missing finding", "proposed", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			fm.Findings = fm.Findings[1:]
+		}, 1, []string{"missing computed finding " + gdcDC1}},
+		{"a computed finding moved to the judged section", "proposed", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			f := gdcFinding(t, fm, gdcDC2)
+			f.Kind, f.Disposition, f.Note = artifact.FindingJudged, artifact.ConflictNoConflict, "judged instead"
+		}, 1, []string{"missing computed finding " + gdcDC2}},
+		{"an extra finding", "proposed", func(t *testing.T, fm *artifact.DecisionConflictFrontmatter) {
+			fm.Findings = append(fm.Findings, artifact.ConflictFinding{ID: "edge-dc-9-supersedes-spec--closed-feature-ac-1", Kind: artifact.FindingComputed,
+				Text: "records match; takes effect when spec/successor is accepted", Disposition: artifact.ConflictSuperseded, Note: "typed"})
+		}, 1, []string{"extra computed finding edge-dc-9-supersedes-spec--closed-feature-ac-1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir, reportPath := alignScenario(t, tc.scenario, "")
+			if tc.edit != nil {
+				editDecisionReport(t, reportPath, func(fm *artifact.DecisionConflictFrontmatter) { tc.edit(t, fm) })
+			}
+			var stdout, stderr bytes.Buffer
+			got := runSpecMRGate(context.Background(), dir, "design/successor", nil, "main", &stdout, &stderr)
+			if got != tc.wantCode {
+				t.Fatalf("runSpecMRGate = %d, want %d; stdout=%s stderr=%s", got, tc.wantCode, stdout.String(), stderr.String())
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(stdout.String(), w) {
+					t.Fatalf("stdout = %s\nwant it to contain %q", stdout.String(), w)
+				}
+			}
+		})
+	}
+}
+
+// TestSpecMRGate_RecomputesAtHeadCommit proves the recompute reads the
+// records of the head commit, never the working tree: an uncommitted
+// deletion of the successor's conflict leaves the gate passing, since the
+// report covers the head, whose records still match.
+func TestSpecMRGate_RecomputesAtHeadCommit(t *testing.T) {
+	t.Parallel()
+	dir, _ := alignScenario(t, "proposed", "")
+	if err := os.Remove(filepath.Join(dir, ".verdi", "conflicts", "successor-closed-feature.md")); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if got := runSpecMRGate(context.Background(), dir, "design/successor", nil, "main", &stdout, &stderr); got != 0 {
+		t.Fatalf("runSpecMRGate = %d, want 0 (records at the head commit match); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+}
+
+// TestSpecMRGate_ShallowCloneNeverPassesCarried proves the gate never
+// passes on an unproven acceptance (SI-270, L3 review O-2): a carried
+// result needs the default branch's first-parent history, so in a shallow
+// clone the recompute reads "acceptance unproven" — a report aligned with
+// full history then differs and fails naming it, and a report aligned in
+// the shallow clone leaves the edges unresolved.
+func TestSpecMRGate_ShallowCloneNeverPassesCarried(t *testing.T) {
+	t.Parallel()
+	full, fullReport := alignScenario(t, "chain", "design/successor-v2")
+	if fm := decodeDecisionReportFile(t, fullReport); gdcFinding(t, fm, gdcDC1).Disposition != artifact.ConflictSuperseded {
+		t.Fatalf("full-history align did not resolve the carried edge: %+v", fm.Findings)
+	}
+	shallow := filepath.Join(t.TempDir(), "shallow")
+	gdcGit(t, full, "clone", "-q", "--depth=1", "--no-single-branch", "--branch=design/successor-v2", "file://"+full, shallow)
+	if gdcGit(t, shallow, "rev-parse", "--is-shallow-repository") != "true" {
+		t.Fatal("test setup: the clone is not shallow")
+	}
+	gdcGit(t, shallow, "remote", "set-head", "origin", "main")
+	report := store.DecisionConflictReportPath(shallow, store.ZoneActive, "successor-v2")
+	data, err := os.ReadFile(fullReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(report, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		align bool
+		want  string
+	}{
+		{"a report aligned with full history", false, gdcDC1 + `: text is "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)", the records compute "acceptance unproven: shallow history`},
+		{"a report aligned in the shallow clone", true, "undispositioned/unresolved finding(s): [" + gdcDC1 + " " + gdcDC2 + "]"},
+	} {
+		if tc.align {
+			var stdout, stderr bytes.Buffer
+			if got := runDesignAlign(context.Background(), shallow, false, alignDeps{ModelDigest: testResolveModelDigest(t, shallow)}, &stdout, &stderr); got != 0 {
+				t.Fatalf("%s: runDesignAlign = %d; stderr=%s", tc.name, got, stderr.String())
+			}
+			dispositionJudged(t, report)
+		}
+		var stdout, stderr bytes.Buffer
+		if got := runSpecMRGate(context.Background(), shallow, "design/successor-v2", nil, "main", &stdout, &stderr); got != 1 {
+			t.Fatalf("%s: runSpecMRGate = %d, want 1; stdout=%s stderr=%s", tc.name, got, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), tc.want) {
+			t.Fatalf("%s: stdout = %s\nwant it to contain %q", tc.name, stdout.String(), tc.want)
+		}
 	}
 }

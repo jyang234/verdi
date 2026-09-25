@@ -105,7 +105,7 @@ func TestSpecMRGate_ReviewThreads_UnresolvedBlocks(t *testing.T) {
 	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
-		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
+		"  - { id: f-1, kind: judged, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
 
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "9", SourceBranch: "design/stale-decline", Title: "Stale decline"})
@@ -131,7 +131,7 @@ func TestSpecMRGate_ReviewThreads_ResolvedPasses(t *testing.T) {
 	t.Parallel()
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
-		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
+		"  - { id: f-1, kind: judged, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
 
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "9", SourceBranch: "design/stale-decline", Title: "Stale decline"})
