@@ -693,17 +693,18 @@ func workflowPath(root, file string) string {
 }
 
 // TestGolangciLintPinIsLockstepWithMakefile closes the drift the Makefile's
-// own head comment and verify.yml's head comment both warn about in prose
-// and neither enforces: `make verify`'s lint step runs whatever
-// golangci-lint the workflow installed, so if the Makefile's pin is bumped
-// and the workflows are not, CI silently lints with the OLD linter while
-// every other test stays green. The Makefile is read as the single source
-// of truth and both the install step's `@<version>` AND the cache key's
-// `<version>` are asserted against it, in both workflows that carry the
-// pattern.
+// own head comment warns about in prose and does not enforce: `make lint`
+// runs whatever golangci-lint the workflow installed, so if the Makefile's
+// pin is bumped and the workflows are not, CI silently lints with the OLD
+// linter while every other test stays green. The Makefile is read as the
+// single source of truth and both the install step's `@<version>` AND the
+// cache key's `<version>` are asserted against it, in both workflows that
+// carry the pattern.
 //
-// verify.yml is asserted here but never modified by this task — it uses the
-// identical cache/install step pair, so covering it costs one table row.
+// Both workflows install it in their `static` gate job. verify.yml's gate
+// jobs must equal merge-gate.yml's in every key and value (SI-267,
+// verifyworkflow_test.go), so its row is implied by merge-gate.yml's; it
+// stays as the one row that names the pin itself.
 func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 	pin := makefileGolangciPin(t)
 
@@ -722,8 +723,9 @@ func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 	}{
 		// merge-gate.yml's lint runs in its static-checks job (SI-266);
 		// TestMergeGateGateJobsUsePinnedSetup proves `make lint` runs there.
+		// verify.yml runs the same static job (SI-267).
 		{"merge-gate.yml", "merge-gate.yml", mergeGateLintJob},
-		{"verify.yml", "verify.yml", "verify"},
+		{"verify.yml", "verify.yml", mergeGateLintJob},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
