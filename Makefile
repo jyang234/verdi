@@ -348,8 +348,8 @@ e2e-check-node:
 # waits for readiness, and tears both down after the run.
 #
 # Wave 7: now wired into `verify` (see the `verify` target below) — both
-# CI configs install Node before running it (verify.yml before `make
-# verify`, merge-gate.yml in its e2e job) so local/CI parity holds
+# CI configs install Node before running it (verify.yml and merge-gate.yml,
+# each in its e2e job) so local/CI parity holds
 # (CLAUDE.md: "CI runs exactly `make verify` — trust parity"; SI-266 reads
 # that as `make verify`'s step set). Depends on e2e-check-node so a missing
 # toolchain fails with the install message above, not a raw shell error.
