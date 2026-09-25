@@ -282,6 +282,9 @@ func newIndex(ctx context.Context, recs *Records, h viewHistory) (*Index, error)
 			}
 		}
 	}
+	if m.err != nil {
+		return nil, m.err
+	}
 	return x, nil
 }
 
@@ -296,6 +299,7 @@ type memo struct {
 	at     map[string]accepted // the acceptance commit's records, per successor
 	closed map[string]Fact     // closed date, per closed spec
 	eval   map[string][]Result // Evaluate, per spec
+	err    error               // the first history answer outside FactState (known)
 }
 
 type accepted struct {
@@ -306,10 +310,25 @@ type accepted struct {
 func (m *memo) acceptance(ctx context.Context, spec string) Fact {
 	f, ok := m.acc[spec]
 	if !ok {
-		f = m.h.Acceptance(ctx, spec)
+		f = m.known(m.h.Acceptance(ctx, spec), fmt.Sprintf("spec/%s's acceptance", spec))
 		m.acc[spec] = f
 	}
 	return f
+}
+
+// known holds a history answer to FactState's three values. Any other
+// state fails the index closed: NewIndex returns it as an error, and until
+// then it reads as unproven, never as a state it does not name.
+func (m *memo) known(f Fact, what string) Fact {
+	switch f.State {
+	case FactProven, FactAbsent, FactUnproven:
+		return f
+	}
+	err := fmt.Errorf("objsupersede: the history answered %s with unknown state %q", what, f.State)
+	if m.err == nil {
+		m.err = err
+	}
+	return unproven(err.Error())
 }
 
 // accepted returns the records of successor's acceptance commit, read
@@ -335,7 +354,7 @@ func (m *memo) Establishment(ctx context.Context, successor string, object artif
 func (m *memo) closedDate(ctx context.Context, t *Spec) Fact {
 	f, ok := m.closed[t.Name]
 	if !ok {
-		f = m.h.Closed(ctx, t)
+		f = m.known(m.h.Closed(ctx, t), fmt.Sprintf("spec/%s's closed date", t.Name))
 		m.closed[t.Name] = f
 	}
 	return f

@@ -14,12 +14,14 @@ import (
 // fakeHist is a viewHistory over in-memory facts. A spec in accepted is
 // accepted at commit "acc-<spec>" on that date, and that commit's records
 // are at[spec] (nil: unreadable), else tree; unproven maps a spec to its
-// acceptance witness; closed overrides a closed spec's fact (default:
-// proven on 2024-01-10). calls counts every query.
+// acceptance witness; facts overrides a spec's acceptance fact as given;
+// closed overrides a closed spec's fact (default: proven on 2024-01-10).
+// calls counts every query.
 type fakeHist struct {
 	tree     *Records
 	accepted map[string]string
 	unproven map[string]string
+	facts    map[string]Fact
 	at       map[string]*Records
 	closed   map[string]Fact
 	calls    map[string]int
@@ -27,6 +29,9 @@ type fakeHist struct {
 
 func (f *fakeHist) Acceptance(_ context.Context, spec string) Fact {
 	f.calls["acceptance "+spec]++
+	if fact, ok := f.facts[spec]; ok {
+		return fact
+	}
 	if w, ok := f.unproven[spec]; ok {
 		return Fact{State: FactUnproven, Witness: w}
 	}
@@ -57,7 +62,7 @@ func (f *fakeHist) recordsAt(_ context.Context, commit string) (*Records, error)
 
 // hist is a fakeHist over tree with s accepted on the given dates.
 func hist(tree *Records, accepted ...string) *fakeHist {
-	f := &fakeHist{tree: tree, accepted: map[string]string{}, unproven: map[string]string{}, at: map[string]*Records{}, closed: map[string]Fact{}, calls: map[string]int{}}
+	f := &fakeHist{tree: tree, accepted: map[string]string{}, unproven: map[string]string{}, facts: map[string]Fact{}, at: map[string]*Records{}, closed: map[string]Fact{}, calls: map[string]int{}}
 	for i := 0; i+1 < len(accepted); i += 2 {
 		f.accepted[accepted[i]] = accepted[i+1]
 	}
@@ -474,6 +479,45 @@ func TestIndex_Batch(t *testing.T) {
 	}
 	if _, err := newIndex(context.Background(), nil, h); err == nil {
 		t.Fatal("nil records built an index")
+	}
+}
+
+// TestIndex_UnknownFact pins that a history answer outside FactState's
+// three values fails the index closed with an error, never a panic or a
+// guessed state (lane L3c review F-4).
+func TestIndex_UnknownFact(t *testing.T) {
+	one := func() *Records {
+		return mRecs([]*Conflict{mConflict("c1", "s1", vo)}, mSpec("s1", nil, mDec("dc-1", vo)))
+	}
+	tests := []struct {
+		name string
+		h    func() *fakeHist
+		want string
+	}{
+		{"a zero acceptance fact", func() *fakeHist {
+			h := hist(one())
+			h.facts["s1"] = Fact{}
+			return h
+		}, `spec/s1's acceptance with unknown state ""`},
+		{"an unknown acceptance state", func() *fakeHist {
+			h := hist(one())
+			h.facts["s1"] = Fact{State: "maybe", Commit: "acc-s1", Date: vDay1}
+			return h
+		}, `spec/s1's acceptance with unknown state "maybe"`},
+		{"an unknown closed state", func() *fakeHist {
+			h := hist(one(), "s1", vDay1)
+			h.closed["t"] = Fact{State: "maybe", Commit: "close-t", Date: "2024-01-10"}
+			return h
+		}, `spec/t's closed date with unknown state "maybe"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.h()
+			x, err := newIndex(context.Background(), h.tree, h)
+			if err == nil || x != nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, %v; want an error containing %q", x, err, tc.want)
+			}
+		})
 	}
 }
 
