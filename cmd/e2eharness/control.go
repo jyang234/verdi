@@ -36,13 +36,17 @@ package main
 //     (R-RR1-23) — see readinesspilotfixture.go. main.go stops it with
 //     the harness.
 //   - GET  /objsupersede-fixture returns JSON describing SIX isolated
-//     `verdi serve` subprocesses, one per closed-spec object supersession
-//     scenario (design docs/superpowers/specs/2026-09-24-closed-spec-
-//     object-supersession-design.md §8) — the happy path, the carried and
-//     dropped whole-spec-revision chains, the not-yet-accepted pair, and
-//     the not-in-force case — each materialized from
-//     internal/objsupersede/scenario's committed fixture — see
-//     objsupersedefixture.go. main.go stops them with the harness.
+//     stores, one per closed-spec object supersession scenario (design
+//     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
+//     design.md §8) — the happy path, the carried and dropped
+//     whole-spec-revision chains, the not-yet-accepted pair, and the
+//     not-in-force case — each materialized from
+//     internal/objsupersede/scenario's committed fixture and given its own
+//     `verdi serve` (the boards) and its own docs site (dex built from
+//     main, on a loopback file server): every view URL, the record facts,
+//     and each view that is not a surface — see objsupersedefixture.go,
+//     whose doc carries the JSON contract. main.go stops them all with the
+//     harness.
 
 import (
 	"log"
@@ -127,10 +131,11 @@ func (c *controlServer) handler() http.Handler {
 	// readiness pilot suite's oracles pin, untouched by earlier suites.
 	mux.HandleFunc("/readiness-pilot-fixture", c.readinessPilot.handler)
 	// The isolated closed-spec object supersession stores
-	// (objsupersedefixture.go): six scenario repositories, each served by
-	// its own `verdi serve` subprocess — the criterion/decision-target
-	// views design docs/superpowers/specs/2026-09-24-closed-spec-object-
-	// supersession-design.md §8 needs, which no shared-store spec models.
+	// (objsupersedefixture.go): six scenario repositories, each with its
+	// own `verdi serve` subprocess and its own docs site built from main —
+	// the criterion/decision-target views design docs/superpowers/specs/
+	// 2026-09-24-closed-spec-object-supersession-design.md §8 needs, which
+	// no shared-store spec models.
 	mux.HandleFunc("/objsupersede-fixture", c.objSupersede.handler)
 	return mux
 }
