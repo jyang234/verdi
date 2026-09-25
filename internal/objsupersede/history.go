@@ -134,13 +134,29 @@ func utcDay(iso string) (string, error) {
 // on its acceptance commit's tree (SI-270).
 func (h History) Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
 	acc := h.Acceptance(ctx, successor)
+	var recs *Records
+	var err error
+	if acc.State != FactAbsent && acc.State != FactUnproven {
+		recs, err = h.recordsAt(ctx, acc.Commit)
+	}
+	return establishment(ctx, acc, recs, err, successor, object)
+}
+
+// recordsAt reads the records of commit's tree in h's repository.
+func (h History) recordsAt(ctx context.Context, commit string) (*Records, error) {
+	return ReadRecords(ctx, CommitTree{Root: h.root, Commit: commit})
+}
+
+// establishment is Establishment's answer from successor's acceptance
+// fact and, when it is proven, the records of its acceptance commit or the
+// error reading them; the views' memo shares it (views.go).
+func establishment(ctx context.Context, acc Fact, recs *Records, err error, successor string, object artifact.Ref) Establishment {
 	switch acc.State {
 	case FactAbsent:
 		return Establishment{Reason: ReasonEstablisherNotAccepted}
 	case FactUnproven:
 		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: acc.Witness}
 	}
-	recs, err := ReadRecords(ctx, CommitTree{Root: h.root, Commit: acc.Commit})
 	if err != nil {
 		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: err.Error()}
 	}
