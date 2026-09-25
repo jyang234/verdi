@@ -15,16 +15,18 @@ import (
 // in discovered verdi.bindings.yaml sidecars against the named spec's ACs;
 // pins name real commits; object-id fragments (#<object-id>) resolve
 // against the target's parsed frontmatter objects, and their edge types are
-// the closed five-value enum — unknown types fail closed" (02 §Lint rules,
-// as amended, R4-I-3). internal/lint's walk deliberately decodes every
+// the closed five-value enum, or `challenges` from a conflict — unknown
+// types fail closed" (02 §Lint rules, as amended, R4-I-3 and closed-spec
+// object supersession). internal/lint's walk deliberately decodes every
 // document via artifact.DecodeStrict only, never the kind's own semantic
 // Validate() (doc.go's design note: every semantic check is re-implemented
 // by its own VL-xxx rule rather than centralized) — so this rule is the
 // sole place that both an unknown link type at all, and a known type
 // outside the closed five-value vocabulary targeting a fragment, are
-// caught, by calling artifact.Link.Validate() itself per link. This rule's
-// other new work (R4-I-3) is resolving a fragment's object id against the
-// target spec's declared objects.
+// caught, by calling artifact.Link.ValidateFor itself per link with the
+// kind of the artifact that owns the link. This rule's other new work
+// (R4-I-3) is resolving a fragment's object id against the target spec's
+// declared objects — a conflict's fragment `challenges` included.
 type vl003 struct{}
 
 func (vl003) ID() string { return "VL-003" }
@@ -43,8 +45,9 @@ func (r vl003) Check(in *RunInput) []Finding {
 		// §Object model — "belong to the spec itself") name no single
 		// declared object, so a dangling one is a SPEC-LEVEL wall locus
 		// (badge-computes dc-3) — the case file, not any one card.
+		owner := artifact.Kind(d.Kind)
 		for _, l := range d.Base.Links {
-			findings = append(findings, locusAll(r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs), SpecLocus())...)
+			findings = append(findings, locusAll(r.checkLink(owner, l, d.RelPath, "links[].ref", in.Snapshot, externalRefs), SpecLocus())...)
 		}
 
 		if d.Spec != nil {
@@ -59,7 +62,7 @@ func (r vl003) Check(in *RunInput) []Finding {
 			// bucket).
 			for _, dc := range d.Spec.Decisions {
 				for _, l := range dc.Links {
-					findings = append(findings, locusAll(r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs), ObjectLocus(dc.ID))...)
+					findings = append(findings, locusAll(r.checkLink(owner, l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs), ObjectLocus(dc.ID))...)
 				}
 			}
 		}
@@ -85,25 +88,32 @@ func (r vl003) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// checkLink resolves a single link's ref: first, l.Validate() itself —
-// covering both an unknown link type outright and, per R4-I-3, a known
-// type outside the closed five-value spec-object edge vocabulary
+// checkLink resolves a single link's ref: first, l.ValidateFor(owner)
+// itself, owner being the kind of the artifact whose links: carry l (a
+// decision's own links belong to its spec) — covering both an unknown link
+// type outright and, per R4-I-3, a known type outside the closed
+// five-value spec-object edge vocabulary
 // (implements/resolves/supersedes/exempts/depends-on) targeting a
-// fragment (02 §Link taxonomy) — since internal/lint's walk deliberately
-// decodes via artifact.DecodeStrict only, never the kind's own Validate()
-// (see doc.go's design note: every semantic check is re-implemented by its
-// own VL-xxx rule rather than centralized), nothing else in this engine
-// would ever catch either case. Then: a story link is a tracker ref, not a
-// corpus ref (02 §External refs scope), and is skipped; an svc/... external
-// ref is checked against discovery only (fragments are not modeled for the
-// provisional external-ref form, 02 §Identity: "External refs
-// (provisional)"); every other ref is checked against the committed zone
-// by its unpinned kind/name half, and, when it carries an object-id
-// fragment (§Identity and references), the fragment is additionally
-// resolved against the target's parsed frontmatter objects (§Object
-// model).
-func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, externalRefs map[string]bool) []Finding {
-	if err := l.Validate(); err != nil {
+// fragment, or `challenges` from a conflict (02 §Link taxonomy, §Lint
+// rules). ValidateFor is artifact.Link.Validate everywhere except a
+// conflict's `challenges`, which may name a spec object as an unpinned
+// fragment (SI-271 refuses a pinned one), so a context-free Validate would
+// wrongly refuse a conflict's fragment challenge and a fragment
+// `challenges` on any other artifact still fails. Since internal/lint's
+// walk deliberately decodes via artifact.DecodeStrict only, never the
+// kind's own Validate() (see doc.go's design note: every semantic check is
+// re-implemented by its own VL-xxx rule rather than centralized), nothing
+// else in this engine would ever catch these cases. Then: a story link is
+// a tracker ref, not a corpus ref (02 §External refs scope), and is
+// skipped; an svc/... external ref is checked against discovery only
+// (fragments are not modeled for the provisional external-ref form, 02
+// §Identity: "External refs (provisional)"); every other ref is checked
+// against the committed zone by its unpinned kind/name half, and, when it
+// carries an object-id fragment (§Identity and references), the fragment
+// is additionally resolved against the target's parsed frontmatter
+// objects (§Object model).
+func (vl003) checkLink(owner artifact.Kind, l artifact.Link, path, field string, snap *Snapshot, externalRefs map[string]bool) []Finding {
+	if err := l.ValidateFor(owner); err != nil {
 		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: %v", field, l.Ref, err)}}
 	}
 	if l.Type == artifact.LinkStory {
