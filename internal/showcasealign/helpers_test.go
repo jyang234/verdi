@@ -626,13 +626,25 @@ func attachHistoricalObligationQualityAncestry(t *testing.T, repo *fixturegit.Re
 // checks a cached clone against a completely independent, uncached
 // buildShowcaseRepo call on every axis provisionShowcaseStore's own doc
 // comment promises equivalence for — refs (including the refs/replace
-// graft), objects, config, the working tree, and the index — and then
+// graft), objects, config, the working tree, and the index, whose stat
+// cache must be fresh (`git diff-files` and `git diff-index HEAD` both
+// empty) in the clone as in the independent build — and then
 // checks that a mutation made in one clone never appears in a sibling
 // clone or in a clone taken afterward from the shared template.
 func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
 	t.Run("a cached clone agrees with a completely independent, uncached build", func(t *testing.T) {
 		fresh := buildShowcaseRepo(t)          // never touches the shared template
 		cachedDir := provisionShowcaseStore(t) // ensureShowcaseTemplate + cloneShowcaseRepoDir
+
+		// index stat cache: checked FIRST, before anything below runs `git
+		// status` (worktreeFingerprint does), because status silently
+		// refreshes and rewrites a stale index and would hide exactly the
+		// defect this checks for. diff-files and diff-index trust the
+		// index's stat data without refreshing it, so a copy whose stat
+		// cache still carried the template's mtimes would list every
+		// tracked file here.
+		assertShowcaseIndexClean(t, fresh.Dir)
+		assertShowcaseIndexClean(t, cachedDir)
 
 		// refs: every ref under .git/refs (branches AND the
 		// refs/replace/<sha> graft), plus the symbolic HEAD pointer itself
@@ -765,6 +777,20 @@ func sortedShowcaseGitLines(t *testing.T, dir string, args ...string) string {
 	lines := strings.Split(trimmed, "\n")
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
+}
+
+// assertShowcaseIndexClean fails the test unless both `git diff-files` and
+// `git diff-index HEAD` report nothing in dir. Neither refreshes the index,
+// so each reports every tracked file whose recorded stat data no longer
+// matches the file on disk — the stale-cache state a byte copy leaves
+// behind until cloneShowcaseRepoDir's `git update-index --refresh` runs.
+func assertShowcaseIndexClean(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{{"diff-files"}, {"diff-index", "HEAD"}} {
+		if out := showcaseGitOutput(t, dir, args...); out != "" {
+			t.Fatalf("git %s in %s reports modified tracked files — the index stat cache is stale:\n%s", strings.Join(args, " "), dir, out)
+		}
+	}
 }
 
 // proveShowcaseAncestor re-runs attachHistoricalObligationQualityAncestry's
