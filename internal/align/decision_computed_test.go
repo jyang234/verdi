@@ -357,27 +357,36 @@ func TestComputeDecisionEdges_CommitTreeMatchesWorkTree(t *testing.T) {
 // finding ids are unique (L4 review a, I-1): a conflict that lists the same
 // challenged fragment more than once yields ONE completeness finding for
 // that (conflict, fragment), so the generated report validates and align
-// writes it, while a distinct unmatched fragment keeps its own finding.
+// writes it, while a distinct unmatched fragment, or a second conflict
+// challenging the same fragment, keeps its own finding.
 func TestComputeDecisionEdges_CompletenessDeduplicated(t *testing.T) {
 	const (
 		ac1   = "  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n"
 		co1   = "  - { type: challenges, ref: \"spec/closed-feature#co-1\" }\n"
 		idAC1 = "completeness-conflict--successor-closed-feature-spec--closed-feature-ac-1"
 		idCO1 = "completeness-conflict--successor-closed-feature-spec--closed-feature-co-1"
+		idC2  = "completeness-conflict--successor-closed-feature-second-spec--closed-feature-ac-1"
+		// second is another superseded conflict naming spec/successor that
+		// challenges the same unmatched fragment, spec/closed-feature#ac-1.
+		second = "---\nid: conflict/successor-closed-feature-second\nkind: conflict\ntitle: \"successor-closed-feature-second\"\nowners: [platform-team]\nstatus: superseded\nresolved_by: spec/successor\n" +
+			"links:\n" + ac1 + "frozen: { at: 2024-02-01, commit: d49dd630388ff05fe4cd7d4084c785045ba15689 }\n---\nbody\n"
 	)
 	texts := map[string]string{
 		idAC1: "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge",
 		idCO1: "conflict/successor-closed-feature challenges spec/closed-feature#co-1, but spec/successor carries no matching edge",
+		idC2:  "conflict/successor-closed-feature-second challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge",
 	}
 	tests := []struct {
-		name  string
-		extra string // challenges links added after the fixture's own ac-1 link
-		want  []string
+		name   string
+		extra  string // challenges links added after the fixture's own ac-1 link
+		second bool   // also write the second conflict (conflicts are read in name order)
+		want   []string
 	}{
-		{"listed once", "", []string{idAC1}},
-		{"listed twice", ac1, []string{idAC1}},
-		{"listed three times", ac1 + ac1, []string{idAC1}},
-		{"a distinct unmatched fragment keeps its own finding", co1 + ac1, []string{idAC1, idCO1}},
+		{"listed once", "", false, []string{idAC1}},
+		{"listed twice", ac1, false, []string{idAC1}},
+		{"listed three times", ac1 + ac1, false, []string{idAC1}},
+		{"a distinct unmatched fragment keeps its own finding", co1 + ac1, false, []string{idAC1, idCO1}},
+		{"a second conflict challenging the same fragment keeps its own finding", ac1, true, []string{idAC1, idC2}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -392,6 +401,9 @@ func TestComputeDecisionEdges_CompletenessDeduplicated(t *testing.T) {
 			}
 			if err := os.WriteFile(p, []byte(strings.Replace(string(b), ac1, ac1+tc.extra, 1)), 0o644); err != nil {
 				t.Fatal(err)
+			}
+			if tc.second {
+				writeTreeFile(t, dir, ".verdi/conflicts/successor-closed-feature-second.md", second)
 			}
 			var got []string
 			for _, f := range computeEdges(t, objsupersede.WorkTree{Root: dir}, "successor", &fakeEstablisher{}) {
