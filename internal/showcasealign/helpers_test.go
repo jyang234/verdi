@@ -626,7 +626,8 @@ func attachHistoricalObligationQualityAncestry(t *testing.T, repo *fixturegit.Re
 // checks a cached clone against a completely independent, uncached
 // buildShowcaseRepo call on every axis provisionShowcaseStore's own doc
 // comment promises equivalence for — refs (including the refs/replace
-// graft), objects, config, the working tree, and the index, whose stat
+// graft), objects, config, the working tree (its directory set, empty
+// directories included), and the index, whose stat
 // cache must be fresh (`git diff-files` and `git diff-index HEAD` both
 // empty) in the clone as in the independent build — and then
 // checks that a mutation made in one clone never appears in a sibling
@@ -693,6 +694,14 @@ func TestProvisionShowcaseStoreCopyEquivalence(t *testing.T) {
 		cachedDigest, cachedStatus := worktreeFingerprint(t, cachedDir)
 		if freshDigest != cachedDigest {
 			t.Fatalf("working tree/index fingerprint disagrees between an independent build and a cached clone:\n%s", statusDelta(freshStatus, cachedStatus))
+		}
+		// directories: worktreeFingerprint hashes files only and git
+		// status never lists an empty directory, so the present-but-empty
+		// mutable zone (provisionMutableZone) is compared here instead.
+		freshDirs := worktreeDirSet(t, fresh.Dir)
+		cachedDirs := worktreeDirSet(t, cachedDir)
+		if freshDirs != cachedDirs {
+			t.Fatalf("working-tree directory set disagrees between an independent build and a cached clone:\n%s", statusDelta(freshDirs, cachedDirs))
 		}
 
 		// the replace graft must be FUNCTIONALLY identical, not merely
@@ -777,6 +786,40 @@ func sortedShowcaseGitLines(t *testing.T, dir string, args ...string) string {
 	lines := strings.Split(trimmed, "\n")
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
+}
+
+// worktreeDirSet returns every directory under root, empty ones included,
+// as sorted slash-separated relative paths, one per line — excluding root
+// itself and the .git subtree (whose contents the refs/objects/config
+// checks cover directly).
+func worktreeDirSet(t *testing.T, root string) string {
+	t.Helper()
+	var dirs []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		switch rel {
+		case ".":
+			return nil
+		case ".git":
+			return fs.SkipDir
+		}
+		dirs = append(dirs, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("listing the working-tree directories under %s: %v", root, err)
+	}
+	sort.Strings(dirs)
+	return strings.Join(dirs, "\n")
 }
 
 // assertShowcaseIndexClean fails the test unless both `git diff-files` and
