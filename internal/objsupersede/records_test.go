@@ -244,6 +244,53 @@ func TestReadRecords_SymlinkParity(t *testing.T) {
 	}
 }
 
+// TestReadRecords_LinkLayouts pins which links are Failures (lane L3
+// re-review a m-1, m-2): a link on a record path, or on a directory records
+// sit in, is a Failure in both readers and is never followed; a link that
+// is no record is ignored alike by both.
+func TestReadRecords_LinkLayouts(t *testing.T) {
+	notRegular := ": " + errNotRegular.Error()
+	tests := []struct {
+		name, link, target string // link replaces the path link with a symlink to target
+		want               []string
+		successorRead      bool
+	}{
+		{"a linked non-record file in a spec directory is ignored", ".verdi/specs/active/successor/notes.md", ".verdi/specs/active/successor/spec.md", nil, true},
+		{"a linked non-record file among the conflicts is ignored", ".verdi/conflicts/README", ".verdi/conflicts/successor-closed-feature.md", nil, true},
+		{"a linked .verdi", ".verdi", "real/verdi", []string{".verdi" + notRegular}, false},
+		{"a linked specs directory", ".verdi/specs", "real/specs", []string{".verdi/specs" + notRegular}, false},
+		{"a linked zone directory", ".verdi/specs/active", "real/active", []string{".verdi/specs/active" + notRegular}, false},
+		{"a linked conflicts directory", ".verdi/conflicts", "real/conflicts", []string{".verdi/conflicts" + notRegular}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := scenario.Build(t, "proposed")
+			link, target := filepath.Join(repo.Dir, tc.link), filepath.Join(repo.Dir, tc.target)
+			if tc.want != nil { // a linked directory: its contents move to the target
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(link, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rel, err := filepath.Rel(filepath.Dir(link), target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(rel, link); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, repo.Dir, "add", "-A")
+			gitIn(t, repo.Dir, "commit", "-q", "--no-verify", "-m", "Link "+tc.link)
+			work, commit := mustRead(t, WorkTree{Root: repo.Dir}), mustRead(t, CommitTree{Root: repo.Dir, Commit: "HEAD"})
+			if !reflect.DeepEqual(work, commit) || !reflect.DeepEqual(work.Failures, tc.want) || tc.successorRead != (work.Specs["successor"] != nil) {
+				t.Fatalf("work %v (successor read %v)\ncommit %v\nwant %v", work.Failures, work.Specs["successor"] != nil, commit.Failures, tc.want)
+			}
+		})
+	}
+}
+
 func TestReadRecords_Failures(t *testing.T) {
 	const bad = "---\nid: [\n---\n"
 	tests := []struct {

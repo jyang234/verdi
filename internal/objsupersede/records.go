@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -28,10 +29,11 @@ import (
 // TreeReader reads one tree's files: a working tree or a commit's tree.
 type TreeReader interface {
 	// Files lists every entry under dir that is not a directory,
-	// recursively, as repo-relative slash paths; dir itself is listed when
-	// it is not a directory. A symlink, to a file or a directory, is listed
-	// as not Regular and never followed. A dir absent from the tree lists
-	// nothing.
+	// recursively, as root-relative slash paths. When dir, or an ancestor
+	// of it below the root, is not a real directory (a symlink, or a file),
+	// Files lists that one entry and nothing through it. A symlink, to a
+	// file or a directory, is listed as not Regular and never followed. A
+	// dir absent from the tree lists nothing.
 	Files(ctx context.Context, dir string) ([]TreeFile, error)
 	// ReadFile returns a repo-relative path's bytes.
 	ReadFile(ctx context.Context, path string) ([]byte, error)
@@ -44,9 +46,9 @@ type TreeFile struct {
 	Regular bool
 }
 
-// errNotRegular is the Failure of a record path, or a directory above one,
-// that is not a regular file: both readers report it alike and read
-// through neither (lane L3 review a M-5).
+// errNotRegular is the Failure of a record path, or a directory records sit
+// in, that is a symlink or another special entry: both readers report it
+// alike and read through neither (lane L3 review a M-5, re-review a m-2).
 var errNotRegular = errors.New("not a regular file; a record is read only from a regular file, never through a link")
 
 // WorkTree reads the working tree under Root, as `verdi align` does.
@@ -54,13 +56,25 @@ type WorkTree struct{ Root string }
 
 // Files implements TreeReader.
 func (w WorkTree) Files(_ context.Context, dir string) ([]TreeFile, error) {
-	base := filepath.Join(w.Root, filepath.FromSlash(dir))
+	base := w.Root
+	for _, part := range strings.Split(dir, "/") {
+		base = filepath.Join(base, part)
+		switch info, err := os.Lstat(base); {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, nil
+		case err != nil:
+			return nil, fmt.Errorf("objsupersede: listing %s: %w", base, err)
+		case !info.IsDir():
+			rel, err := filepath.Rel(w.Root, base)
+			if err != nil {
+				return nil, err
+			}
+			return []TreeFile{{Path: filepath.ToSlash(rel), Regular: info.Mode().IsRegular()}}, nil
+		}
+	}
 	var out []TreeFile
 	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if p == base && errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
 			return err
 		}
 		if !d.IsDir() {
@@ -105,7 +119,7 @@ func (c CommitTree) Files(ctx context.Context, dir string) ([]TreeFile, error) {
 	var out []TreeFile
 	for _, e := range entries {
 		p, ok := strings.CutPrefix(e.Path, prefix)
-		if ok && (p == dir || strings.HasPrefix(p, dir+"/")) {
+		if ok && (p == dir || strings.HasPrefix(p, dir+"/") || strings.HasPrefix(dir, p+"/")) {
 			out = append(out, TreeFile{Path: p, Regular: e.Mode == "100644" || e.Mode == "100755"})
 		}
 	}
@@ -160,13 +174,14 @@ type Records struct {
 var (
 	specsDir     = path.Dir(path.Dir(store.SpecDirRelPath(store.ZoneActive, "x")))
 	conflictsDir = filepath.ToSlash(filepath.Dir(store.ConflictPath("", "x")))
+	specFile     = path.Base(store.SpecRelPath(store.ZoneActive, "x"))
 )
 
 // ReadRecords reads and strict-decodes, through internal/artifact, every
 // spec.md in both zones and every conflict of the tree. An operational read
-// failure is an error; a record that fails decode, whose id disagrees with
-// its path, or that is listed under the two directories as a symlink or
-// other non-regular entry, is a Failure.
+// failure is an error. A record that fails decode or whose id disagrees
+// with its path is a Failure, and so is a symlink or other non-regular
+// entry on a record path (recordPath); one elsewhere is ignored.
 func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 	recs := &Records{Specs: map[string]*Spec{}}
 	fail := func(p string, err error) { recs.Failures = append(recs.Failures, fmt.Sprintf("%s: %v", p, err)) }
@@ -178,7 +193,9 @@ func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 	for _, f := range specFiles {
 		p := f.Path
 		if !f.Regular {
-			fail(p, errNotRegular)
+			if recordPath(p) {
+				fail(p, errNotRegular)
+			}
 			continue
 		}
 		parts := strings.Split(p, "/")
@@ -210,7 +227,9 @@ func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 	for _, f := range conflictFiles {
 		p := f.Path
 		if !f.Regular {
-			fail(p, errNotRegular)
+			if recordPath(p) {
+				fail(p, errNotRegular)
+			}
 			continue
 		}
 		name := strings.TrimSuffix(path.Base(p), ".md")
@@ -233,7 +252,28 @@ func ReadRecords(ctx context.Context, tr TreeReader) (*Records, error) {
 	}
 	sort.Slice(recs.Conflicts, func(i, j int) bool { return recs.Conflicts[i].Name < recs.Conflicts[j].Name })
 	sort.Strings(recs.Failures)
+	recs.Failures = slices.Compact(recs.Failures) // an ancestor both listings name
 	return recs, nil
+}
+
+// recordPath reports whether p, listed under the specs or conflicts
+// directory, is where a record or a directory holding records sits: that
+// directory or an ancestor, a zone directory, a spec directory, a spec.md,
+// or a conflict's .md (lane L3 re-review a m-1).
+func recordPath(p string) bool {
+	for _, dir := range []string{specsDir, conflictsDir} {
+		if p == dir || strings.HasPrefix(dir, p+"/") {
+			return true
+		}
+	}
+	if rest, ok := strings.CutPrefix(p, conflictsDir+"/"); ok {
+		return !strings.Contains(rest, "/") && strings.HasSuffix(rest, ".md")
+	}
+	parts := strings.Split(strings.TrimPrefix(p, specsDir+"/"), "/")
+	if parts[0] != store.ZoneActive && parts[0] != store.ZoneArchive {
+		return false
+	}
+	return len(parts) <= 2 || (len(parts) == 3 && parts[2] == specFile)
 }
 
 // decode splits a record's frontmatter and strict-decodes it.
