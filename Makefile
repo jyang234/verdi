@@ -113,7 +113,7 @@ lint:
 		fi; \
 		golangci-lint run; \
 	elif [ "$$CI" = "true" ]; then \
-		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before the lint step (verify.yml before 'make verify', merge-gate.yml before 'make lint'); a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
+		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before the lint step (verify.yml and merge-gate.yml, each in its static job before 'make lint'); a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
 		exit 1; \
 	else \
 		echo "WARNING: golangci-lint not installed locally; skipping lint (install it to gate this locally)" >&2; \

@@ -10,9 +10,8 @@
 # (CLAUDE.md) is read here as SI-266 reads it for merge-gate.yml, since the
 # gate jobs are the same: CI runs exactly `make verify`'s step set, split
 # across the gate jobs, and that set grows only as the Makefile's
-# VERIFY_STEPS grows. A seventh job, `verify`,
-# produces and uploads the evidence once every gate job has succeeded (see
-# "The evidence job" below).
+# VERIFY_STEPS grows. A seventh job, `verify`, produces and uploads the
+# evidence once every gate job has succeeded (see "The evidence job" below).
 #
 # The self-lint (Phase 4). `make verify`'s own `lint-store` target already
 # runs `verdi lint` against this repo locally (no CI environment), which is
@@ -95,7 +94,12 @@
 # job makes. That step is defense in depth and a legible in-log witness of
 # the results the evidence binds; it needs no canary, because the job cannot
 # run over a failed need. Only then does it build the binary, run `verdi
-# sync --produce`, and upload the bundle.
+# sync --produce`, and upload the bundle. GitHub's "Re-run failed jobs"
+# makes a new attempt of the same run: it re-runs only the failed jobs and
+# their dependents (so `verify`) and keeps the earlier attempt's successful
+# gate jobs. Evidence produced then binds gate jobs that each succeeded at
+# this commit, possibly in different attempts, and a gate job that already
+# succeeded is not re-run; SI-267 accepts this.
 #
 # Disclosed consequence (a deviation from remote-and-ci's original
 # two-workflow delivery, flagged for `verdi align`/`verdi accept`

@@ -81,11 +81,11 @@
 # Change this file and the Makefile's VERIFY_STEPS together.
 #
 # Evidence production/upload is deliberately NOT here. That stays
-# verify.yml's push-only duty (see verify.yml's own head comment on why
-# evidence must be produced strictly after a make-verify run that already
-# gated the SAME commit on push, never a second independent PR-triggered
-# run of it) — this workflow exists to gate merges, not to produce or
-# upload the "verdi-evidence" artifact.
+# verify.yml's push-only duty (see verify.yml's own head comment and SI-267
+# on why): verify.yml produces the evidence only in its `verify` job, after
+# every gate job of the SAME push run passed that commit, never from a
+# second, independent PR-triggered run — this workflow exists to gate
+# merges, not to produce or upload the "verdi-evidence" artifact.
 name: merge-gate
 
 on:
