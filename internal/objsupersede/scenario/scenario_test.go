@@ -184,17 +184,20 @@ func TestBuild_EveryScenario(t *testing.T) {
 
 // TestBuild_PinnedCommits pins the chain scenario's SHAs in a clean
 // environment and under hostile ambient git state: exported identities and
-// dates (as git hooks export them), a global config with merge.log and a
-// commit encoding, and a non-UTC TZ.
+// dates (as git hooks export them), `git -c` settings passed down through
+// GIT_CONFIG_COUNT, a global config reached through GIT_CONFIG_GLOBAL or
+// HOME that sets merge.log and a commit encoding, and a non-UTC TZ.
 func TestBuild_PinnedCommits(t *testing.T) {
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	home := t.TempDir()
+	cfg := filepath.Join(home, ".gitconfig")
 	if err := os.WriteFile(cfg, []byte("[merge]\n\tlog = true\n[i18n]\n\tcommitEncoding = ISO-8859-1\n[user]\n\tname = Ambient\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	hostile := [][2]string{{"GIT_AUTHOR_NAME", "Hook Author"}, {"GIT_AUTHOR_EMAIL", "hook@example.invalid"},
 		{"GIT_AUTHOR_DATE", "@1790364264 -0400"}, {"GIT_COMMITTER_NAME", "Hook Author"},
 		{"GIT_COMMITTER_EMAIL", "hook@example.invalid"}, {"GIT_COMMITTER_DATE", "@1790364264 -0400"},
-		{"GIT_CONFIG_GLOBAL", cfg}, {"TZ", "America/New_York"}}
+		{"GIT_CONFIG_COUNT", "1"}, {"GIT_CONFIG_KEY_0", "i18n.commitEncoding"}, {"GIT_CONFIG_VALUE_0", "ISO-8859-1"},
+		{"GIT_CONFIG_GLOBAL", cfg}, {"HOME", home}, {"XDG_CONFIG_HOME", home}, {"TZ", "America/New_York"}}
 	for _, tc := range []struct {
 		name string
 		env  [][2]string
@@ -228,12 +231,23 @@ func TestMaterialize_ManifestDrivesCommits(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			repo, err := materialize(ctx, mutated(t, tc.mutate), t.TempDir(), "chain")
+			dir := mutated(t, tc.mutate)
+			repo, err := materialize(ctx, dir, t.TempDir(), "chain")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if (repo.Base[0] != wantRootCommit) != tc.rootMoves {
 				t.Fatalf("root %s, moved want %v", repo.Base[0], tc.rootMoves)
+			}
+			m, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			who := m.Commit.Name + " <" + m.Commit.Email + ">"
+			for _, got := range strings.Split(gitOut(t, repo.Dir, "log", "--all", "--format=%an <%ae>|%cn <%ce>"), "\n") {
+				if got != who+"|"+who {
+					t.Fatalf("a commit by %q, want the manifest's %q as author and committer", got, who)
+				}
 			}
 			for i, c := range repo.Steps {
 				if (c != wantChainSteps[i]) != (i >= tc.firstMoved) {
