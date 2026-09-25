@@ -366,6 +366,7 @@ func (m *memo) Establishment(ctx context.Context, successor string, object artif
 func (m *memo) closedDate(ctx context.Context, t *Spec) Fact {
 	f, ok := m.closed[t.Name]
 	if !ok {
+		// vocab:identity — SI-270's closed-date fact named in an operational error: a lifecycle id, not display prose
 		f = m.known(m.h.Closed(ctx, t), fmt.Sprintf("spec/%s's closed date", t.Name))
 		m.closed[t.Name] = f
 	}
