@@ -14,7 +14,9 @@ package main
 //
 //   - a board: one `verdi serve` subprocess over the store's checkout,
 //     the same build-then-exec seam as unprovenboard.go and
-//     specimportfixture.go, one binary build shared by every store. Before
+//     specimportfixture.go, one binary build shared by every store, run
+//     under hermeticServeEnv as they are (no ambient review, open-MR, or
+//     diagram-verification feed and no CI identity reaches it). Before
 //     it starts, .verdi/data/ goes into the repository's .git/info/exclude
 //     — never a commit, so no SHA moves — so the serve's own lock files and
 //     managed worktrees never read as uncommitted changes (nothing under
@@ -662,7 +664,7 @@ func startObjSupersedeServe(ctx context.Context, binPath, root string) (*objSupe
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = root
-	cmd.Env = os.Environ()
+	cmd.Env = hermeticServeEnv(os.Environ())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

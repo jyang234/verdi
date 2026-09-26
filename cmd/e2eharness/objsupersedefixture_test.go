@@ -671,6 +671,61 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 	}
 }
 
+// buildObjSupersedeTestBinary builds the verdi binary once for a test,
+// into its own temporary directory.
+func buildObjSupersedeTestBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "verdi")
+	if err := buildBinary(context.Background(), absModuleRoot(t), bin); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// TestObjSupersedeFixture_HermeticServeEnv: the serves run under
+// hermeticServeEnv, as the sibling fixtures' do (re-review M-A) — an ambient
+// VERDI_REVIEW_FEED naming a missing file does not break the start, and a
+// valid foreign feed is never loaded: the board it names stays out of
+// review mode and never shows the feed's comment.
+func TestObjSupersedeFixture_HermeticServeEnv(t *testing.T) {
+	neutralizeCIEnvForTest(t)
+	t.Setenv("GITHUB_TOKEN", "") // no live forge may outrank the canned feed
+	bin := buildObjSupersedeTestBinary(t)
+	feed := filepath.Join(t.TempDir(), "review-feed.json")
+	const marker = "FOREIGN-REVIEW-FEED-COMMENT"
+	if err := os.WriteFile(feed, []byte(`{"successor": [{"id": "c-1", "author": "foreign", "body": "`+marker+`", "resolved": false}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, feed string }{
+		{"a feed naming a missing file", filepath.Join(t.TempDir(), "missing.json")},
+		{"a valid foreign feed", feed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("VERDI_REVIEW_FEED", tc.feed)
+			f := newObjSupersedeFixture(absModuleRoot(t))
+			f.names, f.tmpRoot = []string{"proposed"}, t.TempDir()
+			f.steps.buildBinary = copyObjSupersedeBinary(bin)
+			t.Cleanup(f.stop)
+			rec := getObjSupersedeFixture(t, f, http.MethodGet)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: the ambient feed reached the serve; body=%s", rec.Code, rec.Body.String())
+			}
+			var info objSupersedeFixtureInfo
+			if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+				t.Fatal(err)
+			}
+			board := info.Stores["proposed"].Boards.Checkout.URL
+			status, page := httpGetBody(t, board)
+			if status != http.StatusOK {
+				t.Fatalf("GET %s = %d, want 200", board, status)
+			}
+			if strings.Contains(page, marker) || strings.Contains(page, "mode-review") {
+				t.Errorf("%s loaded the ambient review feed", board)
+			}
+		})
+	}
+}
+
 // TestObjSupersedeFixture_Handler_Happy is the real witness through the
 // SHIPPED binary: the handler materializes all six scenario stores, builds
 // each one's docs site from main, and serves each board, and then —
