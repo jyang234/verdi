@@ -11,6 +11,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
@@ -71,6 +72,20 @@ func specDocumentURL(ref string, docs documentSet) string {
 	return documentPageDir + "/"
 }
 
+// documentInputs is what every spec document of one build shares: the
+// build stamp, the resolved model, the refs the site has pages for, the
+// specs that get a document, and the closed-spec object supersession
+// views of the build commit's records (design §6; objsupersede.go),
+// computed once per build and read per spec. A nil supersession index
+// supplies no views, and every object renders exactly as before.
+type documentInputs struct {
+	stamp        buildStamp
+	model        *model.Model
+	known        map[string]bool
+	docs         documentSet
+	supersession *objsupersede.Index
+}
+
 // renderSpecDocuments is the pool's per-spec step, a variable so tests can
 // stand in a render that panics or cancels (fix round 1, F4/F5).
 var renderSpecDocuments = writeSpecDocuments
@@ -87,7 +102,8 @@ var renderSpecDocuments = writeSpecDocuments
 // it). The first error cancels the rest and is returned; a worker panic
 // is folded into that error (naming the spec) so the build still exits 2
 // through the normal path instead of killing the process.
-func writeAllSpecDocuments(parent context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, pages []*artifactPage, docs documentSet) error {
+func writeAllSpecDocuments(parent context.Context, outDir, root string, in documentInputs, pages []*artifactPage) error {
+	docs := in.docs
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	sem := make(chan struct{}, documentWorkers())
@@ -129,7 +145,7 @@ schedule:
 			if ctx.Err() != nil {
 				return
 			}
-			if err := renderSpecDocuments(ctx, outDir, root, stamp, mdl, p); err != nil {
+			if err := renderSpecDocuments(ctx, outDir, root, in, p); err != nil {
 				fail(err)
 			}
 		}(p)
@@ -168,15 +184,23 @@ func documentWorkers() int {
 // renders), so the plan and tasks bytes are exactly what a per-kind load
 // would render — TestWriteSpecDocuments_KindsShareOneLoad proves it
 // against the per-kind path the CLI and MCP take.
-func writeSpecDocuments(ctx context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, p *artifactPage) error {
+func writeSpecDocuments(ctx context.Context, outDir, root string, in documentInputs, p *artifactPage) error {
 	if !strings.HasPrefix(p.Entry.Ref, "spec/") {
 		return nil
 	}
+	stamp, mdl := in.stamp, in.model
 	name := strings.TrimPrefix(p.Entry.Ref, "spec/")
 	base := path.Dir(permalinkOutPath(p.Entry.Ref)) // a/spec/<name>
 	res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: name, Mode: specdocload.ModeAt, At: stamp.SHA, Kind: specdoc.KindSpec, Model: mdl})
 	if err != nil {
 		return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
+	}
+	// Closed-spec object supersession (design §6): the views of this
+	// spec's objects, supplied as facts like every other computed input
+	// the document reports — read from the build's one index, never
+	// recomputed per spec.
+	if in.supersession != nil {
+		res.Input.Facts.Supersession = supersessionFacts(in.supersession, name, res.Input.Spec, in.known, in.docs)
 	}
 	var specHTML string
 	for _, kind := range []specdoc.Kind{specdoc.KindSpec, specdoc.KindPlan, specdoc.KindTasks} {

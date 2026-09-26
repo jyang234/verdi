@@ -446,6 +446,32 @@ footer.site-foot {
 }
 .document-files a:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- closed-spec object supersession (design §6; SI-263, SI-278) ----------
+
+   The lines a document adds beside a closed spec's superseded criterion
+   or decision, and beside a successor's decision: the objsupersede views'
+   texts, verbatim, with the deciding decision, the conflict, and the
+   carrying revision linked. Register only — the record's own voice, one
+   quiet step below the object's text — so the original text stays the
+   loudest thing on the object; a disclosure (unproven, not established)
+   reads muted, never as a verdict. Presentation only: no word here. */
+.objsupersede {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.objsupersede--unproven,
+.objsupersede--not-established { color: var(--muted-solid); }
+.objsupersede--proposed { color: var(--living); }
+.objsupersede-conflict {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted-solid);
+  margin-left: 0.35rem;
+}
+.objsupersede-conflict:hover { color: var(--accent); }
+
 /* the board's Document tab (spec/spec-documents ac-4): a reading
    surface beside the board's working surface. One quiet header row —
    ref, kind switch, three controls — then the document carries the page. */

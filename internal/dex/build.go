@@ -110,12 +110,20 @@ func Build(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	// The closed-spec object supersession views of the build commit's
+	// records (design §6; objsupersede.go): computed ONCE per build, read
+	// per spec document below.
+	supersession, err := supersessionIndex(ctx, opts.Root, stamp.SHA)
+	if err != nil {
+		return err
+	}
+
 	for _, p := range pages {
 		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, mdl, docs, p); err != nil {
 			return err
 		}
 	}
-	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, stamp, mdl, pages, docs); err != nil {
+	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, documentInputs{stamp: stamp, model: mdl, known: known, docs: docs, supersession: supersession}, pages); err != nil {
 		return err
 	}
 	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known, mdl); err != nil {
