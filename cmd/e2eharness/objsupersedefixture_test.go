@@ -31,13 +31,19 @@ import (
 // wantRootCommit, which every committed frozen stamp names.
 const objSupersedeRootCommit = "d49dd630388ff05fe4cd7d4084c785045ba15689"
 
+// objSupersedeGoldenNoMain is the not-a-surface reason the golden expects
+// wherever main has no board for a closed object, written out
+// independently of the production constant.
+const objSupersedeGoldenNoMain = `"no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"`
+
 // objSupersedeGolden is the endpoint's JSON contract per store, written out
-// independently of the production table (lane L3d review I-4, M-5): every
-// key, in order, and every value, with the three per-run values replaced by
-// placeholders — {url} (the store's verdi serve), {docs} (its docs site),
-// and {docs_commit} (main's commit, checked against scenario.Build
-// separately). A renamed json tag, a dropped key, or a wrong fact fails
-// here, where the TypeScript consumer would otherwise break silently.
+// independently of the production table (lane L3d review I-4, M-5;
+// re-review I-A, M-C): every key, in order, and every value, with the three
+// per-run values replaced by placeholders — {url} (the store's verdi
+// serve), {docs} (its docs site), and {docs_commit} (main's commit, checked
+// against scenario.Build separately). A renamed json tag, a dropped key, or
+// a wrong fact fails here, where the TypeScript consumer would otherwise
+// break silently.
 var objSupersedeGolden = map[string]string{
 	"accepted": `{
   "scenario": "accepted", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
@@ -46,9 +52,15 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor#dc-1", "decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor#dc-2", "decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": "{docs}a/conflict/successor-closed-story/"}
   ],
   "boards": {
     "checkout": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
@@ -68,9 +80,15 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "spec/successor-v3#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+     "object_board": {"branch": "main", "spec": "spec/successor-v3", "url": "{url}board/spec/successor-v3", "not_a_surface": ""},
+     "decision": "spec/successor-v3#dc-1", "decision_docs_url": "{docs}a/spec/successor-v3/document/#dc-1",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor-v3#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "spec/successor-v3", "url": "{url}board/spec/successor-v3", "not_a_surface": ""},
+     "decision": "spec/successor-v3#dc-2", "decision_docs_url": "{docs}a/spec/successor-v3/document/#dc-2",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": "{docs}a/conflict/successor-closed-story/"}
   ],
   "boards": {
     "checkout": {"branch": "main", "spec": "spec/successor-v3", "url": "{url}board/spec/successor-v3", "not_a_surface": ""},
@@ -92,9 +110,15 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor-v2#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
+     "decision": "spec/successor-v2#dc-2", "decision_docs_url": "{docs}a/spec/successor-v2/document/#dc-2",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": "{docs}a/conflict/successor-closed-story/"}
   ],
   "boards": {
     "checkout": {"branch": "main", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
@@ -115,14 +139,20 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-1", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": ""},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-2", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": ""}
   ],
   "boards": {
     "checkout": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
     "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
-    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": "no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"}
+    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `}
   },
   "docs": {
     "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
@@ -136,14 +166,20 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "spec/successor#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": ""},
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-1", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "",
+     "conflict": "", "conflict_docs_url": ""},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-2", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": ""}
   ],
   "boards": {
     "checkout": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
     "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
-    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": "no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"}
+    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `}
   },
   "docs": {
     "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
@@ -157,11 +193,20 @@ var objSupersedeGolden = map[string]string{
   "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
   "supersessions": [
     {"object": "spec/closed-feature#ac-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#ac-1",
-     "decision": "spec/successor-v2#dc-3", "establishing_decision": "spec/successor#dc-3", "conflict": ""},
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}b/main/board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor-v2#dc-3", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-3", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-3",
+     "conflict": "", "conflict_docs_url": ""},
     {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
-     "decision": "spec/successor-v2#dc-1", "establishing_decision": "spec/successor#dc-1", "conflict": "conflict/successor-closed-feature"},
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}b/main/board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor-v2#dc-1", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
     {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
-     "decision": "spec/successor-v2#dc-2", "establishing_decision": "spec/successor#dc-2", "conflict": "conflict/successor-closed-story"}
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}b/main/board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor-v2#dc-2", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": "{docs}a/conflict/successor-closed-story/"}
   ],
   "boards": {
     "checkout": {"branch": "design/successor-v2", "spec": "spec/successor-v2", "url": "{url}board/spec/successor-v2", "not_a_surface": ""},
@@ -973,8 +1018,7 @@ func checkObjSupersedeRecords(t *testing.T, ctx context.Context, root string, go
 	sort.Slice(want, func(i, j int) bool { return want[i].Object < want[j].Object })
 	var gotPairs []objSupersedeSupersession
 	for _, p := range got.Supersessions {
-		p.ObjectDocsURL = ""
-		gotPairs = append(gotPairs, p)
+		gotPairs = append(gotPairs, objSupersedeSupersession{Object: p.Object, Decision: p.Decision, EstablishingDecision: p.EstablishingDecision, Conflict: p.Conflict})
 	}
 	if !reflect.DeepEqual(gotPairs, want) {
 		t.Errorf("supersessions = %+v, want the records' %+v", gotPairs, want)
@@ -1017,6 +1061,7 @@ func checkObjSupersedeRecords(t *testing.T, ctx context.Context, root string, go
 	if !reflect.DeepEqual(gotDocs, wantDocs) {
 		t.Errorf("docs pages = %v, want the closed specs and main's successors %v", gotDocs, wantDocs)
 	}
+	checkObjSupersedeMainLinks(t, mainRecs, got)
 	switch mainBoard := got.Boards.Main; {
 	case len(mainSuccessors) == 0 && mainBoard.NotASurface == "":
 		t.Errorf("main carries no successor, yet its board %+v is handed out as a surface", mainBoard)
@@ -1024,6 +1069,57 @@ func checkObjSupersedeRecords(t *testing.T, ctx context.Context, root string, go
 		t.Errorf("main board spec %q is none of main's successors %v", mainBoard.Spec, mainSuccessors)
 	case got.Checkout == got.MainBranch && mainBoard.Spec != got.Successor:
 		t.Errorf("checkout is main, yet main's board shows %q, not the successor %q", mainBoard.Spec, got.Successor)
+	}
+}
+
+// checkObjSupersedeMainLinks re-derives, from main's own records, what each
+// supersession's main-side links may name (re-review I-A, M-C): its
+// object_board is the board of a spec on main whose decision links the
+// object — not a surface exactly when no spec on main does — and each docs
+// link is present exactly when main carries its target (the decision's
+// spec, the establishing decision's spec, the conflict), pointing at that
+// target's page or anchor on the docs site.
+func checkObjSupersedeMainLinks(t *testing.T, mainRecs *objsupersede.Records, got objSupersedeStoreInfo) {
+	t.Helper()
+	mainConflicts := map[string]bool{}
+	for _, c := range mainRecs.Conflicts {
+		mainConflicts[c.FM.ID] = true
+	}
+	anchor := func(decision string) string {
+		spec, id, _ := strings.Cut(decision, "#")
+		if decision == "" || mainRecs.Specs[strings.TrimPrefix(spec, "spec/")] == nil {
+			return ""
+		}
+		return got.Docs[spec] + "#" + id
+	}
+	for _, p := range got.Supersessions {
+		var linkers []string
+		for name, spec := range mainRecs.Specs {
+			if _, links := supersedesEdges(spec)[p.Object]; links && !spec.Archived {
+				linkers = append(linkers, "spec/"+name)
+			}
+		}
+		switch b := p.ObjectBoard; {
+		case b.Branch != got.MainBranch:
+			t.Errorf("%s: object_board is on %q, want main's", p.Object, b.Branch)
+		case len(linkers) == 0 && (b.NotASurface == "" || b.URL != ""):
+			t.Errorf("%s: no spec on main links it, yet object_board %+v is a surface", p.Object, b)
+		case len(linkers) > 0 && !slices.Contains(linkers, b.Spec):
+			t.Errorf("%s: object_board shows %q, which does not link it; main's linkers are %v", p.Object, b.Spec, linkers)
+		}
+		if w := anchor(p.Decision); p.DecisionDocsURL != w {
+			t.Errorf("%s: decision_docs_url = %q, want %q", p.Object, p.DecisionDocsURL, w)
+		}
+		if w := anchor(p.EstablishingDecision); p.EstablishingDecisionDocsURL != w {
+			t.Errorf("%s: establishing_decision_docs_url = %q, want %q", p.Object, p.EstablishingDecisionDocsURL, w)
+		}
+		wantConflict := ""
+		if p.Conflict != "" && mainConflicts[p.Conflict] {
+			wantConflict = got.DocsURL + "a/" + p.Conflict + "/"
+		}
+		if p.ConflictDocsURL != wantConflict {
+			t.Errorf("%s: conflict_docs_url = %q, want %q", p.Object, p.ConflictDocsURL, wantConflict)
+		}
 	}
 }
 
@@ -1039,6 +1135,13 @@ func checkObjSupersedeBoards(t *testing.T, got objSupersedeStoreInfo) {
 		role string
 		v    objSupersedeBoard
 	}{{"checkout", got.Boards.Checkout}, {"design", got.Boards.Design}, {"main", got.Boards.Main}}
+	for _, p := range got.Supersessions {
+		views = append(views, struct {
+			role string
+			v    objSupersedeBoard
+		}{"object " + p.Object, p.ObjectBoard})
+	}
+	pages := map[string]string{}
 	for _, view := range views {
 		v := view.v
 		if v.NotASurface != "" {
@@ -1052,6 +1155,7 @@ func checkObjSupersedeBoards(t *testing.T, got objSupersedeStoreInfo) {
 			t.Errorf("%s board %s = %d, want 200", view.role, v.URL, status)
 			continue
 		}
+		pages[v.URL] = page
 		if title := "<h1>" + objSupersedeBoardTitle[v.Spec] + "</h1>"; !strings.Contains(page, title) {
 			t.Errorf("%s board %s lacks %s", view.role, v.URL, title)
 		}
@@ -1060,6 +1164,17 @@ func checkObjSupersedeBoards(t *testing.T, got objSupersedeStoreInfo) {
 		}
 		if strings.Contains(page, `data-testid="uncommitted-indicator">`) {
 			t.Errorf("%s board %s shows the uncommitted-changes indicator", view.role, v.URL)
+		}
+	}
+	// Each object's card renders on its object_board (re-review I-A), and on
+	// the checkout's board whenever the successor there links the object.
+	card := func(object string) string { return `data-ref="` + object + `"` }
+	for _, p := range got.Supersessions {
+		if b := p.ObjectBoard; b.URL != "" && !strings.Contains(pages[b.URL], card(p.Object)) {
+			t.Errorf("object_board %s renders no card for %s", b.URL, p.Object)
+		}
+		if p.Decision != "" && !strings.Contains(pages[got.Boards.Checkout.URL], card(p.Object)) {
+			t.Errorf("checkout board %s renders no card for %s, which %s links", got.Boards.Checkout.URL, p.Object, p.Decision)
 		}
 	}
 	if main := got.Boards.Main; main.URL != "" && got.Checkout != got.MainBranch {
@@ -1102,6 +1217,24 @@ func checkObjSupersedeDocs(t *testing.T, got objSupersedeStoreInfo) {
 		}
 		if !strings.Contains(body, `<a id="`+id+`"></a>`) || !strings.Contains(body, objSupersedeObjectText[p.Object]) {
 			t.Errorf("object page %s does not render %s's text %q at its anchor", p.ObjectDocsURL, p.Object, objSupersedeObjectText[p.Object])
+		}
+	}
+	// §6's link targets (re-review M-C): the deciding decisions' anchors and
+	// the conflict's page, wherever main carries them.
+	for _, p := range got.Supersessions {
+		for _, u := range []string{p.DecisionDocsURL, p.EstablishingDecisionDocsURL} {
+			if u == "" {
+				continue
+			}
+			page, id, _ := strings.Cut(u, "#")
+			if status, body := httpGetBody(t, page); status != http.StatusOK || !strings.Contains(body, `<a id="`+id+`"></a>`) {
+				t.Errorf("decision anchor %s = %d, want 200 with the anchor", u, status)
+			}
+		}
+		if u := p.ConflictDocsURL; u != "" {
+			if status, body := httpGetBody(t, u); status != http.StatusOK || !strings.Contains(body, p.Conflict) {
+				t.Errorf("conflict page %s = %d, want 200 naming %s", u, status, p.Conflict)
+			}
 		}
 	}
 	if _, onMain := got.Docs[got.Successor]; !onMain {

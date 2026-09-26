@@ -53,25 +53,41 @@ package main
 //	main_branch             "main", the default branch
 //	design_branch           the design branch that proposed "successor"
 //	successor               the spec under test at the checkout
-//	establishing_successor  the spec every conflict's resolved_by names: S in
-//	                        design §6's "superseded since … by spec/S#<decision-id>"
+//	establishing_successor  the spec the conflicts' resolved_by names — the
+//	                        successor whose conflicts the records point at; it
+//	                        is the establisher of §6's "superseded since … by
+//	                        spec/S#<decision-id>" only when the views say the
+//	                        supersession is in force (not in proposed or
+//	                        no-conflict, and not in chain-not-in-force)
 //	conflicts               the conflict refs at the checkout, sorted
 //	supersessions           every decision-to-object supersedes edge, sorted by object:
 //	  object                  the closed object, "spec/<closed>#<id>"
 //	  object_docs_url         its document page on the docs site, with its anchor
+//	  object_board            V: main's board that renders the object's reference
+//	                          card (SI-278: a board whose spec links it) — the
+//	                          successor's when main's copy still links it, else the
+//	                          establishing successor's; not a surface when no spec
+//	                          on main links it
 //	  decision                the successor's deciding decision, "" when the
 //	                          successor no longer carries the edge
+//	  decision_docs_url       that decision's anchor on the docs site, "" when
+//	                          main lacks it
 //	  establishing_decision   the establishing successor's decision on the edge
+//	  establishing_decision_docs_url
+//	                          its anchor on the docs site (§6's link to S's
+//	                          decision), "" when main lacks it
 //	  conflict                the conflict challenging the object, "" when none does
-//	boards                  {"checkout": V, "design": V, "main": V}, where V is
-//	                        {"branch", "spec", "url", "not_a_surface"} and exactly
-//	                        one of url and not_a_surface is non-empty
+//	  conflict_docs_url       its page on the docs site (§6's link to the
+//	                          conflict), "" when main lacks it
+//	boards                  {"checkout": V, "design": V, "main": V}: the successor's
+//	                        boards at the checkout, on its design branch, and on main
 //	docs                    spec ref -> its document page on the docs site: both
 //	                        closed specs, and each successor spec main carries
 //
-// These are record facts, not outcomes: whether an edge is in force,
-// carried, proposed, or refused is the objsupersede views' answer, which
-// the surfaces render. Per store:
+// V is {"branch", "spec", "url", "not_a_surface"}; exactly one of url and
+// not_a_surface is non-empty. These are record facts, not outcomes: whether
+// an edge is in force, carried, proposed, or refused is the objsupersede
+// views' answer, which the surfaces render. Per store:
 //
 //	store               checkout             successor          main board
 //	accepted            main                 spec/successor     the checkout's board
@@ -91,14 +107,18 @@ package main
 // closed object: the closed specs are archived and archived specs have no
 // board (ADJ-39), and a closed object renders on a board only as a
 // reference card on a board whose spec links it (SI-278), which no spec on
-// main does. So their main board is reported as not a surface, never as a
-// URL that 404s by design; "the default branch shows nothing" is asserted
-// on the docs site's closed-spec document pages, where the object itself
-// renders. The one /b/main URL handed out, chain-not-in-force's main board
-// (main carries its accepted spec/successor), relies on the workbench
-// cutting a managed worktree named "main" for the default branch — outside
-// the managed-worktree domain's design-branch naming (wtmanager naming.go
-// dc-1; `verdi gc` would map that directory back to design/main).
+// main does. So their main board and every object_board are reported as
+// not a surface, never as a URL that 404s by design; "the default branch
+// shows nothing" is asserted on the docs site's closed-spec document
+// pages, where the object itself renders. An object main's successor no
+// longer carries (chain-drop's spec/closed-feature#dc-1) renders only on
+// the establishing successor's board, which its object_board names. The
+// /b/main URLs handed out — chain-not-in-force's main board and
+// object_boards (main carries its accepted spec/successor) — rely on the
+// workbench cutting a managed worktree named "main" for the default
+// branch, outside the managed-worktree domain's design-branch naming
+// (wtmanager naming.go dc-1; `verdi gc` would map that directory back to
+// design/main).
 
 import (
 	"context"
@@ -241,11 +261,15 @@ type objSupersedeStoreInfo struct {
 
 // objSupersedeSupersession is one decision-to-object supersedes edge.
 type objSupersedeSupersession struct {
-	Object               string `json:"object"`
-	ObjectDocsURL        string `json:"object_docs_url"`
-	Decision             string `json:"decision"`
-	EstablishingDecision string `json:"establishing_decision"`
-	Conflict             string `json:"conflict"`
+	Object                      string            `json:"object"`
+	ObjectDocsURL               string            `json:"object_docs_url"`
+	ObjectBoard                 objSupersedeBoard `json:"object_board"`
+	Decision                    string            `json:"decision"`
+	DecisionDocsURL             string            `json:"decision_docs_url"`
+	EstablishingDecision        string            `json:"establishing_decision"`
+	EstablishingDecisionDocsURL string            `json:"establishing_decision_docs_url"`
+	Conflict                    string            `json:"conflict"`
+	ConflictDocsURL             string            `json:"conflict_docs_url"`
 }
 
 // objSupersedeBoards is a store's three board views.
@@ -304,10 +328,39 @@ func newObjSupersedeStoreInfo(name, checkout, mainBranch, mainCommit, serveURL, 
 	for _, ref := range facts.mainSuccessors {
 		info.Docs[ref] = document(ref)
 	}
+	// What main carries: its successor specs and — shipped with the
+	// establishing successor's acceptance — the conflicts. The Happy test
+	// checks both against main's own records.
+	onMain := map[string]bool{}
+	for _, ref := range facts.mainSuccessors {
+		onMain[ref] = true
+	}
+	anchor := func(object string) string {
+		spec, id, _ := strings.Cut(object, "#")
+		if !onMain[spec] {
+			return ""
+		}
+		return document(spec) + "#" + id
+	}
 	conflicts := map[string]bool{}
 	for _, p := range facts.pairs {
 		spec, id, _ := strings.Cut(p.Object, "#")
 		p.ObjectDocsURL = document(spec) + "#" + id
+		p.DecisionDocsURL = anchor(p.Decision)
+		p.EstablishingDecisionDocsURL = anchor(p.EstablishingDecision)
+		if p.Conflict != "" && onMain[osEstablisher] {
+			p.ConflictDocsURL = docsURL + "a/" + p.Conflict + "/"
+		}
+		// The object's card renders on the board of a spec that links it:
+		// main's copy of the successor when it still does, else the
+		// establishing successor's.
+		p.ObjectBoard = objSupersedeBoard{Branch: mainBranch, NotASurface: objSupersedeNoMainBoard}
+		for _, linking := range []string{p.Decision, p.EstablishingDecision} {
+			if linker, _, _ := strings.Cut(linking, "#"); linking != "" && onMain[linker] {
+				p.ObjectBoard = board(mainBranch, linker)
+				break
+			}
+		}
 		info.Supersessions = append(info.Supersessions, p)
 		if p.Conflict != "" && !conflicts[p.Conflict] {
 			conflicts[p.Conflict] = true
