@@ -158,20 +158,44 @@ func (e *supersessionEnrichment) attach(proj *BoardProjection) {
 const (
 	heightTextLinePx   = 17 // .refcard-object-text: 0.78rem × 1.35
 	heightTextChars    = 24 // a sans line of the 12.5rem card, with slack
-	heightTextMaxLines = 3  // -webkit-line-clamp: 3
 	heightLinePx       = 16 // .objsupersede-lines li: 0.68rem × 1.35
 	heightLineChars    = 24 // a mono line of the card, with slack
 	heightLineGapPx    = 3  // .objsupersede-lines gap 0.2rem
 	heightBlockGapPx   = 7  // the list's and the text's 0.4rem margin
 	heightPeekCuePx    = 22 // .refcard--object's 1.35rem room for the peek cue
+	heightBadgeRowPx   = 18 // one .card-badges row in flow: a 0.56rem chip with its border, plus the row gap
+	heightBadgesPerRow = 2  // chips are about half a card wide
 )
 
-// wrappedLines is how many visual lines n characters take at chars per line.
-func wrappedLines(n, chars int) float64 {
-	if n <= 0 {
+// wrappedLines is how many visual lines text takes at chars per line
+// under word wrap: tokens (whitespace-separated) move to the next line
+// whole when they do not fit, and a token longer than a line breaks
+// anywhere (overflow-wrap: anywhere). Word wrap wastes the tail of a line
+// a character count never sees — two 15-character tokens need two
+// 24-character lines, not one and a bit — so this is the conservative
+// figure the layout reserves (the board closure's C-4).
+func wrappedLines(text string, chars int) float64 {
+	tokens := strings.Fields(text)
+	if len(tokens) == 0 {
 		return 0
 	}
-	return math.Ceil(float64(n) / float64(chars))
+	lines, used := 1, 0
+	for _, tok := range tokens {
+		n := utf8.RuneCountInString(tok)
+		if used > 0 && used+1+n <= chars {
+			used += 1 + n
+			continue
+		}
+		if used > 0 {
+			lines++
+		}
+		for n > chars { // an unbreakable token breaks anywhere across lines
+			lines++
+			n -= chars
+		}
+		used = n
+	}
+	return float64(lines)
 }
 
 // linesHeightPx is the height of the views' §6 lines as rendered in an
@@ -182,11 +206,11 @@ func linesHeightPx(views []supersessionView) float64 {
 	for _, v := range views {
 		h += heightBlockGapPx
 		for _, l := range v.Lines {
-			n := utf8.RuneCountInString(l.Text)
+			text := l.Text
 			for _, t := range l.Trailing {
-				n += 1 + utf8.RuneCountInString(t.Ref)
+				text += " " + t.Ref
 			}
-			h += wrappedLines(n, heightLineChars)*heightLinePx + heightLineGapPx
+			h += wrappedLines(text, heightLineChars)*heightLinePx + heightLineGapPx
 		}
 	}
 	return h
@@ -194,23 +218,31 @@ func linesHeightPx(views []supersessionView) float64 {
 
 // refCardHeightPx is a reference card's rendered height: the uniform
 // footprint, or, for a card carrying its object (SI-278), the footprint
-// plus the object's clamped text, the lines, and the peek cue's room.
+// plus the object's FULL original text (never clamped: "its original
+// text, unchanged"), the lines, and the peek cue's room.
 func refCardHeightPx(rc refCardView) float64 {
 	if rc.Object == nil {
 		return boardlayout.RefCardHeight
 	}
-	text := math.Min(heightTextMaxLines, wrappedLines(utf8.RuneCountInString(rc.Object.Text), heightTextChars))
+	text := wrappedLines(rc.Object.Text, heightTextChars)
 	return boardlayout.RefCardHeight + heightBlockGapPx + text*heightTextLinePx + linesHeightPx([]supersessionView{rc.Object.Supersession}) + heightPeekCuePx
 }
 
 // cardHeightPx is an object card's rendered height: the uniform
 // footprint, or, for a decision card carrying its views, the footprint
-// plus the lines.
+// plus the lines and — when the card also wears wall badges, which then
+// sit in flow above the lines instead of pinned over them — the badge
+// rows (the docs closure's B-1).
 func cardHeightPx(c cardView) float64 {
 	if len(c.Supersessions) == 0 {
 		return boardlayout.CardHeight
 	}
-	return boardlayout.CardHeight + linesHeightPx(c.Supersessions)
+	h := boardlayout.CardHeight + linesHeightPx(c.Supersessions)
+	if n := len(c.Badges); n > 0 {
+		rows := math.Ceil(float64(n) / heightBadgesPerRow)
+		h += heightBlockGapPx + rows*heightBadgeRowPx
+	}
+	return h
 }
 
 // boardSupersessionLinks resolves each non-empty ref to its board-side

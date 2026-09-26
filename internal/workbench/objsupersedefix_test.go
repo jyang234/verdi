@@ -2,12 +2,14 @@ package workbench
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
@@ -187,5 +189,134 @@ func TestLoadDocument_PerBranchLinksNoCorpusPage(t *testing.T) {
 	}
 	if strings.Contains(snap.Markdown, `href="/a/`) {
 		t.Fatalf("the per-branch Document tab links a corpus page it cannot serve:\n%s", snap.Markdown)
+	}
+}
+
+// TestWrappedLines (the board closure's C-4): the estimate simulates word
+// wrap — the reviewer's witness, tokens of about 15 characters, needs one
+// line each at 24 characters per line, where a character count sees two
+// per line — and breaks an unbreakable token anywhere.
+func TestWrappedLines(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       float64
+	}{
+		{"empty", "", 0},
+		{"one short token", "x", 1},
+		{"fits one line", "supersedes spec/t#dc-1", 1},
+		{"three 15-character tokens: one per line", "aaaaaaaaaaaaaaa bbbbbbbbbbbbbbb ccccccccccccccc", 3},
+		{"the reviewer's shape: 2 per line by count, 1 per line by wrap", strings.Repeat("abcdefghijklmno ", 6), 6},
+		{"an unbreakable 50-character token breaks across three lines", strings.Repeat("x", 50), 3},
+		{"a long token after a short one", "ab " + strings.Repeat("y", 30), 3},
+		{"exactly 24 characters fill one line", strings.Repeat("z", 24), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wrappedLines(tc.text, 24); got != tc.want {
+				t.Errorf("wrappedLines(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+	// A card estimate is never below the character-count estimate.
+	long := strings.Repeat("abcdefghijklmno ", 6)
+	if wrappedLines(long, 24) < math.Ceil(float64(len(strings.TrimSpace(long)))/24) {
+		t.Errorf("word wrap estimated fewer lines than a character count")
+	}
+}
+
+// TestCardHeights_BadgesAndFullText: a decision card with lines and wall
+// badges reserves the badge rows (the docs closure's B-1); a reference
+// card reserves its whole original text (minor d), never a clamp.
+func TestCardHeights_BadgesAndFullText(t *testing.T) {
+	lines := []supersessionView{{State: "not-established", Lines: []supersessionLineView{{Kind: "not-established", Text: "supersession not established: the object spec/closed-feature#co-1 is not an acceptance criterion or a decision"}}}}
+	plain := cardView{ID: "dc-1", Kind: "decision", Supersessions: lines}
+	badged := cardView{ID: "dc-1", Kind: "decision", Supersessions: lines, Badges: []badgeView{{Source: "lint:VL-026", Label: "VL-026"}}}
+	if cardHeightPx(badged) <= cardHeightPx(plain) {
+		t.Errorf("a badge row added no height: %v vs %v", cardHeightPx(badged), cardHeightPx(plain))
+	}
+	three := badged
+	three.Badges = append(three.Badges, badgeView{Label: "b"}, badgeView{Label: "c"})
+	if cardHeightPx(three) <= cardHeightPx(badged) {
+		t.Errorf("a second badge row added no height: %v vs %v", cardHeightPx(three), cardHeightPx(badged))
+	}
+	// Badges alone (no lines) leave the footprint: they stay pinned at the foot.
+	if got := cardHeightPx(cardView{ID: "ac-1", Kind: "acceptance-criterion", Badges: badged.Badges}); got != 140 {
+		t.Errorf("badges without lines changed the footprint: %v", got)
+	}
+	short := refCardView{Ref: obsFeatureObject, Object: &refObjectView{Text: "short", Supersession: supersessionView{State: "unproven", Lines: []supersessionLineView{{Kind: "unproven", Text: "supersession unproven: w"}}}}}
+	long := short
+	long.Object = &refObjectView{Text: strings.Repeat("a long original criterion text ", 8), Supersession: short.Object.Supersession}
+	if refCardHeightPx(long)-refCardHeightPx(short) < 8*heightTextLinePx {
+		t.Errorf("the reference card clamps the original text in its estimate: %v vs %v", refCardHeightPx(long), refCardHeightPx(short))
+	}
+}
+
+// TestLaneLanding_ClearsReservedHeights (the board closure's C-3): a new
+// sticky in the decision lane and a new pin in the reference lane land
+// below the cards' reserved heights, never on a card's lines.
+func TestLaneLanding_ClearsReservedHeights(t *testing.T) {
+	neutralizeCIEnv(t)
+	repo := scenario.Build(t, "accepted")
+	p := obsBoard(t, repo.Dir, "successor")
+	var lowest *cardView
+	for i := range p.Cards {
+		c := &p.Cards[i]
+		if c.Kind == "decision" && (lowest == nil || c.Y+cardHeightPx(*c) > lowest.Y+cardHeightPx(*lowest)) {
+			lowest = c
+		}
+	}
+	if lowest == nil || len(lowest.Supersessions) == 0 {
+		t.Fatal("no decision card with lines on the accepted board")
+	}
+	_, y := stickyLanePosition(p, artifact.AnnotationDecisionNeeded)
+	if y < lowest.Y+cardHeightPx(*lowest) {
+		t.Errorf("a decision-needed sticky lands at y=%v, inside %s's reserved height (y=%v, h=%v)", y, lowest.ID, lowest.Y, cardHeightPx(*lowest))
+	}
+	if y < lowest.Y+boardlayout.CardHeight+1 {
+		t.Errorf("the landing used the bare footprint: y=%v", y)
+	}
+	var lowestRef *refCardView
+	for i := range p.RefCards {
+		rc := &p.RefCards[i]
+		if lowestRef == nil || rc.Y+refCardHeightPx(*rc) > lowestRef.Y+refCardHeightPx(*lowestRef) {
+			lowestRef = rc
+		}
+	}
+	if lowestRef == nil || lowestRef.Object == nil {
+		t.Fatal("no reference card with an object on the accepted board")
+	}
+	_, py := laneBottomPosition(p, referenceLane())
+	if py < lowestRef.Y+refCardHeightPx(*lowestRef) {
+		t.Errorf("a pin lands at y=%v, inside %s's reserved height (y=%v, h=%v)", py, lowestRef.Ref, lowestRef.Y, refCardHeightPx(*lowestRef))
+	}
+}
+
+// TestLoadSealed_DisclosesMissingLines (the board closure's C-5): the
+// sealed render of a remote-only branch computes no views and says so in
+// its disclosure — never silence.
+func TestLoadSealed_DisclosesMissingLines(t *testing.T) {
+	neutralizeCIEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "proposed") // design/successor exists locally; make it remote-only
+	gitIn(t, repo.Dir, "checkout", "-q", "main")
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/design/successor", "design/successor")
+	gitIn(t, repo.Dir, "branch", "-q", "-D", "design/successor")
+	bb := newBranchBoards(repo.Dir, Deps{}, &boardSpecServer{root: repo.Dir})
+	proj, _, err := bb.loadSealed(ctx, "design/successor", "origin/design/successor", "successor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, n := range proj.Notices {
+		if strings.Contains(n, "closed-spec object supersession lines (design §6) are not computed on this sealed render") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the sealed board's notices do not disclose the missing lines: %q", proj.Notices)
+	}
+	for _, c := range proj.Cards {
+		if len(c.Supersessions) != 0 {
+			t.Fatalf("the sealed board carries views it says it does not compute: %+v", c.Supersessions)
+		}
 	}
 }

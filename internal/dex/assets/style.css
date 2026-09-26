@@ -483,16 +483,23 @@ footer.site-foot {
    room for its peek cue below them. */
 .refcard.refcard--object { height: auto; min-height: 4.5rem; padding-bottom: 1.35rem; } /* two classes: outranks .refcard's fixed height, which follows in this file */
 .objcard:has(.objsupersede-lines) { height: auto; min-height: 8.75rem; }
+/* the object's ORIGINAL text, whole (SI-278: "its original text,
+   unchanged"): no clamp, and an unbreakable token wraps inside the card */
 .refcard-object-text {
   margin: 0.4rem 0 0;
   font-family: var(--sans);
   font-size: 0.78rem;
   line-height: 1.35;
   color: var(--ink);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* a decision card that carries lines AND wall badges keeps the badge row
+   in flow, above the lines, instead of pinned over them at the card's
+   foot (the docs closure's B-1); cardHeightPx counts the rows */
+.objcard:has(.objsupersede-lines) .card-badges {
+  position: static;
+  margin: 0.4rem 0 0;
 }
 .objsupersede-lines {
   list-style: none;
@@ -501,8 +508,8 @@ footer.site-foot {
   display: grid;
   gap: 0.2rem;
 }
-.objsupersede-lines li { font-size: 0.68rem; line-height: 1.35; }
-.objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; }
+.objsupersede-lines li { font-size: 0.68rem; line-height: 1.35; overflow-wrap: anywhere; }
+.objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
 .objsupersede-lines .objsupersede-conflict { font-size: 0.66rem; margin-left: 0.3rem; }
 
 /* the board's Document tab (spec/spec-documents ac-4): a reading
