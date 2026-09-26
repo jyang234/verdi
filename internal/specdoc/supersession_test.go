@@ -401,3 +401,37 @@ func TestSupersession_DisclosureLines(t *testing.T) {
 		t.Errorf("an in-force edge line is marked as a disclosure: %+v, %v", s.Lines, err)
 	}
 }
+
+// TestSupersessionLineMarkdown_NoAutolinks (lane L5 fix pass 2, item 12):
+// a bare URL, a www. host or an email address in a witness never becomes
+// a GFM autolink — a link the surface did not vet — and renders as
+// written.
+func TestSupersessionLineMarkdown_NoAutolinks(t *testing.T) {
+	witness := "see https://example.com/x and www.example.org and a@b.io"
+	fm, body := fixtureSpec(t)
+	commit := strings.Repeat("0", 39) + "1"
+	facts := &SupersessionFacts{Objects: map[string]objsupersede.ObjectView{"dc-1": {Object: "spec/lockbox#dc-1", State: objsupersede.ObjectUnproven, Witness: witness}}}
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: Facts{Supersession: facts}, Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := RenderMarkdown(doc)
+	if !strings.Contains(md, `see https\://example.com/x and www\.example.org and a\@b.io`) {
+		t.Errorf("markdown lacks the escaped witness:\n%s", md)
+	}
+	html, err := RenderHTML(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(html, `data-testid="objsupersede-dc-1-unproven"`)
+	if start < 0 {
+		t.Fatalf("html lacks the line:\n%s", html)
+	}
+	line := html[start : start+strings.Index(html[start:], "</span>")]
+	if strings.Contains(line, "<a ") {
+		t.Errorf("the engine autolinked the witness:\n%s", line)
+	}
+	if !strings.Contains(line, "see https://example.com/x and www.example.org and a@b.io") {
+		t.Errorf("the witness is not rendered as written:\n%s", line)
+	}
+}

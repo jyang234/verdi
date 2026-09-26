@@ -228,7 +228,7 @@ var textEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 // strikethrough, and the escape character itself — so a line's text is
 // rendered as written. A canonical ref carries none of these characters,
 // so the token links stay whole.
-var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "~", `\~`)
+var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "~", `\~`, "://", `\://`, "www.", `www\.`, "@", `\@`)
 
 // replaceToken replaces the first whole-token occurrence of ref in text
 // (containsToken's boundary rule) with repl; text is returned unchanged
