@@ -39,15 +39,20 @@ type Supersession struct {
 // SupersessionLine is one §6 line. Text is the view's line, verbatim.
 // Kind names the line's place in its view, for surfaces and tests:
 // governed, since, carry, or unproven for an object view; edge, carries,
-// or not-established for a decision view. Links are the refs the text
-// names, linked in place; Trailing are links rendered after the text —
-// an object view's establishing conflict beside the line naming its
-// deciding decision (§6: "linking to S's decision and to the conflict").
+// or not-established for a decision view. Disclosure marks a line that
+// is a disclosure rather than a §6 text (SI-279: an unproven
+// supersession or carry, a not-established reason), so surfaces can
+// render it in the muted disclosure register. Links are the refs the
+// text names, linked in place; Trailing are links rendered after the
+// text — an object view's establishing conflict beside the line naming
+// its deciding decision (§6: "linking to S's decision and to the
+// conflict").
 type SupersessionLine struct {
-	Kind     string
-	Text     string
-	Links    []RefLink
-	Trailing []RefLink
+	Kind       string
+	Text       string
+	Disclosure bool
+	Links      []RefLink
+	Trailing   []RefLink
 }
 
 // RefLink is a canonical ref and its URL on the rendering surface.
@@ -79,7 +84,8 @@ func ObjectSupersession(v objsupersede.ObjectView, links map[string]string) (*Su
 		// Links ride the §6 texts only: the deciding decision and the
 		// conflict on the since line, the revision on a carried or
 		// dropped carry line. A disclosure (an unproven supersession or
-		// carry; SI-279) is left as it reads.
+		// carry; SI-279) is left as it reads and marked as one.
+		line.Disclosure = kinds[i] == "unproven" || (kinds[i] == "carry" && v.Carry == objsupersede.CarryUnproven)
 		switch {
 		case kinds[i] == "since":
 			line.Links = namedLinks(text, links, v.By)
@@ -109,11 +115,11 @@ func DecisionSupersession(v objsupersede.DecisionView, links map[string]string) 
 		if i >= len(kinds) {
 			return Supersession{}, fmt.Errorf("specdoc: the %s view of %s's edge %s rendered %d lines, more than its state has", v.State, v.Decision, v.Edge, len(texts))
 		}
-		line := SupersessionLine{Kind: kinds[i], Text: text}
+		line := SupersessionLine{Kind: kinds[i], Text: text, Disclosure: kinds[i] == "not-established"}
 		// Links ride the §6 and §5 texts only: the object on the edge
 		// line, the establishing successor and its conflict on the
 		// carries line. A not-established reason (SI-279) is left as it
-		// reads.
+		// reads and marked as a disclosure.
 		switch kinds[i] {
 		case "edge":
 			line.Links = namedLinks(text, links, v.Object)
@@ -176,14 +182,37 @@ func refByte(b byte) bool {
 // line's kind, and the view's state; trailing links follow the span.
 // Markup only — no word is added to or taken from the line.
 func SupersessionLineMarkup(stem string, s Supersession, line SupersessionLine) string {
-	text := textEscaper.Replace(line.Text)
+	return supersessionLineMarkup(stem, s, line, false)
+}
+
+// SupersessionLineMarkdown is SupersessionLineMarkup for the Markdown
+// text form: the same inline HTML, with the text's Markdown-significant
+// punctuation backslash-escaped so a witness that carries backticks,
+// asterisks, underscores, brackets or backslashes renders literally
+// through the store's engine, never as code, emphasis or a link (the L5
+// docs review's M-2). The engine unescapes them, so the HTML it produces
+// equals SupersessionLineMarkup's.
+func SupersessionLineMarkdown(stem string, s Supersession, line SupersessionLine) string {
+	return supersessionLineMarkup(stem, s, line, true)
+}
+
+func supersessionLineMarkup(stem string, s Supersession, line SupersessionLine, markdown bool) string {
+	escape := textEscaper.Replace
+	if markdown {
+		escape = func(t string) string { return markdownEscaper.Replace(textEscaper.Replace(t)) }
+	}
+	text := escape(line.Text)
 	for _, l := range line.Links {
-		text = replaceToken(text, textEscaper.Replace(l.Ref), `<a href="`+escapeAttr(l.URL)+`">`+textEscaper.Replace(l.Ref)+`</a>`)
+		text = replaceToken(text, escape(l.Ref), `<a href="`+escapeAttr(l.URL)+`">`+escape(l.Ref)+`</a>`)
+	}
+	class := "objsupersede objsupersede--" + escapeAttr(s.State)
+	if line.Disclosure {
+		class += " objsupersede--disclosure"
 	}
 	var b strings.Builder
-	b.WriteString(`<span class="objsupersede objsupersede--` + escapeAttr(s.State) + `" data-testid="objsupersede-` + escapeAttr(stem) + `-` + escapeAttr(line.Kind) + `" data-state="` + escapeAttr(s.State) + `">` + text + `</span>`)
+	b.WriteString(`<span class="` + class + `" data-testid="objsupersede-` + escapeAttr(stem) + `-` + escapeAttr(line.Kind) + `" data-state="` + escapeAttr(s.State) + `">` + text + `</span>`)
 	for _, l := range line.Trailing {
-		b.WriteString(` <a class="objsupersede-conflict" data-testid="objsupersede-` + escapeAttr(stem) + `-conflict" href="` + escapeAttr(l.URL) + `">` + textEscaper.Replace(l.Ref) + `</a>`)
+		b.WriteString(` <a class="objsupersede-conflict" data-testid="objsupersede-` + escapeAttr(stem) + `-conflict" href="` + escapeAttr(l.URL) + `">` + escape(l.Ref) + `</a>`)
 	}
 	return b.String()
 }
@@ -193,6 +222,13 @@ func SupersessionLineMarkup(stem string, s Supersession, line SupersessionLine) 
 // apostrophe or a quote in a §6 text ("spec/T's completed work") stays
 // verbatim in the Markdown form.
 var textEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// markdownEscaper backslash-escapes the ASCII punctuation CommonMark and
+// GFM read as inline syntax — code spans, emphasis, links, images,
+// strikethrough, and the escape character itself — so a line's text is
+// rendered as written. A canonical ref carries none of these characters,
+// so the token links stay whole.
+var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "~", `\~`)
 
 // replaceToken replaces the first whole-token occurrence of ref in text
 // (containsToken's boundary rule) with repl; text is returned unchanged

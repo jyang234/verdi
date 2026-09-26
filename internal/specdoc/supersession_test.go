@@ -80,14 +80,14 @@ func TestBuild_SupersessionObjects(t *testing.T) {
 		{"carrying unproven: the witness, unlinked", unprovenCarry, &Supersession{State: "superseded", Lines: []SupersessionLine{
 			{Kind: "governed", Text: "governed spec/lockbox's completed work (closed 2024-01-10)"},
 			{Kind: "since", Text: "superseded since 2024-02-15 by spec/s1#dc-1", Links: []RefLink{{tsBy, "/a/spec/s1/document/#dc-1"}}, Trailing: []RefLink{{tsConflict, "/a/conflict/c1/"}}},
-			{Kind: "carry", Text: "carrying unproven: spec/s2 is not accepted"},
+			{Kind: "carry", Text: "carrying unproven: spec/s2 is not accepted", Disclosure: true},
 		}}},
 		{"closed date unproven: the views' text, never a guessed date", closedUnproven, &Supersession{State: "superseded", Lines: []SupersessionLine{
 			{Kind: "governed", Text: "governed spec/lockbox's completed work (closed date unproven: shallow history)"},
 			{Kind: "since", Text: "superseded since 2024-02-15 by spec/s1#dc-1", Links: []RefLink{{tsBy, "/a/spec/s1/document/#dc-1"}}, Trailing: []RefLink{{tsConflict, "/a/conflict/c1/"}}},
 		}}},
 		{"supersession unproven", objsupersede.ObjectView{Object: tsObject, State: objsupersede.ObjectUnproven, Witness: "records do not decode: x"},
-			&Supersession{State: "unproven", Lines: []SupersessionLine{{Kind: "unproven", Text: "supersession unproven: records do not decode: x"}}}},
+			&Supersession{State: "unproven", Lines: []SupersessionLine{{Kind: "unproven", Text: "supersession unproven: records do not decode: x", Disclosure: true}}}},
 		{"not superseded: nothing added", objsupersede.ObjectView{Object: tsObject, State: objsupersede.ObjectNotSuperseded}, nil},
 	}
 	for _, tc := range tests {
@@ -180,10 +180,10 @@ func TestBuild_SupersessionDecisions(t *testing.T) {
 			{Kind: "carries", Text: "carries the replacement established by spec/s1 (conflict/c1, since 2024-02-15)", Links: []RefLink{{"spec/s1", "/a/spec/s1/document/"}, {tsConflict, "/a/conflict/c1/"}}},
 		}}}},
 		{"not established: the reason, never a supersession", []objsupersede.DecisionView{notEst}, []Supersession{{State: "not-established", Object: "spec/t#dc-1", Lines: []SupersessionLine{
-			{Kind: "not-established", Text: "supersession not established: no conflict challenges spec/t#dc-1"},
+			{Kind: "not-established", Text: "supersession not established: no conflict challenges spec/t#dc-1", Disclosure: true},
 		}}}},
 		{"two edges keep link order", []objsupersede.DecisionView{notEst, inForce}, []Supersession{
-			{State: "not-established", Object: "spec/t#dc-1", Lines: []SupersessionLine{{Kind: "not-established", Text: "supersession not established: no conflict challenges spec/t#dc-1"}}},
+			{State: "not-established", Object: "spec/t#dc-1", Lines: []SupersessionLine{{Kind: "not-established", Text: "supersession not established: no conflict challenges spec/t#dc-1", Disclosure: true}}},
 			{State: "in-force", Object: "spec/t#dc-1", Lines: []SupersessionLine{{Kind: "edge", Text: "supersedes spec/t#dc-1", Links: []RefLink{{"spec/t#dc-1", "/a/spec/t/document/#dc-1"}}}}},
 		}},
 		{"no views: nothing added", nil, nil},
@@ -256,7 +256,7 @@ func TestRenderMarkdown_Supersession(t *testing.T) {
 			"   - <span class=\"objsupersede objsupersede--superseded\" data-testid=\"objsupersede-ac-1-carry\" data-state=\"superseded\">carried by <a href=\"/a/spec/s2/document/\">spec/s2</a></span>\n",
 		// The decision: its own object view, then its edge views, before its rationale.
 		"### dc-1 — One holder per key. <a id=\"dc-1\"></a>\n\n" +
-			"- <span class=\"objsupersede objsupersede--unproven\" data-testid=\"objsupersede-dc-1-unproven\" data-state=\"unproven\">supersession unproven: shallow &lt;history&gt;</span>\n" +
+			"- <span class=\"objsupersede objsupersede--unproven objsupersede--disclosure\" data-testid=\"objsupersede-dc-1-unproven\" data-state=\"unproven\">supersession unproven: shallow &lt;history&gt;</span>\n" +
 			"- <span class=\"objsupersede objsupersede--in-force\" data-testid=\"objsupersede-dc-1-spec-t-dc-1-edge\" data-state=\"in-force\">supersedes <a href=\"/a/spec/t/document/#dc-1?q=&quot;x&quot;\">spec/t#dc-1</a></span>\n" +
 			"- <span class=\"objsupersede objsupersede--in-force\" data-testid=\"objsupersede-dc-1-spec-t-dc-1-carries\" data-state=\"in-force\">carries the replacement established by <a href=\"/a/spec/s1/document/\">spec/s1</a> (<a href=\"/a/conflict/c1/\">conflict/c1</a>, since 2024-02-15)</span>\n\n",
 	} {
@@ -303,5 +303,101 @@ func TestRenderMarkdown_SupersessionAbsentIsByteIdentical(t *testing.T) {
 	}
 	if RenderMarkdown(base) != RenderMarkdown(empty) {
 		t.Errorf("an empty supply changed the bytes:\n%s", RenderMarkdown(empty))
+	}
+}
+
+// TestSupersessionLineMarkdown_EscapesInlineSyntax (the L5 docs review's
+// M-2): a witness or reason carrying Markdown inline syntax — backticks,
+// asterisks, underscores, brackets, backslashes, angle brackets — renders
+// literally through the store's engine, never as code, emphasis, a link
+// or a tag, and the HTML the engine produces equals the HTML-surface
+// markup (SupersessionLineMarkup) for the same line.
+func TestSupersessionLineMarkdown_EscapesInlineSyntax(t *testing.T) {
+	witness := "run `git remote set-head origin <branch>` and *retry* a_b\\c [x](y) ~z~ & done"
+	fm, body := fixtureSpec(t)
+	commit := strings.Repeat("0", 39) + "1"
+	facts := &SupersessionFacts{Objects: map[string]objsupersede.ObjectView{"dc-1": {Object: "spec/lockbox#dc-1", State: objsupersede.ObjectUnproven, Witness: witness}}}
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: Facts{Supersession: facts}, Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := RenderMarkdown(doc)
+	wantMD := `<span class="objsupersede objsupersede--unproven objsupersede--disclosure" data-testid="objsupersede-dc-1-unproven" data-state="unproven">supersession unproven: run ` + "\\`" + `git remote set-head origin &lt;branch&gt;` + "\\`" + ` and \*retry\* a\_b\\c \[x\](y) \~z\~ &amp; done</span>`
+	if !strings.Contains(md, wantMD) {
+		t.Errorf("markdown lacks the escaped line:\n%s\n--- got ---\n%s", wantMD, md)
+	}
+	html, err := RenderHTML(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHTML := `<span class="objsupersede objsupersede--unproven objsupersede--disclosure" data-testid="objsupersede-dc-1-unproven" data-state="unproven">supersession unproven: run ` + "`" + `git remote set-head origin &lt;branch&gt;` + "`" + ` and *retry* a_b\c [x](y) ~z~ &amp; done</span>`
+	if !strings.Contains(html, wantHTML) {
+		t.Errorf("html lacks the literal line:\n%s\n--- got ---\n%s", wantHTML, html)
+	}
+	// Within the line itself (the document carries code spans of its own
+	// elsewhere), no syntax was read.
+	start := strings.Index(html, `data-testid="objsupersede-dc-1-unproven"`)
+	if start < 0 {
+		t.Fatalf("html lacks the line:\n%s", html)
+	}
+	line := html[start : start+strings.Index(html[start:], "</span>")]
+	for _, bad := range []string{"<code>", "<em>", "<del>", "<a "} {
+		if strings.Contains(line, bad) {
+			t.Errorf("the engine read the witness as syntax (%s):\n%s", bad, line)
+		}
+	}
+	// The HTML surface's markup for the same line is what the engine produced.
+	if got := SupersessionLineMarkup("dc-1", *doc.Decisions[0].Supersession, doc.Decisions[0].Supersession.Lines[0]); got != wantHTML {
+		t.Errorf("SupersessionLineMarkup differs from the engine's HTML:\n got %s\nwant %s", got, wantHTML)
+	}
+}
+
+// TestSupersession_DisclosureLines (the L5 docs review's M-5): unproven
+// disclosures — an unproven supersession, an unproven carry, a
+// not-established reason (SI-279) — are marked as disclosures and render
+// in the muted disclosure register; §6 lines are not.
+func TestSupersession_DisclosureLines(t *testing.T) {
+	carried := tsSuperseded()
+	carried.Carry, carried.Revision = objsupersede.CarryCarried, tsRevision
+	unprovenCarry := tsSuperseded()
+	unprovenCarry.Carry, unprovenCarry.Revision, unprovenCarry.Witness = objsupersede.CarryUnproven, tsRevision, "spec/s2 is not accepted"
+	for _, tc := range []struct {
+		name string
+		view objsupersede.ObjectView
+		want []bool // per line
+	}{
+		{"superseded, carried: §6 lines only", carried, []bool{false, false, false}},
+		{"carrying unproven: the carry line is a disclosure", unprovenCarry, []bool{false, false, true}},
+		{"supersession unproven", objsupersede.ObjectView{Object: tsObject, State: objsupersede.ObjectUnproven, Witness: "w"}, []bool{true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := ObjectSupersession(tc.view, tsLinks())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []bool
+			for _, l := range s.Lines {
+				got = append(got, l.Disclosure)
+				markup := SupersessionLineMarkup("x", *s, l)
+				if strings.Contains(markup, "objsupersede--disclosure") != l.Disclosure {
+					t.Errorf("line %q: disclosure class present=%v, want %v", l.Text, !l.Disclosure, l.Disclosure)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("disclosure flags = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	notEst := objsupersede.DecisionView{Decision: "spec/lockbox#dc-1", Edge: "spec/t#dc-1", Object: "spec/t#dc-1", State: objsupersede.DecisionNotEstablished, Reason: "no conflict challenges spec/t#dc-1"}
+	s, err := DecisionSupersession(notEst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Lines) != 1 || !s.Lines[0].Disclosure {
+		t.Errorf("a not-established reason is not marked as a disclosure: %+v", s.Lines)
+	}
+	inForce := objsupersede.DecisionView{Decision: "spec/lockbox#dc-1", Edge: "spec/t#dc-1", Object: "spec/t#dc-1", State: objsupersede.DecisionInForce}
+	if s, err := DecisionSupersession(inForce, nil); err != nil || s.Lines[0].Disclosure {
+		t.Errorf("an in-force edge line is marked as a disclosure: %+v, %v", s.Lines, err)
 	}
 }

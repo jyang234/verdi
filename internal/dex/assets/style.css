@@ -462,7 +462,8 @@ footer.site-foot {
   color: var(--ink);
 }
 .objsupersede--unproven,
-.objsupersede--not-established { color: var(--muted-solid); }
+.objsupersede--not-established,
+.objsupersede--disclosure { color: var(--muted-solid); }
 .objsupersede--proposed { color: var(--living); }
 .objsupersede-conflict {
   font-family: var(--mono);

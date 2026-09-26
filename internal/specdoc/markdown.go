@@ -242,7 +242,7 @@ func RenderMarkdown(doc Document) string {
 func writeSupersession(w func(string, ...any), indent, id string, s Supersession) {
 	stem := SupersessionStem(id, s)
 	for _, line := range s.Lines {
-		w("%s- %s\n", indent, SupersessionLineMarkup(stem, s, line))
+		w("%s- %s\n", indent, SupersessionLineMarkdown(stem, s, line))
 	}
 }
 
