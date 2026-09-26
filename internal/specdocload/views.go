@@ -3,15 +3,23 @@ package specdocload
 // Closed-spec object supersession views for every document consumer
 // (design §6; SI-263, SI-278, SI-279; the controller's I-1 ruling on lane
 // L5's docs-site review): the objsupersede view index of ONE tree,
-// computed once and cached per (root, tree identity), supplied by Load to
-// every document as Facts.Supersession — so the CLI, MCP, the docs site
-// and the board's Document tab render one set of bytes (spec/spec-documents
-// ac-6) — and handed to the board's cards through BoardIndexes. The cache
-// is the one process-wide cache: a commit's views are keyed by the commit,
-// a working tree's by a content digest of its records, so an unchanged
-// tree never recomputes, a moved head or an edited record does; it is a
-// bounded LRU with single-flight builds, so concurrent loads of one tree
-// share one build instead of racing a duplicate.
+// computed once and cached, supplied by Load to every document as
+// Facts.Supersession — so the CLI, MCP, the docs site and the board's
+// Document tab render one set of bytes (spec/spec-documents ac-6) — and
+// handed to the board's cards through BoardIndexes.
+//
+// Every view depends on the default branch's history (acceptance, the
+// closed date, carrying), so every cache key carries the RESOLVED
+// DEFAULT-BRANCH HEAD (or "unresolved") beside the tree's identity: a
+// commit's views are keyed by the repository (its git common dir, shared
+// by every worktree), the commit and the head; a working tree's by the
+// root, a content digest of its records and the head. An unchanged tree
+// under an unchanged head never recomputes; a moved head, a default
+// branch that becomes resolvable, or an edited record does. The digest
+// is taken from the exact bytes the index decodes (one snapshot read
+// feeds both), so a record edited between two reads can never be cached
+// under the wrong key. The cache is a bounded LRU with single-flight
+// builds, so concurrent loads of one tree share one build.
 
 import (
 	"context"
@@ -35,31 +43,16 @@ import (
 
 // Views are one tree's closed-spec object supersession views: the index,
 // the records it was built from (a surface renders an object's original
-// text from them), and, on demand, the records' content digest (Digest).
+// text from them), and the content digest of those records' bytes.
 type Views struct {
 	Records *objsupersede.Records
 	Index   *objsupersede.Index
-
-	tree   objsupersede.TreeReader
-	mu     sync.Mutex
-	digest string
+	digest  string
 }
 
-// Digest is the content digest of the records the views were built from
-// (recordsDigest), computed once on first use; a working tree's views
-// carry it from their cache key.
-func (v *Views) Digest(ctx context.Context) (string, error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.digest == "" {
-		d, err := recordsDigest(ctx, v.tree)
-		if err != nil {
-			return "", err
-		}
-		v.digest = d
-	}
-	return v.digest, nil
-}
+// Digest is the content digest of the record bytes the views were built
+// from (recordsDigest).
+func (v *Views) Digest() string { return v.digest }
 
 // viewCache is the bounded, single-flight LRU behind CommitViews,
 // WorkTreeViews and BoardIndexes.
@@ -148,8 +141,51 @@ func (c *viewCache) evict() {
 	}
 }
 
-func viewKey(root, kind, id string) string {
-	return root + "\x00" + kind + "\x00" + id
+// viewKey names one cache entry: the tree's home (a repository for a
+// commit, a root for a working tree), its kind, its identity (the commit,
+// or the records digest) and the default-branch head the views were
+// computed against.
+func viewKey(home, kind, id, head string) string {
+	return home + "\x00" + kind + "\x00" + id + "\x00" + head
+}
+
+// unresolvedHead is the key's head when the default branch cannot be
+// resolved: every history fact then reads unproven, and the entry is
+// invalidated the moment the branch resolves.
+const unresolvedHead = "unresolved"
+
+// resolveDefaultHead is the default branch's head commit at root, or
+// unresolvedHead when specstate cannot resolve the branch or its ref.
+func resolveDefaultHead(ctx context.Context, root string) (head string, resolved bool) {
+	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
+	if !ok {
+		return unresolvedHead, false
+	}
+	sha, err := gitx.RevParse(ctx, root, branch.Ref)
+	if err != nil {
+		return unresolvedHead, false
+	}
+	return sha, true
+}
+
+// repoKey is the repository's identity for a commit's views: its git
+// common dir, the one directory the main worktree and every linked
+// worktree share, resolved through symlinks so two spellings of one path
+// (a temp dir and its realpath) key alike. A directory git cannot answer
+// for falls back to root itself.
+func repoKey(ctx context.Context, root string) string {
+	dir, err := gitx.CommonDir(ctx, root)
+	if err != nil {
+		return root
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(root, dir)
+	}
+	dir = filepath.Clean(dir)
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	return dir
 }
 
 // CommitViews returns the views of the records at commit (any revision git
@@ -160,22 +196,33 @@ func CommitViews(ctx context.Context, root, commit string) (*Views, error) {
 	if err != nil {
 		return nil, fmt.Errorf("specdocload: resolving %q: %w", commit, err)
 	}
-	return views.get(ctx, viewKey(root, "commit", full), func(ctx context.Context) (*Views, error) {
-		return buildViews(ctx, root, objsupersede.CommitTree{Root: root, Commit: full}, "")
+	head, _ := resolveDefaultHead(ctx, root)
+	return commitViews(ctx, root, full, head)
+}
+
+// commitViews is CommitViews with the commit and the default head resolved.
+func commitViews(ctx context.Context, root, full, head string) (*Views, error) {
+	return views.get(ctx, viewKey(repoKey(ctx, root), "commit", full, head), func(ctx context.Context) (*Views, error) {
+		snap, digest, err := snapshotRecords(ctx, objsupersede.CommitTree{Root: root, Commit: full})
+		if err != nil {
+			return nil, err
+		}
+		return buildViews(ctx, root, snap, digest)
 	})
 }
 
 // WorkTreeViews returns the views of root's working-tree records, keyed by
-// their content digest: an edit to any record is a new key, an unchanged
-// tree a hit.
+// their content digest and the default head: an edit to any record, or a
+// moved head, is a new key; an unchanged tree under an unchanged head a
+// hit.
 func WorkTreeViews(ctx context.Context, root string) (*Views, error) {
-	tr := objsupersede.WorkTree{Root: root}
-	digest, err := recordsDigest(ctx, tr)
+	snap, digest, err := snapshotRecords(ctx, objsupersede.WorkTree{Root: root})
 	if err != nil {
 		return nil, err
 	}
-	return views.get(ctx, viewKey(root, "tree", digest), func(ctx context.Context) (*Views, error) {
-		return buildViews(ctx, root, tr, digest)
+	head, _ := resolveDefaultHead(ctx, root)
+	return views.get(ctx, viewKey(root, "tree", digest, head), func(ctx context.Context) (*Views, error) {
+		return buildViews(ctx, root, snap, digest)
 	})
 }
 
@@ -190,47 +237,44 @@ type BoardViews struct{ Default, Tree *Views }
 
 // BoardIndexes returns root's board views, computing only what the cache
 // lacks: the default-branch views once per head, the tree's once per
-// records digest.
+// (records digest, head).
 func BoardIndexes(ctx context.Context, root string) (BoardViews, error) {
-	treeDigest, err := recordsDigest(ctx, objsupersede.WorkTree{Root: root})
+	snap, treeDigest, err := snapshotRecords(ctx, objsupersede.WorkTree{Root: root})
 	if err != nil {
 		return BoardViews{}, err
 	}
+	head, resolved := resolveDefaultHead(ctx, root)
 	buildTree := func(ctx context.Context) (*Views, error) {
-		return buildViews(ctx, root, objsupersede.WorkTree{Root: root}, treeDigest)
+		return buildViews(ctx, root, snap, treeDigest)
 	}
-	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
-	if !ok {
-		tree, err := views.get(ctx, viewKey(root, "tree", treeDigest), buildTree)
+	if !resolved {
+		tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, head), buildTree)
 		if err != nil {
 			return BoardViews{}, err
 		}
 		return BoardViews{Tree: tree}, nil
 	}
-	def, err := CommitViews(ctx, root, branch.Ref)
+	def, err := commitViews(ctx, root, head, head)
 	if err != nil {
 		return BoardViews{}, err
 	}
-	defDigest, err := def.Digest(ctx)
-	if err != nil {
-		return BoardViews{}, err
-	}
-	if defDigest == treeDigest {
+	if def.Digest() == treeDigest {
 		return BoardViews{Default: def, Tree: def}, nil
 	}
-	tree, err := views.get(ctx, viewKey(root, "tree", treeDigest), buildTree)
+	tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, head), buildTree)
 	if err != nil {
 		return BoardViews{}, err
 	}
 	return BoardViews{Default: def, Tree: tree}, nil
 }
 
-// buildViews reads tr's records and computes every view against the
-// default branch's history at root. An unreadable tree or an index that
-// cannot be computed is the caller's error: a surface never renders a
-// superseded object as untouched because its records could not be read.
-func buildViews(ctx context.Context, root string, tr objsupersede.TreeReader, digest string) (*Views, error) {
-	recs, err := objsupersede.ReadRecords(ctx, tr)
+// buildViews decodes snap's records and computes every view against the
+// default branch's history at root. A tree that cannot be decoded as a
+// whole or an index that cannot be computed is the caller's error: a
+// surface never renders a superseded object as untouched because its
+// records could not be read.
+func buildViews(ctx context.Context, root string, snap *memTree, digest string) (*Views, error) {
+	recs, err := objsupersede.ReadRecords(ctx, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -238,10 +282,10 @@ func buildViews(ctx context.Context, root string, tr objsupersede.TreeReader, di
 	if err != nil {
 		return nil, err
 	}
-	return &Views{Records: recs, Index: ix, tree: tr, digest: digest}, nil
+	return &Views{Records: recs, Index: ix, digest: digest}, nil
 }
 
-// The record directories the digest covers: the same two the views read,
+// The record directories a snapshot covers: the same two the views read,
 // derived from internal/store's layout accessors exactly as
 // objsupersede.ReadRecords derives its own.
 var (
@@ -249,36 +293,77 @@ var (
 	recordConflictsDir = filepath.ToSlash(filepath.Dir(store.ConflictPath("", "x")))
 )
 
-// recordsDigest is a content digest of every entry under the two record
-// directories of tr — path, regularity, and a regular file's bytes — so a
-// working tree and a commit with the same records digest the same, and
-// any record byte, a new or removed record, or a symlink on a record path
-// changes it. Files outside those directories (the data zone, the body of
-// the store) never move it.
-func recordsDigest(ctx context.Context, tr objsupersede.TreeReader) (string, error) {
-	var files []objsupersede.TreeFile
+// memTree is one snapshot of a tree's record directories — the listings
+// and the bytes read once — served back as a TreeReader, so the index
+// decodes exactly the bytes the digest covers.
+type memTree struct {
+	lists map[string][]objsupersede.TreeFile
+	files map[string]memFile
+}
+
+type memFile struct {
+	regular bool
+	data    []byte
+}
+
+// Files implements objsupersede.TreeReader over the snapshot's listings;
+// a directory the snapshot never listed is an error, never an empty tree.
+func (m *memTree) Files(_ context.Context, dir string) ([]objsupersede.TreeFile, error) {
+	listed, ok := m.lists[dir]
+	if !ok {
+		return nil, fmt.Errorf("specdocload: the record snapshot has no listing for %q", dir)
+	}
+	return append([]objsupersede.TreeFile(nil), listed...), nil
+}
+
+// ReadFile implements objsupersede.TreeReader over the snapshot's bytes.
+func (m *memTree) ReadFile(_ context.Context, p string) ([]byte, error) {
+	f, ok := m.files[p]
+	if !ok || !f.regular {
+		return nil, fmt.Errorf("specdocload: %s is not a regular file of the record snapshot", p)
+	}
+	return f.data, nil
+}
+
+// snapshotRecords reads every entry under the two record directories of
+// tr once — path, regularity, and a regular file's bytes, in a fixed
+// order — into a snapshot, and digests exactly what it read: a working
+// tree and a commit with the same records digest the same; any record
+// byte, a new or removed record, or a symlink on a record path changes
+// it; files outside those directories never move it.
+func snapshotRecords(ctx context.Context, tr objsupersede.TreeReader) (*memTree, string, error) {
+	m := &memTree{lists: map[string][]objsupersede.TreeFile{}, files: map[string]memFile{}}
+	h := sha256.New()
 	for _, dir := range []string{recordSpecsDir, recordConflictsDir} {
 		listed, err := tr.Files(ctx, dir)
 		if err != nil {
-			return "", err
+			return nil, "", err
 		}
-		files = append(files, listed...)
+		sorted := append([]objsupersede.TreeFile(nil), listed...)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
+		m.lists[dir] = sorted
+		for _, f := range sorted {
+			fmt.Fprintf(h, "%s\x00%v\x00", f.Path, f.Regular)
+			if !f.Regular {
+				m.files[f.Path] = memFile{}
+				continue
+			}
+			data, err := tr.ReadFile(ctx, f.Path)
+			if err != nil {
+				return nil, "", err
+			}
+			fmt.Fprintf(h, "%d\x00", len(data))
+			h.Write(data)
+			m.files[f.Path] = memFile{regular: true, data: data}
+		}
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	h := sha256.New()
-	for _, f := range files {
-		fmt.Fprintf(h, "%s\x00%v\x00", f.Path, f.Regular)
-		if !f.Regular {
-			continue
-		}
-		data, err := tr.ReadFile(ctx, f.Path)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(h, "%d\x00", len(data))
-		h.Write(data)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return m, hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// recordsDigest is the content digest of tr's records (snapshotRecords).
+func recordsDigest(ctx context.Context, tr objsupersede.TreeReader) (string, error) {
+	_, digest, err := snapshotRecords(ctx, tr)
+	return digest, err
 }
 
 // SupersessionFacts assembles spec name's document facts from v: the view
@@ -327,9 +412,9 @@ func SupersessionFacts(v *Views, name string, fm *artifact.SpecFrontmatter) *spe
 // one address every document consumer serves: an artifact's corpus page,
 // "/a/<kind>/<name>" — the docs site's permalink and the workbench's
 // corpus route alike — with, for a spec's object, the object's declared
-// body anchor (02 §Object model; the id when none is declared). A spec or
-// conflict v's records do not carry, a pinned ref, a conflict fragment, or
-// anything else gets no link and renders as plain text.
+// body anchor (ObjectAnchor). A spec or conflict v's records do not carry,
+// a pinned ref, a conflict fragment, or anything else gets no link and
+// renders as plain text.
 func SupersessionLink(v *Views, ref string) string {
 	r, err := artifact.ParseRef(ref)
 	if err != nil || r.Pinned() || v == nil || v.Records == nil {
@@ -338,14 +423,13 @@ func SupersessionLink(v *Views, ref string) string {
 	page := "/a/" + string(r.Kind) + "/" + r.Name
 	switch r.Kind {
 	case artifact.KindSpec:
-		s := v.Records.Specs[r.Name]
-		if s == nil || s.FM == nil {
+		if v.Records.Specs[r.Name] == nil {
 			return ""
 		}
 		if r.Object == "" {
 			return page
 		}
-		anchor, ok := objectAnchor(s.FM, r.Object)
+		anchor, ok := ObjectAnchor(v, r)
 		if !ok {
 			return ""
 		}
@@ -363,9 +447,18 @@ func SupersessionLink(v *Views, ref string) string {
 	return ""
 }
 
-// objectAnchor is the declared body anchor of fm's criterion or decision
-// id, without a leading "#", or the id itself when none is declared; ok is
-// false when fm declares no such object.
+// ObjectAnchor is the declared body anchor (02 §Object model) of the
+// criterion or decision ref names in v's records, without a leading "#",
+// or the object's id when none is declared — the fragment every consumer
+// links on the spec's corpus page; ok is false when the records do not
+// declare the object.
+func ObjectAnchor(v *Views, ref artifact.Ref) (string, bool) {
+	if v == nil || v.Records == nil || v.Records.Specs[ref.Name] == nil || v.Records.Specs[ref.Name].FM == nil {
+		return "", false
+	}
+	return objectAnchor(v.Records.Specs[ref.Name].FM, ref.Object)
+}
+
 func objectAnchor(fm *artifact.SpecFrontmatter, id string) (string, bool) {
 	anchor := ""
 	found := false

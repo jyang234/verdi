@@ -3,6 +3,7 @@ package specdocload
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -469,4 +470,274 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+// The default-branch head in every key (lane L5 fix pass 2, item 1; the
+// docs review's N-1 and the board review's I-1): a working tree's views,
+// and any commit's, depend on default-branch history, so a merge that
+// accepts the successor, an unrelated non-empty move of the head, or a
+// default branch that becomes resolvable each rebuild — in the same
+// process, with the tree's own bytes unchanged.
+func TestViews_KeyedByDefaultBranchHead(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "proposed") // checkout design/successor
+	decision := func(v *Views) objsupersede.DecisionState {
+		t.Helper()
+		ds := v.Index.Decisions("successor", "dc-1")
+		if len(ds) != 1 {
+			t.Fatalf("successor#dc-1 views = %+v", ds)
+		}
+		return ds[0].State
+	}
+	before := ViewBuilds()
+	tree, err := WorkTreeViews(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision(tree) != objsupersede.DecisionProposed {
+		t.Fatalf("before acceptance dc-1 = %s, want proposed", decision(tree))
+	}
+	branchCommit, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := CommitViews(ctx, repo.Dir, branchCommit); err != nil || decision(v) != objsupersede.DecisionProposed {
+		t.Fatalf("CommitViews(design tip) = %v, %v; want proposed", err, decision(v))
+	}
+	built := ViewBuilds() - before
+
+	// Accept the successor: a real, non-empty merge into main, fetched
+	// (origin/main is the store's default branch), the checkout back on
+	// the design branch with its bytes unchanged.
+	gitIn(t, repo.Dir, "checkout", "-q", "main")
+	gitIn(t, repo.Dir, "merge", "-q", "--no-ff", "-m", "Accept spec/successor", "design/successor")
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", "main")
+	gitIn(t, repo.Dir, "checkout", "-q", "design/successor")
+
+	tree, err = WorkTreeViews(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision(tree) != objsupersede.DecisionInForce {
+		t.Fatalf("after acceptance, the same process reads dc-1 = %s, want in-force (a stale entry)", decision(tree))
+	}
+	if v, err := CommitViews(ctx, repo.Dir, branchCommit); err != nil || decision(v) != objsupersede.DecisionInForce {
+		t.Fatalf("CommitViews(design tip) after acceptance = %v, %v; want in-force", err, decision(v))
+	}
+	if res, err := Load(ctx, Request{Root: repo.Dir, Name: "successor", Mode: ModeWorkingTree, Kind: specdoc.KindSpec}); err != nil {
+		t.Fatal(err)
+	} else if got := res.Input.Facts.Supersession.Decisions["dc-1"]; len(got) != 1 || got[0].State != objsupersede.DecisionInForce {
+		t.Fatalf("Load(ModeWorkingTree) after acceptance = %+v, want in-force", got)
+	}
+	if ViewBuilds()-before <= built {
+		t.Fatalf("no rebuild after the head moved: builds %d then %d", built, ViewBuilds()-before)
+	}
+	built = ViewBuilds() - before
+
+	// An UNRELATED non-empty move of the head rebuilds too: history may
+	// have changed in ways the tree cannot see.
+	gitIn(t, repo.Dir, "checkout", "-q", "main")
+	other := filepath.Join(repo.Dir, ".verdi", "specs", "active", "other-feature", "spec.md")
+	raw, err := os.ReadFile(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, append(raw, []byte("\nAn unrelated edit on main.\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo.Dir, "commit", "-q", "-am", "Edit spec/other-feature on main")
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", "main")
+	gitIn(t, repo.Dir, "checkout", "-q", "design/successor")
+	if _, err := WorkTreeViews(ctx, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if ViewBuilds()-before <= built {
+		t.Fatalf("no rebuild after an unrelated head move: builds %d then %d", built, ViewBuilds()-before)
+	}
+	if _, err := WorkTreeViews(ctx, repo.Dir); err != nil || ViewBuilds()-before != built+1 {
+		t.Fatalf("the same tree under the same head rebuilt again: err=%v builds=%d", err, ViewBuilds()-before)
+	}
+}
+
+// TestBoardIndexes_UnresolvedThenResolved (the board review's witness B):
+// with the default branch gone the tree's views serve both cards with
+// every history fact unproven; once the branch is back — the notice's own
+// remedy — the board reads the current facts, in the same process.
+func TestBoardIndexes_UnresolvedThenResolved(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "chain-not-in-force") // checkout design/successor-v2
+	dc2 := func(b BoardViews) objsupersede.DecisionView {
+		t.Helper()
+		ds := b.Tree.Index.Decisions("successor-v2", "dc-2")
+		if len(ds) != 1 {
+			t.Fatalf("successor-v2#dc-2 views = %+v", ds)
+		}
+		return ds[0]
+	}
+	gitIn(t, repo.Dir, "update-ref", "-d", "refs/remotes/origin/main")
+	b, err := BoardIndexes(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Default != nil || dc2(b).State != objsupersede.DecisionNotEstablished || !strings.Contains(dc2(b).Reason, "acceptance unproven") {
+		t.Fatalf("unresolved default branch: Default=%v dc-2=%+v; want no Default and an acceptance-unproven reason", b.Default != nil, dc2(b))
+	}
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", "main")
+	b, err = BoardIndexes(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Default == nil || dc2(b).State != objsupersede.DecisionProposed || !dc2(b).Carried {
+		t.Fatalf("after the remedy the same process still reads: Default=%v dc-2=%+v; want Default and a proposed, carried dc-2", b.Default != nil, dc2(b))
+	}
+}
+
+// TestCommitViews_SharedAcrossWorktrees (the board review's M-8): the
+// default-branch views are keyed by the repository, not the worktree, so a
+// second worktree of the same repository is a hit, not a second build.
+func TestCommitViews_SharedAcrossWorktrees(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitIn(t, repo.Dir, "worktree", "add", "-q", "--detach", wt, "main")
+	before := ViewBuilds()
+	a, err := CommitViews(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := CommitViews(ctx, wt, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b || ViewBuilds()-before != 1 {
+		t.Fatalf("two worktrees of one repository built %d times (same entry: %v), want one shared build", ViewBuilds()-before, a == b)
+	}
+	// Their default-branch board views are the same entry too.
+	ba, err := BoardIndexes(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bb, err := BoardIndexes(ctx, wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ba.Default != bb.Default || ba.Default != a {
+		t.Fatalf("board Default views differ across worktrees")
+	}
+	if ViewBuilds()-before != 1 {
+		t.Fatalf("builds = %d across both boards, want still 1", ViewBuilds()-before)
+	}
+}
+
+// flakyTree returns different bytes on each read of the same path — an
+// edit landing between a digest pass and a decode pass.
+type flakyTree struct {
+	inner objsupersede.TreeReader
+	reads atomic.Int32
+}
+
+func (f *flakyTree) Files(ctx context.Context, dir string) ([]objsupersede.TreeFile, error) {
+	return f.inner.Files(ctx, dir)
+}
+
+func (f *flakyTree) ReadFile(ctx context.Context, p string) ([]byte, error) {
+	data, err := f.inner.ReadFile(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	n := f.reads.Add(1)
+	return append(append([]byte(nil), data...), []byte(fmt.Sprintf("\n# read %d\n", n))...), nil
+}
+
+// TestSnapshot_DigestCoversTheDecodedBytes (the board review's M-7): the
+// digest and the index come from ONE read of each record, so a tree that
+// changes between reads can never be cached under another tree's digest.
+func TestSnapshot_DigestCoversTheDecodedBytes(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	tr := &flakyTree{inner: objsupersede.WorkTree{Root: repo.Dir}}
+	snap, digest, err := snapshotRecords(ctx, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The snapshot's own digest is the digest returned, and the records
+	// decoded from it carry the very bytes that digest covers.
+	again, err := recordsDigest(ctx, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != digest {
+		t.Fatalf("the snapshot digests %q, the read returned %q", again, digest)
+	}
+	recs, err := objsupersede.ReadRecords(ctx, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range recs.Specs {
+		if !strings.Contains(string(s.Raw), "# read ") {
+			t.Fatalf("spec/%s was decoded from bytes the snapshot never read", name)
+		}
+		if got := snap.files[s.Path].data; string(got) != string(s.Raw) {
+			t.Fatalf("spec/%s decoded bytes differ from the snapshot's", name)
+		}
+	}
+	// A second read of the flaky tree digests differently — the trees
+	// differ — and never aliases the first.
+	if d2, err := recordsDigest(ctx, tr); err != nil || d2 == digest {
+		t.Fatalf("a changed tree digested the same: %v %v", d2 == digest, err)
+	}
+	// The snapshot refuses a directory it never listed.
+	if _, err := snap.Files(ctx, "somewhere/else"); err == nil {
+		t.Fatal("the snapshot listed a directory it never read")
+	}
+	if _, err := snap.ReadFile(ctx, "no/such/file"); err == nil {
+		t.Fatal("the snapshot read a file it never had")
+	}
+}
+
+// TestBoardIndexes_Errors (the board review's M-5): a default branch that
+// resolves to something that is not a commit, and a record that cannot be
+// read, each fail the lookup — never a board rendered as if the object
+// were untouched.
+func TestBoardIndexes_Errors(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	t.Run("the default branch names a blob", func(t *testing.T) {
+		repo := scenario.Build(t, "accepted")
+		blob, err := gitx.RevParse(ctx, repo.Dir, "HEAD:.verdi/verdi.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", blob)
+		if _, err := BoardIndexes(ctx, repo.Dir); err == nil {
+			t.Fatal("BoardIndexes succeeded with a default branch that is not a commit")
+		}
+		if _, err := WorkTreeViews(ctx, repo.Dir); err != nil {
+			t.Fatalf("the working tree's own views must still compute (history unproven): %v", err)
+		}
+	})
+	t.Run("an unreadable record", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads every file")
+		}
+		repo := scenario.Build(t, "accepted")
+		p := filepath.Join(repo.Dir, ".verdi", "specs", "active", "successor", "spec.md")
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+		if _, err := os.ReadFile(p); err == nil {
+			t.Skip("this environment reads mode-0 files")
+		}
+		if _, err := BoardIndexes(ctx, repo.Dir); err == nil {
+			t.Fatal("BoardIndexes succeeded over an unreadable record")
+		}
+		if _, err := WorkTreeViews(ctx, repo.Dir); err == nil {
+			t.Fatal("WorkTreeViews succeeded over an unreadable record")
+		}
+	})
 }

@@ -41,6 +41,11 @@ type Request struct {
 	Kind      specdoc.Kind
 	Model     *model.Model
 	Readiness *readinesspilot.Snapshot
+	// CorpusUnservable says the consumer cannot serve the corpus pages the
+	// closed-spec object supersession lines would link (a per-branch board's
+	// Document tab, whose /a/ route serves the serving checkout's tree, not
+	// the branch's): the lines then name their refs as plain text.
+	CorpusUnservable bool
 }
 
 // Result carries the assembled Input plus what a consumer may want to
@@ -167,6 +172,9 @@ func Load(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("specdocload: closed-spec object supersession views for %s: %w", ref, err)
 	}
 	facts.Supersession = SupersessionFacts(sup, req.Name, fm)
+	if req.CorpusUnservable {
+		facts.Supersession.Links = map[string]string{}
+	}
 
 	return Result{
 		Input: specdoc.Input{
