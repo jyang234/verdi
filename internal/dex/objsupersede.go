@@ -29,10 +29,12 @@ import (
 func supersessionIndex(ctx context.Context, root, commit string) (*objsupersede.Index, error) {
 	recs, err := objsupersede.ReadRecords(ctx, objsupersede.CommitTree{Root: root, Commit: commit})
 	if err != nil {
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
 		return nil, fmt.Errorf("dex: closed-spec object supersession records at %s: %w", commit, err)
 	}
 	ix, err := objsupersede.NewIndex(ctx, recs, objsupersede.NewHistory(ctx, root))
 	if err != nil {
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
 		return nil, fmt.Errorf("dex: closed-spec object supersession views at %s: %w", commit, err)
 	}
 	return ix, nil
