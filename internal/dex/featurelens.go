@@ -16,6 +16,8 @@ import (
 
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specdoc"
+	"github.com/jyang234/verdi/internal/specdocload"
 )
 
 // featureLensHTML renders the paired stub-plan/live-mapping section for a
@@ -29,9 +31,9 @@ import (
 // marker — are display prose and resolve through mdl
 // (model.DisplayClass's enumeration rule; nil falls back to bare ids).
 // The refs, testids, and CSS classes below are identity and stay bare.
-func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, p *artifactPage) template.HTML {
+func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, views *specdocload.Views, p *artifactPage) (template.HTML, error) {
 	if !isRoundFourFeaturePage(p) {
-		return ""
+		return "", nil
 	}
 
 	storyWord := mdl.DisplayClass("story")
@@ -66,8 +68,16 @@ func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, p
 	b.WriteString(`<div class="live-mapping" data-testid="live-mapping">` + "\n")
 	b.WriteString("<h3>Current mapping <span class=\"lens-note\">computed from implements edges</span></h3>\n")
 	b.WriteString("<table><thead><tr><th>AC</th><th>Text</th><th>Implementing " + template.HTMLEscapeString(storiesWord) + "</th></tr></thead><tbody>\n")
+	name := strings.TrimPrefix(p.Entry.Ref, "spec/")
 	for _, ac := range p.Meta.AcceptanceCriteria {
-		fmt.Fprintf(&b, "<tr><td><code>%s</code></td><td>%s</td><td>", template.HTMLEscapeString(ac.ID), template.HTMLEscapeString(ac.Text))
+		// A closed feature's superseded criterion carries the same §6 lines
+		// here as on its document, from the same views (the L5 docs
+		// review's M-1): the criterion's text, unchanged, then the lines.
+		lines, err := objectSupersessionHTML(views, name, ac.ID)
+		if err != nil {
+			return "", fmt.Errorf("dex: feature lens for %s#%s: %w", p.Entry.Ref, ac.ID, err)
+		}
+		fmt.Fprintf(&b, "<tr><td><code>%s</code></td><td>%s%s</td><td>", template.HTMLEscapeString(ac.ID), template.HTMLEscapeString(ac.Text), lines)
 		stories := implementingStoryRefs(ix, p.Entry.Ref, ac.ID)
 		if len(stories) == 0 {
 			b.WriteString(`<span class="empty">no implementing ` + template.HTMLEscapeString(storyWord) + `</span>`)
@@ -86,7 +96,35 @@ func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, p
 		b.WriteString("</td></tr>\n")
 	}
 	b.WriteString("</tbody></table>\n</div>\n</section>\n")
-	return template.HTML(b.String())
+	return template.HTML(b.String()), nil
+}
+
+// objectSupersessionHTML renders the closed-spec object supersession lines
+// of spec name's object id from views (design §6) as a list under the
+// object's text — the docs site's inline markup, links included, through
+// internal/specdoc's one conversion and one line renderer — or "" when the
+// views report no lines for it. A malformed view is an error, never a
+// rendering.
+func objectSupersessionHTML(views *specdocload.Views, name, id string) (string, error) {
+	if views == nil || views.Records == nil || views.Records.Specs[name] == nil {
+		return "", nil
+	}
+	facts := specdocload.SupersessionFacts(views, name, views.Records.Specs[name].FM)
+	v, ok := facts.Objects[id]
+	if !ok {
+		return "", nil
+	}
+	s, err := specdoc.ObjectSupersession(v, facts.Links)
+	if err != nil || s == nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(`<ul class="objsupersede-lines" data-testid="lens-supersession-` + template.HTMLEscapeString(id) + `" data-state="` + template.HTMLEscapeString(s.State) + `">`)
+	for _, line := range s.Lines {
+		b.WriteString(`<li>` + specdoc.SupersessionLineMarkup(id, *s, line) + `</li>`)
+	}
+	b.WriteString(`</ul>`)
+	return b.String(), nil
 }
 
 // implementingStoryRefs returns the sorted refs of every story whose

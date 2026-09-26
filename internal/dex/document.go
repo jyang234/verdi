@@ -11,7 +11,6 @@ import (
 
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
-	"github.com/jyang234/verdi/internal/objsupersede"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
@@ -73,17 +72,15 @@ func specDocumentURL(ref string, docs documentSet) string {
 }
 
 // documentInputs is what every spec document of one build shares: the
-// build stamp, the resolved model, the refs the site has pages for, the
-// specs that get a document, and the closed-spec object supersession
-// views of the build commit's records (design §6; objsupersede.go),
-// computed once per build and read per spec. A nil supersession index
-// supplies no views, and every object renders exactly as before.
+// build stamp, the resolved model, the refs the site has pages for, and
+// the specs that get a document. The closed-spec object supersession
+// views (design §6) are not here: the shared loader supplies them to
+// every consumer from its one cache, which Build warms once per build.
 type documentInputs struct {
-	stamp        buildStamp
-	model        *model.Model
-	known        map[string]bool
-	docs         documentSet
-	supersession *objsupersede.Index
+	stamp buildStamp
+	model *model.Model
+	known map[string]bool
+	docs  documentSet
 }
 
 // renderSpecDocuments is the pool's per-spec step, a variable so tests can
@@ -195,18 +192,11 @@ func writeSpecDocuments(ctx context.Context, outDir, root string, in documentInp
 	if err != nil {
 		return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
 	}
-	// Closed-spec object supersession (design §6): the views of this
-	// spec's objects, supplied as facts like every other computed input
-	// the document reports — read from the build's one index, never
-	// recomputed per spec.
-	if in.supersession != nil {
-		res.Input.Facts.Supersession = supersessionFacts(in.supersession, name, res.Input.Spec, in.known, in.docs)
-	}
 	var specHTML string
 	for _, kind := range []specdoc.Kind{specdoc.KindSpec, specdoc.KindPlan, specdoc.KindTasks} {
-		in := res.Input
-		in.Kind = kind
-		doc, err := specdoc.Build(in)
+		input := res.Input
+		input.Kind = kind
+		doc, err := specdoc.Build(input)
 		if err != nil {
 			return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
 		}

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
@@ -18,41 +17,49 @@ import (
 // §8; SI-263): a closed spec's document renders a superseded criterion or
 // decision's original text unchanged, then the objsupersede views' lines
 // with their links, and a successor's decision renders its decision
-// view. The six committed scenario stores (testdata/objsupersede) are
-// built into real repositories; the site is built from main, as the
-// published site is, and the working tree is put on main first where a
-// scenario's checkout is a design branch (default-branch surfaces compute
-// from default-branch records only).
+// view. The views come from the shared loader (internal/specdocload),
+// computed once per build from the BUILD COMMIT's records — never the
+// working tree — so the four document consumers render one set of bytes.
+// The six committed scenario stores (testdata/objsupersede) are built
+// into real repositories and the site is built from main, as the
+// published site is.
 
 const (
 	osFeatureDoc   = "a/spec/closed-feature/document/index.html"
 	osStoryDoc     = "a/spec/closed-story/document/index.html"
 	osSuccessorDoc = "a/spec/successor/document/index.html"
 	// The §6 lines on closed-feature#dc-1 after acceptance, with S's
-	// decision and the conflict linked (design §6: "linking to S's
-	// decision and to the conflict").
+	// decision and the conflict linked to their corpus pages (design §6:
+	// "linking to S's decision and to the conflict"; the one address every
+	// consumer serves, so the bytes stay identical across them).
 	osGovernedFeature = `data-testid="objsupersede-dc-1-governed" data-state="superseded">governed spec/closed-feature's completed work (closed 2024-01-10)</span>`
-	osSinceFeature    = `data-testid="objsupersede-dc-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor/document/#dc-1">spec/successor#dc-1</a></span> <a class="objsupersede-conflict" data-testid="objsupersede-dc-1-conflict" href="/a/conflict/successor-closed-feature/">conflict/successor-closed-feature</a>`
+	osSinceFeature    = `data-testid="objsupersede-dc-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor#dc-1">spec/successor#dc-1</a></span> <a class="objsupersede-conflict" data-testid="objsupersede-dc-1-conflict" href="/a/conflict/successor-closed-feature">conflict/successor-closed-feature</a>`
 	osGovernedStory   = `data-testid="objsupersede-ac-1-governed" data-state="superseded">governed spec/closed-story's completed work (closed 2024-01-10)</span>`
-	osSinceStory      = `data-testid="objsupersede-ac-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor/document/#dc-2">spec/successor#dc-2</a></span> <a class="objsupersede-conflict" data-testid="objsupersede-ac-1-conflict" href="/a/conflict/successor-closed-story/">conflict/successor-closed-story</a>`
+	osSinceStory      = `data-testid="objsupersede-ac-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor#dc-2">spec/successor#dc-2</a></span> <a class="objsupersede-conflict" data-testid="objsupersede-ac-1-conflict" href="/a/conflict/successor-closed-story">conflict/successor-closed-story</a>`
 	// The original texts, unchanged (design §6: "the original object text, unchanged").
 	osFeatureText = "the governed records are listed newest first"
 	osStoryText   = "the record list renders every governed record"
 )
 
-// buildObjSupersedeSite builds scenario store into a repository, puts its
-// working tree on main, and builds the docs site from main into a fresh
-// directory. It returns the site directory and the store root.
-func buildObjSupersedeSite(t *testing.T, store string) (site, root string) {
+// buildObjSupersedeSite builds scenario store into a repository and the
+// docs site from main into a fresh directory. With checkoutMain the
+// working tree is put on main first (the published site's shape); without
+// it the checkout stays where the scenario leaves it, so a site built
+// from main over a design-branch checkout can tell the build commit's
+// records from the working tree's. It returns the site directory and the
+// store root.
+func buildObjSupersedeSite(t *testing.T, store string, checkoutMain bool) (site, root string) {
 	t.Helper()
 	neutralizeCIEnv(t)
 	ctx := context.Background()
 	repo := scenario.Build(t, store)
-	if branch, err := gitx.CurrentBranch(ctx, repo.Dir); err != nil {
-		t.Fatal(err)
-	} else if branch != "main" {
-		if err := gitx.Checkout(ctx, repo.Dir, "main"); err != nil {
+	if checkoutMain {
+		if branch, err := gitx.CurrentBranch(ctx, repo.Dir); err != nil {
 			t.Fatal(err)
+		} else if branch != "main" {
+			if err := gitx.Checkout(ctx, repo.Dir, "main"); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	out := t.TempDir()
@@ -74,18 +81,18 @@ func TestBuild_ClosedSpecObjectSupersession(t *testing.T) {
 		{"after acceptance: both targets, S's decision and the conflict linked", "accepted", []page{
 			{osFeatureDoc, []string{osFeatureText, osGovernedFeature, osSinceFeature}, []string{"objsupersede-ac-1", "objsupersede-dc-1-carry"}},
 			{osStoryDoc, []string{osStoryText, osGovernedStory, osSinceStory}, []string{"objsupersede-dc-1", "objsupersede-ac-1-carry"}},
-			{osSuccessorDoc, []string{`data-testid="objsupersede-dc-1-spec-closed-feature-dc-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-feature/document/#dc-1">spec/closed-feature#dc-1</a></span>`,
-				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story/document/#ac-1">spec/closed-story#ac-1</a></span>`}, []string{"objsupersede-ac-1", "not established", "proposed"}},
+			{osSuccessorDoc, []string{`data-testid="objsupersede-dc-1-spec-closed-feature-dc-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-feature#dc-1">spec/closed-feature#dc-1</a></span>`,
+				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story#ac-1">spec/closed-story#ac-1</a></span>`}, []string{"objsupersede-ac-1", "not established", "proposed"}},
 		}},
 		{"carried through two revisions: S1's date kept, carried by the head", "chain", []page{
-			{osFeatureDoc, []string{osGovernedFeature, osSinceFeature, `data-testid="objsupersede-dc-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v3/document/">spec/successor-v3</a></span>`}, nil},
-			{osStoryDoc, []string{osGovernedStory, osSinceStory, `data-testid="objsupersede-ac-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v3/document/">spec/successor-v3</a></span>`}, nil},
-			{"a/spec/successor-v3/document/index.html", []string{`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story/document/#ac-1">spec/closed-story#ac-1</a></span>`,
-				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-carries" data-state="in-force">carries the replacement established by <a href="/a/spec/successor/document/">spec/successor</a> (<a href="/a/conflict/successor-closed-story/">conflict/successor-closed-story</a>, since 2024-02-15)</span>`}, nil},
+			{osFeatureDoc, []string{osGovernedFeature, osSinceFeature, `data-testid="objsupersede-dc-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v3">spec/successor-v3</a></span>`}, nil},
+			{osStoryDoc, []string{osGovernedStory, osSinceStory, `data-testid="objsupersede-ac-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v3">spec/successor-v3</a></span>`}, nil},
+			{"a/spec/successor-v3/document/index.html", []string{`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story#ac-1">spec/closed-story#ac-1</a></span>`,
+				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-carries" data-state="in-force">carries the replacement established by <a href="/a/spec/successor">spec/successor</a> (<a href="/a/conflict/successor-closed-story">conflict/successor-closed-story</a>, since 2024-02-15)</span>`}, nil},
 		}},
 		{"a revision drops the edge: still superseded, no longer carried", "chain-drop", []page{
-			{osFeatureDoc, []string{osGovernedFeature, osSinceFeature, `data-testid="objsupersede-dc-1-carry" data-state="superseded">no longer carried by the current revision (<a href="/a/spec/successor-v2/document/">spec/successor-v2</a>)</span>`}, nil},
-			{osStoryDoc, []string{osGovernedStory, osSinceStory, `data-testid="objsupersede-ac-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v2/document/">spec/successor-v2</a></span>`}, nil},
+			{osFeatureDoc, []string{osGovernedFeature, osSinceFeature, `data-testid="objsupersede-dc-1-carry" data-state="superseded">no longer carried by the current revision (<a href="/a/spec/successor-v2">spec/successor-v2</a>)</span>`}, nil},
+			{osStoryDoc, []string{osGovernedStory, osSinceStory, `data-testid="objsupersede-ac-1-carry" data-state="superseded">carried by <a href="/a/spec/successor-v2">spec/successor-v2</a></span>`}, nil},
 		}},
 		{"not yet accepted: the default branch shows nothing", "proposed", []page{
 			{osFeatureDoc, []string{osFeatureText}, []string{"objsupersede"}},
@@ -101,13 +108,13 @@ func TestBuild_ClosedSpecObjectSupersession(t *testing.T) {
 			{osSuccessorDoc, []string{
 				`data-testid="objsupersede-dc-1-spec-closed-feature-dc-1-not-established" data-state="not-established">supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1</span>`,
 				`data-testid="objsupersede-dc-3-spec-closed-feature-ac-1-not-established" data-state="not-established">supersession not established: no conflict challenges spec/closed-feature#ac-1</span>`,
-				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story/document/#ac-1">spec/closed-story#ac-1</a></span>`,
+				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story#ac-1">spec/closed-story#ac-1</a></span>`,
 			}, []string{`objsupersede-dc-1-spec-closed-feature-dc-1-edge`}},
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			site, _ := buildObjSupersedeSite(t, tc.store)
+			site, _ := buildObjSupersedeSite(t, tc.store, true)
 			for _, p := range tc.pages {
 				html := readFile(t, site, p.path)
 				for _, want := range p.has {
@@ -130,12 +137,39 @@ func TestBuild_ClosedSpecObjectSupersession(t *testing.T) {
 	}
 }
 
+// TestBuild_ClosedSpecObjectSupersession_BuildCommitNotWorkingTree (the
+// L5 docs review's I-2 witness): the site's documents compute from the
+// BUILD COMMIT's records — default-branch surfaces from default-branch
+// records only (design §6) — never the working tree's. chain-not-in-force
+// is built from main with the checkout LEFT on design/successor-v2, whose
+// unaccepted revision would otherwise leak a "carrying unproven:
+// spec/successor-v2 is not accepted" line onto main's closed-story page.
+func TestBuild_ClosedSpecObjectSupersession_BuildCommitNotWorkingTree(t *testing.T) {
+	site, root := buildObjSupersedeSite(t, "chain-not-in-force", false)
+	if branch, err := gitx.CurrentBranch(context.Background(), root); err != nil || branch != "design/successor-v2" {
+		t.Fatalf("the checkout is %q (%v), want design/successor-v2 for this witness", branch, err)
+	}
+	story := readFile(t, site, osStoryDoc)
+	if strings.Contains(story, "objsupersede-ac-1-carry") || strings.Contains(story, "successor-v2") {
+		t.Fatalf("main's closed-story document carries the design branch's revision:\n%s", story)
+	}
+	for _, want := range []string{osGovernedStory, osSinceStory} {
+		if !strings.Contains(story, want) {
+			t.Errorf("closed-story document lacks %q", want)
+		}
+	}
+	// The design branch's own spec is not on main: no document for it.
+	if _, err := os.Stat(filepath.Join(site, "a", "spec", "successor-v2", "document")); !os.IsNotExist(err) {
+		t.Errorf("the site built from main carries the design branch's successor-v2 document: %v", err)
+	}
+}
+
 // TestBuild_ClosedSpecObjectSupersession_AddsLinesOnly: the closed spec's
 // document differs from a render with no views supplied by exactly the
 // added bullet lines — its fold, rollup, evidence, and verdicts render as
 // before (design §6) — and the artifact page's verbatim body is untouched.
 func TestBuild_ClosedSpecObjectSupersession_AddsLinesOnly(t *testing.T) {
-	site, root := buildObjSupersedeSite(t, "accepted")
+	site, root := buildObjSupersedeSite(t, "accepted", true)
 	sha, err := gitx.RevParse(context.Background(), root, "main")
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +180,7 @@ func TestBuild_ClosedSpecObjectSupersession_AddsLinesOnly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		res.Input.Facts.Supersession = nil // the render with no views supplied
 		doc, err := specdoc.Build(res.Input)
 		if err != nil {
 			t.Fatal(err)
@@ -168,13 +203,61 @@ func TestBuild_ClosedSpecObjectSupersession_AddsLinesOnly(t *testing.T) {
 		if want := squeezeBlank(specdoc.RenderMarkdown(doc)); squeezeBlank(strings.Join(kept, "\n")) != want {
 			t.Errorf("%s: the document changed beyond the added lines:\n--- with views, lines removed ---\n%s\n--- without views ---\n%s", name, squeezeBlank(strings.Join(kept, "\n")), want)
 		}
-		page := readFile(t, site, filepath.Join("a", "spec", name, "index.html"))
-		if strings.Contains(page, "objsupersede") {
-			t.Errorf("%s: the artifact page (the verbatim body) carries supersession markup", name)
+	}
+	page := readFile(t, site, "a/spec/closed-feature/index.html")
+	if !strings.Contains(page, "The governed records are listed newest first.") {
+		t.Errorf("closed-feature's artifact page lost its verbatim body")
+	}
+	if strings.Contains(page, `data-testid="objsupersede-dc-1-`) {
+		t.Errorf("the artifact page's verbatim body carries the decision's supersession markup")
+	}
+}
+
+// TestObjectSupersessionHTML (the L5 docs review's M-1): a closed feature's
+// artifact page lists each criterion's text in the feature lens, so a
+// superseded criterion carries the same lines there, from the same views.
+// No scenario supersedes a closed FEATURE's criterion in force (the
+// stores supersede the feature's decision and the story's criterion), so
+// the row renderer is proven on the closed story's criterion — the views
+// do not care which class declares the object — and the page-level
+// negative on the accepted store's closed feature, whose ac-1 is not
+// superseded and whose page therefore carries no lines.
+func TestObjectSupersessionHTML(t *testing.T) {
+	neutralizeCIEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	views, err := specdocload.CommitViews(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := objectSupersessionHTML(views, "closed-story", "ac-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<ul class="objsupersede-lines" data-testid="lens-supersession-ac-1" data-state="superseded">`,
+		`<li><span class="objsupersede objsupersede--superseded" data-testid="objsupersede-ac-1-governed" data-state="superseded">governed spec/closed-story's completed work (closed 2024-01-10)</span></li>`,
+		`<li><span class="objsupersede objsupersede--superseded" data-testid="objsupersede-ac-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor#dc-2">spec/successor#dc-2</a></span> <a class="objsupersede-conflict" data-testid="objsupersede-ac-1-conflict" href="/a/conflict/successor-closed-story">conflict/successor-closed-story</a></li>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lens lines lack %q:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(readFile(t, site, "a/spec/closed-feature/index.html"), "The governed records are listed newest first.") {
-		t.Errorf("closed-feature's artifact page lost its verbatim body")
+	for _, tc := range []struct{ spec, id string }{{"closed-feature", "ac-1"}, {"closed-feature", "dc-9"}, {"nowhere", "ac-1"}} {
+		if got, err := objectSupersessionHTML(views, tc.spec, tc.id); err != nil || got != "" {
+			t.Errorf("objectSupersessionHTML(%s#%s) = %q, %v; want nothing", tc.spec, tc.id, got, err)
+		}
+	}
+	if got, err := objectSupersessionHTML(nil, "closed-story", "ac-1"); err != nil || got != "" {
+		t.Errorf("nil views gave %q, %v", got, err)
+	}
+	site, _ := buildObjSupersedeSite(t, "accepted", true)
+	page := readFile(t, site, "a/spec/closed-feature/index.html")
+	if !strings.Contains(page, `<td><code>ac-1</code></td>`) {
+		t.Fatalf("closed-feature's page has no feature lens mapping row for ac-1:\n%s", page)
+	}
+	if strings.Contains(page, "objsupersede") {
+		t.Errorf("closed-feature#ac-1 is not superseded on the accepted store, yet its page carries supersession markup:\n%s", page)
 	}
 }
 
@@ -186,68 +269,33 @@ func squeezeBlank(s string) string {
 	return s
 }
 
-// TestBuild_ClosedSpecObjectSupersession_Deterministic: two builds of the
-// same commit write byte-identical documents (Phase 12's determinism), and
-// the view index is computed once per build (the cost note: measured and
-// logged, never per spec).
-func TestBuild_ClosedSpecObjectSupersession_Deterministic(t *testing.T) {
-	site, root := buildObjSupersedeSite(t, "chain")
-	again := t.TempDir()
-	start := time.Now()
-	if err := Build(context.Background(), Options{Root: root, OutDir: again, Commit: "main"}); err != nil {
+// TestBuild_ClosedSpecObjectSupersession_OncePerBuild (the L5 docs
+// review's M-4): one build of the site computes the view index exactly
+// once, however many spec documents it renders, and a rebuild of the
+// same commit computes nothing anew (the shared cache); two builds write
+// byte-identical documents (Phase 12's determinism).
+func TestBuild_ClosedSpecObjectSupersession_OncePerBuild(t *testing.T) {
+	neutralizeCIEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "chain")
+	before := specdocload.ViewBuilds()
+	first := t.TempDir()
+	if err := Build(ctx, Options{Root: repo.Dir, OutDir: first, Commit: "main"}); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("second build of the chain store: %s", time.Since(start).Round(time.Millisecond))
-	for _, p := range []string{osFeatureDoc, osStoryDoc, "a/spec/successor-v3/document/index.html", "a/spec/closed-feature/spec.md"} {
-		if readFile(t, site, p) != readFile(t, again, p) {
+	if got := specdocload.ViewBuilds() - before; got != 1 {
+		t.Fatalf("the build computed the view index %d times, want exactly once", got)
+	}
+	again := t.TempDir()
+	if err := Build(ctx, Options{Root: repo.Dir, OutDir: again, Commit: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := specdocload.ViewBuilds() - before; got != 1 {
+		t.Fatalf("a rebuild of the same commit computed the view index again (%d builds)", got)
+	}
+	for _, p := range []string{osFeatureDoc, osStoryDoc, "a/spec/successor-v3/document/index.html", "a/spec/closed-feature/spec.md", "a/spec/closed-feature/index.html"} {
+		if readFile(t, first, p) != readFile(t, again, p) {
 			t.Errorf("%s differs between two builds of the same commit", p)
 		}
-	}
-	start = time.Now()
-	ix, err := supersessionIndex(context.Background(), root, "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("view index of the chain store: %s", time.Since(start).Round(time.Millisecond))
-	if v := ix.Object("closed-feature", "dc-1"); v.Since != "2024-02-15" {
-		t.Errorf("index Object(closed-feature, dc-1).Since = %q, want 2024-02-15", v.Since)
-	}
-}
-
-func TestSupersessionLink(t *testing.T) {
-	known := map[string]bool{"spec/s": true, "spec/nodoc": true, "conflict/c": true}
-	docs := documentSet{"spec/s": true}
-	tests := []struct {
-		ref, want string
-	}{
-		{"spec/s#dc-1", "/a/spec/s/document/#dc-1"},
-		{"spec/s", "/a/spec/s/document/"},
-		{"conflict/c", "/a/conflict/c/"},
-		{"spec/nodoc#dc-1", ""}, // a page but no document: objects render only in documents
-		{"spec/nodoc", ""},
-		{"spec/absent#ac-1", ""},
-		{"conflict/absent", ""},
-		{"spec/s@0123abc#dc-1", ""}, // a view never names a pinned ref; none is linked
-		{"", ""},
-		{"not a ref", ""},
-	}
-	for _, tc := range tests {
-		if got := supersessionLink(tc.ref, known, docs); got != tc.want {
-			t.Errorf("supersessionLink(%q) = %q, want %q", tc.ref, got, tc.want)
-		}
-	}
-}
-
-// TestSupersessionIndex_Errors: an unresolvable commit is the build's
-// error (fail closed: a site never renders a superseded object as
-// untouched because its records could not be read).
-func TestSupersessionIndex_Errors(t *testing.T) {
-	neutralizeCIEnv(t)
-	repo := scenario.Build(t, "accepted")
-	if _, err := supersessionIndex(context.Background(), repo.Dir, "no-such-commit"); err == nil {
-		t.Fatal("supersessionIndex accepted an unresolvable commit")
-	}
-	if _, err := supersessionIndex(context.Background(), t.TempDir(), "HEAD"); err == nil {
-		t.Fatal("supersessionIndex accepted a directory that is not a repository")
 	}
 }

@@ -228,7 +228,7 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 		{
 			name: "supersession line element",
 			typ:  reflect.TypeOf(proj.Cards).Elem().FieldByIndex(supersessionsField(t, reflect.TypeOf(proj.Cards).Elem())).Type.Elem().Field(15).Type.Elem(),
-			want: []string{"Kind", "Text", "Links", "Trailing"},
+			want: []string{"Kind", "Text", "Disclosure", "Links", "Trailing"},
 		},
 		{
 			name: "stub element",

@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -111,11 +112,13 @@ func Build(ctx context.Context, opts Options) error {
 	}
 
 	// The closed-spec object supersession views of the build commit's
-	// records (design §6; objsupersede.go): computed ONCE per build, read
-	// per spec document below.
-	supersession, err := supersessionIndex(ctx, opts.Root, stamp.SHA)
+	// records (design §6): the shared loader's one cache, warmed ONCE here
+	// — every spec document's load then hits it — and read by the feature
+	// lens for a closed feature's criterion rows.
+	lens.views, err = specdocload.CommitViews(ctx, opts.Root, stamp.SHA)
 	if err != nil {
-		return err
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
+		return fmt.Errorf("dex: closed-spec object supersession views at %s: %w", stamp.SHA, err)
 	}
 
 	for _, p := range pages {
@@ -123,7 +126,7 @@ func Build(ctx context.Context, opts Options) error {
 			return err
 		}
 	}
-	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, documentInputs{stamp: stamp, model: mdl, known: known, docs: docs, supersession: supersession}, pages); err != nil {
+	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, documentInputs{stamp: stamp, model: mdl, known: known, docs: docs}, pages); err != nil {
 		return err
 	}
 	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known, mdl); err != nil {

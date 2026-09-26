@@ -152,10 +152,14 @@ type supersessionView struct {
 // it names with their hrefs, and the links rendered after it (an object
 // view's conflict beside the line naming its deciding decision).
 type supersessionLineView struct {
-	Kind     string                 `json:"kind"`
-	Text     string                 `json:"text"`
-	Links    []supersessionLinkView `json:"links,omitempty"`
-	Trailing []supersessionLinkView `json:"trailing,omitempty"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+	// Disclosure marks a line that is a disclosure rather than a §6 text
+	// (SI-279): an unproven supersession or carry, a not-established
+	// reason.
+	Disclosure bool                   `json:"disclosure,omitempty"`
+	Links      []supersessionLinkView `json:"links,omitempty"`
+	Trailing   []supersessionLinkView `json:"trailing,omitempty"`
 }
 
 // supersessionLinkView is a canonical ref and its href on this board.
