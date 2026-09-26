@@ -366,7 +366,7 @@ func (s objSupersedeSteps) withDefaults() objSupersedeSteps {
 		s.buildSite = dex.Build
 	}
 	if s.serveSite == nil {
-		s.serveSite = serveObjSupersedeSite
+		s.serveSite = func(dir string) (*objSupersedeSite, error) { return serveObjSupersedeSite(objSupersedeLoopback, dir) }
 	}
 	if s.startServe == nil {
 		s.startServe = startObjSupersedeServe
@@ -601,10 +601,15 @@ type objSupersedeSite struct {
 	srv *http.Server
 }
 
-// serveObjSupersedeSite serves the built site in dir on a loopback port.
-// The listener is bound before this returns, so the site answers at once.
-func serveObjSupersedeSite(dir string) (*objSupersedeSite, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+// objSupersedeLoopback is where every docs site listens: an ephemeral
+// loopback port.
+const objSupersedeLoopback = "127.0.0.1:0"
+
+// serveObjSupersedeSite serves the built site in dir on addr (production:
+// objSupersedeLoopback). The listener is bound before this returns, so the
+// site answers at once; a bind failure is an error, with nothing started.
+func serveObjSupersedeSite(addr, dir string) (*objSupersedeSite, error) {
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}

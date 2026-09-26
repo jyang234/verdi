@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -347,7 +350,7 @@ func fakeObjSupersedeProc(calls *int) *objSupersedeProc {
 func TestObjSupersedeFixture_Stop(t *testing.T) {
 	var callsA, callsB int
 	scratch := t.TempDir()
-	site, err := serveObjSupersedeSite(t.TempDir())
+	site, err := serveObjSupersedeSite(objSupersedeLoopback, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,15 +472,21 @@ func TestExcludeObjSupersedeDataZone(t *testing.T) {
 
 // TestServeObjSupersedeSite serves a built directory on loopback until
 // stop, which is idempotent and nil-safe. Negative: a page the site does
-// not have is a 404.
+// not have is a 404, and an address already taken is a listen error with
+// nothing served.
 func TestServeObjSupersedeSite(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("site home"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	site, err := serveObjSupersedeSite(dir)
+	site, err := serveObjSupersedeSite(objSupersedeLoopback, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	taken := strings.TrimSuffix(strings.TrimPrefix(site.url, "http://"), "/")
+	if again, err := serveObjSupersedeSite(taken, dir); err == nil {
+		again.stop()
+		t.Fatalf("listening on the taken address %s succeeded", taken)
 	}
 	t.Cleanup(site.stop)
 	if !strings.HasPrefix(site.url, "http://127.0.0.1:") || !strings.HasSuffix(site.url, "/") {
@@ -537,25 +546,47 @@ func copyObjSupersedeBinary(bin string) func(context.Context, string, string) er
 	}
 }
 
-// TestObjSupersedeFixture_StartAll_Negative drives startAll's failure paths
-// with the real steps (lane L3d review I-5): each row fails at a chosen
-// store AFTER the earlier stores are fully up — real `verdi serve`
-// subprocesses and real docs sites — and proves the partial failure reaps
-// every one of them and removes the run's scratch. It also proves the
+// buildObjSupersedeTestBinary builds the verdi binary once for a test,
+// into its own temporary directory.
+func buildObjSupersedeTestBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "verdi")
+	if err := buildBinary(context.Background(), absModuleRoot(t), bin); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// TestObjSupersedeFixture_StartAll_Negative drives the start's failure paths
+// through ensureStarted — the handler's own call, with the request's
+// context — using the real steps (lane L3d review I-5, re-review M-B): each
+// row fails at a chosen store AFTER the earlier stores are fully up (real
+// `verdi serve` subprocesses and real docs sites), and proves the partial
+// failure reaps every one of them — the failing store's own included —
+// removes the run's scratch, and caches nothing. It also proves the
 // fixture reads its scenario data from moduleRoot, not from the source
 // file's location (review M-2: a -trimpath build would lose the latter).
 func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 	neutralizeCIEnvForTest(t)
-	ctx := context.Background()
 	moduleRoot := absModuleRoot(t)
-	bin := filepath.Join(t.TempDir(), "verdi")
-	if err := buildBinary(ctx, moduleRoot, bin); err != nil {
-		t.Fatal(err)
-	}
+	bin := buildObjSupersedeTestBinary(t)
 	falseBin, err := exec.LookPath("false")
 	if err != nil {
 		t.Fatalf("no false binary: %v", err)
 	}
+	// A serve that stays alive but never answers: it records its pid, then
+	// becomes a sleep.
+	pidFile := filepath.Join(t.TempDir(), "sleeper.pid")
+	sleeper := filepath.Join(t.TempDir(), "sleeper")
+	if err := os.WriteFile(sleeper, []byte("#!/bin/sh\necho $$ > '"+pidFile+"'\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An address a docs site cannot take: this test holds it.
+	held, err := net.Listen("tcp", objSupersedeLoopback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
 	// storeOf names the store a step's directory belongs to:
 	// <scratch>/<store>/{repo,main,site}.
 	storeOf := func(dir string) string { return filepath.Base(filepath.Dir(dir)) }
@@ -564,34 +595,44 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 		name       string
 		moduleRoot string
 		stores     []string
-		bad        func(*objSupersedeSteps)
-		want       string
-		wantServes int // stores fully up before the failure: reaping must not be vacuous
+		bad        func(s *objSupersedeSteps, cancel context.CancelFunc)
+		wants      []string
+		wantServes int // serves and sites that came up: reaping must not be vacuous
 		wantSites  int
+		after      func(t *testing.T)
 	}{
-		{name: "the manifest is read from moduleRoot", moduleRoot: t.TempDir(), want: "loading the objsupersede scenario manifest"},
-		{name: "the binary build fails", bad: func(s *objSupersedeSteps) {
+		{name: "the manifest is read from moduleRoot", moduleRoot: t.TempDir(), wants: []string{"loading the objsupersede scenario manifest"}},
+		{name: "the binary build fails", bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
 			s.buildBinary = func(context.Context, string, string) error { return errors.New("boom") }
-		}, want: "building verdi binary for the objsupersede fixture: boom"},
+		}, wants: []string{"building verdi binary for the objsupersede fixture: boom"}},
 		{name: "a store is missing from the manifest", stores: []string{"accepted", "no-such-scenario"},
-			want: `scenario "no-such-scenario" is not defined in the manifest`, wantServes: 1, wantSites: 1},
-		{name: "materialize fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+			wants: []string{`scenario "no-such-scenario" is not defined in the manifest`}, wantServes: 1, wantSites: 1},
+		{name: "materialize fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
 			s.materialize = func(ctx context.Context, fixtureDir, repoDir, name string) (*scenario.Repo, error) {
 				if name == "chain" {
 					repoDir = filepath.Join(repoDir, "missing") // the real replay, into a directory that does not exist
 				}
 				return scenario.Materialize(ctx, fixtureDir, repoDir, name)
 			}
-		}, want: `materializing objsupersede scenario "chain"`, wantServes: 1, wantSites: 1},
-		{name: "the docs build fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+		}, wants: []string{`materializing objsupersede scenario "chain"`}, wantServes: 1, wantSites: 1},
+		{name: "the docs build fails", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
 			s.buildSite = func(ctx context.Context, opts dex.Options) error {
 				if storeOf(opts.Root) == "chain" {
 					opts.Commit = "refs/heads/no-such-branch" // the real build, at a commit that does not resolve
 				}
 				return dex.Build(ctx, opts)
 			}
-		}, want: `building the docs site for objsupersede scenario "chain"`, wantServes: 1, wantSites: 1},
-		{name: "the serve exits before healthz", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps) {
+		}, wants: []string{`building the docs site for objsupersede scenario "chain"`}, wantServes: 1, wantSites: 1},
+		{name: "the docs site cannot listen", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
+			serve := s.serveSite
+			s.serveSite = func(dir string) (*objSupersedeSite, error) {
+				if storeOf(dir) == "chain" {
+					return serveObjSupersedeSite(held.Addr().String(), dir) // the real listen, on a taken address
+				}
+				return serve(dir)
+			}
+		}, wants: []string{`serving the docs site for objsupersede scenario "chain"`, "address already in use"}, wantServes: 1, wantSites: 1},
+		{name: "the serve exits before healthz", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
 			start := s.startServe
 			s.startServe = func(ctx context.Context, binPath, root string) (*objSupersedeProc, error) {
 				if storeOf(root) == "chain" {
@@ -599,17 +640,53 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 				}
 				return start(ctx, binPath, root)
 			}
-		}, want: `starting verdi serve for objsupersede scenario "chain": verdi serve exited before answering healthz`, wantServes: 1, wantSites: 2},
+		}, wants: []string{`starting verdi serve for objsupersede scenario "chain": verdi serve exited before answering healthz`}, wantServes: 1, wantSites: 2},
+		{name: "the serve stays alive but never answers", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, _ context.CancelFunc) {
+			start := s.startServe
+			s.startServe = func(ctx context.Context, binPath, root string) (*objSupersedeProc, error) {
+				if storeOf(root) != "chain" {
+					return start(ctx, binPath, root)
+				}
+				short, cancel := context.WithTimeout(ctx, time.Second)
+				defer cancel()
+				return startObjSupersedeServe(short, sleeper, root) // the real start, of a child that never answers
+			}
+		}, wants: []string{`starting verdi serve for objsupersede scenario "chain": waiting for healthz`}, wantServes: 1, wantSites: 2,
+			after: func(t *testing.T) {
+				raw, err := os.ReadFile(pidFile)
+				if err != nil {
+					t.Fatalf("the sleeper never ran: %v", err)
+				}
+				pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+					t.Errorf("the never-healthy serve (pid %d) was not reaped: kill -0 = %v", pid, err)
+				}
+			}},
+		{name: "a store fails after its own serve is up", stores: []string{"accepted", "conflict-open"},
+			wants: []string{`store "conflict-open" has no recorded facts`}, wantServes: 2, wantSites: 2},
+		{name: "the request is cancelled mid-start", stores: []string{"accepted", "chain"}, bad: func(s *objSupersedeSteps, cancel context.CancelFunc) {
+			start := s.startServe
+			s.startServe = func(ctx context.Context, binPath, root string) (*objSupersedeProc, error) {
+				p, err := start(ctx, binPath, root)
+				cancel() // the request goes away once the first store is up
+				return p, err
+			}
+		}, wants: []string{`objsupersede scenario "chain"`, "context canceled"}, wantServes: 1, wantSites: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			tmp := t.TempDir()
 			var serves []*objSupersedeProc
 			var sites []*objSupersedeSite
 			steps := objSupersedeSteps{
 				buildBinary: copyObjSupersedeBinary(bin),
 				serveSite: func(dir string) (*objSupersedeSite, error) {
-					s, err := serveObjSupersedeSite(dir)
+					s, err := serveObjSupersedeSite(objSupersedeLoopback, dir)
 					if err == nil {
 						sites = append(sites, s)
 					}
@@ -624,7 +701,7 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 				},
 			}
 			if tc.bad != nil {
-				tc.bad(&steps)
+				tc.bad(&steps, cancel)
 			}
 			root := moduleRoot
 			if tc.moduleRoot != "" {
@@ -632,19 +709,19 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 			}
 			f := newObjSupersedeFixture(root)
 			f.names, f.tmpRoot, f.steps = tc.stores, tmp, steps
-			t.Cleanup(f.stop)
+			t.Cleanup(f.stop) // reaps a start that wrongly succeeds (ensureStarted caches it)
 
-			run, err := f.startAll(ctx)
-			if run != nil {
-				// A start that wrongly succeeds is never cached in f, so f.stop
-				// cannot reach it: reap it here rather than leak its serves.
-				t.Cleanup(func() {
-					stopObjSupersedeStores(run.stores)
-					_ = os.RemoveAll(run.scratch)
-				})
+			info, err := f.ensureStarted(ctx)
+			if err == nil {
+				t.Fatalf("ensureStarted = %+v; want an error containing %q", info, tc.wants)
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("startAll = %+v, %v; want an error containing %q", run, err, tc.want)
+			for _, want := range tc.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v; want it to contain %q", err, want)
+				}
+			}
+			if f.run != nil {
+				t.Errorf("a failed start was cached: %+v", f.run)
 			}
 			if len(serves) != tc.wantServes || len(sites) != tc.wantSites {
 				t.Fatalf("%d serves and %d docs sites came up before the failure, want %d and %d", len(serves), len(sites), tc.wantServes, tc.wantSites)
@@ -667,19 +744,11 @@ func TestObjSupersedeFixture_StartAll_Negative(t *testing.T) {
 			if entries, _ := os.ReadDir(tmp); len(entries) != 0 {
 				t.Errorf("the failed start left scratch behind: %v", entries)
 			}
+			if tc.after != nil {
+				tc.after(t)
+			}
 		})
 	}
-}
-
-// buildObjSupersedeTestBinary builds the verdi binary once for a test,
-// into its own temporary directory.
-func buildObjSupersedeTestBinary(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "verdi")
-	if err := buildBinary(context.Background(), absModuleRoot(t), bin); err != nil {
-		t.Fatal(err)
-	}
-	return bin
 }
 
 // TestObjSupersedeFixture_HermeticServeEnv: the serves run under
