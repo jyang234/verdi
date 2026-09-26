@@ -238,11 +238,11 @@ func RenderMarkdown(doc Document) string {
 
 // writeSupersession writes one Supersession beside object id as bullets
 // under indent: one per §6 line, the text verbatim inside its markup
-// (supersessionLineMarkup).
+// (SupersessionLineMarkup).
 func writeSupersession(w func(string, ...any), indent, id string, s Supersession) {
-	stem := supersessionStem(id, s)
+	stem := SupersessionStem(id, s)
 	for _, line := range s.Lines {
-		w("%s- %s\n", indent, supersessionLineMarkup(stem, s, line))
+		w("%s- %s\n", indent, SupersessionLineMarkup(stem, s, line))
 	}
 }
 

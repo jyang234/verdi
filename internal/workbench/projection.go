@@ -101,6 +101,76 @@ type cardView struct {
 	// (dc-4's opener contract) — this field only carries the DATA; no
 	// chip markup is emitted here.
 	Badges []badgeView `json:"badges,omitempty"`
+	// Supersessions is a DECISION card's closed-spec object supersession
+	// views (SI-278; design §6): one per fragment `supersedes` edge to a
+	// closed spec's object, in link order, computed from this board's OWN
+	// tree — so a design branch reads "proposed — … when spec/S is
+	// accepted", the default branch "supersedes …" in force, and
+	// non-matching records "supersession not established: <reason>".
+	// Store-derived enrichment attached by attachObjectSupersession
+	// (objsupersede.go) after buildProjection returns, exactly like
+	// Obligations and Badges above; empty on every other card and omitted
+	// from the wire then (get_board gains only additive fields).
+	Supersessions []supersessionView `json:"supersessions,omitempty"`
+}
+
+// supersessionView is one closed-spec object supersession view on the
+// wire, shared by a reference card's object (an objsupersede.ObjectView)
+// and a decision card's edge (an objsupersede.DecisionView): the view's
+// state, its structured fields — the link targets — and its §6 lines as
+// internal/specdoc gives them their links, verbatim. Mirrors the view
+// types field for field so this file, the pure projector, never imports
+// the compute package (the badgeView posture).
+type supersessionView struct {
+	State  string `json:"state"`
+	Object string `json:"object,omitempty"` // a decision view's edge object, "spec/T#o"
+	Edge   string `json:"edge,omitempty"`   // a decision view's edge ref, as written
+	// An object view: the deciding decision, the establishing conflict,
+	// S_k's acceptance date, T's closed date (or why it is unproven), the
+	// carrying state with the revision it names, a branching chain's
+	// heads, and why the object or its carry is unproven.
+	By            string   `json:"by,omitempty"`
+	Conflict      string   `json:"conflict,omitempty"`
+	Since         string   `json:"since,omitempty"`
+	Closed        string   `json:"closed,omitempty"`
+	ClosedWitness string   `json:"closed_witness,omitempty"`
+	Carry         string   `json:"carry,omitempty"`
+	Revision      string   `json:"revision,omitempty"`
+	Heads         []string `json:"heads,omitempty"`
+	Witness       string   `json:"witness,omitempty"`
+	// A decision view: whether the edge carries an earlier revision's
+	// replacement, the establishing successor, and a not-established reason.
+	Carried     bool   `json:"carried,omitempty"`
+	Establisher string `json:"establisher,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	// Lines are the view's §6 lines in display order.
+	Lines []supersessionLineView `json:"lines"`
+}
+
+// supersessionLineView is one §6 line: its kind (governed, since, carry,
+// unproven; edge, carries, not-established), its verbatim text, the refs
+// it names with their hrefs, and the links rendered after it (an object
+// view's conflict beside the line naming its deciding decision).
+type supersessionLineView struct {
+	Kind     string                 `json:"kind"`
+	Text     string                 `json:"text"`
+	Links    []supersessionLinkView `json:"links,omitempty"`
+	Trailing []supersessionLinkView `json:"trailing,omitempty"`
+}
+
+// supersessionLinkView is a canonical ref and its href on this board.
+type supersessionLinkView struct {
+	Ref  string `json:"ref"`
+	Href string `json:"href"`
+}
+
+// refObjectView is what a closed spec's reference card shows when the
+// default-branch views report supersession lines for its target (SI-278;
+// the controller's ruling 4): the object's original text, unchanged, and
+// its view. Never set on any other reference card.
+type refObjectView struct {
+	Text         string           `json:"text"`
+	Supersession supersessionView `json:"supersession"`
 }
 
 // obligationView is one declared evidence kind's obligation as it renders on
@@ -210,6 +280,13 @@ type refCardView struct {
 	// link that would 404. Store-derived enrichment attached by
 	// attachFamilyLinks.
 	UnresolvedNotice string `json:"unresolvedNotice,omitempty"`
+	// Object is set only on a reference card whose target is a closed
+	// spec's criterion or decision that the DEFAULT-BRANCH closed-spec
+	// object supersession views report lines for (SI-278; design §6): the
+	// object's original text, unchanged, and the view. Store-derived
+	// enrichment attached by attachObjectSupersession (objsupersede.go);
+	// nil, and omitted from the wire, on every other reference card.
+	Object *refObjectView `json:"object,omitempty"`
 }
 
 // edgeView is one yarn element: a declared spec edge or an

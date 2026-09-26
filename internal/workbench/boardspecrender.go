@@ -19,6 +19,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specdoc"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the
@@ -461,6 +462,17 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		// a locus-declaring finding names, so the non-empty slice is the
 		// whole gate, exactly like Obligations above.
 		writeBadgeChips(&b, c.ID, c.Badges)
+		// A decision's closed-spec object supersession views (SI-278):
+		// the §6 lines, verbatim, in the same inline markup the docs site
+		// writes — populated only where the views report an edge, so the
+		// non-empty slice is the whole gate, exactly like Badges above.
+		if len(c.Supersessions) > 0 {
+			b.WriteString(`<ul class="objsupersede-lines" data-testid="card-supersession-` + esc(c.ID) + `">`)
+			for _, s := range c.Supersessions {
+				writeSupersessionLines(&b, specdoc.SupersessionStem(c.ID, specdocSupersession(s)), s)
+			}
+			b.WriteString(`</ul>`)
+		}
 		// A card's yarn handle draws a typed SPEC edge (add-link) — domain
 		// surface, offered only where the kernel accepts it (proto-sticky
 		// attribution handles stay: those draw annotation threads).
@@ -481,6 +493,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		cls := "refcard"
 		pinAttrs := ""
 		label := "reference"
+		if rc.Object != nil {
+			// A closed spec's superseded object (SI-278): the card grows to
+			// hold the object's text and its §6 lines.
+			cls += " refcard--object"
+		}
 		if rc.Pinned {
 			cls += " refcard--pinned"
 			pinAttrs = ` data-pin-id="` + esc(rc.PinID) + `"`
@@ -489,6 +506,15 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		b.WriteString(`<div class="` + cls + `" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `"` + pinAttrs + ` style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + label + `</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
 		b.WriteString(`<span class="card-ref" title="` + esc(rc.Ref) + `">` + esc(rc.Ref) + `</span>`)
+		if rc.Object != nil {
+			// The object's original text, unchanged, then the default-branch
+			// views' lines (design §6; SI-278) — the same inline markup the
+			// docs site writes, so the two surfaces cannot drift.
+			b.WriteString(`<p class="card-text refcard-object-text" data-testid="refcard-object-text" title="` + esc(rc.Object.Text) + `">` + esc(rc.Object.Text) + `</p>`)
+			b.WriteString(`<ul class="objsupersede-lines" data-testid="refcard-supersession" data-state="` + esc(rc.Object.Supersession.State) + `">`)
+			writeSupersessionLines(&b, refCardSupersessionStem(rc.Ref), rc.Object.Supersession)
+			b.WriteString(`</ul>`)
+		}
 		if rc.EditorHref != "" {
 			// A proposal-diagram reference opens its own editor surface
 			// (spec/board-editor dc-1) — every mode: reading a proposal's
@@ -1450,6 +1476,16 @@ func renderASDDialogs(p *BoardProjection) string {
 	writeASDImpactDialog(&b)
 	writeASDEditStubDialog(&b, p)
 	return b.String()
+}
+
+// writeSupersessionLines writes one view's §6 lines as list items, each
+// through internal/specdoc's one line renderer under the given testid
+// stem — the docs site's exact markup, links included.
+func writeSupersessionLines(b *strings.Builder, stem string, s supersessionView) {
+	sd := specdocSupersession(s)
+	for _, line := range sd.Lines {
+		b.WriteString(`<li>` + specdoc.SupersessionLineMarkup(stem, sd, line) + `</li>`)
+	}
 }
 
 // refKindOf classifies a ref-card's target kind for the picker's

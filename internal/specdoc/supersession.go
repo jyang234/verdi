@@ -53,9 +53,9 @@ type SupersessionLine struct {
 // RefLink is a canonical ref and its URL on the rendering surface.
 type RefLink struct{ Ref, URL string }
 
-// objectSupersession converts an object view; nil for an object the
+// ObjectSupersession converts an object view; nil for an object the
 // records do not supersede.
-func objectSupersession(v objsupersede.ObjectView, links map[string]string) (*Supersession, error) {
+func ObjectSupersession(v objsupersede.ObjectView, links map[string]string) (*Supersession, error) {
 	if v.State == objsupersede.ObjectNotSuperseded {
 		return nil, nil
 	}
@@ -94,8 +94,8 @@ func objectSupersession(v objsupersede.ObjectView, links map[string]string) (*Su
 	return s, nil
 }
 
-// decisionSupersession converts one decision edge's view.
-func decisionSupersession(v objsupersede.DecisionView, links map[string]string) (Supersession, error) {
+// DecisionSupersession converts one decision edge's view.
+func DecisionSupersession(v objsupersede.DecisionView, links map[string]string) (Supersession, error) {
 	texts, err := v.Lines()
 	if err != nil {
 		return Supersession{}, err
@@ -169,13 +169,13 @@ func refByte(b byte) bool {
 	return strings.IndexByte("-_./#@:", b) >= 0
 }
 
-// supersessionLineMarkup renders one line as inline HTML for the Markdown
+// SupersessionLineMarkup renders one line as inline HTML for the Markdown
 // text form (the store's engine passes inline HTML through, exactly as
 // the object anchors already rely on): the text verbatim, each named ref
 // replaced in place by its link, inside a span that names the object, the
 // line's kind, and the view's state; trailing links follow the span.
 // Markup only — no word is added to or taken from the line.
-func supersessionLineMarkup(stem string, s Supersession, line SupersessionLine) string {
+func SupersessionLineMarkup(stem string, s Supersession, line SupersessionLine) string {
 	text := textEscaper.Replace(line.Text)
 	for _, l := range line.Links {
 		text = replaceToken(text, textEscaper.Replace(l.Ref), `<a href="`+escapeAttr(l.URL)+`">`+textEscaper.Replace(l.Ref)+`</a>`)
@@ -215,11 +215,11 @@ func replaceToken(text, ref, repl string) string {
 	}
 }
 
-// supersessionStem is the data-testid stem of one Supersession beside
+// SupersessionStem is the data-testid stem of one Supersession beside
 // object id: the id alone for the object's own view, the id and the
 // edge's object (its "/" and "#" flattened to "-", as the board's
 // ref-card testids are) for a decision view.
-func supersessionStem(id string, s Supersession) string {
+func SupersessionStem(id string, s Supersession) string {
 	if s.Object == "" {
 		return id
 	}

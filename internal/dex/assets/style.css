@@ -472,6 +472,33 @@ footer.site-foot {
 }
 .objsupersede-conflict:hover { color: var(--accent); }
 
+/* On the board (SI-278): a closed spec's reference card that carries its
+   object grows past the uniform footprint to hold the original text and
+   the lines, and so does a decision card that carries its views; the
+   lines sit in a plain list one step below the card's own text. */
+.refcard--object { height: auto; min-height: 4.5rem; padding-bottom: 1.35rem; }
+.refcard-object-text {
+  margin: 0.4rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.objsupersede-lines {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; }
+.objsupersede-lines .objsupersede-conflict { font-size: 0.66rem; margin-left: 0.3rem; }
+.objcard:has(.objsupersede-lines) { height: auto; min-height: 8.75rem; }
+
 /* the board's Document tab (spec/spec-documents ac-4): a reading
    surface beside the board's working surface. One quiet header row —
    ref, kind switch, three controls — then the document carries the page. */

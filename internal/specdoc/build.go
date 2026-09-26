@@ -75,12 +75,12 @@ func Build(in Input) (Document, error) {
 		if sup != nil {
 			var err error
 			if v, ok := sup.Objects[d.ID]; ok {
-				if item.Supersession, err = objectSupersession(v, sup.Links); err != nil {
+				if item.Supersession, err = ObjectSupersession(v, sup.Links); err != nil {
 					return Document{}, fmt.Errorf("specdoc: %s: %w", d.ID, err)
 				}
 			}
 			for _, v := range sup.Decisions[d.ID] {
-				s, err := decisionSupersession(v, sup.Links)
+				s, err := DecisionSupersession(v, sup.Links)
 				if err != nil {
 					return Document{}, fmt.Errorf("specdoc: %s: %w", d.ID, err)
 				}
@@ -104,7 +104,7 @@ func Build(in Input) (Document, error) {
 		if sup != nil {
 			if v, ok := sup.Objects[ac.ID]; ok {
 				var err error
-				if cr.Supersession, err = objectSupersession(v, sup.Links); err != nil {
+				if cr.Supersession, err = ObjectSupersession(v, sup.Links); err != nil {
 					return Document{}, fmt.Errorf("specdoc: %s: %w", ac.ID, err)
 				}
 			}

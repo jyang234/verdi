@@ -37,11 +37,7 @@ import (
 // inside the store it was resolved from, never a root-relative address
 // that ejects the operator to the serving checkout or 404s on a
 // branch-only target.
-func attachFamilyLinks(ctx context.Context, proj *BoardProjection, root, fixedBranch string) error {
-	ix, err := index.Build(root)
-	if err != nil {
-		return fmt.Errorf("workbench: family links: building index: %w", err)
-	}
+func attachFamilyLinks(ctx context.Context, proj *BoardProjection, ix *index.Index, root, fixedBranch string) error {
 	attachParentFeatureLink(proj, ix, fixedBranch)
 	return attachStubStoryLinks(ctx, proj, ix, root, fixedBranch)
 }
