@@ -1,5 +1,6 @@
 import { test, expect, request, type Locator, type Page } from "@playwright/test";
 import { CONTROL_URL, refCardTestId } from "./fixtures";
+import { addSticky } from "./helpers";
 
 // Closed-spec object supersession on the board (design
 // docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-design.md
@@ -365,5 +366,60 @@ test.describe("closed-spec object supersession on the board", () => {
     expect(ci.boards.main.url).not.toBe("");
     await page.goto(ci.boards.main.url);
     await expectSuperseded(page, story, `#obj-${objectId(story.establishing_decision)}`, null);
+  });
+
+  test("a decision card wearing a wall badge keeps the badge row off its lines (constraint-target)", async ({ page }) => {
+    // The successor's dc-1 supersedes a CONSTRAINT of the closed feature
+    // (design §8's refusal): VL-026 pins a badge on the card, and the view
+    // reads "not established" — the one fixture card carrying both.
+    const st = store(await fixture(page), "constraint-target");
+    const s = st.supersessions.find((x) => x.object === "spec/closed-feature#co-1") as Supersession;
+    expect(s, "the fixture supersedes the closed feature's constraint").toBeTruthy();
+    await page.goto(st.boards.checkout.url);
+    const card = page.getByTestId(`card-${objectId(s.decision)}`);
+    const badges = card.locator(".card-badges");
+    await expect(badges).toHaveCount(1);
+    await expect(card.locator(".badge-chip").first()).toBeVisible();
+    const reason = card.getByTestId(`objsupersede-${decisionStem(s.decision, s.object)}-not-established`);
+    await expect(reason).toHaveAttribute("data-state", "not-established");
+    await expect(reason).toContainText("supersession not established: ");
+    await expectUnclipped(page, card);
+    const badgeBox = (await badges.boundingBox()) as Box;
+    expect(badgeBox, "the badge row has a box").toBeTruthy();
+    const lines = card.locator(".objsupersede-lines li");
+    const n = await lines.count();
+    expect(n).toBeGreaterThan(0);
+    for (let i = 0; i < n; i++) {
+      const box = (await lines.nth(i).boundingBox()) as Box;
+      expect(intersects(badgeBox, box), `badge row ${JSON.stringify(badgeBox)} covers line ${i} ${JSON.stringify(box)}`).toBe(false);
+    }
+    // A constraint is never a superseded object: its reference card is untouched.
+    await expectUntouched(page, s.object);
+  });
+
+  test("a board-landed sticky covers no card's lines", async ({ page }) => {
+    // The lane-landing policy places a new sticky below every card's
+    // RESERVED height, so the board's own authoring action never lands on
+    // a decision's §6 line.
+    const st = store(await fixture(page), "proposed");
+    await page.goto(st.boards.design.url);
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+    const sticky = await addSticky(page, "landing probe for the decision lane", "decision-needed");
+    const stickyBox = (await sticky.boundingBox()) as Box;
+    expect(stickyBox, "the sticky has a box").toBeTruthy();
+    const lines = page.locator(".objsupersede-lines li");
+    const n = await lines.count();
+    expect(n).toBeGreaterThan(0);
+    for (let i = 0; i < n; i++) {
+      const box = (await lines.nth(i).boundingBox()) as Box;
+      expect(intersects(stickyBox, box), `sticky ${JSON.stringify(stickyBox)} covers line ${i} ${JSON.stringify(box)}`).toBe(false);
+    }
+    const cards = page.locator(".objcard, .refcard, .stubcard");
+    const m = await cards.count();
+    for (let i = 0; i < m; i++) {
+      const box = await cards.nth(i).boundingBox();
+      if (!box) continue;
+      expect(intersects(stickyBox, box), `sticky covers ${await cards.nth(i).getAttribute("data-testid")}`).toBe(false);
+    }
   });
 });
