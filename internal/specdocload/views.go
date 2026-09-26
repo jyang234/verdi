@@ -154,25 +154,48 @@ func viewKey(home, kind, id, head string) string {
 // invalidated the moment the branch resolves.
 const unresolvedHead = "unresolved"
 
-// resolveDefaultHead is the default branch's head commit at root, or
-// unresolvedHead when specstate cannot resolve the branch or its ref.
-func resolveDefaultHead(ctx context.Context, root string) (head string, resolved bool) {
-	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
-	if !ok {
-		return unresolvedHead, false
-	}
-	sha, err := gitx.RevParse(ctx, root, branch.Ref)
-	if err != nil {
-		return unresolvedHead, false
-	}
-	return sha, true
+// defaultHistory is the history every view is computed against: the
+// default branch's head commit at root — unresolvedHead when specstate
+// cannot resolve the branch or its ref — and whether the repository's
+// history is shallow. Shallowness is a history input too (History reads
+// it for acceptance and closed dates), so it is part of every key:
+// deepening a clone in place (`git fetch --unshallow`) is a new key and
+// the stale "shallow history" views are never served again.
+type defaultHistory struct {
+	head     string // a full commit id, or unresolvedHead
+	resolved bool
+	shallow  bool // shallow, or unknowable (treated as shallow: unproven)
 }
 
-// repoKey is the repository's identity for a commit's views: its git
-// common dir, the one directory the main worktree and every linked
+// key is the history's component of a cache key — never a git revision.
+func (h defaultHistory) key() string {
+	if h.shallow {
+		return h.head + "+shallow"
+	}
+	return h.head
+}
+
+// resolveDefaultHistory reads root's default history.
+func resolveDefaultHistory(ctx context.Context, root string) defaultHistory {
+	h := defaultHistory{head: unresolvedHead}
+	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
+			h.head, h.resolved = sha, true
+		}
+	}
+	if shallow, err := gitx.IsShallow(ctx, root); err != nil || shallow {
+		h.shallow = true
+	}
+	return h
+}
+
+// repoKey is the store's identity for a commit's views: the repository's
+// git common dir — the one directory the main worktree and every linked
 // worktree share, resolved through symlinks so two spellings of one path
-// (a temp dir and its realpath) key alike. A directory git cannot answer
-// for falls back to root itself.
+// (a temp dir and its realpath) key alike — joined with the store's
+// repo-relative prefix, since a commit's records are read relative to the
+// store root and two stores in one repository must never share views. A
+// directory git cannot answer for falls back to root itself.
 func repoKey(ctx context.Context, root string) string {
 	dir, err := gitx.CommonDir(ctx, root)
 	if err != nil {
@@ -185,7 +208,11 @@ func repoKey(ctx context.Context, root string) string {
 	if real, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = real
 	}
-	return dir
+	prefix, err := gitx.RepoPrefix(ctx, root)
+	if err != nil {
+		return root
+	}
+	return dir + "\x00" + prefix
 }
 
 // CommitViews returns the views of the records at commit (any revision git
@@ -196,13 +223,12 @@ func CommitViews(ctx context.Context, root, commit string) (*Views, error) {
 	if err != nil {
 		return nil, fmt.Errorf("specdocload: resolving %q: %w", commit, err)
 	}
-	head, _ := resolveDefaultHead(ctx, root)
-	return commitViews(ctx, root, full, head)
+	return commitViews(ctx, root, full, resolveDefaultHistory(ctx, root).key())
 }
 
-// commitViews is CommitViews with the commit and the default head resolved.
-func commitViews(ctx context.Context, root, full, head string) (*Views, error) {
-	return views.get(ctx, viewKey(repoKey(ctx, root), "commit", full, head), func(ctx context.Context) (*Views, error) {
+// commitViews is CommitViews with the commit and the history key resolved.
+func commitViews(ctx context.Context, root, full, historyKey string) (*Views, error) {
+	return views.get(ctx, viewKey(repoKey(ctx, root), "commit", full, historyKey), func(ctx context.Context) (*Views, error) {
 		snap, digest, err := snapshotRecords(ctx, objsupersede.CommitTree{Root: root, Commit: full})
 		if err != nil {
 			return nil, err
@@ -220,8 +246,7 @@ func WorkTreeViews(ctx context.Context, root string) (*Views, error) {
 	if err != nil {
 		return nil, err
 	}
-	head, _ := resolveDefaultHead(ctx, root)
-	return views.get(ctx, viewKey(root, "tree", digest, head), func(ctx context.Context) (*Views, error) {
+	return views.get(ctx, viewKey(root, "tree", digest, resolveDefaultHistory(ctx, root).key()), func(ctx context.Context) (*Views, error) {
 		return buildViews(ctx, root, snap, digest)
 	})
 }
@@ -243,25 +268,25 @@ func BoardIndexes(ctx context.Context, root string) (BoardViews, error) {
 	if err != nil {
 		return BoardViews{}, err
 	}
-	head, resolved := resolveDefaultHead(ctx, root)
+	h := resolveDefaultHistory(ctx, root)
 	buildTree := func(ctx context.Context) (*Views, error) {
 		return buildViews(ctx, root, snap, treeDigest)
 	}
-	if !resolved {
-		tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, head), buildTree)
+	if !h.resolved {
+		tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, h.key()), buildTree)
 		if err != nil {
 			return BoardViews{}, err
 		}
 		return BoardViews{Tree: tree}, nil
 	}
-	def, err := commitViews(ctx, root, head, head)
+	def, err := commitViews(ctx, root, h.head, h.key())
 	if err != nil {
 		return BoardViews{}, err
 	}
 	if def.Digest() == treeDigest {
 		return BoardViews{Default: def, Tree: def}, nil
 	}
-	tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, head), buildTree)
+	tree, err := views.get(ctx, viewKey(root, "tree", treeDigest, h.key()), buildTree)
 	if err != nil {
 		return BoardViews{}, err
 	}

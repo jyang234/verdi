@@ -741,3 +741,101 @@ func TestBoardIndexes_Errors(t *testing.T) {
 		}
 	})
 }
+
+// TestCommitViews_TwoStoresInOneRepository (the board closure's C-1): a
+// second store under sub/ of the same repository shares the git common
+// dir but not its records, so its commit views are its own — never the
+// root store's entry.
+func TestCommitViews_TwoStoresInOneRepository(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	sub := filepath.Join(repo.Dir, "sub")
+	for _, rel := range []string{".verdi/verdi.yaml", ".verdi/specs/archive/closed-feature/spec.md", ".verdi/specs/active/other-feature/spec.md"} {
+		data, err := os.ReadFile(filepath.Join(repo.Dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dst := filepath.Join(sub, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, repo.Dir, "add", "sub")
+	gitIn(t, repo.Dir, "commit", "-q", "-m", "A second store under sub/")
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", "main")
+
+	before := ViewBuilds()
+	root, err := CommitViews(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Records.Specs["successor"] == nil || root.Index.Object("closed-feature", "dc-1").State != objsupersede.ObjectSuperseded {
+		t.Fatalf("the root store's views lost the successor: %+v", root.Index.Object("closed-feature", "dc-1"))
+	}
+	subViews, err := CommitViews(ctx, sub, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subViews == root {
+		t.Fatal("the sub store was served the root store's entry")
+	}
+	if subViews.Records.Specs["successor"] != nil || subViews.Index.Object("closed-feature", "dc-1").State != objsupersede.ObjectNotSuperseded {
+		t.Fatalf("the sub store's views carry the root store's records: successor present=%v dc-1=%+v", subViews.Records.Specs["successor"] != nil, subViews.Index.Object("closed-feature", "dc-1"))
+	}
+	if got := ViewBuilds() - before; got != 2 {
+		t.Fatalf("builds = %d, want one per store", got)
+	}
+	// Each is a hit on its own key.
+	if again, err := CommitViews(ctx, sub, "main"); err != nil || again != subViews || ViewBuilds()-before != 2 {
+		t.Fatalf("the sub store's second lookup rebuilt or changed entry: err=%v same=%v builds=%d", err, again == subViews, ViewBuilds()-before)
+	}
+}
+
+// TestViews_ShallowThenUnshallowed (the board closure's C-2): a shallow
+// clone's views read acceptance as unproven; deepening the clone in place
+// with `git fetch --unshallow` is a new key, so the same process then
+// reads the supersession in force.
+func TestViews_ShallowThenUnshallowed(t *testing.T) {
+	viewsEnv(t)
+	ctx := context.Background()
+	src := scenario.Build(t, "accepted")
+	clone := filepath.Join(t.TempDir(), "shallow")
+	gitIn(t, src.Dir, "clone", "-q", "--depth", "1", "file://"+src.Dir, clone)
+	shallow, err := gitx.IsShallow(ctx, clone)
+	if err != nil || !shallow {
+		t.Fatalf("clone is not shallow: %v %v", shallow, err)
+	}
+	b, err := BoardIndexes(ctx, clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Default == nil {
+		t.Fatal("the shallow clone's default branch did not resolve")
+	}
+	if v := b.Default.Index.Object("closed-feature", "dc-1"); v.State != objsupersede.ObjectUnproven || !strings.Contains(v.Witness, "shallow") {
+		t.Fatalf("shallow clone: closed-feature#dc-1 = %+v, want unproven with a shallow-history witness", v)
+	}
+	gitIn(t, clone, "fetch", "-q", "--unshallow")
+	if shallow, err := gitx.IsShallow(ctx, clone); err != nil || shallow {
+		t.Fatalf("clone is still shallow after --unshallow: %v %v", shallow, err)
+	}
+	b2, err := BoardIndexes(ctx, clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b2.Default == b.Default {
+		t.Fatal("the deepened clone was served the shallow entry")
+	}
+	if v := b2.Default.Index.Object("closed-feature", "dc-1"); v.State != objsupersede.ObjectSuperseded {
+		t.Fatalf("deepened clone: closed-feature#dc-1 = %+v, want superseded", v)
+	}
+	if res, err := Load(ctx, Request{Root: clone, Name: "closed-feature", Mode: ModeAccepted, Kind: specdoc.KindSpec}); err != nil {
+		t.Fatal(err)
+	} else if v := res.Input.Facts.Supersession.Objects["dc-1"]; v.State != objsupersede.ObjectSuperseded {
+		t.Fatalf("Load after --unshallow: %+v", v)
+	}
+}
