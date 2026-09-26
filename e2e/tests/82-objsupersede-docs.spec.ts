@@ -111,12 +111,23 @@ function objectText(page: Page, id: string) {
   return page.locator(`h3:has(a#${id}), li:has(a#${id})`).first();
 }
 
+// corpusHref is the one address every document consumer serves for a
+// ref the §6 lines name (internal/specdocload's SupersessionLink; the
+// links must be identical across the four renders, spec/spec-documents
+// ac-6): the artifact's corpus page, "/a/<kind>/<name>", with the
+// object's anchor for a spec's object.
+function corpusHref(ref: string): string {
+  const hash = ref.indexOf("#");
+  return hash < 0 ? `/a/${ref}` : `/a/${ref.slice(0, hash)}#${ref.slice(hash + 1)}`;
+}
+
 // expectSameTarget compares a rendered href (site-absolute) with the
-// fixture's absolute URL for the same page and anchor.
-async function expectSameTarget(page: Page, link: ReturnType<Page["locator"]>, wantURL: string) {
-  const href = await link.getAttribute("href");
-  expect(href).not.toBeNull();
-  expect(new URL(href as string, page.url()).href).toBe(wantURL);
+// corpus address of the ref it links, and proves the address serves: the
+// docs site's directory-form permalink answers it (by its redirect).
+async function expectSameTarget(page: Page, link: ReturnType<Page["locator"]>, ref: string) {
+  await expect(link).toHaveAttribute("href", corpusHref(ref));
+  const res = await page.request.get(new URL(corpusHref(ref).replace(/#.*$/, ""), page.url()).href);
+  expect(res.status(), `GET ${corpusHref(ref)}`).toBe(200);
 }
 
 // expectSuperseded asserts §6's lines on one closed object's document:
@@ -139,27 +150,35 @@ async function expectSuperseded(page: Page, s: Supersession, establishingSpec: s
   expect(s.establishing_decision.startsWith(establishingSpec + "#")).toBe(true);
   const decisionLink = since.getByRole("link", { name: s.establishing_decision, exact: true });
   await expect(decisionLink).toBeVisible();
-  await expectSameTarget(page, decisionLink, s.establishing_decision_docs_url);
+  await expectSameTarget(page, decisionLink, s.establishing_decision);
 
   const conflictLink = page.getByTestId(`objsupersede-${id}-conflict`);
   await expect(conflictLink).toHaveText(s.conflict);
-  await expectSameTarget(page, conflictLink, s.conflict_docs_url);
+  await expectSameTarget(page, conflictLink, s.conflict);
 }
+
+// The two closed objects every scenario's records supersede, in the
+// fixture's order (the M-3 guard: a loop over an empty list proves
+// nothing).
+const CLOSED_OBJECTS = ["spec/closed-feature#dc-1", "spec/closed-story#ac-1"];
 
 test.describe("closed-spec object supersession on the docs site", () => {
   test("after acceptance: original text, governed, since/by with links to S's decision and the conflict", async ({ page }) => {
     const st = store(await fixture(page), "accepted");
-    expect(st.supersessions.map((s) => s.object)).toEqual(["spec/closed-feature#dc-1", "spec/closed-story#ac-1"]);
+    expect(st.supersessions.map((s) => s.object)).toEqual(CLOSED_OBJECTS);
     for (const s of st.supersessions) {
       await expectSuperseded(page, s, st.establishing_successor);
       // No carrying line: the establishing successor heads its chain.
       await expect(page.getByTestId(`objsupersede-${objectId(s.object)}-carry`)).toHaveCount(0);
-      // Both links land: S's decision anchor exists on its document, and
-      // the conflict page names the conflict.
+      // Both links land: S's decision heading exists on its artifact page
+      // (the permalink is directory-form, so the site answers the corpus
+      // address with a trailing slash, the anchor kept), and the conflict
+      // page names the conflict.
       await page.getByTestId(`objsupersede-${objectId(s.object)}-since`).getByRole("link").click();
-      await expect(page).toHaveURL(s.establishing_decision_docs_url);
-      await expect(page.locator(`a#${objectId(s.establishing_decision)}`)).toHaveCount(1);
-      await page.goto(s.conflict_docs_url);
+      const decisionId = objectId(s.establishing_decision);
+      await expect.poll(() => new URL(page.url()).pathname.replace(/\/$/, "") + new URL(page.url()).hash).toBe(corpusHref(s.establishing_decision));
+      await expect(page.locator(`#${decisionId}`)).toHaveCount(1);
+      await page.goto(new URL(corpusHref(s.conflict), page.url()).href);
       // The artifact page's shell and body each carry an h1 naming the conflict.
       await expect(page.getByRole("heading", { level: 1 }).first()).toContainText(s.conflict.slice("conflict/".length));
     }
@@ -170,7 +189,7 @@ test.describe("closed-spec object supersession on the docs site", () => {
       const edge = page.getByTestId(`objsupersede-${decisionStem(s.decision, s.object)}-edge`);
       await expect(edge).toHaveAttribute("data-state", "in-force");
       await expect(edge).toHaveText(`supersedes ${s.object}`);
-      await expectSameTarget(page, edge.getByRole("link", { name: s.object, exact: true }), s.object_docs_url);
+      await expectSameTarget(page, edge.getByRole("link", { name: s.object, exact: true }), s.object);
       await expect(page.getByTestId(`objsupersede-${decisionStem(s.decision, s.object)}-carries`)).toHaveCount(0);
     }
   });
@@ -178,12 +197,13 @@ test.describe("closed-spec object supersession on the docs site", () => {
   test("carried through revisions: S1's date and conflict kept, carried by the latest revision", async ({ page }) => {
     const st = store(await fixture(page), "chain");
     expect(st.successor).toBe("spec/successor-v3");
+    expect(st.supersessions.map((s) => s.object)).toEqual(CLOSED_OBJECTS);
     for (const s of st.supersessions) {
       await expectSuperseded(page, s, st.establishing_successor);
       const carry = page.getByTestId(`objsupersede-${objectId(s.object)}-carry`);
       await expect(carry).toHaveAttribute("data-state", "superseded");
       await expect(carry).toHaveText(`carried by ${st.successor}`);
-      await expectSameTarget(page, carry.getByRole("link", { name: st.successor, exact: true }), st.docs[st.successor]);
+      await expectSameTarget(page, carry.getByRole("link", { name: st.successor, exact: true }), st.successor);
       // The revision's own decision reads in force and names what it carries.
       await page.goto(s.decision_docs_url);
       const stem = decisionStem(s.decision, s.object);
@@ -191,8 +211,8 @@ test.describe("closed-spec object supersession on the docs site", () => {
       const carries = page.getByTestId(`objsupersede-${stem}-carries`);
       await expect(carries).toHaveAttribute("data-state", "in-force");
       await expect(carries).toContainText(`carries the replacement established by ${st.establishing_successor} (${s.conflict}, since `);
-      await expectSameTarget(page, carries.getByRole("link", { name: st.establishing_successor, exact: true }), st.docs[st.establishing_successor]);
-      await expectSameTarget(page, carries.getByRole("link", { name: s.conflict, exact: true }), s.conflict_docs_url);
+      await expectSameTarget(page, carries.getByRole("link", { name: st.establishing_successor, exact: true }), st.establishing_successor);
+      await expectSameTarget(page, carries.getByRole("link", { name: s.conflict, exact: true }), s.conflict);
     }
   });
 
@@ -206,7 +226,7 @@ test.describe("closed-spec object supersession on the docs site", () => {
     const droppedCarry = page.getByTestId(`objsupersede-${objectId((dropped as Supersession).object)}-carry`);
     await expect(droppedCarry).toHaveAttribute("data-state", "superseded");
     await expect(droppedCarry).toHaveText(`no longer carried by the current revision (${st.successor})`);
-    await expectSameTarget(page, droppedCarry.getByRole("link", { name: st.successor, exact: true }), st.docs[st.successor]);
+    await expectSameTarget(page, droppedCarry.getByRole("link", { name: st.successor, exact: true }), st.successor);
     await expectSuperseded(page, kept as Supersession, st.establishing_successor);
     await expect(page.getByTestId(`objsupersede-${objectId((kept as Supersession).object)}-carry`)).toHaveText(`carried by ${st.successor}`);
   });
@@ -215,6 +235,7 @@ test.describe("closed-spec object supersession on the docs site", () => {
     test(`not yet accepted (${name}): the default branch's documents show nothing on the closed objects`, async ({ page }) => {
       const st = store(await fixture(page), name);
       expect(st.checkout).toBe(st.design_branch);
+      expect(st.supersessions.map((s) => s.object)).toEqual(CLOSED_OBJECTS);
       for (const s of st.supersessions) {
         await page.goto(s.object_docs_url);
         await expect(objectText(page, objectId(s.object))).toBeVisible();
