@@ -75,6 +75,7 @@ func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, v
 		// review's M-1): the criterion's text, unchanged, then the lines.
 		lines, err := objectSupersessionHTML(views, name, ac.ID)
 		if err != nil {
+			// vocab:identity — "feature lens" names this section (05 §Lenses), not the class word as display prose
 			return "", fmt.Errorf("dex: feature lens for %s#%s: %w", p.Entry.Ref, ac.ID, err)
 		}
 		fmt.Fprintf(&b, "<tr><td><code>%s</code></td><td>%s%s</td><td>", template.HTMLEscapeString(ac.ID), template.HTMLEscapeString(ac.Text), lines)

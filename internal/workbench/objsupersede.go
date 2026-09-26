@@ -37,6 +37,7 @@ import (
 func attachObjectSupersession(ctx context.Context, proj *BoardProjection, ix *index.Index, root, fixedBranch string) error {
 	b, err := specdocload.BoardIndexes(ctx, root)
 	if err != nil {
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
 		return fmt.Errorf("workbench: closed-spec object supersession views for %s: %w", proj.Spec, err)
 	}
 	objects := b.Default
