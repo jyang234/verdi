@@ -1506,12 +1506,12 @@ func canvasMinHeight(p *BoardProjection) float64 {
 	)
 	bottom := float64(floor)
 	for _, c := range p.Cards {
-		if y := c.Y + boardlayout.CardHeight; y > bottom {
+		if y := c.Y + cardHeightPx(c); y > bottom {
 			bottom = y
 		}
 	}
 	for _, rc := range p.RefCards {
-		if y := rc.Y + boardlayout.RefCardHeight; y > bottom {
+		if y := rc.Y + refCardHeightPx(rc); y > bottom {
 			bottom = y
 		}
 	}

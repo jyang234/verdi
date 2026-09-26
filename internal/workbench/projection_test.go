@@ -440,5 +440,5 @@ func TestBuildProjection_RelatesEndpointNamesDeadSticky_Dropped(t *testing.T) {
 // where the in-memory frontmatter's own field is the intended input, so the
 // shim forwards it verbatim.
 func buildProjectionFM(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
-	return buildProjection(specName, fm, body, stored, annotations, comments, mode, string(fm.Status))
+	return buildProjection(specName, fm, body, stored, annotations, comments, mode, string(fm.Status), nil)
 }

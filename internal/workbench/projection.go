@@ -555,7 +555,7 @@ type BoardProjection struct {
 // from a persisted status: field, which a feature/story may omit
 // entirely). It arrives as a plain value so this function stays a pure
 // projection of its inputs: no Git execution, no clock, no randomness.
-func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind, status string) (*BoardProjection, error) {
+func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind, status string, heights map[string]float64) (*BoardProjection, error) {
 	p := &BoardProjection{
 		Spec: specName, Title: fm.Title, Mode: mode, Status: status,
 		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
@@ -814,10 +814,10 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 
 	layoutObjs := make([]boardlayout.Object, 0, len(objects)+len(refs)+len(p.StubViews))
 	for _, o := range objects {
-		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneKind(o.kind), ID: o.id, DocOrder: o.order})
+		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneKind(o.kind), ID: o.id, DocOrder: o.order, Height: heights[o.id]})
 	}
 	for i, r := range refs {
-		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i})
+		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i, Height: heights[r]})
 	}
 	// Stub cards slot into the kind-locked stubs band in declaration order
 	// (dc-6), keyed "stub:<slug>" — a namespace no object id or artifact

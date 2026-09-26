@@ -300,7 +300,7 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 		return nil, nil, fmt.Errorf("workbench: resolving effective state for %s at %s: %w", name, ref, err)
 	}
 
-	proj, err := buildProjection(name, fm, bodyBytes, stored, nil, nil, modeReadOnly, string(st.ArtifactStatus()))
+	proj, err := buildProjection(name, fm, bodyBytes, stored, nil, nil, modeReadOnly, string(st.ArtifactStatus()), nil)
 	if err != nil {
 		return nil, nil, err
 	}

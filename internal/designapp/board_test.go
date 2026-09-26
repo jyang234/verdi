@@ -219,7 +219,7 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 		},
 		{
 			name: "supersession element",
-			typ:  reflect.TypeOf(proj.Cards).Elem().FieldByIndex(supersessionsField(t, reflect.TypeOf(proj.Cards).Elem())).Type.Elem(),
+			typ:  fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(),
 			want: []string{
 				"State", "Object", "Edge", "By", "Conflict", "Since", "Closed", "ClosedWitness",
 				"Carry", "Revision", "Heads", "Witness", "Carried", "Establisher", "Reason", "Lines",
@@ -227,8 +227,22 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 		},
 		{
 			name: "supersession line element",
-			typ:  reflect.TypeOf(proj.Cards).Elem().FieldByIndex(supersessionsField(t, reflect.TypeOf(proj.Cards).Elem())).Type.Elem().Field(15).Type.Elem(),
+			typ:  fieldType(t, fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(), "Lines").Elem(),
 			want: []string{"Kind", "Text", "Disclosure", "Links", "Trailing"},
+		},
+		{
+			// A link is two strings today; a slice added here would need its
+			// own copy in the clone's line loop.
+			name: "supersession link element",
+			typ:  fieldType(t, fieldType(t, fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(), "Lines").Elem(), "Links").Elem(),
+			want: []string{"Ref", "Href"},
+		},
+		{
+			// The reference card's object: a pointer the clone dereferences
+			// and copies, with its Supersession's collections.
+			name: "reference card object element",
+			typ:  fieldType(t, reflect.TypeOf(proj.RefCards).Elem(), "Object").Elem(),
+			want: []string{"Text", "Supersession"},
 		},
 		{
 			name: "stub element",
@@ -258,15 +272,15 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 	}
 }
 
-// supersessionsField locates the card element's Supersessions field by
-// name, so the nested ratchet rows above follow it if it moves.
-func supersessionsField(t *testing.T, card reflect.Type) []int {
+// fieldType is the type of typ's field name, so the nested ratchet rows
+// above follow a field if it moves and fail by name if it goes.
+func fieldType(t *testing.T, typ reflect.Type, name string) reflect.Type {
 	t.Helper()
-	f, ok := card.FieldByName("Supersessions")
+	f, ok := typ.FieldByName(name)
 	if !ok {
-		t.Fatal("card element has no Supersessions field")
+		t.Fatalf("%s has no %s field", typ, name)
 	}
-	return f.Index
+	return f.Type
 }
 
 // TestGetBoardDoesNotAliasClosedSpecSupersession is the mutate-the-clone

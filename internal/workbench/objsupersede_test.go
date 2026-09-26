@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
+	"github.com/jyang234/verdi/internal/specdocload"
 )
 
 // The board's closed-spec object supersession surface (design §6, §8;
@@ -218,6 +219,10 @@ func TestBoardSupersessionLink(t *testing.T) {
 	neutralizeCIEnv(t)
 	repo := scenario.Build(t, "accepted")
 	ix := mustIndex(t, repo.Dir)
+	views, err := specdocload.WorkTreeViews(context.Background(), repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name, ref, own, fixedBranch, want string
 	}{
@@ -238,7 +243,7 @@ func TestBoardSupersessionLink(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := boardSupersessionLink(tc.ref, tc.own, ix, tc.fixedBranch); got != tc.want {
+			if got := boardSupersessionLink(tc.ref, tc.own, ix, tc.fixedBranch, views); got != tc.want {
 				t.Errorf("boardSupersessionLink(%q, own %q, branch %q) = %q, want %q", tc.ref, tc.own, tc.fixedBranch, got, tc.want)
 			}
 		})

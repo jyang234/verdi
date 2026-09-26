@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
@@ -297,5 +299,57 @@ func TestBuild_ClosedSpecObjectSupersession_OncePerBuild(t *testing.T) {
 		if readFile(t, first, p) != readFile(t, again, p) {
 			t.Errorf("%s differs between two builds of the same commit", p)
 		}
+	}
+}
+
+// TestFeatureLensHTML_RendersSupersededCriterionLines (the L5 docs
+// review's M-1 closure, fix pass 2 item 10): the feature lens's criterion
+// ROW carries the lines — a lens driven by a class-feature page whose
+// criterion the views supersede must put them in the row's Text cell,
+// right after the criterion's text. The views do not care which class
+// declares the object, so the accepted store's closed story stands in as
+// the feature; a lens that drops the lines fails here.
+func TestFeatureLensHTML_RendersSupersededCriterionLines(t *testing.T) {
+	neutralizeCIEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	views, err := specdocload.CommitViews(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := index.Build(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	story := views.Records.Specs["closed-story"].FM
+	p := &artifactPage{
+		Entry:   &index.Entry{Ref: "spec/closed-story", Kind: "spec", Title: story.Title},
+		Meta:    meta{Class: artifact.ClassFeature, Problem: &artifact.Attribute{Text: "p"}, AcceptanceCriteria: story.AcceptanceCriteria},
+		RelPath: ".verdi/specs/archive/closed-story/spec.md",
+	}
+	html, err := featureLensHTML(ix, knownRefs(ix), nil, views, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := `<tr><td><code>ac-1</code></td><td>` + osStoryText + `<ul class="objsupersede-lines" data-testid="lens-supersession-ac-1" data-state="superseded">`
+	if !strings.Contains(string(html), row) {
+		t.Fatalf("the lens row lacks the criterion's lines right after its text:\nwant %s\n--- got ---\n%s", row, html)
+	}
+	if !strings.Contains(string(html), `data-testid="objsupersede-ac-1-since" data-state="superseded">superseded since 2024-02-15 by <a href="/a/spec/successor#dc-2">spec/successor#dc-2</a></span>`) {
+		t.Errorf("the lens row lacks the since line:\n%s", html)
+	}
+	// A criterion the views do not touch renders its bare row.
+	feature := views.Records.Specs["closed-feature"].FM
+	p = &artifactPage{
+		Entry:   &index.Entry{Ref: "spec/closed-feature", Kind: "spec", Title: feature.Title},
+		Meta:    meta{Class: artifact.ClassFeature, Problem: &artifact.Attribute{Text: "p"}, AcceptanceCriteria: feature.AcceptanceCriteria},
+		RelPath: ".verdi/specs/archive/closed-feature/spec.md",
+	}
+	html, err = featureLensHTML(ix, knownRefs(ix), nil, views, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `<tr><td><code>ac-1</code></td><td>an operator can read the governed records</td><td>`) || strings.Contains(string(html), "objsupersede") {
+		t.Errorf("an untouched criterion's row changed:\n%s", html)
 	}
 }

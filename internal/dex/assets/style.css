@@ -474,38 +474,15 @@ footer.site-foot {
 .objsupersede-conflict:hover { color: var(--accent); }
 
 /* On the board (SI-278): a closed spec's reference card that carries its
-   object, and a decision card that carries its views, keep the lane's
-   uniform footprint at rest — the layout's collision-free slots assume
-   it (boardlayout's RefCardHeight and CardHeight) — clipping the lines
-   under a visible mark, the wall's own truncation idiom ("truncation is
-   visible, never silent"); on hover or keyboard focus the card expands
-   above its neighbours to be read in full. The lines sit in a plain list
-   one step below the card's own text. */
-.refcard--object, .objcard:has(.objsupersede-lines) { overflow: hidden; }
-.refcard--object::after { content: "\22EF  peek"; }
-.objcard:has(.objsupersede-lines)::after {
-  content: "\22EF";
-  position: absolute;
-  right: 0.5rem;
-  bottom: 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  color: var(--muted-solid);
-  opacity: 0.8;
-  pointer-events: none;
-}
-.refcard--object:hover, .refcard--object:focus-within,
-.objcard:has(.objsupersede-lines):hover, .objcard:has(.objsupersede-lines):focus-within {
-  height: auto;
-  overflow: visible;
-  z-index: 9;
-  box-shadow: var(--shadow-lift);
-}
-.refcard--object:hover, .refcard--object:focus-within { padding-bottom: 1.35rem; }
-.refcard--object:hover::after, .refcard--object:focus-within::after { content: "peek"; }
-.objcard:has(.objsupersede-lines):hover::after, .objcard:has(.objsupersede-lines):focus-within::after { content: none; }
+   object, and a decision card that carries its views, grow to show every
+   §6 line at rest — no hover, no focus, no clipping — and the layout
+   reserves the height they take (boardlayout.Object.Height, estimated
+   by internal/workbench's refCardHeightPx/cardHeightPx from these very
+   rules), so a grown card covers no other card. The lines sit in a plain
+   list one step below the card's own text; the reference card keeps
+   room for its peek cue below them. */
+.refcard.refcard--object { height: auto; min-height: 4.5rem; padding-bottom: 1.35rem; } /* two classes: outranks .refcard's fixed height, which follows in this file */
+.objcard:has(.objsupersede-lines) { height: auto; min-height: 8.75rem; }
 .refcard-object-text {
   margin: 0.4rem 0 0;
   font-family: var(--sans);
@@ -524,6 +501,7 @@ footer.site-foot {
   display: grid;
   gap: 0.2rem;
 }
+.objsupersede-lines li { font-size: 0.68rem; line-height: 1.35; }
 .objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; }
 .objsupersede-lines .objsupersede-conflict { font-size: 0.66rem; margin-left: 0.3rem; }
 

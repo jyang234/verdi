@@ -1,23 +1,27 @@
 package workbench
 
 // Closed-spec object supersession on the board (design §6, §8; SI-278 as
-// clarified; the controller's rulings on lane L5's stop report): a closed
-// spec's reference card renders the object's original text and the
-// objsupersede views' §6 lines computed from DEFAULT-BRANCH records — only
-// where the views report lines; every other reference card is unchanged —
-// and the successor's own decision card renders its decision views from
-// the board's OWN tree, so a design branch reads "proposed". The views
-// come from the one process-wide cache every document consumer shares
-// (specdocload.BoardIndexes: the default-branch views once per head, the
-// tree's once per records digest, bounded, single-flight), and
+// clarified; the controller's rulings on lane L5's stop report and its
+// fix pass 2): a closed spec's reference card renders the object's
+// original text and the objsupersede views' §6 lines computed from
+// DEFAULT-BRANCH records — only where the views report lines; every other
+// reference card is unchanged — and the successor's own decision card
+// renders its decision views from the board's OWN tree, so a design
+// branch reads "proposed". Every line shows at rest: the enrichment is
+// computed BEFORE the pure projector runs, so the layout reserves each
+// grown card's height (boardlayout.Object.Height) and no card renders
+// under another. The views come from the one process-wide cache every
+// document consumer shares (specdocload.BoardIndexes), and
 // internal/specdoc's conversion is the one place the lines are given
-// their links; this file adds the board's link targets and the wire
-// shape.
+// their links; this file adds the board's link targets, the height
+// estimates its stylesheet rules imply, and the wire shape.
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
@@ -27,61 +31,194 @@ import (
 	"github.com/jyang234/verdi/internal/specdocload"
 )
 
-// attachObjectSupersession enriches proj (SI-278) in the I/O tier, after
-// buildProjection, exactly as attachFamilyLinks does: each reference card
-// whose target is a closed spec's object that the default-branch views
-// report lines for gains the object's original text and those lines, and
-// each decision card gains the views of its fragment `supersedes` edges
-// from the board's own tree. ix resolves link targets; fixedBranch keeps
-// a per-branch board's links inside its branch (ADJ-70).
-func attachObjectSupersession(ctx context.Context, proj *BoardProjection, ix *index.Index, root, fixedBranch string) error {
+// supersessionEnrichment is what computeObjectSupersession found for one
+// board: the closed objects among the spec's edge targets that the
+// default-branch views supersede, by reference-card ref, and each
+// decision's views from the board's own tree, by decision id.
+type supersessionEnrichment struct {
+	objects   map[string]*refObjectView
+	decisions map[string][]supersessionView
+}
+
+// computeObjectSupersession computes the board's closed-spec object
+// supersession enrichment (SI-278) in the I/O tier, before buildProjection:
+// each unpinned spec-object ref the spec's links and its decisions' links
+// name — the reference cards buildProjection derives from the same edges
+// — whose object the default-branch views report lines for, with the
+// object's original text; and each decision's views of its fragment
+// `supersedes` edges from the board's own tree. ix resolves link targets;
+// fixedBranch keeps a per-branch board's links inside its branch
+// (ADJ-70). Views that cannot be computed are the load's error: a board
+// never renders a superseded object as untouched because its records
+// could not be read.
+func computeObjectSupersession(ctx context.Context, name string, fm *artifact.SpecFrontmatter, ix *index.Index, root, fixedBranch string) (*supersessionEnrichment, error) {
 	b, err := specdocload.BoardIndexes(ctx, root)
 	if err != nil {
 		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
-		return fmt.Errorf("workbench: closed-spec object supersession views for %s: %w", proj.Spec, err)
+		return nil, fmt.Errorf("workbench: closed-spec object supersession views for %s: %w", name, err)
 	}
 	objects := b.Default
 	if objects == nil {
 		objects = b.Tree
 	}
-	for i := range proj.RefCards {
-		rc := &proj.RefCards[i]
-		ref, err := artifact.ParseRef(rc.Ref)
-		if err != nil || ref.Kind != artifact.KindSpec || ref.Pinned() || !ref.Fragment() {
+	e := &supersessionEnrichment{objects: map[string]*refObjectView{}, decisions: map[string][]supersessionView{}}
+	for _, ref := range objectRefs(name, fm) {
+		r, err := artifact.ParseRef(ref)
+		if err != nil {
 			continue
 		}
-		v := objects.Index.Object(ref.Name, ref.Object)
+		v := objects.Index.Object(r.Name, r.Object)
 		if v.State == objsupersede.ObjectNotSuperseded {
 			continue
 		}
-		s, err := specdoc.ObjectSupersession(v, boardSupersessionLinks(proj.Spec, ix, fixedBranch, v.By, v.Revision, v.Conflict))
+		s, err := specdoc.ObjectSupersession(v, boardSupersessionLinks(name, ix, fixedBranch, objects, v.By, v.Revision, v.Conflict))
 		if err != nil {
-			return fmt.Errorf("workbench: %s on %s: %w", rc.Ref, proj.Spec, err)
+			return nil, fmt.Errorf("workbench: %s on %s: %w", ref, name, err)
 		}
-		rc.Object = &refObjectView{Text: specdocload.ObjectText(objects, ref), Supersession: objectSupersessionView(v, *s)}
+		e.objects[ref] = &refObjectView{Text: specdocload.ObjectText(objects, r), Supersession: objectSupersessionView(v, *s)}
+	}
+	for _, d := range fm.Decisions {
+		for _, v := range b.Tree.Index.Decisions(name, d.ID) {
+			s, err := specdoc.DecisionSupersession(v, boardSupersessionLinks(name, ix, fixedBranch, objects, v.Object, v.Establisher, v.Conflict))
+			if err != nil {
+				return nil, fmt.Errorf("workbench: %s#%s: %w", name, d.ID, err)
+			}
+			e.decisions[d.ID] = append(e.decisions[d.ID], decisionSupersessionView(v, s))
+		}
+	}
+	return e, nil
+}
+
+// objectRefs lists, in declaration order and without duplicates, every
+// spec-object ref outside spec name that its top-level links and its
+// decisions' links name, keyed as buildProjection keys the reference
+// card (the pin dropped: "spec/T#o").
+func objectRefs(name string, fm *artifact.SpecFrontmatter) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(links []artifact.Link) {
+		for _, l := range links {
+			r, err := artifact.ParseRef(l.Ref)
+			if err != nil || r.Kind != artifact.KindSpec || !r.Fragment() || r.Name == name {
+				continue
+			}
+			key := "spec/" + r.Name + "#" + r.Object
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, key)
+			}
+		}
+	}
+	add(fm.Links)
+	for _, d := range fm.Decisions {
+		add(d.Links)
+	}
+	return out
+}
+
+// heights are the rendered heights the layout must reserve, by layout
+// key: a reference card's ref, a decision card's id.
+func (e *supersessionEnrichment) heights() map[string]float64 {
+	if e == nil {
+		return nil
+	}
+	h := map[string]float64{}
+	for ref, o := range e.objects {
+		h[ref] = refCardHeightPx(refCardView{Ref: ref, Object: o})
+	}
+	for id, views := range e.decisions {
+		h[id] = cardHeightPx(cardView{ID: id, Supersessions: views})
+	}
+	return h
+}
+
+// attach lands the enrichment on the built projection's cards.
+func (e *supersessionEnrichment) attach(proj *BoardProjection) {
+	if e == nil {
+		return
+	}
+	for i := range proj.RefCards {
+		if o := e.objects[proj.RefCards[i].Ref]; o != nil {
+			proj.RefCards[i].Object = o
+		}
 	}
 	for i := range proj.Cards {
-		c := &proj.Cards[i]
-		if c.Kind != string(boardlayout.ZoneDecision) {
-			continue
-		}
-		for _, v := range b.Tree.Index.Decisions(proj.Spec, c.ID) {
-			s, err := specdoc.DecisionSupersession(v, boardSupersessionLinks(proj.Spec, ix, fixedBranch, v.Object, v.Establisher, v.Conflict))
-			if err != nil {
-				return fmt.Errorf("workbench: %s#%s: %w", proj.Spec, c.ID, err)
-			}
-			c.Supersessions = append(c.Supersessions, decisionSupersessionView(v, s))
+		if v := e.decisions[proj.Cards[i].ID]; len(v) > 0 {
+			proj.Cards[i].Supersessions = v
 		}
 	}
-	return nil
+}
+
+// Height estimates in px, mirrored by style.css's rules for these cards
+// (.refcard--object, .refcard-object-text, .objsupersede-lines). The
+// layout reserves what these say, so every figure is conservative — a
+// chars-per-line count below what the fonts fit, a line box a little
+// taller than the rule's — and an estimate is never shorter than the
+// render.
+const (
+	heightTextLinePx   = 17 // .refcard-object-text: 0.78rem × 1.35
+	heightTextChars    = 24 // a sans line of the 12.5rem card, with slack
+	heightTextMaxLines = 3  // -webkit-line-clamp: 3
+	heightLinePx       = 16 // .objsupersede-lines li: 0.68rem × 1.35
+	heightLineChars    = 24 // a mono line of the card, with slack
+	heightLineGapPx    = 3  // .objsupersede-lines gap 0.2rem
+	heightBlockGapPx   = 7  // the list's and the text's 0.4rem margin
+	heightPeekCuePx    = 22 // .refcard--object's 1.35rem room for the peek cue
+)
+
+// wrappedLines is how many visual lines n characters take at chars per line.
+func wrappedLines(n, chars int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return math.Ceil(float64(n) / float64(chars))
+}
+
+// linesHeightPx is the height of the views' §6 lines as rendered in an
+// .objsupersede-lines list: each line's text and its trailing links,
+// wrapped, plus the list's gaps.
+func linesHeightPx(views []supersessionView) float64 {
+	var h float64
+	for _, v := range views {
+		h += heightBlockGapPx
+		for _, l := range v.Lines {
+			n := utf8.RuneCountInString(l.Text)
+			for _, t := range l.Trailing {
+				n += 1 + utf8.RuneCountInString(t.Ref)
+			}
+			h += wrappedLines(n, heightLineChars)*heightLinePx + heightLineGapPx
+		}
+	}
+	return h
+}
+
+// refCardHeightPx is a reference card's rendered height: the uniform
+// footprint, or, for a card carrying its object (SI-278), the footprint
+// plus the object's clamped text, the lines, and the peek cue's room.
+func refCardHeightPx(rc refCardView) float64 {
+	if rc.Object == nil {
+		return boardlayout.RefCardHeight
+	}
+	text := math.Min(heightTextMaxLines, wrappedLines(utf8.RuneCountInString(rc.Object.Text), heightTextChars))
+	return boardlayout.RefCardHeight + heightBlockGapPx + text*heightTextLinePx + linesHeightPx([]supersessionView{rc.Object.Supersession}) + heightPeekCuePx
+}
+
+// cardHeightPx is an object card's rendered height: the uniform
+// footprint, or, for a decision card carrying its views, the footprint
+// plus the lines.
+func cardHeightPx(c cardView) float64 {
+	if len(c.Supersessions) == 0 {
+		return boardlayout.CardHeight
+	}
+	return boardlayout.CardHeight + linesHeightPx(c.Supersessions)
 }
 
 // boardSupersessionLinks resolves each non-empty ref to its board-side
 // href, keeping only the ones that resolve.
-func boardSupersessionLinks(own string, ix *index.Index, fixedBranch string, refs ...string) map[string]string {
+func boardSupersessionLinks(own string, ix *index.Index, fixedBranch string, views *specdocload.Views, refs ...string) map[string]string {
 	links := map[string]string{}
 	for _, ref := range refs {
-		if href := boardSupersessionLink(ref, own, ix, fixedBranch); href != "" {
+		if href := boardSupersessionLink(ref, own, ix, fixedBranch, views); href != "" {
 			links[ref] = href
 		}
 	}
@@ -94,12 +231,15 @@ func boardSupersessionLinks(own string, ix *index.Index, fixedBranch string, ref
 // whole ref goes to that spec's SERVABLE surface (servableSurface: an
 // active spec's board — on a per-branch board, that branch's own /b/
 // board, ADJ-70 — or an archived spec's corpus page, ADJ-39) with the
-// card anchor on a board and the body heading's id on a corpus page; a
-// conflict goes to its corpus page. A per-branch board links to no corpus
-// page, where no surface provably serves the branch's tree (the same
-// posture servableSurface takes for the archive). A pinned ref, a ref the
-// index lacks, or anything else gets no link and renders as plain text.
-func boardSupersessionLink(ref, own string, ix *index.Index, fixedBranch string) string {
+// card anchor on a board and, on a corpus page, the object's DECLARED
+// body anchor from views' records — the fragment every document consumer
+// links (specdocload.ObjectAnchor); an object the records do not declare
+// gets no link. A conflict goes to its corpus page. A per-branch board
+// links to no corpus page, where no surface provably serves the branch's
+// tree (the posture servableSurface takes for the archive). A pinned
+// ref, a ref the index lacks, or anything else gets no link and renders
+// as plain text.
+func boardSupersessionLink(ref, own string, ix *index.Index, fixedBranch string, views *specdocload.Views) string {
 	r, err := artifact.ParseRef(ref)
 	if err != nil || r.Pinned() {
 		return ""
@@ -122,7 +262,11 @@ func boardSupersessionLink(ref, own string, ix *index.Index, fixedBranch string)
 		case href == "" || r.Object == "":
 			return href
 		case archived:
-			return href + "#" + r.Object
+			anchor, ok := specdocload.ObjectAnchor(views, r)
+			if !ok {
+				return ""
+			}
+			return href + "#" + anchor
 		}
 		return href + "#obj-" + r.Object
 	case artifact.KindConflict:

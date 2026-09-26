@@ -69,7 +69,11 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 		}
 	}
 
-	res, err := specdocload.Load(ctx, specdocload.Request{Root: s.root, Name: name, Mode: specdocload.ModeWorkingTree, Kind: kind, Model: s.model, Readiness: readiness})
+	// A per-branch (/b/<branch>) instance serves the branch's tree, but the
+	// corpus route (/a/{kind}/{name}) serves the serving checkout's, so the
+	// §6 lines' corpus links could 404 there: the document takes the board
+	// cards' posture and links no corpus page on a per-branch board.
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: s.root, Name: name, Mode: specdocload.ModeWorkingTree, Kind: kind, Model: s.model, Readiness: readiness, CorpusUnservable: s.fixedBranch != ""})
 	if err != nil {
 		return documentSnapshot{}, err
 	}
