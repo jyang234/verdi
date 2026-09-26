@@ -313,6 +313,7 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 		// R2: "read-only from committed content" names the render's immutability
 		// only — it is not a lifecycle claim; the stamp and rail speak the
 		// effective state.
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
 		"branch %s exists only as remote-tracking ref %s: this board is rendered read-only from that ref's committed content — no worktree was cut and no local branch was created; fetch the branch as a local branch to author. The scratch annotation tier and obligation enrichment are working-tree state and are not read from a remote ref, and the closed-spec object supersession lines (design §6) are not computed on this sealed render: the docs site built from the default branch, or the branch fetched as a local branch, shows them.",
 		branch, ref))
 	git := &boardGitState{Branch: ref, DefaultBranch: "", Branches: nil, Dirty: false}
