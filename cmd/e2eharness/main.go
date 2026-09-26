@@ -145,6 +145,10 @@ func run() error {
 	// The readiness-pilot fixture (readinesspilotfixture.go) spawns its own
 	// serve over its own shared-shape store; reap it with the harness too.
 	defer ctrl.readinessPilot.stop()
+	// The objsupersede fixture (objsupersedefixture.go) spawns up to six of
+	// its own serves, one per closed-spec object supersession scenario;
+	// reap them with the harness too.
+	defer ctrl.objSupersede.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),
