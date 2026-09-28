@@ -47,15 +47,17 @@ type History struct {
 	cache  *historyCache
 }
 
-// historyCache is a History's memo: each spec's walk list, the positions
-// of the store's first-parent commits, and the engine that answers its
-// establishments (per (S_k, T, head), SI-270 as amended).
+// historyCache is a History's memo: each spec's first presence, each
+// (successor, closed spec) walk list, the positions of the store's
+// first-parent commits, and the engine that answers its establishments
+// (per (S_k, T, head), SI-270 as amended).
 type historyCache struct {
-	mu     sync.Mutex // guards walks and order
-	walks  map[string]walkList
-	order  map[string]int // nil until read
-	orderF Fact           // unproven when order cannot be read
-	engMu  sync.Mutex     // serializes Establishment over eng
+	mu     sync.Mutex          // guards firsts, walks, and order
+	firsts map[string]Fact     // per spec
+	walks  map[string]walkList // per (successor, closed spec)
+	order  map[string]int      // nil until read
+	orderF Fact                // unproven when order cannot be read
+	engMu  sync.Mutex          // serializes Establishment over eng
 	eng    *engine
 }
 
@@ -63,7 +65,7 @@ type historyCache struct {
 // unresolved branch or commit makes every later fact unproven rather than
 // failing here.
 func NewHistory(ctx context.Context, root string) History {
-	h := History{root: root, cache: &historyCache{walks: map[string]walkList{}}}
+	h := History{root: root, cache: &historyCache{firsts: map[string]Fact{}, walks: map[string]walkList{}}}
 	h.branch, h.ok = specstate.ResolveDefaultBranch(ctx, root)
 	if h.ok {
 		head, err := gitx.RevParse(ctx, root, h.branch.Ref+"^{commit}")
@@ -88,57 +90,92 @@ const noBranch = "the default branch could not be resolved (no CI_DEFAULT_BRANCH
 // is Establishment's answer (SI-270 as amended). A shallow history, an
 // unresolved default branch, or an unreadable commit is unproven.
 func (h History) Acceptance(ctx context.Context, spec string) Fact {
-	_, f := h.walk(ctx, spec)
+	f := h.first(ctx, spec)
 	if f.State != FactProven {
 		return f
 	}
 	return h.dated(ctx, f.Commit)
 }
 
-// walk implements walkSource, memoized per spec.
-func (h History) walk(ctx context.Context, spec string) ([]string, Fact) {
+// first is spec's first presence on the pinned commit's first-parent
+// chain: FactProven naming the earliest commit whose tree holds spec's
+// spec.md in either zone, FactAbsent when none does, or FactUnproven with
+// the witness; memoized per spec.
+func (h History) first(ctx context.Context, spec string) Fact {
 	if h.cache == nil {
-		return h.readWalk(ctx, spec)
+		return h.readFirst(ctx, spec)
 	}
 	h.cache.mu.Lock()
 	defer h.cache.mu.Unlock()
-	w, ok := h.cache.walks[spec]
+	f, ok := h.cache.firsts[spec]
 	if !ok {
-		w.commits, w.fact = h.readWalk(ctx, spec)
-		h.cache.walks[spec] = w
+		f = h.readFirst(ctx, spec)
+		h.cache.firsts[spec] = f
 	}
-	return w.commits, w.fact
+	return f
 }
 
-// readWalk reads spec's walk (walkSource) from the pinned commit's
-// first-parent chain: the commits that change spec's spec.md in either
-// zone or .verdi/conflicts/, from the first whose tree holds spec.md.
-func (h History) readWalk(ctx context.Context, spec string) ([]string, Fact) {
+// readFirst reads first's fact.
+func (h History) readFirst(ctx context.Context, spec string) Fact {
 	switch {
 	case !h.ok:
-		return nil, unproven(noBranch)
+		return unproven(noBranch)
 	case h.unread != "":
-		return nil, unproven(h.unread)
+		return unproven(h.unread)
 	}
-	paths := []string{store.SpecRelPath(store.ZoneActive, spec), store.SpecRelPath(store.ZoneArchive, spec)}
+	paths := specPaths(spec)
 	commits, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, paths...)
 	if err != nil {
-		return nil, h.historyError(err)
+		return h.historyError(err)
 	}
 	first, err := firstHolding(ctx, h.root, commits, paths)
 	switch {
 	case err != nil:
-		return nil, unproven(err.Error())
+		return unproven(err.Error())
 	case first == "":
-		return nil, Fact{State: FactAbsent}
+		return Fact{State: FactAbsent}
 	}
-	all, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, append(paths, conflictsDir)...)
+	return Fact{State: FactProven, Commit: first}
+}
+
+// specPaths are spec's spec.md paths in the active and archive zones.
+func specPaths(spec string) []string {
+	return []string{store.SpecRelPath(store.ZoneActive, spec), store.SpecRelPath(store.ZoneArchive, spec)}
+}
+
+// walk implements walkSource, memoized per (successor, closed spec).
+func (h History) walk(ctx context.Context, successor, closed string) ([]string, Fact) {
+	f := h.first(ctx, successor)
+	if f.State != FactProven {
+		return nil, f
+	}
+	if h.cache == nil {
+		return h.readWalk(ctx, f.Commit, successor, closed)
+	}
+	key := successor + "\x00" + closed
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	w, ok := h.cache.walks[key]
+	if !ok {
+		w.commits, w.fact = h.readWalk(ctx, f.Commit, successor, closed)
+		h.cache.walks[key] = w
+	}
+	return w.commits, w.fact
+}
+
+// readWalk reads the (successor, closed) walk (walkSource) from the pinned
+// commit's first-parent chain: the commits that change successor's or
+// closed's spec.md in either zone or .verdi/conflicts/ (SI-281's walk
+// set), from first, the first whose tree holds successor's spec.md.
+func (h History) readWalk(ctx context.Context, first, successor, closed string) ([]string, Fact) {
+	paths := append(append(specPaths(successor), specPaths(closed)...), conflictsDir)
+	all, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, paths...)
 	if err != nil {
 		return nil, h.historyError(err)
 	}
 	i := slices.Index(all, first)
 	if i < 0 {
-		return nil, unproven(fmt.Sprintf("the commit %s that first holds spec/%s is missing from its walk", first, spec))
+		return nil, unproven(fmt.Sprintf("the commit %s that first holds spec/%s is missing from its walk", first, successor))
 	}
 	return all[i:], Fact{State: FactProven, Commit: first}
 }

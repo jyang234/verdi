@@ -19,12 +19,14 @@ import (
 // History implements it.
 type walkSource interface {
 	// walk lists, oldest first, the first-parent commits of the default
-	// branch that change spec's spec.md in either zone or the conflicts
-	// directory, from the first that holds spec (SI-270 as amended). Its
-	// fact is FactProven, naming that first commit, when the branch holds
-	// spec; FactAbsent when it never did; and FactUnproven, with the
-	// witness, when that cannot be read.
-	walk(ctx context.Context, spec string) ([]string, Fact)
+	// branch that change successor's or closed's spec.md in either zone or
+	// the conflicts directory, from the first that holds successor (SI-270
+	// as amended; SI-281's walk set, per (successor, closed spec), so a
+	// target closed after the successor landed is seen at its archive
+	// commit). Its fact is FactProven, naming that first commit, when the
+	// branch holds successor; FactAbsent when it never did; and
+	// FactUnproven, with the witness, when that cannot be read.
+	walk(ctx context.Context, successor, closed string) ([]string, Fact)
 	// position is a walked commit's place on the default branch's
 	// first-parent chain: a later commit has a larger position.
 	position(ctx context.Context, commit string) (int, error)
@@ -35,13 +37,14 @@ type walkSource interface {
 }
 
 // engine answers establishments over one default-branch head. It
-// memoizes each walk list per spec, each (successor, closed spec) walk
-// (SI-270's point is per (S_k, T)), each commit's records and date, and
-// each answer at a walked commit, so one engine reads each at most once.
+// memoizes each (successor, closed spec) walk list and walk (SI-270's
+// point and SI-281's walk set are per (S_k, T)), each commit's records and
+// date, and each answer at a walked commit, so one engine reads each at
+// most once.
 // It is not safe for concurrent use; History serializes its callers.
 type engine struct {
 	src     walkSource
-	lists   map[string]walkList
+	lists   map[string]walkList // per (successor, closed spec)
 	walks   map[string]*walkState
 	recs    map[string]recordsAt
 	dates   map[string]Fact
@@ -49,8 +52,8 @@ type engine struct {
 	err     error                    // the first history answer outside FactState, or a defect
 }
 
-// walkList is one spec's walk (walkSource): its commits, their positions,
-// and their fact.
+// walkList is one (successor, closed spec) walk list (walkSource): its
+// commits, their positions, and their fact.
 type walkList struct {
 	commits []string
 	pos     []int
@@ -170,20 +173,21 @@ func (e *engine) walkOf(ctx context.Context, successor, closed string) *walkStat
 	key := successor + "\x00" + closed
 	w, ok := e.walks[key]
 	if !ok {
-		w = &walkState{successor: successor, closed: closed, list: e.list(ctx, successor)}
+		w = &walkState{successor: successor, closed: closed, list: e.list(ctx, successor, closed)}
 		e.walks[key] = w
 	}
 	return w
 }
 
-// list returns spec's walk list with its commits' positions, read once;
-// a list that does not start at its first commit or whose positions do
-// not increase is unproven.
-func (e *engine) list(ctx context.Context, spec string) walkList {
-	if l, ok := e.lists[spec]; ok {
+// list returns the (spec, closed) walk list with its commits' positions,
+// read once; a list that does not start at its first commit or whose
+// positions do not increase is unproven.
+func (e *engine) list(ctx context.Context, spec, closed string) walkList {
+	key := spec + "\x00" + closed
+	if l, ok := e.lists[key]; ok {
 		return l
 	}
-	commits, f := e.src.walk(ctx, spec)
+	commits, f := e.src.walk(ctx, spec, closed)
 	l := walkList{commits: commits, fact: e.known(f, fmt.Sprintf("spec/%s's acceptance", spec))}
 	if l.fact.State == FactProven {
 		if len(commits) == 0 || commits[0] != l.fact.Commit {
@@ -200,7 +204,7 @@ func (e *engine) list(ctx context.Context, spec string) walkList {
 			l.pos = append(l.pos, p)
 		}
 	}
-	e.lists[spec] = l
+	e.lists[key] = l
 	return l
 }
 

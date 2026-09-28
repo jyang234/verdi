@@ -33,8 +33,9 @@ func (f *fakeHist) Acceptance(_ context.Context, spec string) Fact {
 	return f.fact(spec)
 }
 
-// walk is spec's walk: its one acceptance commit, "acc-<spec>".
-func (f *fakeHist) walk(_ context.Context, spec string) ([]string, Fact) {
+// walk is spec's walk for any closed spec: its one acceptance commit,
+// "acc-<spec>".
+func (f *fakeHist) walk(_ context.Context, spec, _ string) ([]string, Fact) {
 	f.calls["walk "+spec]++
 	fact := f.fact(spec)
 	if fact.State != FactProven {
@@ -677,6 +678,7 @@ func TestIndex_Scenarios(t *testing.T) {
 	const (
 		govF = "governed spec/closed-feature's completed work (closed 2024-01-10) | "
 		govS = "governed spec/closed-story's completed work (closed 2024-01-10) | "
+		govO = "governed spec/other-feature's completed work "
 		byF  = "superseded since 2024-02-15 by spec/successor#dc-1"
 		byS  = "superseded since 2024-02-15 by spec/successor#dc-2"
 	)
@@ -757,6 +759,26 @@ func TestIndex_Scenarios(t *testing.T) {
 		{"stale base: a later successor reads proposed, not already superseded", "stale-base", "", []look{
 			{"closed-feature#dc-1", "", ""},
 			{"", "unrelated#dc-1", "proposed — supersedes spec/closed-feature#dc-1 when spec/unrelated is accepted"},
+		}},
+		// The lane L6 review's I-1 witness on the surfaces: a target closed
+		// after its successor landed is superseded from its archive commit
+		// (SI-281's walk set), never from a later commit the walk visits.
+		{"a target closed after the successor landed, then a later conflict", "late-close-then-conflict", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-03-01) | superseded since 2024-03-01 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-1", "supersedes spec/other-feature#dc-1"},
+		}},
+		{"a target closed by the pull request's last commit, then a later conflict", "ff-close-in-pr-then-conflict", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-02-10) | superseded since 2024-02-10 by spec/successor#dc-1"},
+			{"", "successor#dc-1", "supersedes spec/other-feature#dc-1"},
+		}},
+		{"a rival after a late close never ties the successor in force", "late-close-rival", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-03-01) | superseded since 2024-03-01 by spec/successor#dc-1"},
+			{"", "unrelated#dc-1", "supersession not established: the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"},
+		}},
+		{"two successors landed before a late close tie at the archive commit", "late-close-tie", "", []look{
+			{"other-feature#dc-1", "", "supersession unproven: spec/successor: acceptance unproven: spec/successor and spec/unrelated first match for spec/other-feature#dc-1 at the same commit 72718a09e3c8adf897ba25c11b8e2f67149f9e0b, so neither takes effect before the other"},
+			{"closed-story#ac-1", "", govS + byS},
 		}},
 		{"a proposed rival on the design branch never unseats the successor in force", "already-superseded", "", []look{
 			{"closed-feature#dc-1", "", govF + "superseded since 2024-01-15 by spec/prior-successor#dc-1"},

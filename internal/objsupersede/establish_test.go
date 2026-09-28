@@ -10,12 +10,15 @@ import (
 )
 
 // fakeWalk is a walkSource over in-memory commits "c1", "c2", ..., in
-// first-parent order: lists maps a spec to its walk (the first commit
-// holds it; none: never on the branch), facts overrides a spec's walk
-// fact, at maps a commit to its records (absent or nil: unreadable), and
-// days to its date (absent: unproven). calls counts every query.
+// first-parent order: lists maps a successor to its walk for every closed
+// spec (the first commit holds it; none: never on the branch), pairs
+// overrides it for one "successor closed" pair (SI-281's per-(S, T) walk
+// set), facts overrides a successor's walk fact, at maps a commit to its
+// records (absent or nil: unreadable), and days to its date (absent:
+// unproven). calls counts every query.
 type fakeWalk struct {
 	lists map[string][]string
+	pairs map[string][]string
 	facts map[string]Fact
 	at    map[string]*Records
 	days  map[string]string
@@ -30,12 +33,15 @@ func (f *fakeWalk) position(_ context.Context, commit string) (int, error) {
 	return n, nil
 }
 
-func (f *fakeWalk) walk(_ context.Context, spec string) ([]string, Fact) {
-	f.calls["walk "+spec]++
-	if fact, ok := f.facts[spec]; ok {
-		return f.lists[spec], fact
+func (f *fakeWalk) walk(_ context.Context, spec, closed string) ([]string, Fact) {
+	f.calls["walk "+spec+" "+closed]++
+	l, ok := f.pairs[spec+" "+closed]
+	if !ok {
+		l = f.lists[spec]
 	}
-	l := f.lists[spec]
+	if fact, ok := f.facts[spec]; ok {
+		return l, fact
+	}
 	if len(l) == 0 {
 		return nil, Fact{State: FactAbsent}
 	}
@@ -61,7 +67,7 @@ func (f *fakeWalk) dated(_ context.Context, commit string) Fact {
 // walkOver is a fakeWalk in which s1 lands at c1 and walks c1, c2, ...,
 // commit ci holding recs[i-1] and dated 2024-02-1<i>.
 func walkOver(recs ...*Records) *fakeWalk {
-	f := &fakeWalk{lists: map[string][]string{}, facts: map[string]Fact{}, at: map[string]*Records{}, days: map[string]string{}, calls: map[string]int{}}
+	f := &fakeWalk{lists: map[string][]string{}, pairs: map[string][]string{}, facts: map[string]Fact{}, at: map[string]*Records{}, days: map[string]string{}, calls: map[string]int{}}
 	for i, r := range recs {
 		c := string(rune('1' + i))
 		f.lists["s1"] = append(f.lists["s1"], "c"+c)
@@ -90,6 +96,11 @@ func TestEngine_Establishment(t *testing.T) {
 	open := func() *Records {
 		r := full()
 		r.Conflicts[0].FM.Status = "open"
+		return r
+	}
+	notClosed := func() *Records {
+		r := full()
+		r.Specs["t"].Archived = false
 		return r
 	}
 	// v2 carries dc-1 from s1 (c1 names s1) and issues dc-3 to t#ac-1 (c2
@@ -125,6 +136,12 @@ func TestEngine_Establishment(t *testing.T) {
 			return walkOver(mRecs([]*Conflict{mConflict("c1", "s1", p)}, mSpec("s1", nil, mDec("dc-2", p))),
 				mRecs([]*Conflict{mConflict("c1", "s1", p, vo)}, mSpec("s1", nil, mDec("dc-2", p), mDec("dc-1", vo))))
 		}, "s1", p, inForceAt("c1", "2024-02-11")},
+		{"the walk for (S, T) reaches T's archive commit (SI-281's walk set)", func() *fakeWalk {
+			f := walkOver(notClosed(), notClosed(), full())
+			f.lists["s1"] = []string{"c1", "c2"} // S's own paths and the conflicts only
+			f.pairs["s1 t"] = []string{"c1", "c3"}
+			return f
+		}, "s1", vo, inForceAt("c3", "2024-02-13")},
 		{"never matches: the latest evaluated commit's reason", func() *fakeWalk { return walkOver(specOnly(), open()) }, "s1", vo,
 			notIn("the conflict conflict/c1 is not superseded")},
 		{"the successor leaves the branch: the latest commit holding it gives the reason", func() *fakeWalk {
@@ -187,7 +204,7 @@ func TestEngine_Memo(t *testing.T) {
 			t.Errorf("%s read %d times, want once", key, n)
 		}
 	}
-	if f.calls["records c3"] != 0 || f.calls["walk s1"] != 1 || f.calls["dated c2"] != 1 {
+	if f.calls["records c3"] != 0 || f.calls["walk s1 t"] != 1 || f.calls["dated c2"] != 1 {
 		t.Errorf("calls %v: want s1's walk and c2's date read once, and c3 never", f.calls)
 	}
 }
@@ -238,8 +255,15 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 	unprovenBy := func(detail string) Establishment {
 		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: detail}
 	}
-	tie := func(a, b string) Establishment {
-		return unprovenBy("spec/" + a + " and spec/" + b + " first match for spec/t#dc-1 at the same commit c1, so neither takes effect before the other")
+	tieAt := func(a, b, commit string) Establishment {
+		return unprovenBy("spec/" + a + " and spec/" + b + " first match for spec/t#dc-1 at the same commit " + commit + ", so neither takes effect before the other")
+	}
+	tie := func(a, b string) Establishment { return tieAt(a, b, "c1") }
+	// notClosed is both successors' complete records before t is closed.
+	notClosed := func() *Records {
+		r := both(sxC, ssC, cxC, csC)
+		r.Specs["t"].Archived = false
+		return r
 	}
 	tests := []struct {
 		name  string
@@ -256,6 +280,11 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 		{"two matches first holding at one commit are each unproven", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1"}, "s": {"c1"}}, both(sxC, ssC, cxC, csC))
 		}, tie("s", "x"), tie("x", "s")},
+		{"the tie check reads the rival's own (X, T) walk: both first match at T's archive commit", func() *fakeWalk {
+			f := storeOf(map[string][]string{"x": {"c1"}, "s": {"c1"}}, notClosed(), both(sxC, ssC, cxC, csC))
+			f.pairs["s t"], f.pairs["x t"] = []string{"c1", "c2"}, []string{"c1", "c2"}
+			return f
+		}, tieAt("s", "x", "c2"), tieAt("x", "s", "c2")},
 		{"a rival's establishment unproven before the commit", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c2"}}, undecodable(), both(sxC, ssC, cxC, csC))
 		}, unprovenBy("spec/x's establishment: records do not decode at the acceptance commit: x: broken"), unprovenBy("records do not decode at the acceptance commit: x: broken")},

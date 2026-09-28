@@ -222,29 +222,39 @@ func TestEvaluate_EveryScenario(t *testing.T) {
 		refusal1 = ", dc-2 " + newE // the other edge still resolves
 	)
 	want := map[string]struct{ spec, results string }{
-		"accepted":              {"successor", happy},
-		"already-superseded":    {"successor", "dc-1 unresolved/already-superseded" + refusal1},
-		"chain":                 {"successor-v3", "dc-1 " + carried + ", dc-2 " + carried},
-		"chain-drop":            {"successor-v2", "dc-2 " + carried},
-		"chain-not-in-force":    {"successor-v2", "dc-1 unresolved/establisher-not-in-force, dc-2 " + carried + ", dc-3 unresolved/no-conflict"},
-		"conflict-dismissed":    {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
-		"conflict-open":         {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
-		"conflict-spans-specs":  {"successor", "dc-1 unresolved/conflict-spans-specs, dc-2 unresolved/conflict-spans-specs"},
-		"constraint-target":     {"successor", "dc-1 unresolved/object-not-criterion-or-decision" + refusal1},
-		"feature-criterion":     {"successor", happy + ", dc-3 " + newE},
-		"feature-fragment-link": {"successor", happy},
-		"ff-landing":            {"successor", happy},
-		"no-conflict":           {"successor", "dc-1 unresolved/no-conflict" + refusal1},
-		"proposed":              {"successor", happy},
-		"rebase-landing":        {"successor", happy},
-		"resolved-by-other":     {"successor", "dc-1 unresolved/resolved-by-other" + refusal1},
-		"stale-base":            {"unrelated", "dc-1 " + newE},
-		"target-not-closed":     {"successor", "dc-1 unresolved/target-not-closed" + refusal1},
-		"top-level-supersedes":  {"successor", "dc-2 " + newE},
-		"undeclared-object":     {"successor", "dc-1 unresolved/object-not-declared" + refusal1},
-		"unmatched-challenge":   {"successor", happy + ", - unresolved/unmatched-challenge"},
-		"unrelated":             {"unrelated", "dc-1 unresolved/already-superseded"},
-		"unrelated-accepted":    {"unrelated", "dc-1 unresolved/already-superseded"},
+		"accepted":                     {"successor", happy},
+		"already-superseded":           {"successor", "dc-1 unresolved/already-superseded" + refusal1},
+		"chain":                        {"successor-v3", "dc-1 " + carried + ", dc-2 " + carried},
+		"chain-drop":                   {"successor-v2", "dc-2 " + carried},
+		"chain-not-in-force":           {"successor-v2", "dc-1 unresolved/establisher-not-in-force, dc-2 " + carried + ", dc-3 unresolved/no-conflict"},
+		"conflict-dismissed":           {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
+		"conflict-open":                {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
+		"conflict-spans-specs":         {"successor", "dc-1 unresolved/conflict-spans-specs, dc-2 unresolved/conflict-spans-specs"},
+		"constraint-target":            {"successor", "dc-1 unresolved/object-not-criterion-or-decision" + refusal1},
+		"feature-criterion":            {"successor", happy + ", dc-3 " + newE},
+		"feature-fragment-link":        {"successor", happy},
+		"ff-close-in-pr":               {"successor", happy},
+		"ff-close-in-pr-then-conflict": {"successor", happy},
+		"ff-landing":                   {"successor", happy},
+		"ff-widening-series":           {"successor", happy + ", dc-3 " + newE},
+		"late-close":                   {"successor", happy},
+		"late-close-rival":             {"unrelated", "dc-1 unresolved/already-superseded"},
+		"late-close-then-conflict":     {"successor", happy},
+		"late-close-tie":               {"successor", "dc-1 unresolved/acceptance-unproven" + refusal1},
+		"no-conflict":                  {"successor", "dc-1 unresolved/no-conflict" + refusal1},
+		"proposed":                     {"successor", happy},
+		"rebase-landing":               {"successor", happy},
+		"resolved-by-other":            {"successor", "dc-1 unresolved/resolved-by-other" + refusal1},
+		"same-commit-tie":              {"successor", "dc-1 unresolved/acceptance-unproven" + refusal1},
+		"skeleton-landing":             {"successor", happy},
+		"stale-base":                   {"unrelated", "dc-1 " + newE},
+		"target-not-closed":            {"successor", "dc-1 unresolved/target-not-closed" + refusal1},
+		"top-level-supersedes":         {"successor", "dc-2 " + newE},
+		"undecodable-before-point":     {"successor", happy},
+		"undeclared-object":            {"successor", "dc-1 unresolved/object-not-declared" + refusal1},
+		"unmatched-challenge":          {"successor", happy + ", - unresolved/unmatched-challenge"},
+		"unrelated":                    {"unrelated", "dc-1 unresolved/already-superseded"},
+		"unrelated-accepted":           {"unrelated", "dc-1 unresolved/already-superseded"},
 	}
 	m, err := scenario.Load(scenario.Dir())
 	if err != nil {
@@ -399,6 +409,54 @@ func TestHistory_EstablishmentStaleBase(t *testing.T) {
 	}
 }
 
+// TestHistory_EstablishmentLateClose is the lane L6 review's I-1 witness,
+// rebuilt (SI-281's walk set): the walk for (S, T) visits T's spec paths
+// in both zones, so a target closed after the successor landed is seen at
+// its archive commit and dated by it, never at a later commit the walk
+// happens to visit; and a rival's walk in the tie check uses its own (X, T)
+// set, so two successors that land before the close first match at the
+// archive commit together (SI-281(2)).
+func TestHistory_EstablishmentLateClose(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	late := scenario.Build(t, "late-close")
+	lateThen := scenario.Build(t, "late-close-then-conflict")
+	ff := scenario.Build(t, "ff-close-in-pr")
+	ffThen := scenario.Build(t, "ff-close-in-pr-then-conflict")
+	rival := scenario.Build(t, "late-close-rival")
+	tie := scenario.Build(t, "late-close-tie")
+	other, story := obj("other-feature", "dc-1"), obj("closed-story", "ac-1")
+	tied := func(a, b string) Establishment {
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: "spec/" + a + " and spec/" + b + " first match for spec/other-feature#dc-1 at the same commit " + tie.Steps[4] + ", so neither takes effect before the other"}
+	}
+	tests := []struct {
+		name      string
+		repo      *scenario.Repo
+		successor string
+		object    artifact.Ref
+		want      Establishment
+	}{
+		{"closed after the merge: in force at the archive commit", late, "successor", other, Establishment{Commit: late.Steps[2], Date: "2024-03-01"}},
+		{"closed after the merge: the closed story's point does not move", late, "successor", story, Establishment{Commit: late.Steps[1], Date: "2024-02-15"}},
+		{"a later conflict filing: dated by the archive commit, never by the filing", lateThen, "successor", other, Establishment{Commit: lateThen.Steps[2], Date: "2024-03-01"}},
+		{"closed by the pull request's last commit, landed by fast-forward", ff, "successor", other, Establishment{Commit: ff.Steps[1], Date: "2024-02-10"}},
+		{"closed in the pull request: the closed story at the series' first commit", ff, "successor", story, Establishment{Commit: ff.Steps[0], Date: "2024-02-01"}},
+		{"closed in the pull request, then a later conflict filing", ffThen, "successor", other, Establishment{Commit: ffThen.Steps[1], Date: "2024-02-10"}},
+		{"a rival after the late close: the successor stays in force, no tie", rival, "successor", other, Establishment{Commit: rival.Steps[2], Date: "2024-03-01"}},
+		{"a rival after the late close is already superseded", rival, "unrelated", other, Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"}},
+		{"two successors landed before the close tie at the archive commit", tie, "successor", other, tied("successor", "unrelated")},
+		{"two successors landed before the close: asked of the rival", tie, "unrelated", other, tied("unrelated", "successor")},
+		{"two successors landed before the close: the closed story is not tied", tie, "successor", story, Establishment{Commit: tie.Steps[1], Date: "2024-02-15"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NewHistory(ctx, tc.repo.Dir).Establishment(ctx, tc.successor, tc.object); got != tc.want {
+				t.Fatalf("got  %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // commitAt writes path on the checked-out branch, commits it with author
 // and committer date date, points origin/main at main, and returns the
 // commit.
@@ -453,6 +511,7 @@ func TestEvaluate_Scenarios(t *testing.T) {
 		{"unrelated reuse", "unrelated", "", "unrelated", "dc-1", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
 		{"stale base: the successor's records match at its own head", "stale-base", "design/successor", "successor", "dc-1", "records match; takes effect when spec/successor is accepted"},
 		{"stale base: a successor not in force never refuses a later one (F-1)", "stale-base", "", "unrelated", "dc-1", "records match; takes effect when spec/unrelated is accepted"},
+		{"a rival proposed after a late close is refused (I-1)", "late-close-rival", "design/unrelated", "unrelated", "dc-1", "the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

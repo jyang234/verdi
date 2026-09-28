@@ -37,9 +37,12 @@ func TestLoad_CommittedManifest(t *testing.T) {
 	}
 	names := sortedKeys(m.Scenarios)
 	want := []string{"accepted", "already-superseded", "chain", "chain-drop", "chain-not-in-force", "conflict-dismissed",
-		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-criterion", "feature-fragment-link", "ff-landing", "no-conflict",
-		"proposed", "rebase-landing", "resolved-by-other", "stale-base", "target-not-closed", "top-level-supersedes",
-		"undeclared-object", "unmatched-challenge", "unrelated", "unrelated-accepted"}
+		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-criterion", "feature-fragment-link",
+		"ff-close-in-pr", "ff-close-in-pr-then-conflict", "ff-landing", "ff-widening-series", "late-close",
+		"late-close-rival", "late-close-then-conflict", "late-close-tie", "no-conflict", "proposed", "rebase-landing",
+		"resolved-by-other", "same-commit-tie", "skeleton-landing", "stale-base", "target-not-closed",
+		"top-level-supersedes", "undeclared-object", "undecodable-before-point", "unmatched-challenge", "unrelated",
+		"unrelated-accepted"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("scenarios %v, want %v", names, want)
 	}
@@ -233,7 +236,7 @@ func hostileGit(t *testing.T) {
 // one "name base steps" line per scenario in name order, from a build with
 // no ambient git state. TestBuild_EveryScenario reproduces it under
 // hostileGit, so no ambient setting moves any SHA of any scenario.
-const wantAllCommits = "ca71d8a08f4bbd813aa0aa10d53b93ae8c51d985b576ff2a65f0593cde8cce9c"
+const wantAllCommits = "9543fe7d77124ac2828dbeed778402c852623ff38b791772c3effaca9a8bca31"
 
 func TestBuild_EveryScenario(t *testing.T) {
 	hostileGit(t)
