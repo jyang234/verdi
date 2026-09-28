@@ -27,9 +27,17 @@
 //     destination's parent, then commits the same way.
 //   - A merge step runs `git merge -q --no-ff --no-verify -m <message>
 //     <branch>`.
-//   - A commit or merge carries GIT_AUTHOR_DATE (the author date, else the
-//     date) and GIT_COMMITTER_DATE (the date), each as "<unix seconds>
-//     +0000".
+//   - A fast-forward step runs `git merge -q --ff-only <branch>`: a
+//     landing without a merge commit. It makes no commit, so it carries no
+//     date; its message only describes it.
+//   - A rebase step runs `git rebase -q <upstream>` on its branch, replaying
+//     the branch's commits onto the upstream (a rebase landing, with a
+//     fast-forward step after it): each replayed commit keeps its own
+//     author and author date and takes the step's date as its committer
+//     date, so a rebase step carries no author date.
+//   - A commit, merge, or rebase carries GIT_AUTHOR_DATE (the author date,
+//     else the date) and GIT_COMMITTER_DATE (the date), each as "<unix
+//     seconds> +0000".
 //   - Finally, point refs/remotes/origin/<initial branch> at the initial
 //     branch and check out the scenario's checkout.
 package scenario
@@ -75,18 +83,23 @@ type Scenario struct {
 	Steps    []Step `json:"steps"`
 }
 
-// Step is one commit on Branch (created from the current HEAD when it does
-// not exist yet): Layers written as one commit, Moves applied as one
-// commit, or Merge merged --no-ff. Date is the committer date, and the
-// author date unless AuthorDate is set; both are RFC 3339 in UTC.
+// Step is one operation on Branch (created from the current HEAD when it
+// does not exist yet): Layers written as one commit, Moves applied as one
+// commit, Merge merged --no-ff, FastForward merged --ff-only (no commit),
+// or Branch rebased onto Rebase. Date is the committer date, and the
+// author date unless AuthorDate is set; both are RFC 3339 in UTC. A
+// fast-forward step has neither, and a rebase step no author date (the
+// package doc's replay rules).
 type Step struct {
-	Branch     string   `json:"branch"`
-	Date       string   `json:"date"`
-	AuthorDate string   `json:"author_date,omitempty"`
-	Message    string   `json:"message"`
-	Layers     []string `json:"layers,omitempty"`
-	Moves      []Move   `json:"moves,omitempty"`
-	Merge      string   `json:"merge,omitempty"`
+	Branch      string   `json:"branch"`
+	Date        string   `json:"date,omitempty"`
+	AuthorDate  string   `json:"author_date,omitempty"`
+	Message     string   `json:"message"`
+	Layers      []string `json:"layers,omitempty"`
+	Moves       []Move   `json:"moves,omitempty"`
+	Merge       string   `json:"merge,omitempty"`
+	FastForward string   `json:"fast_forward,omitempty"`
+	Rebase      string   `json:"rebase,omitempty"`
 }
 
 // Move renames a repo path (a file or a directory) to another.
@@ -105,10 +118,12 @@ func Dir() string {
 // Load strict-decodes dir's scenarios.json and checks it, reporting the
 // first problem in sorted order: the identity is complete; every layer's
 // repo paths are clean and its record files exist; every step names a
-// branch, a message, UTC dates, and exactly one operation over defined
-// layers or clean paths; base steps stay on the initial branch and never
-// merge; and every merged branch and checkout exists by then (the initial
-// branch, or one an earlier step committed to).
+// branch, a message, and exactly one operation over defined layers or
+// clean paths, with the UTC dates its operation carries (Step); base steps
+// stay on the initial branch and only write layers or move paths; and
+// every merged, fast-forwarded, or rebased-onto branch, every rebased
+// branch, and the checkout exists by then (the initial branch, or one an
+// earlier step committed to).
 func Load(dir string) (*Manifest, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "scenarios.json"))
 	if err != nil {
@@ -143,7 +158,7 @@ func (m *Manifest) validate(dir string) error {
 		return fmt.Errorf("no base step")
 	}
 	for i, st := range m.Base {
-		if st.Branch != m.Commit.InitialBranch || st.Merge != "" {
+		if st.Branch != m.Commit.InitialBranch || st.Merge != "" || st.FastForward != "" || st.Rebase != "" {
 			return fmt.Errorf("base step %d must write layers or move paths on %s", i, m.Commit.InitialBranch)
 		}
 		if err := m.validateStep(st); err != nil {
@@ -160,8 +175,13 @@ func (m *Manifest) validate(dir string) error {
 			if err := m.validateStep(st); err != nil {
 				return fmt.Errorf("scenario %q step %d: %w", name, i, err)
 			}
-			if st.Merge != "" && !branches[st.Merge] {
-				return fmt.Errorf("scenario %q step %d merges %q before any step commits to it", name, i, st.Merge)
+			for _, use := range []struct{ verb, branch string }{{"merges", st.Merge}, {"fast-forwards to", st.FastForward}, {"rebases onto", st.Rebase}} {
+				if use.branch != "" && !branches[use.branch] {
+					return fmt.Errorf("scenario %q step %d %s %q before any step commits to it", name, i, use.verb, use.branch)
+				}
+			}
+			if st.Rebase != "" && !branches[st.Branch] {
+				return fmt.Errorf("scenario %q step %d rebases %q before any step commits to it", name, i, st.Branch)
 			}
 			branches[st.Branch] = true
 		}
@@ -176,22 +196,31 @@ func (m *Manifest) validateStep(st Step) error {
 	if st.Branch == "" || st.Message == "" {
 		return fmt.Errorf("a step needs a branch and a message")
 	}
-	if _, err := stepTime(st.Date); err != nil {
-		return err
-	}
-	if st.AuthorDate != "" {
-		if _, err := stepTime(st.AuthorDate); err != nil {
-			return err
-		}
-	}
 	ops := 0
-	for _, has := range []bool{len(st.Layers) > 0, len(st.Moves) > 0, st.Merge != ""} {
+	for _, has := range []bool{len(st.Layers) > 0, len(st.Moves) > 0, st.Merge != "", st.FastForward != "", st.Rebase != ""} {
 		if has {
 			ops++
 		}
 	}
 	if ops != 1 {
-		return fmt.Errorf("a step writes layers, moves paths, or merges a branch: exactly one")
+		return fmt.Errorf("a step writes layers, moves paths, merges, fast-forwards, or rebases a branch: exactly one")
+	}
+	switch {
+	case st.FastForward != "":
+		if st.Date != "" || st.AuthorDate != "" {
+			return fmt.Errorf("a fast-forward step makes no commit, so it carries no date")
+		}
+	case st.Rebase != "" && st.AuthorDate != "":
+		return fmt.Errorf("a rebase step keeps each replayed commit's author date, so it carries none")
+	default:
+		if _, err := stepTime(st.Date); err != nil {
+			return err
+		}
+		if st.AuthorDate != "" {
+			if _, err := stepTime(st.AuthorDate); err != nil {
+				return err
+			}
+		}
 	}
 	for _, l := range st.Layers {
 		if _, ok := m.Layers[l]; !ok {

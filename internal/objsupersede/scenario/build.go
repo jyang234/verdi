@@ -93,7 +93,9 @@ type gitIn struct {
 	id  Identity
 }
 
-// step commits one step on its branch and returns the commit.
+// step applies one step on its branch and returns the branch's commit
+// after it: the step's commit, or for a fast-forward the commit reached,
+// and for a rebase the last replayed commit.
 func (g gitIn) step(m *Manifest, fixtureDir string, st Step) (string, error) {
 	if head, _ := g.run(nil, "symbolic-ref", "--short", "HEAD"); head != st.Branch {
 		args := []string{"checkout", "-q", st.Branch}
@@ -108,6 +110,10 @@ func (g gitIn) step(m *Manifest, fixtureDir string, st Step) (string, error) {
 	switch {
 	case st.Merge != "":
 		_, err = g.run(&st, "merge", "-q", "--no-ff", "--no-verify", "-m", st.Message, st.Merge)
+	case st.FastForward != "":
+		_, err = g.run(nil, "merge", "-q", "--ff-only", st.FastForward)
+	case st.Rebase != "":
+		_, err = g.run(&st, "rebase", "-q", st.Rebase)
 	case len(st.Moves) > 0:
 		for _, mv := range st.Moves {
 			if err = os.MkdirAll(filepath.Join(g.dir, filepath.Dir(filepath.FromSlash(mv.To))), 0o755); err != nil {
