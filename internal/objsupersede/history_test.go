@@ -574,6 +574,11 @@ func TestEvaluate_Scenarios(t *testing.T) {
 		{"unrelated reuse", "unrelated", "", "unrelated", "dc-1", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
 		{"stale base: the successor's records match at its own head", "stale-base", "design/successor", "successor", "dc-1", "records match; takes effect when spec/successor is accepted"},
 		{"stale base: a successor not in force never refuses a later one (F-1)", "stale-base", "", "unrelated", "dc-1", "records match; takes effect when spec/unrelated is accepted"},
+		// Lane L6 review M-1: under SI-272 as amended the design branch's
+		// proposed rival, never in force, refuses nothing, so the accepted
+		// prior successor's own edge reads resolved (it read "already
+		// superseded by spec/successor" under the tree-only rule, (b)).
+		{"a proposed rival never refuses the accepted successor's own edge (M-1)", "already-superseded", "", "prior-successor", "dc-1", "records match; takes effect when spec/prior-successor is accepted"},
 		{"a rival proposed after a late close is refused (I-1)", "late-close-rival", "design/unrelated", "unrelated", "dc-1", "the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"},
 	}
 	for _, tc := range tests {
