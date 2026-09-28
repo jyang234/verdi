@@ -494,7 +494,7 @@ func TestInForceAt(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(recs)
 			}
-			reason, detail := recs.inForceAt(ctx, tc.successor, tc.object)
+			reason, detail := recs.inForceAt(ctx, tc.successor, tc.object, fakeEst{})
 			if reason != tc.reason || !strings.HasPrefix(detail, tc.detailPrefix) || (tc.detailPrefix == "") != (detail == "") {
 				t.Fatalf("got %q %q, want %q with detail starting %q", reason, detail, tc.reason, tc.detailPrefix)
 			}

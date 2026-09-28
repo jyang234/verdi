@@ -232,8 +232,10 @@ func TestEvaluate_EveryScenario(t *testing.T) {
 		"conflict-spans-specs":  {"successor", "dc-1 unresolved/conflict-spans-specs, dc-2 unresolved/conflict-spans-specs"},
 		"constraint-target":     {"successor", "dc-1 unresolved/object-not-criterion-or-decision" + refusal1},
 		"feature-fragment-link": {"successor", happy},
+		"ff-landing":            {"successor", happy},
 		"no-conflict":           {"successor", "dc-1 unresolved/no-conflict" + refusal1},
 		"proposed":              {"successor", happy},
+		"rebase-landing":        {"successor", happy},
 		"resolved-by-other":     {"successor", "dc-1 unresolved/resolved-by-other" + refusal1},
 		"target-not-closed":     {"successor", "dc-1 unresolved/target-not-closed" + refusal1},
 		"top-level-supersedes":  {"successor", "dc-2 " + newE},
@@ -274,6 +276,97 @@ func TestEvaluate_EveryScenario(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHistory_EstablishmentLandings is the whole-wave review's F-4
+// witness, rebuilt: a successor whose pull request lands without a merge
+// commit (a fast-forward, or a rebase onto a main that moved) is in force
+// from the earliest first-parent commit at which it is present AND §3's
+// match for (S_k, T) holds, dated by that commit's committer date (SI-270
+// as amended), never refused at the commit that first holds its spec. The
+// point is per (S_k, T), so an object S_k has no edge to is not in force.
+func TestHistory_EstablishmentLandings(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	ff := scenario.Build(t, "ff-landing")
+	rb := scenario.Build(t, "rebase-landing")
+	tests := []struct {
+		name   string
+		repo   *scenario.Repo
+		object artifact.Ref
+		want   Establishment
+	}{
+		{"fast-forward: the decision, at the series' second commit", ff, obj("closed-feature", "dc-1"), Establishment{Commit: ff.Steps[1], Date: "2024-02-10"}},
+		{"fast-forward: the criterion, at the series' second commit", ff, obj("closed-story", "ac-1"), Establishment{Commit: ff.Steps[1], Date: "2024-02-10"}},
+		{"rebase: the decision, at the replayed second commit", rb, obj("closed-feature", "dc-1"), Establishment{Commit: rb.Steps[3], Date: "2024-02-15"}},
+		{"rebase: the criterion, at the replayed second commit", rb, obj("closed-story", "ac-1"), Establishment{Commit: rb.Steps[3], Date: "2024-02-15"}},
+		{"fast-forward: an object the successor has no edge to", ff, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "spec/successor carries no edge to spec/closed-feature#ac-1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NewHistory(ctx, tc.repo.Dir).Establishment(ctx, "successor", tc.object); got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	// The accepted fact is still the first-parent commit that first holds
+	// the spec: acceptance and the in-force point differ here.
+	if got := NewHistory(ctx, ff.Dir).Acceptance(ctx, "successor"); got != (Fact{State: FactProven, Commit: ff.Steps[0], Date: "2024-02-01"}) {
+		t.Fatalf("acceptance %+v, want the series' first commit", got)
+	}
+}
+
+// TestHistory_EstablishmentCorrective pins SI-270 as amended on a later
+// corrective commit: a successor whose records did not match when it
+// landed takes effect at the first-parent commit where they first match,
+// dated by it; the walk visits only commits touching its spec paths or
+// .verdi/conflicts/, from its first presence.
+func TestHistory_EstablishmentCorrective(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "chain-not-in-force")
+	gitIn(t, repo.Dir, "checkout", "-q", "main")
+	// A default-branch commit outside the walk: it moves no fact.
+	commitAt(t, repo.Dir, "2024-02-18T09:00:00Z", "README.md", "unrelated\n")
+	// The corrective commit: the successor's conflict for the closed
+	// feature now also challenges #ac-1, which its dc-3 supersedes.
+	unmatched, err := os.ReadFile(filepath.Join(scenario.Dir(), "records", "conflicts", "successor-closed-feature-unmatched.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrective := commitAt(t, repo.Dir, "2024-02-20T09:00:00Z", ".verdi/conflicts/successor-closed-feature.md", string(unmatched))
+	h := NewHistory(ctx, repo.Dir)
+	for _, o := range []artifact.Ref{obj("closed-feature", "dc-1"), obj("closed-feature", "ac-1")} {
+		if got := h.Establishment(ctx, "successor", o); got != (Establishment{Commit: corrective, Date: "2024-02-20"}) {
+			t.Errorf("%s: got %+v, want in force at the corrective commit since 2024-02-20", o, got)
+		}
+	}
+	// The closed story's match held at the merge: its point does not move.
+	if got := h.Establishment(ctx, "successor", obj("closed-story", "ac-1")); got != (Establishment{Commit: repo.Steps[1], Date: "2024-02-15"}) {
+		t.Errorf("closed-story#ac-1: got %+v, want in force at the merge since 2024-02-15", got)
+	}
+}
+
+// commitAt writes path on the checked-out branch, commits it with author
+// and committer date date, points origin/main at main, and returns the
+// commit.
+func commitAt(t *testing.T, dir, date, path, content string) string {
+	t.Helper()
+	full := filepath.Join(dir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	cmd := exec.Command("git", "-C", dir, "commit", "-q", "--no-verify", "-m", "Commit "+path)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "main")
+	return gitOut(t, dir, "rev-parse", "HEAD")
 }
 
 // TestHistory_EstablishmentBelowGitRoot pins that a store below the git

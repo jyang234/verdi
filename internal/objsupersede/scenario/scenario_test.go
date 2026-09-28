@@ -37,8 +37,8 @@ func TestLoad_CommittedManifest(t *testing.T) {
 	}
 	names := sortedKeys(m.Scenarios)
 	want := []string{"accepted", "already-superseded", "chain", "chain-drop", "chain-not-in-force", "conflict-dismissed",
-		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-fragment-link", "no-conflict", "proposed",
-		"resolved-by-other", "target-not-closed", "top-level-supersedes", "undeclared-object",
+		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-fragment-link", "ff-landing", "no-conflict",
+		"proposed", "rebase-landing", "resolved-by-other", "target-not-closed", "top-level-supersedes", "undeclared-object",
 		"unmatched-challenge", "unrelated", "unrelated-accepted"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("scenarios %v, want %v", names, want)
@@ -233,7 +233,7 @@ func hostileGit(t *testing.T) {
 // one "name base steps" line per scenario in name order, from a build with
 // no ambient git state. TestBuild_EveryScenario reproduces it under
 // hostileGit, so no ambient setting moves any SHA of any scenario.
-const wantAllCommits = "bc01ce030463fa55f25324f2a4fabd5464cf8429c2c6faaa01a95ce58a7f5b2f"
+const wantAllCommits = "8e77b4ecf06e14689f201e8a79cf7d66d3a2695b2e6c325f352f473b4b79cfd3"
 
 func TestBuild_EveryScenario(t *testing.T) {
 	hostileGit(t)
@@ -402,6 +402,23 @@ func TestMaterialize_Landings(t *testing.T) {
 				"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main"})
 		})
 	}
+}
+
+// TestBuild_Landings pins the committed landings without a merge commit
+// (whole-wave review F-4): ff-landing fast-forwards main to the
+// successor's second commit, and rebase-landing replays both commits onto
+// a main that moved, then fast-forwards.
+func TestBuild_Landings(t *testing.T) {
+	const propose, resolve = " Propose spec/successor", " Resolve the conflicts spec/successor challenges"
+	ff := Build(t, "ff-landing")
+	checkLanding(t, ff, []string{ff.Steps[1], ff.Steps[0]}, []string{
+		"2024-02-10T09:00:00+00:00 2024-02-10T09:00:00+00:00" + resolve,
+		"2024-02-01T09:00:00+00:00 2024-02-01T09:00:00+00:00" + propose})
+	rb := Build(t, "rebase-landing")
+	checkLanding(t, rb, []string{rb.Steps[3], gitOut(t, rb.Dir, "rev-parse", rb.Steps[3]+"^"), rb.Steps[2]}, []string{
+		"2024-02-10T09:00:00+00:00 2024-02-15T09:00:00+00:00" + resolve,
+		"2024-02-01T09:00:00+00:00 2024-02-15T09:00:00+00:00" + propose,
+		"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main"})
 }
 
 // TestMaterialize_GitErrors pins that a failing git step is returned as an

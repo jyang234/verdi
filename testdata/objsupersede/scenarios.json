@@ -75,6 +75,9 @@
     "conflict-story": {
       ".verdi/conflicts/successor-closed-story.md": "conflicts/successor-closed-story.md"
     },
+    "main-moves": {
+      "README.md": "readme.md"
+    },
     "prior": {
       ".verdi/conflicts/prior-successor-closed-feature.md": "conflicts/prior-successor-closed-feature.md",
       ".verdi/specs/active/prior-successor/spec.md": "specs/prior-successor.md"
@@ -372,6 +375,33 @@
         }
       ]
     },
+    "ff-landing": {
+      "checkout": "main",
+      "steps": [
+        {
+          "branch": "design/successor",
+          "date": "2024-02-01T09:00:00Z",
+          "layers": [
+            "successor"
+          ],
+          "message": "Propose spec/successor"
+        },
+        {
+          "branch": "design/successor",
+          "date": "2024-02-10T09:00:00Z",
+          "layers": [
+            "conflict-feature",
+            "conflict-story"
+          ],
+          "message": "Resolve the conflicts spec/successor challenges"
+        },
+        {
+          "branch": "main",
+          "fast_forward": "design/successor",
+          "message": "Accept spec/successor by fast-forward"
+        }
+      ]
+    },
     "no-conflict": {
       "checkout": "design/successor",
       "steps": [
@@ -398,6 +428,47 @@
             "conflict-story"
           ],
           "message": "Propose spec/successor"
+        }
+      ]
+    },
+    "rebase-landing": {
+      "checkout": "main",
+      "steps": [
+        {
+          "branch": "design/successor",
+          "date": "2024-02-01T09:00:00Z",
+          "layers": [
+            "successor"
+          ],
+          "message": "Propose spec/successor"
+        },
+        {
+          "branch": "design/successor",
+          "date": "2024-02-10T09:00:00Z",
+          "layers": [
+            "conflict-feature",
+            "conflict-story"
+          ],
+          "message": "Resolve the conflicts spec/successor challenges"
+        },
+        {
+          "branch": "main",
+          "date": "2024-02-12T09:00:00Z",
+          "layers": [
+            "main-moves"
+          ],
+          "message": "Move main"
+        },
+        {
+          "branch": "design/successor",
+          "date": "2024-02-15T09:00:00Z",
+          "message": "Rebase spec/successor onto main",
+          "rebase": "main"
+        },
+        {
+          "branch": "main",
+          "fast_forward": "design/successor",
+          "message": "Accept spec/successor by rebase"
         }
       ]
     },

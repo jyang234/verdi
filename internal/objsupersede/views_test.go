@@ -29,6 +29,30 @@ type fakeHist struct {
 
 func (f *fakeHist) Acceptance(_ context.Context, spec string) Fact {
 	f.calls["acceptance "+spec]++
+	return f.fact(spec)
+}
+
+// walk is spec's walk: its one acceptance commit, "acc-<spec>".
+func (f *fakeHist) walk(_ context.Context, spec string) ([]string, Fact) {
+	f.calls["walk "+spec]++
+	fact := f.fact(spec)
+	if fact.State != FactProven {
+		return nil, fact
+	}
+	return []string{fact.Commit}, fact
+}
+
+// dated is "acc-<spec>"'s date, the spec's acceptance date.
+func (f *fakeHist) dated(_ context.Context, commit string) Fact {
+	f.calls["dated "+commit]++
+	fact := f.fact(strings.TrimPrefix(commit, "acc-"))
+	if fact.State == FactProven && fact.Commit != commit {
+		return Fact{State: FactUnproven, Witness: "no such commit " + commit}
+	}
+	return fact
+}
+
+func (f *fakeHist) fact(spec string) Fact {
 	if fact, ok := f.facts[spec]; ok {
 		return fact
 	}
@@ -429,9 +453,10 @@ func TestIndex_DecisionViews(t *testing.T) {
 }
 
 // TestIndex_Batch pins item 3's cost and purity: one index answers every
-// view of a tree, each acceptance, acceptance-commit read, and closed date
-// queried at most once; building never mutates the records, and two
-// builds are equal.
+// view of a tree, each acceptance, acceptance walk, walked commit's records
+// and date, and closed date queried at most once (the establishing
+// successor's history is its walk, not its acceptance); building never
+// mutates the records, and two builds are equal.
 func TestIndex_Batch(t *testing.T) {
 	build := func() (*Records, *fakeHist) {
 		o2 := "spec/t#ac-1"
@@ -451,7 +476,7 @@ func TestIndex_Batch(t *testing.T) {
 			t.Errorf("%s queried %d times, want once", k, n)
 		}
 	}
-	for _, key := range []string{"acceptance s1", "records acc-s1", "closed t"} {
+	for _, key := range []string{"walk s1", "records acc-s1", "dated acc-s1", "closed t"} {
 		if h.calls[key] != 1 {
 			t.Errorf("%s never queried", key)
 		}
@@ -624,6 +649,22 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"closed-feature#dc-1", "", govF + byF},
 			{"closed-story#ac-1", "", govS + byS},
 			{"closed-feature#ac-1", "", ""},
+			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		// The whole-wave review's F-4 witness on the surfaces: a landing
+		// without a merge commit is in force from the commit where §3's
+		// match first holds (SI-270 as amended), dated by it.
+		{"a fast-forward landing is in force from its second commit", "ff-landing", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-02-10 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + "superseded since 2024-02-10 by spec/successor#dc-2"},
+			{"closed-feature#ac-1", "", ""},
+			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		{"a rebase landing is in force from its replayed second commit", "rebase-landing", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-02-15 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + "superseded since 2024-02-15 by spec/successor#dc-2"},
 			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
 			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
 		}},
