@@ -3,17 +3,20 @@
 // tests driving the built binary), over the committed scenario fixture
 // testdata/objsupersede and its builder: lint, align, and gate on the
 // successor's design branch, acceptance, the refusals §8 lists, a carried
-// replacement through revisions, unrelated reuse, and a hand-typed
-// disposition. The judged sweep runs unconfigured (the scenario store sets
-// no align.judge_cmd, and judge_required defaults false), and its absence
-// finding is dispositioned by hand, as a reviewer does, so the gate turns
-// on the computed section.
+// replacement through revisions, unrelated reuse, a hand-typed
+// disposition, and each landing shape's outcome. The judged sweep runs
+// unconfigured (the scenario store sets no align.judge_cmd, and
+// judge_required defaults false), and its absence finding is dispositioned
+// by hand, as a reviewer does, so the gate turns on the computed section.
 package main
 
 import (
+	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -178,6 +181,172 @@ func TestObjSupersedeE2E_AlignAndGate(t *testing.T) {
 					t.Fatalf("conflicts = %v, want only S1's %v (a carried replacement files no new conflict)", names, want)
 				}
 			}
+		})
+	}
+}
+
+// cssView is what the built `verdi spec doc` prints, from the default
+// branch, beside one object or decision id of the document ref: the
+// view's supersession lines joined by " | ", as TestIndex_Scenarios pins
+// them, or "" for none.
+type cssView struct{ ref, id, want string }
+
+// cssViewLine matches one supersession line of `verdi spec doc`'s
+// Markdown: a span whose test id starts with the object or decision id,
+// holding the view's line with the refs it names linked in place. The
+// trailing conflict link beside a since line is not part of the line.
+var (
+	cssViewLine = regexp.MustCompile(`<span class="objsupersede objsupersede--[^"]*" data-testid="objsupersede-([^"]*)" data-state="[^"]*">(.*?)</span>`)
+	cssTag      = regexp.MustCompile(`<[^>]*>`)
+)
+
+// cssViews runs `verdi spec doc` on dir for each view's document, which it
+// reads from the default branch, and checks the lines beside the view's id.
+// The id's own anchor must be in the document, so a view that expects no
+// line stands on its own: the object was rendered, and nothing is beside it.
+func cssViews(t *testing.T, bin, dir string, repo *scenario.Repo, views []cssView) {
+	t.Helper()
+	docs := map[string]string{}
+	for _, v := range views {
+		doc, ok := docs[v.ref]
+		if !ok {
+			doc = cssRun(t, bin, dir, 0, "spec", "doc", v.ref, "--no-readiness")
+			docs[v.ref] = doc
+		}
+		if anchor := `<a id="` + v.id + `"></a>`; !strings.Contains(doc, anchor) {
+			t.Errorf("verdi spec doc %s renders no %s anchor for %s", v.ref, anchor, v.id)
+		}
+		var lines []string
+		for _, m := range cssViewLine.FindAllStringSubmatch(doc, -1) {
+			if strings.HasPrefix(m[1], v.id+"-") {
+				lines = append(lines, html.UnescapeString(cssTag.ReplaceAllString(m[2], "")))
+			}
+		}
+		if got, want := strings.Join(lines, " | "), cssAt(repo, v.want); got != want {
+			t.Errorf("verdi spec doc %s, %s:\n got %q\nwant %q", v.ref, v.id, got, want)
+		}
+	}
+}
+
+// cssAt replaces "{step N}" in s with step N's commit as a reason names the
+// point it evaluated (its 12-hex prefix, SI-281), and "{commit N}" with the
+// whole commit, as a tie's witness names it.
+func cssAt(repo *scenario.Repo, s string) string {
+	for i, c := range repo.Steps {
+		s = strings.ReplaceAll(s, fmt.Sprintf("{step %d}", i), c[:12])
+		s = strings.ReplaceAll(s, fmt.Sprintf("{commit %d}", i), c)
+	}
+	return s
+}
+
+// TestObjSupersedeE2E_Landings drives each landing shape of the scenario
+// fixture through the built binary (whole-wave review N-2). align and the
+// gate evaluate a successor's own edges as new replacements, so they never
+// show its in-force point; that point, and the "as of commit" witness of a
+// supersession not in force, reach the CLI in `verdi spec doc`'s lines,
+// which it reads from the default branch. Each row checks those lines as
+// TestIndex_Scenarios pins them, then runs align and the gate on a design
+// branch, asserting the outcome the package tests pin for that branch's
+// head. That is TestEvaluate_EveryScenario's outcome for the scenario,
+// except in late-close: its design branch is the pre-merge head, the
+// commit target-not-closed checks out, so the row asserts that scenario's
+// pinned outcome. A design branch the scenario does not define is cut at
+// main, so align and the gate read the tree TestEvaluate_EveryScenario
+// evaluates.
+func TestObjSupersedeE2E_Landings(t *testing.T) {
+	t.Parallel()
+	bin := buildVerdiBinary(t)
+	const (
+		govF = "governed spec/closed-feature's completed work (closed 2024-01-10) | "
+		govS = "governed spec/closed-story's completed work (closed 2024-01-10) | "
+		govO = "governed spec/other-feature's completed work "
+		byS  = "superseded since 2024-02-15 by spec/successor#dc-2"
+		notE = "supersession not established: spec/successor's supersession was not in force at its acceptance: "
+	)
+	tests := []struct {
+		name, scenario, branch, spec string
+		cut                          bool // the test cuts branch at main
+		want                         map[string]cssFinding
+		views                        []cssView
+	}{
+		{name: "fast-forward: in force from the series' completing commit", scenario: "ff-landing", branch: "design/successor", spec: "successor",
+			want: map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2},
+			views: []cssView{
+				{"spec/closed-feature", "dc-1", govF + "superseded since 2024-02-10 by spec/successor#dc-1"},
+				{"spec/closed-story", "ac-1", govS + "superseded since 2024-02-10 by spec/successor#dc-2"},
+				{"spec/closed-feature", "ac-1", ""},
+				{"spec/successor", "dc-1", "supersedes spec/closed-feature#dc-1"},
+				{"spec/successor", "dc-2", "supersedes spec/closed-story#ac-1"},
+			}},
+		{name: "rebase: in force from the replayed completing commit", scenario: "rebase-landing", branch: "design/successor", spec: "successor",
+			want: map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2},
+			views: []cssView{
+				{"spec/closed-feature", "dc-1", govF + "superseded since 2024-02-15 by spec/successor#dc-1"},
+				{"spec/closed-story", "ac-1", govS + "superseded since 2024-02-15 by spec/successor#dc-2"},
+				{"spec/successor", "dc-1", "supersedes spec/closed-feature#dc-1"},
+				{"spec/successor", "dc-2", "supersedes spec/closed-story#ac-1"},
+			}},
+		// F-1: the stale-base merge never puts the closed feature's
+		// supersession in force, and a later successor replaces the object.
+		{name: "stale base: not in force as of the merge, replaceable by a later successor", scenario: "stale-base", branch: "design/unrelated", spec: "unrelated",
+			want: map[string]cssFinding{gdcDC1: {true, "records match; takes effect when spec/unrelated is accepted", cssNoteDC1}},
+			views: []cssView{
+				{"spec/closed-feature", "dc-1", ""},
+				{"spec/closed-feature", "ac-1", ""},
+				{"spec/closed-story", "ac-1", govS + byS},
+				{"spec/successor", "dc-1", notE + "as of commit {step 3}, conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"},
+				{"spec/successor", "dc-2", "supersedes spec/closed-story#ac-1"},
+			}},
+		// BL-94: the series' first commit is the point, so the later edge
+		// is not in force, and its reason names that commit.
+		{name: "widening series: in force from its first commit; the later edge is not", scenario: "ff-widening-series", branch: "design/successor", spec: "successor",
+			want: map[string]cssFinding{gdcDC1: cssNewDC1, gdcDC2: cssNewDC2,
+				"edge-dc-3-supersedes-spec--closed-feature-ac-1": {true, cssNew, "decision dc-3 supersedes spec/closed-feature#ac-1"}},
+			views: []cssView{
+				{"spec/closed-feature", "dc-1", govF + "superseded since 2024-02-01 by spec/successor#dc-1"},
+				{"spec/closed-feature", "ac-1", ""},
+				{"spec/successor", "dc-3", notE + "as of commit {step 0}, spec/successor carries no edge to spec/closed-feature#ac-1"},
+			}},
+		// The views are the rows pinned for late-close-then-conflict,
+		// which is this scenario plus a later filing; the history test
+		// pins both at the archive commit. The design branch is the
+		// pre-merge head, which is the commit target-not-closed checks
+		// out, so its gate refuses the edge while the target is open.
+		{name: "late close: in force from the archive commit", scenario: "late-close", branch: "design/successor", spec: "successor",
+			want: map[string]cssFinding{"edge-dc-1-supersedes-spec--other-feature-dc-1": cssUnresolved("the target spec spec/other-feature is not closed"), gdcDC2: cssNewDC2},
+			views: []cssView{
+				{"spec/other-feature", "dc-1", govO + "(closed 2024-03-01) | superseded since 2024-03-01 by spec/successor#dc-1"},
+				{"spec/closed-story", "ac-1", govS + byS},
+				{"spec/successor", "dc-1", "supersedes spec/other-feature#dc-1"},
+			}},
+		// The scenario's one design branch, design/two, names no spec, so
+		// the test cuts design/successor at main; the gate fails naming
+		// exactly dc-1's edge. The text wraps the R2 witness that the
+		// history test pins for the rival, spec/unrelated, in condition 5's
+		// establishment reason (match_test) and the acceptance-unproven
+		// text (reason_test).
+		{name: "same-commit tie: acceptance unproven", scenario: "same-commit-tie", branch: "design/successor", spec: "successor", cut: true,
+			want: map[string]cssFinding{gdcDC2: cssNewDC2,
+				gdcDC1: cssUnresolved("acceptance unproven: spec/unrelated's establishment: spec/unrelated and spec/successor first match for spec/closed-feature#dc-1 at the same commit {commit 1}, so neither takes effect before the other")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := scenario.Build(t, tc.scenario)
+			dir := repo.Dir
+			cssViews(t, bin, dir, repo, tc.views)
+			if tc.cut {
+				gdcGit(t, dir, "checkout", "-q", "-b", tc.branch, "main")
+			} else {
+				gdcGit(t, dir, "checkout", "-q", tc.branch)
+			}
+			want := map[string]cssFinding{}
+			for id, f := range tc.want {
+				f.text = cssAt(repo, f.text)
+				want[id] = f
+			}
+			cssAlign(t, bin, dir, tc.spec, want)
+			cssGate(t, bin, dir, want)
 		})
 	}
 }

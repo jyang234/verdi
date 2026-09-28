@@ -85,7 +85,7 @@ interface Fixture {
   stores: Record<string, Store>;
 }
 
-// The fixture's cold start builds the binary and seven stores; warm it
+// The fixture's cold start builds the binary and eight stores; warm it
 // once under its own allowance (the 49-readiness-pilot pattern).
 test.beforeAll(async () => {
   test.setTimeout(240_000);
