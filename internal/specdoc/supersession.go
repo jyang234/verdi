@@ -43,10 +43,12 @@ type Supersession struct {
 // is a disclosure rather than a §6 text (SI-279: an unproven
 // supersession or carry, a not-established reason), so surfaces can
 // render it in the muted disclosure register. Links are the refs the
-// text names, linked in place; Trailing are links rendered after the
+// text names, linked in place; Trailing are refs rendered after the
 // text — an object view's establishing conflict beside the line naming
 // its deciding decision (§6: "linking to S's decision and to the
-// conflict").
+// conflict"). A ref the surface serves no page for is rendered as plain
+// text, never dropped: a per-branch render differs from the serving one
+// only by its omitted hrefs (SI-280 as amended after the L7 review).
 type SupersessionLine struct {
 	Kind       string
 	Text       string
@@ -55,7 +57,8 @@ type SupersessionLine struct {
 	Trailing   []RefLink
 }
 
-// RefLink is a canonical ref and its URL on the rendering surface.
+// RefLink is a canonical ref and its URL on the rendering surface; an
+// empty URL is a ref the surface serves no page for, rendered as text.
 type RefLink struct{ Ref, URL string }
 
 // ObjectSupersession converts an object view; nil for an object the
@@ -89,8 +92,12 @@ func ObjectSupersession(v objsupersede.ObjectView, links map[string]string) (*Su
 		switch {
 		case kinds[i] == "since":
 			line.Links = namedLinks(text, links, v.By)
-			if url := links[v.Conflict]; v.Conflict != "" && url != "" {
-				line.Trailing = []RefLink{{Ref: v.Conflict, URL: url}}
+			// §6 links the since line to the conflict as well. The text
+			// does not name it, so it trails the line — linked where the
+			// surface serves it, as plain text where it does not (SI-280
+			// as amended: only the href is ever omitted, never the ref).
+			if v.Conflict != "" {
+				line.Trailing = []RefLink{{Ref: v.Conflict, URL: links[v.Conflict]}}
 			}
 		case kinds[i] == "carry" && v.Carry != objsupersede.CarryUnproven:
 			line.Links = namedLinks(text, links, v.Revision)
@@ -179,8 +186,9 @@ func refByte(b byte) bool {
 // text form (the store's engine passes inline HTML through, exactly as
 // the object anchors already rely on): the text verbatim, each named ref
 // replaced in place by its link, inside a span that names the object, the
-// line's kind, and the view's state; trailing links follow the span.
-// Markup only — no word is added to or taken from the line.
+// line's kind, and the view's state; trailing refs follow the span, each
+// a link where it has a URL and a text span where it has none. Markup
+// only — no word is added to or taken from the line.
 func SupersessionLineMarkup(stem string, s Supersession, line SupersessionLine) string {
 	return supersessionLineMarkup(stem, s, line, false)
 }
@@ -212,6 +220,12 @@ func supersessionLineMarkup(stem string, s Supersession, line SupersessionLine, 
 	var b strings.Builder
 	b.WriteString(`<span class="` + class + `" data-testid="objsupersede-` + escapeAttr(stem) + `-` + escapeAttr(line.Kind) + `" data-state="` + escapeAttr(s.State) + `">` + text + `</span>`)
 	for _, l := range line.Trailing {
+		// A ref the surface serves no page for keeps its place and its
+		// text under the same test id, with no href (SI-280 as amended).
+		if l.URL == "" {
+			b.WriteString(` <span class="objsupersede-conflict" data-testid="objsupersede-` + escapeAttr(stem) + `-conflict">` + escape(l.Ref) + `</span>`)
+			continue
+		}
 		b.WriteString(` <a class="objsupersede-conflict" data-testid="objsupersede-` + escapeAttr(stem) + `-conflict" href="` + escapeAttr(l.URL) + `">` + escape(l.Ref) + `</a>`)
 	}
 	return b.String()

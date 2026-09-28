@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -319,4 +320,95 @@ func TestLoadSealed_DisclosesMissingLines(t *testing.T) {
 			t.Fatalf("the sealed board carries views it says it does not compute: %+v", c.Supersessions)
 		}
 	}
+}
+
+// TestPerBranch_KeepsConflictRefAsText (the L7 review's F2; SI-280 as
+// amended): a per-branch render — the Document tab of a closed spec and
+// the board's reference card alike — keeps every ref a §6 line names as
+// plain text and omits only its href. The trailing conflict ref, which
+// the first implementation dropped, stays under its test id, and the
+// text a reader sees equals the serving render's.
+func TestPerBranch_KeepsConflictRefAsText(t *testing.T) {
+	neutralizeCIEnv(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted") // checkout main: both closed objects superseded
+	serving := &boardSpecServer{root: repo.Dir}
+	branch := &boardSpecServer{root: repo.Dir, fixedBranch: "design/successor"}
+
+	// The closed feature's Document tab: linked on the serving instance,
+	// text on the per-branch one, the same words either way.
+	servingDoc, err := serving.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchDoc, err := branch.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const linked = `<a class="objsupersede-conflict" data-testid="objsupersede-dc-1-conflict" href="/a/conflict/successor-closed-feature">conflict/successor-closed-feature</a>`
+	const asText = `<span class="objsupersede-conflict" data-testid="objsupersede-dc-1-conflict">conflict/successor-closed-feature</span>`
+	if !strings.Contains(servingDoc.Markdown, linked) {
+		t.Fatalf("the serving Document tab lacks the linked conflict ref:\n%s", servingDoc.Markdown)
+	}
+	if !strings.Contains(branchDoc.Markdown, asText) {
+		t.Errorf("the per-branch Document tab lacks the conflict ref as text:\n%s", branchDoc.Markdown)
+	}
+	if strings.Contains(branchDoc.Markdown, `href="/a/`) || strings.Contains(branchDoc.HTML, `href="/a/`) {
+		t.Errorf("the per-branch Document tab links a corpus page it cannot serve:\n%s", branchDoc.Markdown)
+	}
+	if got, want := stripHTMLTags(branchDoc.HTML), stripHTMLTags(servingDoc.HTML); got != want {
+		t.Errorf("the text a reader sees differs between the per-branch and serving Document tabs:\n--- branch ---\n%s\n--- serving ---\n%s", got, want)
+	}
+
+	// The successor's board: the closed feature's reference card carries
+	// the conflict ref, linked on the serving board and as text on the
+	// per-branch board, with the same line texts.
+	servingProj, _, _, _, err := serving.loadBoard(ctx, "successor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchProj, _, _, _, err := branch.loadBoard(ctx, "successor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	servingCard, branchCard := obsRefCard(t, servingProj, obsFeatureObject), obsRefCard(t, branchProj, obsFeatureObject)
+	if servingCard.Object == nil || branchCard.Object == nil {
+		t.Fatalf("the reference card lacks its object: serving %+v, branch %+v", servingCard.Object, branchCard.Object)
+	}
+	sLines, bLines := servingCard.Object.Supersession.Lines, branchCard.Object.Supersession.Lines
+	if len(sLines) != len(bLines) || len(sLines) < 2 {
+		t.Fatalf("lines: serving %d, branch %d", len(sLines), len(bLines))
+	}
+	for i := range sLines {
+		if sLines[i].Text != bLines[i].Text || sLines[i].Kind != bLines[i].Kind {
+			t.Errorf("line %d differs: serving %+v, branch %+v", i, sLines[i], bLines[i])
+		}
+	}
+	if want := []supersessionLinkView{{Ref: obsConflictF, Href: "/a/" + obsConflictF}}; !equalLinks(sLines[1].Trailing, want) {
+		t.Errorf("serving since trailing = %+v, want %+v", sLines[1].Trailing, want)
+	}
+	if want := []supersessionLinkView{{Ref: obsConflictF, Href: ""}}; !equalLinks(bLines[1].Trailing, want) {
+		t.Errorf("per-branch since trailing = %+v, want the ref with no href %+v", bLines[1].Trailing, want)
+	}
+	page, err := renderBoardSpecPage(branchProj, &boardGitState{}, testASDView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const cardAsText = `<span class="objsupersede-conflict" data-testid="objsupersede-spec-closed-feature-dc-1-conflict">conflict/successor-closed-feature</span>`
+	if !strings.Contains(string(page), cardAsText) {
+		t.Errorf("the per-branch reference card lacks the conflict ref as text:\n%s", page)
+	}
+	if strings.Contains(string(page), `href="/a/`) {
+		t.Errorf("the per-branch board links a corpus page it cannot serve")
+	}
+	// The layout reserved the ref's room: the per-branch card is as tall
+	// as the serving one, whose trailing ref it now renders too.
+	if got, want := refCardHeightPx(*branchCard), refCardHeightPx(*servingCard); got != want {
+		t.Errorf("reserved heights differ: per-branch %v, serving %v", got, want)
+	}
+}
+
+// stripHTMLTags drops every HTML tag, leaving the text a reader sees.
+func stripHTMLTags(s string) string {
+	return regexp.MustCompile(`<[^>]+>`).ReplaceAllString(s, "")
 }

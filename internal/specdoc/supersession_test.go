@@ -2,6 +2,7 @@ package specdoc
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -112,9 +113,12 @@ func TestBuild_SupersessionObjects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// No URL: the deciding decision stays in the text unlinked, and
+		// the trailing conflict ref stays, URL-less (SI-280 as amended:
+		// only the href is omitted, never the ref).
 		want := &Supersession{State: "superseded", Lines: []SupersessionLine{
 			{Kind: "governed", Text: "governed spec/lockbox's completed work (closed 2024-01-10)"},
-			{Kind: "since", Text: "superseded since 2024-02-15 by spec/s1#dc-1"},
+			{Kind: "since", Text: "superseded since 2024-02-15 by spec/s1#dc-1", Trailing: []RefLink{{tsConflict, ""}}},
 		}}
 		if got := doc.Decisions[0].Supersession; !reflect.DeepEqual(got, want) {
 			t.Errorf("dc-1 supersession:\n got %+v\nwant %+v", got, want)
@@ -434,4 +438,65 @@ func TestSupersessionLineMarkdown_NoAutolinks(t *testing.T) {
 	if !strings.Contains(line, "see https://example.com/x and www.example.org and a@b.io") {
 		t.Errorf("the witness is not rendered as written:\n%s", line)
 	}
+}
+
+// TestSupersessionLineMarkup_UnservableRefStaysAsText (the L7 review's
+// F2; SI-280 as amended): a render whose surface serves no page for the
+// refs a §6 line names — a per-branch board's Document tab or card, whose
+// links map is empty — keeps every ref as plain text under the same test
+// id and omits only the hrefs: the trailing conflict ref, which the first
+// implementation dropped, stays. The text a reader sees is the linked
+// render's text exactly, and the Markdown form's engine output equals the
+// HTML surface's markup, as it does for a linked line.
+func TestSupersessionLineMarkup_UnservableRefStaysAsText(t *testing.T) {
+	linked, err := ObjectSupersession(tsSuperseded(), tsLinks())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinked, err := ObjectSupersession(tsSuperseded(), map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linked.Lines) != 2 || len(unlinked.Lines) != 2 {
+		t.Fatalf("lines: linked %d, unlinked %d, want 2 each", len(linked.Lines), len(unlinked.Lines))
+	}
+	const wantUnlinked = `<span class="objsupersede objsupersede--superseded" data-testid="objsupersede-ac-1-since" data-state="superseded">superseded since 2024-02-15 by spec/s1#dc-1</span> <span class="objsupersede-conflict" data-testid="objsupersede-ac-1-conflict">conflict/c1</span>`
+	gotUnlinked := SupersessionLineMarkup("ac-1", *unlinked, unlinked.Lines[1])
+	if gotUnlinked != wantUnlinked {
+		t.Errorf("unlinked since line:\n got %s\nwant %s", gotUnlinked, wantUnlinked)
+	}
+	if strings.Contains(gotUnlinked, "href=") || strings.Contains(gotUnlinked, "<a ") {
+		t.Errorf("an unlinked line carries a link: %s", gotUnlinked)
+	}
+	gotLinked := SupersessionLineMarkup("ac-1", *linked, linked.Lines[1])
+	if !strings.Contains(gotLinked, `<a class="objsupersede-conflict" data-testid="objsupersede-ac-1-conflict" href="/a/conflict/c1/">conflict/c1</a>`) {
+		t.Fatalf("the linked line lacks its conflict link: %s", gotLinked)
+	}
+	// Only the hrefs differ: the visible text is identical.
+	if stripTags(gotLinked) != stripTags(gotUnlinked) {
+		t.Errorf("the text a reader sees differs:\n linked   %q\n unlinked %q", stripTags(gotLinked), stripTags(gotUnlinked))
+	}
+	// The Markdown form renders to the same HTML through the engine.
+	fm, body := fixtureSpec(t)
+	commit := strings.Repeat("0", 39) + "1"
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Kind: KindSpec,
+		Facts: Facts{Supersession: &SupersessionFacts{Objects: map[string]objsupersede.ObjectView{"ac-1": tsSuperseded()}, Links: map[string]string{}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := RenderHTML(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, wantUnlinked) {
+		t.Errorf("the engine's HTML lacks the unlinked line:\n%s\n--- got ---\n%s", wantUnlinked, html)
+	}
+	if strings.Contains(html, `href="/a/`) {
+		t.Errorf("an unlinked document links a corpus page:\n%s", html)
+	}
+}
+
+// stripTags drops every HTML tag, leaving the text a reader sees.
+func stripTags(s string) string {
+	return regexp.MustCompile(`<[^>]+>`).ReplaceAllString(s, "")
 }
