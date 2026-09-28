@@ -226,14 +226,18 @@ func (e *engine) advance(ctx context.Context, w *walkState, bound int) bool {
 	return true
 }
 
-// evaluate is w's match at its commit i, reading condition 5 as of it.
+// evaluate is w's match at its commit i, reading condition 5 as of it. A
+// commit whose records cannot be read or decoded is unproven, its witness
+// naming the commit (SI-274(3)), since it may lie before the point
+// (SI-281(4)).
 func (e *engine) evaluate(ctx context.Context, w *walkState, i int) evaluation {
-	r := e.records(ctx, w.list.commits[i])
+	commit := w.list.commits[i]
+	r := e.records(ctx, commit)
 	switch {
 	case r.err != nil:
-		return evaluation{state: evalUnproven, witness: r.err.Error()}
+		return evaluation{state: evalUnproven, witness: fmt.Sprintf("the records at commit %s cannot be read: %v", shortCommit(commit), r.err)}
 	case len(r.recs.Failures) > 0:
-		return evaluation{state: evalUnproven, witness: "records do not decode at the acceptance commit: " + strings.Join(r.recs.Failures, "; ")}
+		return evaluation{state: evalUnproven, witness: fmt.Sprintf("records do not decode at commit %s: %s", shortCommit(commit), strings.Join(r.recs.Failures, "; "))}
 	}
 	s := r.recs.Specs[w.successor]
 	if s == nil {
@@ -266,7 +270,8 @@ func (a asOf) Establishment(ctx context.Context, successor string, object artifa
 // answer is object's establishment from w's commit i, memoized: in force
 // since i's date when the match holds at i, object's own edge is a new
 // replacement there, and no other successor ties it at i; otherwise not
-// in force with object's reason at i, or acceptance unproven.
+// in force with object's reason at i, naming i so the reason never reads
+// as a statement about the head (SI-281), or acceptance unproven.
 func (e *engine) answer(ctx context.Context, w *walkState, i int, object artifact.Ref) Establishment {
 	commit := w.list.commits[i]
 	key := w.successor + "\x00" + object.String() + "\x00" + commit
@@ -282,6 +287,8 @@ func (e *engine) answer(ctx context.Context, w *walkState, i int, object artifac
 		// be a definite failure; anything else is this package's defect,
 		// reported rather than passed.
 		a = Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's evaluation of %s at %s is inconsistent", w.successor, object, commit)}
+	case reason == ReasonEstablisherNotInForce:
+		a = Establishment{Reason: reason, Detail: fmt.Sprintf("as of commit %s, %s", shortCommit(commit), detail)}
 	case reason != "":
 		a = Establishment{Reason: reason, Detail: detail}
 	default:
@@ -499,6 +506,16 @@ func (recs *Records) inForceAt(ctx context.Context, successor string, object art
 		return ReasonAcceptanceUnproven, witness
 	}
 	return "", ""
+}
+
+// shortCommit is how a reason names the commit it was evaluated at
+// (SI-281): a full commit id's 12-hex prefix, the stamp lines' short form
+// (internal/specdoc); a shorter name is returned whole.
+func shortCommit(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
 }
 
 // textOrError renders a result this package built; a rendering error is

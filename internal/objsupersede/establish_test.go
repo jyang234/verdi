@@ -131,7 +131,7 @@ func TestEngine_Establishment(t *testing.T) {
 		{"per (S_k, T): the object's edge added after the point establishes nothing", func() *fakeWalk {
 			return walkOver(mRecs([]*Conflict{mConflict("c1", "s1", p)}, mSpec("s1", nil, mDec("dc-2", p))),
 				mRecs([]*Conflict{mConflict("c1", "s1", p, vo)}, mSpec("s1", nil, mDec("dc-2", p), mDec("dc-1", vo))))
-		}, "s1", vo, notIn("spec/s1 carries no edge to spec/t#dc-1")},
+		}, "s1", vo, notIn("as of commit c1, spec/s1 carries no edge to spec/t#dc-1")},
 		{"per (S_k, T): the object whose edge the point holds", func() *fakeWalk {
 			return walkOver(mRecs([]*Conflict{mConflict("c1", "s1", p)}, mSpec("s1", nil, mDec("dc-2", p))),
 				mRecs([]*Conflict{mConflict("c1", "s1", p, vo)}, mSpec("s1", nil, mDec("dc-2", p), mDec("dc-1", vo))))
@@ -143,13 +143,13 @@ func TestEngine_Establishment(t *testing.T) {
 			return f
 		}, "s1", vo, inForceAt("c3", "2024-02-13")},
 		{"never matches: the latest evaluated commit's reason", func() *fakeWalk { return walkOver(specOnly(), open()) }, "s1", vo,
-			notIn("the conflict conflict/c1 is not superseded")},
+			notIn("as of commit c2, the conflict conflict/c1 is not superseded")},
 		{"the successor leaves the branch: the latest commit holding it gives the reason", func() *fakeWalk {
 			return walkOver(specOnly(), mRecs(nil))
-		}, "s1", vo, notIn("no conflict challenges spec/t#dc-1")},
+		}, "s1", vo, notIn("as of commit c1, no conflict challenges spec/t#dc-1")},
 		{"a record that does not decode before the match holds (SI-274(6))", func() *fakeWalk { return walkOver(undecodable(), full()) }, "s1", vo,
-			unprovenBy("records do not decode at the acceptance commit: .verdi/specs/active/x/spec.md: broken")},
-		{"an unreadable commit before the match holds", func() *fakeWalk { return walkOver(nil, full()) }, "s1", vo, unprovenBy("blob missing at c1")},
+			unprovenBy("records do not decode at commit c1: .verdi/specs/active/x/spec.md: broken")},
+		{"an unreadable commit before the match holds", func() *fakeWalk { return walkOver(nil, full()) }, "s1", vo, unprovenBy("the records at commit c1 cannot be read: blob missing at c1")},
 		{"a commit after the point is never read", func() *fakeWalk { return walkOver(full(), nil) }, "s1", vo, inForceAt("c1", "2024-02-11")},
 		{"the point's date is unproven", func() *fakeWalk {
 			f := walkOver(full())
@@ -160,7 +160,7 @@ func TestEngine_Establishment(t *testing.T) {
 			f := walkOver(carries())
 			f.lists["v2"] = f.lists["s1"]
 			return f
-		}, "v2", vo, notIn("spec/v2 carries its edge to spec/t#dc-1 from its predecessor; it issues no new replacement")},
+		}, "v2", vo, notIn("as of commit c1, spec/v2 carries its edge to spec/t#dc-1 from its predecessor; it issues no new replacement")},
 		{"never on the default branch", func() *fakeWalk { return walkOver() }, "s1", vo, Establishment{Reason: ReasonEstablisherNotAccepted}},
 		{"the walk is unproven", func() *fakeWalk {
 			f := walkOver(full())
@@ -273,10 +273,10 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 	}{
 		{"a rival in force before the commit refuses", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c2"}}, mRecs([]*Conflict{cxC}, sxC), both(sxC, ssC, cxC, csC))
-		}, notIn("the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)"), Establishment{Commit: "c1", Date: "2024-02-11"}},
+		}, notIn("as of commit c2, the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)"), Establishment{Commit: "c1", Date: "2024-02-11"}},
 		{"a supersession in force is never unseated by a later one", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c1", "c2"}}, both(sxG, ssC, cxG, csC), both(sxFixed, ssC, cxG, csC))
-		}, Establishment{Commit: "c1", Date: "2024-02-11"}, notIn("the object spec/t#dc-1 is already superseded by spec/s (conflict/cs)")},
+		}, Establishment{Commit: "c1", Date: "2024-02-11"}, notIn("as of commit c2, the object spec/t#dc-1 is already superseded by spec/s (conflict/cs)")},
 		{"two matches first holding at one commit are each unproven", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1"}, "s": {"c1"}}, both(sxC, ssC, cxC, csC))
 		}, tie("s", "x"), tie("x", "s")},
@@ -287,13 +287,13 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 		}, tieAt("s", "x", "c2"), tieAt("x", "s", "c2")},
 		{"a rival's establishment unproven before the commit", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c2"}}, undecodable(), both(sxC, ssC, cxC, csC))
-		}, unprovenBy("spec/x's establishment: records do not decode at the acceptance commit: x: broken"), unprovenBy("records do not decode at the acceptance commit: x: broken")},
+		}, unprovenBy("spec/x's establishment: records do not decode at commit c1: x: broken"), unprovenBy("records do not decode at commit c1: x: broken")},
 		{"a successor never in force refuses no later one (F-1)", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c2"}}, mRecs([]*Conflict{cxG}, sxG), both(sxG, ssC, cxG, csC))
-		}, Establishment{Commit: "c2", Date: "2024-02-12"}, notIn("conflict/cx challenges spec/t#ac-1, but spec/x carries no matching edge")},
+		}, Establishment{Commit: "c2", Date: "2024-02-12"}, notIn("as of commit c2, conflict/cx challenges spec/t#ac-1, but spec/x carries no matching edge")},
 		{"a question nested in a walk reads only its evaluated commits", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c1", "c2"}}, both(sxG, ssG, cxG, csG), both(sxG, ssFixed, cxG, csG))
-		}, Establishment{Commit: "c2", Date: "2024-02-12"}, notIn("conflict/cx challenges spec/t#ac-1, but spec/x carries no matching edge")},
+		}, Establishment{Commit: "c2", Date: "2024-02-12"}, notIn("as of commit c2, conflict/cx challenges spec/t#ac-1, but spec/x carries no matching edge")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -353,4 +353,19 @@ func TestEngine_FailsClosed(t *testing.T) {
 			t.Fatalf("got %+v, engine error %v; want acceptance unproven and the defect recorded", got, e.err)
 		}
 	})
+}
+
+// TestShortCommit pins how a reason names the commit it was evaluated at
+// (SI-281): a full commit id's 12-hex prefix, and a shorter name whole.
+func TestShortCommit(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"72718a09e3c8adf897ba25c11b8e2f67149f9e0b", "72718a09e3c8"},
+		{"72718a09e3c8", "72718a09e3c8"},
+		{"c1", "c1"},
+		{"", ""},
+	} {
+		if got := shortCommit(tc.in); got != tc.want {
+			t.Errorf("shortCommit(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

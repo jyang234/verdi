@@ -2,6 +2,7 @@ package objsupersede
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,17 +151,17 @@ func TestHistory_Establishment(t *testing.T) {
 		prep                      func(*testing.T, string)
 
 		object artifact.Ref
-		want   Establishment // Detail: its required prefix
+		want   Establishment // Detail: its required prefix; {main} names main's commit, where each reason is evaluated
 	}{
 		{"in force", "", "successor", nil, obj("closed-feature", "dc-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
 		{"in force, criterion", "", "successor", nil, obj("closed-story", "ac-1"), Establishment{Commit: accepted.Steps[1], Date: "2024-02-15"}},
-		{"no edge to the object at acceptance", "", "successor", nil, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "spec/successor carries no edge to spec/closed-feature#ac-1"}},
+		{"no edge to the object at acceptance", "", "successor", nil, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit {main}, spec/successor carries no edge to spec/closed-feature#ac-1"}},
 		{"not accepted", "proposed", "successor", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotAccepted}},
-		{"records did not match at acceptance", "unrelated-accepted", "unrelated", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"}},
+		{"records did not match at acceptance", "unrelated-accepted", "unrelated", nil, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit {main}, the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"}},
 		{"acceptance unproven: no default branch", "accepted", "successor", noBranchRepo, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: noBranch}},
-		{"acceptance unproven: a record fails decode at acceptance", "proposed", "successor", acceptBroken, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at the acceptance commit: .verdi/specs/active/zz-broken/spec.md: "}},
-		{"acceptance unproven: a record under a quoted name fails at acceptance", "proposed", "successor", acceptOddName, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at the acceptance commit: .verdi/conflicts/successor-closed-feature-2é.md: id conflict/successor-closed-feature disagrees"}},
-		{"acceptance unproven: an unreadable acceptance commit", "accepted", "successor", unreadable, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "objsupersede: reading .verdi/conflicts/successor-closed-story.md: "}},
+		{"acceptance unproven: a record fails decode at acceptance", "proposed", "successor", acceptBroken, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at commit {main}: .verdi/specs/active/zz-broken/spec.md: "}},
+		{"acceptance unproven: a record under a quoted name fails at acceptance", "proposed", "successor", acceptOddName, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "records do not decode at commit {main}: .verdi/conflicts/successor-closed-feature-2é.md: id conflict/successor-closed-feature disagrees"}},
+		{"acceptance unproven: an unreadable acceptance commit", "accepted", "successor", unreadable, obj("closed-feature", "dc-1"), Establishment{Reason: ReasonAcceptanceUnproven, Detail: "the records at commit {main} cannot be read: objsupersede: reading .verdi/conflicts/successor-closed-story.md: "}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -171,6 +172,7 @@ func TestHistory_Establishment(t *testing.T) {
 			if tc.prep != nil {
 				tc.prep(t, dir)
 			}
+			tc.want.Detail = strings.ReplaceAll(tc.want.Detail, "{main}", shortCommit(gitOut(t, dir, "rev-parse", "main")))
 			got := NewHistory(ctx, dir).Establishment(ctx, tc.successor, tc.object)
 			if got.Reason != tc.want.Reason || got.Commit != tc.want.Commit || got.Date != tc.want.Date ||
 				!strings.HasPrefix(got.Detail, tc.want.Detail) || (tc.want.Detail == "") != (got.Detail == "") {
@@ -302,6 +304,7 @@ func TestHistory_EstablishmentLandings(t *testing.T) {
 	ctx := context.Background()
 	ff := scenario.Build(t, "ff-landing")
 	rb := scenario.Build(t, "rebase-landing")
+	wide := scenario.Build(t, "ff-widening-series")
 	tests := []struct {
 		name   string
 		repo   *scenario.Repo
@@ -312,7 +315,11 @@ func TestHistory_EstablishmentLandings(t *testing.T) {
 		{"fast-forward: the criterion, at the series' second commit", ff, obj("closed-story", "ac-1"), Establishment{Commit: ff.Steps[1], Date: "2024-02-10"}},
 		{"rebase: the decision, at the replayed second commit", rb, obj("closed-feature", "dc-1"), Establishment{Commit: rb.Steps[3], Date: "2024-02-15"}},
 		{"rebase: the criterion, at the replayed second commit", rb, obj("closed-story", "ac-1"), Establishment{Commit: rb.Steps[3], Date: "2024-02-15"}},
-		{"fast-forward: an object the successor has no edge to", ff, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "spec/successor carries no edge to spec/closed-feature#ac-1"}},
+		{"fast-forward: an object the successor has no edge to, named at the point", ff, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit " + shortCommit(ff.Steps[1]) + ", spec/successor carries no edge to spec/closed-feature#ac-1"}},
+		{"a widening series: in force at its first commit, where the match first holds", wide, obj("closed-feature", "dc-1"), Establishment{Commit: wide.Steps[0], Date: "2024-02-01"}},
+		// BL-94's residual, named at the point so it never reads as a
+		// statement about the head, which carries the edge (SI-281).
+		{"a widening series: the later edge's reason names the point", wide, obj("closed-feature", "ac-1"), Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit " + shortCommit(wide.Steps[0]) + ", spec/successor carries no edge to spec/closed-feature#ac-1"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -368,7 +375,11 @@ func TestHistory_EstablishmentStaleBase(t *testing.T) {
 	hermetic(t)
 	ctx := context.Background()
 	repo := scenario.Build(t, "stale-base")
-	gap := Establishment{Reason: ReasonEstablisherNotInForce, Detail: "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"}
+	// gap is the successor's reason, named at the latest commit its walk
+	// evaluated (SI-281): the merge, or a later commit the walk visits.
+	gap := func(at string) Establishment {
+		return Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit " + shortCommit(at) + ", conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"}
+	}
 	story := Establishment{Commit: repo.Steps[3], Date: "2024-02-15"}
 	before := NewHistory(ctx, repo.Dir)
 	for _, tc := range []struct {
@@ -376,7 +387,7 @@ func TestHistory_EstablishmentStaleBase(t *testing.T) {
 		object    artifact.Ref
 		want      Establishment
 	}{
-		{"successor", obj("closed-feature", "dc-1"), gap},
+		{"successor", obj("closed-feature", "dc-1"), gap(repo.Steps[3])},
 		{"successor", obj("closed-story", "ac-1"), story},
 		{"unrelated", obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotAccepted}},
 	} {
@@ -400,7 +411,7 @@ func TestHistory_EstablishmentStaleBase(t *testing.T) {
 		want      Establishment
 	}{
 		{"unrelated", obj("closed-feature", "dc-1"), Establishment{Commit: accepted, Date: "2024-03-15"}},
-		{"successor", obj("closed-feature", "dc-1"), gap},
+		{"successor", obj("closed-feature", "dc-1"), gap(accepted)},
 		{"successor", obj("closed-story", "ac-1"), story},
 	} {
 		if got := after.Establishment(ctx, tc.successor, tc.object); got != tc.want {
@@ -443,7 +454,7 @@ func TestHistory_EstablishmentLateClose(t *testing.T) {
 		{"closed in the pull request: the closed story at the series' first commit", ff, "successor", story, Establishment{Commit: ff.Steps[0], Date: "2024-02-01"}},
 		{"closed in the pull request, then a later conflict filing", ffThen, "successor", other, Establishment{Commit: ffThen.Steps[1], Date: "2024-02-10"}},
 		{"a rival after the late close: the successor stays in force, no tie", rival, "successor", other, Establishment{Commit: rival.Steps[2], Date: "2024-03-01"}},
-		{"a rival after the late close is already superseded", rival, "unrelated", other, Establishment{Reason: ReasonEstablisherNotInForce, Detail: "the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"}},
+		{"a rival after the late close is already superseded", rival, "unrelated", other, Establishment{Reason: ReasonEstablisherNotInForce, Detail: "as of commit " + shortCommit(rival.Steps[4]) + ", the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"}},
 		{"two successors landed before the close tie at the archive commit", tie, "successor", other, tied("successor", "unrelated")},
 		{"two successors landed before the close: asked of the rival", tie, "unrelated", other, tied("unrelated", "successor")},
 		{"two successors landed before the close: the closed story is not tied", tie, "successor", story, Establishment{Commit: tie.Steps[1], Date: "2024-02-15"}},
@@ -455,6 +466,15 @@ func TestHistory_EstablishmentLateClose(t *testing.T) {
 			}
 		})
 	}
+}
+
+// atSteps replaces each "{step N}" in s with repo's step N commit as a
+// reason names it (shortCommit).
+func atSteps(repo *scenario.Repo, s string) string {
+	for i, c := range repo.Steps {
+		s = strings.ReplaceAll(s, fmt.Sprintf("{step %d}", i), shortCommit(c))
+	}
+	return s
 }
 
 // commitAt writes path on the checked-out branch, commits it with author
@@ -506,7 +526,7 @@ func TestEvaluate_Scenarios(t *testing.T) {
 		{"S2 carries S1's replacement", "chain", "design/successor-v2", "successor-v2", "dc-1", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
 		{"S3 amends and still carries it", "chain", "design/successor-v3", "successor-v3", "dc-1", "carries the replacement established by spec/successor (conflict/successor-closed-feature, since 2024-02-15)"},
 		{"S3 amends the closed criterion's replacement and still carries it", "chain", "design/successor-v3", "successor-v3", "dc-2", "carries the replacement established by spec/successor (conflict/successor-closed-story, since 2024-02-15)"},
-		{"S1 was not in force for T at acceptance: a sibling edge had no conflict", "chain-not-in-force", "", "successor-v2", "dc-1", "spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
+		{"S1 was not in force for T at acceptance: a sibling edge had no conflict", "chain-not-in-force", "", "successor-v2", "dc-1", "spec/successor's supersession was not in force at its acceptance: as of commit {step 1}, no conflict challenges spec/closed-feature#ac-1"},
 		{"the same S1 was in force for another closed spec", "chain-not-in-force", "", "successor-v2", "dc-2", "carries the replacement established by spec/successor (conflict/successor-closed-story, since 2024-02-15)"},
 		{"unrelated reuse", "unrelated", "", "unrelated", "dc-1", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
 		{"stale base: the successor's records match at its own head", "stale-base", "design/successor", "successor", "dc-1", "records match; takes effect when spec/successor is accepted"},
@@ -515,10 +535,11 @@ func TestEvaluate_Scenarios(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := chain.Dir
+			repo := chain
 			if tc.scenario != "chain" {
-				dir = scenario.Build(t, tc.scenario).Dir
+				repo = scenario.Build(t, tc.scenario)
 			}
+			dir := repo.Dir
 			if tc.branch != "" {
 				gitIn(t, dir, "checkout", "-q", tc.branch)
 			}
@@ -526,9 +547,10 @@ func TestEvaluate_Scenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			want := atSteps(repo, tc.want)
 			got, err := result(t, res, tc.dc).Text()
-			if err != nil || got != tc.want {
-				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			if err != nil || got != want {
+				t.Fatalf("got %q, %v; want %q", got, err, want)
 			}
 		})
 	}

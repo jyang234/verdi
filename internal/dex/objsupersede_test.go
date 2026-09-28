@@ -108,7 +108,7 @@ func TestBuild_ClosedSpecObjectSupersession(t *testing.T) {
 			{osFeatureDoc, []string{osFeatureText}, []string{"objsupersede"}},
 			{osStoryDoc, []string{osGovernedStory, osSinceStory}, nil},
 			{osSuccessorDoc, []string{
-				`data-testid="objsupersede-dc-1-spec-closed-feature-dc-1-not-established" data-state="not-established">supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1</span>`,
+				`data-testid="objsupersede-dc-1-spec-closed-feature-dc-1-not-established" data-state="not-established">supersession not established: spec/successor's supersession was not in force at its acceptance: as of commit 092a88215473, no conflict challenges spec/closed-feature#ac-1</span>`,
 				`data-testid="objsupersede-dc-3-spec-closed-feature-ac-1-not-established" data-state="not-established">supersession not established: no conflict challenges spec/closed-feature#ac-1</span>`,
 				`data-testid="objsupersede-dc-2-spec-closed-story-ac-1-edge" data-state="in-force">supersedes <a href="/a/spec/closed-story#ac-1">spec/closed-story#ac-1</a></span>`,
 			}, []string{`objsupersede-dc-1-spec-closed-feature-dc-1-edge`}},
