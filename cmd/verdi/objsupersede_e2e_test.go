@@ -202,6 +202,8 @@ var (
 
 // cssViews runs `verdi spec doc` on dir for each view's document, which it
 // reads from the default branch, and checks the lines beside the view's id.
+// The id's own anchor must be in the document, so a view that expects no
+// line stands on its own: the object was rendered, and nothing is beside it.
 func cssViews(t *testing.T, bin, dir string, repo *scenario.Repo, views []cssView) {
 	t.Helper()
 	docs := map[string]string{}
@@ -210,6 +212,9 @@ func cssViews(t *testing.T, bin, dir string, repo *scenario.Repo, views []cssVie
 		if !ok {
 			doc = cssRun(t, bin, dir, 0, "spec", "doc", v.ref, "--no-readiness")
 			docs[v.ref] = doc
+		}
+		if anchor := `<a id="` + v.id + `"></a>`; !strings.Contains(doc, anchor) {
+			t.Errorf("verdi spec doc %s renders no %s anchor for %s", v.ref, anchor, v.id)
 		}
 		var lines []string
 		for _, m := range cssViewLine.FindAllStringSubmatch(doc, -1) {
@@ -240,11 +245,14 @@ func cssAt(repo *scenario.Repo, s string) string {
 // show its in-force point; that point, and the "as of commit" witness of a
 // supersession not in force, reach the CLI in `verdi spec doc`'s lines,
 // which it reads from the default branch. Each row checks those lines as
-// TestIndex_Scenarios pins them, then runs align on a design branch with
-// the outcome TestEvaluate_EveryScenario pins. The gate runs only on a
-// design branch the scenario defines, since it is a spec MR's own gate. A
-// branch the scenario does not define is cut at main, so align reads the
-// tree that TestEvaluate_EveryScenario evaluates.
+// TestIndex_Scenarios pins them, then runs align and the gate on a design
+// branch, asserting the outcome the package tests pin for that branch's
+// head. That is TestEvaluate_EveryScenario's outcome for the scenario,
+// except in late-close: its design branch is the pre-merge head, the
+// commit target-not-closed checks out, so the row asserts that scenario's
+// pinned outcome. A design branch the scenario does not define is cut at
+// main, so align and the gate read the tree TestEvaluate_EveryScenario
+// evaluates.
 func TestObjSupersedeE2E_Landings(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
@@ -257,7 +265,7 @@ func TestObjSupersedeE2E_Landings(t *testing.T) {
 	)
 	tests := []struct {
 		name, scenario, branch, spec string
-		cut                          bool // branch is cut at main: align runs, the gate does not
+		cut                          bool // the test cuts branch at main
 		want                         map[string]cssFinding
 		views                        []cssView
 	}{
@@ -311,10 +319,12 @@ func TestObjSupersedeE2E_Landings(t *testing.T) {
 				{"spec/closed-story", "ac-1", govS + byS},
 				{"spec/successor", "dc-1", "supersedes spec/other-feature#dc-1"},
 			}},
-		// The scenario's one design branch, design/two, names no spec. The
-		// text wraps the R2 witness that the history test pins for the
-		// rival, spec/unrelated, in condition 5's establishment reason
-		// (match_test) and the acceptance-unproven text (reason_test).
+		// The scenario's one design branch, design/two, names no spec, so
+		// the test cuts design/successor at main; the gate fails naming
+		// exactly dc-1's edge. The text wraps the R2 witness that the
+		// history test pins for the rival, spec/unrelated, in condition 5's
+		// establishment reason (match_test) and the acceptance-unproven
+		// text (reason_test).
 		{name: "same-commit tie: acceptance unproven", scenario: "same-commit-tie", branch: "design/successor", spec: "successor", cut: true,
 			want: map[string]cssFinding{gdcDC2: cssNewDC2,
 				gdcDC1: cssUnresolved("acceptance unproven: spec/unrelated's establishment: spec/unrelated and spec/successor first match for spec/closed-feature#dc-1 at the same commit {commit 1}, so neither takes effect before the other")}},
@@ -336,9 +346,7 @@ func TestObjSupersedeE2E_Landings(t *testing.T) {
 				want[id] = f
 			}
 			cssAlign(t, bin, dir, tc.spec, want)
-			if !tc.cut {
-				cssGate(t, bin, dir, want)
-			}
+			cssGate(t, bin, dir, want)
 		})
 	}
 }
