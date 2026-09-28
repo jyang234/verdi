@@ -300,8 +300,14 @@ func (e *engine) dateOrTie(ctx context.Context, w *walkState, i int, object arti
 			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s's establishment: %s", x, xw.list.fact.Witness)}
 		}
 		j := indexOf(xw.list.commits, commit)
-		if j < 0 || !e.advance(ctx, xw, pos+1) || j >= len(xw.evals) {
-			continue
+		if j < 0 {
+			continue // x's walk skips the commit: its match cannot first hold there
+		}
+		if !e.advance(ctx, xw, pos+1) {
+			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's walk was re-entered at a commit it is evaluating", x)}
+		}
+		if j >= len(xw.evals) {
+			continue // x's walk ended before the commit
 		}
 		switch xw.evals[j].state {
 		case evalUnproven:

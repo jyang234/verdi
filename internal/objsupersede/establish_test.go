@@ -315,4 +315,13 @@ func TestEngine_FailsClosed(t *testing.T) {
 			t.Fatalf("got %+v, engine error %v; want acceptance unproven and the defect recorded", got, e.err)
 		}
 	})
+	t.Run("a rival's walk re-entered by the tie check", func(t *testing.T) {
+		recs := mRecs([]*Conflict{mConflict("cs", "s", vo), mConflict("cx", "x", vo)}, mSpec("s", nil, mDec("dc-1", vo)), mSpec("x", nil, mDec("dc-1", vo)))
+		e := newEngine(storeOf(map[string][]string{"s": {"c1"}, "x": {"c1"}}, recs))
+		e.walkOf(ctx, "x", "t").busy = true
+		got := e.establishment(ctx, "s", obj("t", "dc-1"))
+		if got != (Establishment{Reason: ReasonAcceptanceUnproven, Detail: "objsupersede: spec/x's walk was re-entered at a commit it is evaluating"}) || e.err == nil {
+			t.Fatalf("got %+v, engine error %v; want acceptance unproven and the defect recorded", got, e.err)
+		}
+	})
 }
