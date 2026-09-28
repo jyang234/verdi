@@ -41,6 +41,11 @@ type Request struct {
 	Kind      specdoc.Kind
 	Model     *model.Model
 	Readiness *readinesspilot.Snapshot
+	// CorpusUnservable says the consumer cannot serve the corpus pages the
+	// closed-spec object supersession lines would link (a per-branch board's
+	// Document tab, whose /a/ route serves the serving checkout's tree, not
+	// the branch's): the lines then name their refs as plain text.
+	CorpusUnservable bool
 }
 
 // Result carries the assembled Input plus what a consumer may want to
@@ -146,6 +151,29 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	}
 	if req.Readiness != nil {
 		facts = specdoc.WithReadiness(facts, *req.Readiness, ref)
+	}
+	// Closed-spec object supersession (design §6; SI-263): the views of
+	// this spec's objects, computed from the SAME tree the document is
+	// read from — the commit under ModeAccepted and ModeAt, the checkout
+	// under ModeWorkingTree — through the one process-wide cache
+	// (views.go), and supplied to every consumer alike, so the CLI, MCP,
+	// the docs site and the board's Document tab render one set of bytes
+	// (spec/spec-documents ac-6). Views that cannot be computed fail the
+	// load: a document never renders a superseded object as untouched
+	// because its records could not be read.
+	var sup *Views
+	if req.Mode == ModeWorkingTree {
+		sup, err = WorkTreeViews(ctx, req.Root)
+	} else {
+		sup, err = CommitViews(ctx, req.Root, src.commit)
+	}
+	if err != nil {
+		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
+		return Result{}, fmt.Errorf("specdocload: closed-spec object supersession views for %s: %w", ref, err)
+	}
+	facts.Supersession = SupersessionFacts(sup, req.Name, fm)
+	if req.CorpusUnservable {
+		facts.Supersession.Links = map[string]string{}
 	}
 
 	return Result{

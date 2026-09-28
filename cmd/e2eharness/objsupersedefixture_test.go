@@ -159,6 +159,33 @@ var objSupersedeGolden = map[string]string{
     "spec/closed-story": "{docs}a/spec/closed-story/document/"
   }
 }`,
+	"constraint-target": `{
+  "scenario": "constraint-target", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "design/successor", "main_branch": "main", "design_branch": "design/successor",
+  "successor": "spec/successor", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#co-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#co-1",
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-1", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": ""},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "object_board": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `},
+     "decision": "spec/successor#dc-2", "decision_docs_url": "",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": ""}
+  ],
+  "boards": {
+    "checkout": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "", "url": "", "not_a_surface": ` + objSupersedeGoldenNoMain + `}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/"
+  }
+}`,
 	"no-conflict": `{
   "scenario": "no-conflict", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
   "checkout": "design/successor", "main_branch": "main", "design_branch": "design/successor",
@@ -1256,6 +1283,10 @@ func TestObjSupersedeStores_LintClean(t *testing.T) {
 	for _, name := range objSupersedeStores {
 		rows[name] = nil
 	}
+	// constraint-target is a served refusal scenario (L5 fix pass 3): its
+	// successor's edge targets a constraint, which VL-026 refuses on the
+	// design branch; the serve renders it regardless.
+	rows["constraint-target"] = []string{"VL-026"}
 	names := make([]string, 0, len(rows))
 	for name := range rows {
 		names = append(names, name)

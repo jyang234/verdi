@@ -147,7 +147,7 @@ import (
 // chain-drop), the not-yet-accepted pair (proposed, no-conflict), and the
 // broken-chain not-in-force case (chain-not-in-force). Order is fixed so
 // the fixture's provisioning is deterministic, not map iteration.
-var objSupersedeStores = []string{"accepted", "chain", "chain-drop", "proposed", "no-conflict", "chain-not-in-force"}
+var objSupersedeStores = []string{"accepted", "chain", "chain-drop", "proposed", "no-conflict", "chain-not-in-force", "constraint-target"}
 
 // objSupersedeDataZone is the store's runtime data zone, excluded (never
 // committed) in every provisioned repository.
@@ -159,14 +159,15 @@ const objSupersedeNoMainBoard = "no board on main shows a closed object here: sp
 
 // The committed records' refs (testdata/objsupersede/records).
 const (
-	osEstablisher      = "spec/successor"
-	osClosedFeature    = "spec/closed-feature"
-	osClosedStory      = "spec/closed-story"
-	osConflictFeature  = "conflict/successor-closed-feature"
-	osConflictStory    = "conflict/successor-closed-story"
-	osFeatureDecision  = osClosedFeature + "#dc-1"
-	osFeatureCriterion = osClosedFeature + "#ac-1"
-	osStoryCriterion   = osClosedStory + "#ac-1"
+	osEstablisher       = "spec/successor"
+	osClosedFeature     = "spec/closed-feature"
+	osClosedStory       = "spec/closed-story"
+	osConflictFeature   = "conflict/successor-closed-feature"
+	osConflictStory     = "conflict/successor-closed-story"
+	osFeatureDecision   = osClosedFeature + "#dc-1"
+	osFeatureCriterion  = osClosedFeature + "#ac-1"
+	osFeatureConstraint = osClosedFeature + "#co-1"
+	osStoryCriterion    = osClosedStory + "#ac-1"
 )
 
 // objSupersedeFacts is one store's static record facts, read off the
@@ -238,6 +239,19 @@ var objSupersedeFactsByStore = map[string]objSupersedeFacts{
 			osPair(osFeatureCriterion, "spec/successor-v2#dc-3", "spec/successor#dc-3", ""),
 			osPair(osFeatureDecision, "spec/successor-v2#dc-1", "spec/successor#dc-1", osConflictFeature),
 			osPair(osStoryCriterion, "spec/successor-v2#dc-2", "spec/successor#dc-2", osConflictStory),
+		},
+	},
+	// constraint-target (design §8's refusal "the edge targets … a
+	// constraint"; L5 fix pass 3): the successor's dc-1 supersedes a
+	// CONSTRAINT of the closed feature, so its decision card wears a VL-026
+	// badge beside its "not established" line — the one store where a badge
+	// row and supersession lines share a card. Not yet accepted, like
+	// proposed: main has no successor and no board shows a closed object.
+	"constraint-target": {
+		designBranch: "design/successor", successor: "spec/successor",
+		pairs: []objSupersedeSupersession{
+			osPair(osFeatureConstraint, "spec/successor#dc-1", "spec/successor#dc-1", osConflictFeature),
+			osPair(osStoryCriterion, "spec/successor#dc-2", "spec/successor#dc-2", osConflictStory),
 		},
 	},
 }

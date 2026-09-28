@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/draftmutation"
+	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -207,7 +208,41 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 		{
 			name: "card element",
 			typ:  reflect.TypeOf(proj.Cards).Elem(),
-			want: []string{"ID", "Kind", "Text", "X", "Y", "Anchored", "Obligations", "Badges"},
+			want: []string{"ID", "Kind", "Text", "X", "Y", "Anchored", "Obligations", "Badges", "Supersessions"},
+		},
+		{
+			// Object (SI-278) is a pointer to a struct carrying nested
+			// slices; the clone copies it level by level.
+			name: "reference card element",
+			typ:  reflect.TypeOf(proj.RefCards).Elem(),
+			want: []string{"Ref", "X", "Y", "Pinned", "PinID", "EditorHref", "FeatureHref", "Archived", "UnresolvedNotice", "Object"},
+		},
+		{
+			name: "supersession element",
+			typ:  fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(),
+			want: []string{
+				"State", "Object", "Edge", "By", "Conflict", "Since", "Closed", "ClosedWitness",
+				"Carry", "Revision", "Heads", "Witness", "Carried", "Establisher", "Reason", "Lines",
+			},
+		},
+		{
+			name: "supersession line element",
+			typ:  fieldType(t, fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(), "Lines").Elem(),
+			want: []string{"Kind", "Text", "Disclosure", "Links", "Trailing"},
+		},
+		{
+			// A link is two strings today; a slice added here would need its
+			// own copy in the clone's line loop.
+			name: "supersession link element",
+			typ:  fieldType(t, fieldType(t, fieldType(t, reflect.TypeOf(proj.Cards).Elem(), "Supersessions").Elem(), "Lines").Elem(), "Links").Elem(),
+			want: []string{"Ref", "Href"},
+		},
+		{
+			// The reference card's object: a pointer the clone dereferences
+			// and copies, with its Supersession's collections.
+			name: "reference card object element",
+			typ:  fieldType(t, reflect.TypeOf(proj.RefCards).Elem(), "Object").Elem(),
+			want: []string{"Text", "Supersession"},
 		},
 		{
 			name: "stub element",
@@ -234,6 +269,91 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fieldType is the type of typ's field name, so the nested ratchet rows
+// above follow a field if it moves and fail by name if it goes.
+func fieldType(t *testing.T, typ reflect.Type, name string) reflect.Type {
+	t.Helper()
+	f, ok := typ.FieldByName(name)
+	if !ok {
+		t.Fatalf("%s has no %s field", typ, name)
+	}
+	return f.Type
+}
+
+// TestGetBoardDoesNotAliasClosedSpecSupersession is the mutate-the-clone
+// proof for the SI-278 collections (controller ruling 1): a reference
+// card's Object and a decision card's Supersessions, down to a line's
+// link slices, are the caller's own copies. The fixture is the accepted
+// closed-spec object supersession scenario store, whose successor board
+// carries both.
+func TestGetBoardDoesNotAliasClosedSpecSupersession(t *testing.T) {
+	for _, key := range []string{"CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF", "CI_DEFAULT_BRANCH", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME"} {
+		t.Setenv(key, "")
+	}
+	root := scenario.Build(t, "accepted").Dir
+	loader := &retainingBoardLoader{inner: workbenchBoardLoader{}}
+	svc := NewService()
+	svc.Board = loader
+
+	first, err := svc.GetBoard(context.Background(), root, GetBoardRequest{Spec: "spec/successor"})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	ref, card := -1, -1
+	for i := range first.RefCards {
+		if first.RefCards[i].Object != nil {
+			ref = i
+			break
+		}
+	}
+	for i := range first.Cards {
+		if len(first.Cards[i].Supersessions) > 0 {
+			card = i
+			break
+		}
+	}
+	if ref < 0 || card < 0 {
+		t.Fatalf("fixture projection lacks the collections under test: ref card with object=%v, card with supersessions=%v", ref >= 0, card >= 0)
+	}
+	obj := first.RefCards[ref].Object
+	if len(obj.Supersession.Lines) < 2 || len(obj.Supersession.Lines[1].Links) == 0 || len(obj.Supersession.Lines[1].Trailing) == 0 ||
+		len(first.Cards[card].Supersessions[0].Lines) == 0 || len(first.Cards[card].Supersessions[0].Lines[0].Links) == 0 {
+		t.Fatalf("fixture views lack the nested link slices under test: %+v / %+v", obj.Supersession, first.Cards[card].Supersessions)
+	}
+	wantText := obj.Text
+	wantLine := obj.Supersession.Lines[1].Text
+	wantHref := obj.Supersession.Lines[1].Links[0].Href
+	wantTrailing := obj.Supersession.Lines[1].Trailing[0].Href
+	wantEdge := first.Cards[card].Supersessions[0].Lines[0].Text
+	wantEdgeHref := first.Cards[card].Supersessions[0].Lines[0].Links[0].Href
+
+	// Mutate every reachable level of both collections.
+	obj.Text = "TAMPERED"
+	obj.Supersession.Lines[1].Text = "TAMPERED"
+	obj.Supersession.Lines[1].Links[0].Href = "TAMPERED"
+	obj.Supersession.Lines[1].Trailing[0].Href = "TAMPERED"
+	first.Cards[card].Supersessions[0].Lines[0].Text = "TAMPERED"
+	first.Cards[card].Supersessions[0].Lines[0].Links[0].Href = "TAMPERED"
+
+	second, err := svc.GetBoard(context.Background(), root, GetBoardRequest{Spec: "spec/successor"})
+	if err != nil {
+		t.Fatalf("GetBoard (second): %v", err)
+	}
+	got := second.RefCards[ref].Object
+	if got.Text != wantText || got.Supersession.Lines[1].Text != wantLine || got.Supersession.Lines[1].Links[0].Href != wantHref || got.Supersession.Lines[1].Trailing[0].Href != wantTrailing {
+		t.Fatalf("the reference card's object is aliased through the clone: %+v", got)
+	}
+	if s := second.Cards[card].Supersessions[0]; s.Lines[0].Text != wantEdge || s.Lines[0].Links[0].Href != wantEdgeHref {
+		t.Fatalf("the decision card's supersessions are aliased through the clone: %+v", s)
+	}
+	// The port's own retained value is the ground truth.
+	kept := loader.retained
+	if kept.RefCards[ref].Object.Text != wantText || kept.RefCards[ref].Object.Supersession.Lines[1].Links[0].Href != wantHref ||
+		kept.Cards[card].Supersessions[0].Lines[0].Links[0].Href != wantEdgeHref {
+		t.Fatalf("the loader's retained projection was mutated: %+v / %+v", kept.RefCards[ref].Object, kept.Cards[card].Supersessions[0])
 	}
 }
 
