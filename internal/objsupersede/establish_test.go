@@ -281,6 +281,29 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 			f.pairs["s t"], f.pairs["x t"] = []string{"c1", "c2"}, []string{"c1", "c2"}
 			return f
 		}, tieAt("s", "x", "c2"), tieAt("x", "s", "c2")},
+		// The tie check reads a rival's answer for the object, not only its
+		// match (lane L6 review M-5, mutant tie-always): x's match holds at
+		// c2 through dc-3, but its edge to the object is carried from p1,
+		// whose own match never holds (cp also challenges t#ac-1), so x is
+		// never in force for it and s is not tied.
+		{"a rival whose match holds but whose edge is carried is no tie", func() *fakeWalk {
+			p1, cp := mSpec("p1", nil, mDec("dc-1", vo)), mConflict("cp", "p1", vo, p)
+			x := mCarries(mSpec("x", []string{"p1"}, mDec("dc-1", vo), mDec("dc-3", p)), "dc-1")
+			return storeOf(map[string][]string{"p1": {"c1", "c2"}, "s": {"c2"}, "x": {"c2"}},
+				mRecs([]*Conflict{cp}, p1), mRecs([]*Conflict{cp, csC, mConflict("cx", "x", vo, p)}, p1, ssC, x))
+		}, Establishment{Commit: "c2", Date: "2024-02-12"},
+			notIn("as of commit c2, spec/x carries its edge to spec/t#dc-1 from its predecessor; it issues no new replacement")},
+		// A rival whose match is unproven at the point leaves the tie
+		// undecided (lane L6 review M-5, mutant tie-unproven-continue): x
+		// lands with s at c2, and x's other edge's rival y is unproven
+		// there, since y's commit c1 cannot be read.
+		{"a rival unproven at the point leaves the successor unproven", func() *fakeWalk {
+			x := mSpec("x", nil, mDec("dc-1", vo), mDec("dc-3", p))
+			y := mSpec("y", nil, mDec("dc-1", p))
+			return storeOf(map[string][]string{"y": {"c1", "c2"}, "s": {"c2"}, "x": {"c2"}},
+				nil, mRecs([]*Conflict{csC, mConflict("cx", "x", vo, p), mConflict("cy", "y", p)}, ssC, x, y))
+		}, unprovenBy("spec/x's establishment: spec/y's establishment: the records at commit c1 cannot be read: blob missing at c1"),
+			unprovenBy("spec/y's establishment: the records at commit c1 cannot be read: blob missing at c1")},
 		{"a rival's establishment unproven before the commit", func() *fakeWalk {
 			return storeOf(map[string][]string{"x": {"c1", "c2"}, "s": {"c2"}}, undecodable(), both(sxC, ssC, cxC, csC))
 		}, unprovenBy("spec/x's establishment: records do not decode at commit c1: x: broken"), unprovenBy("records do not decode at commit c1: x: broken")},
