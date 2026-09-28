@@ -248,18 +248,19 @@ func (x *Index) Decisions(spec, id string) []DecisionView {
 }
 
 // viewHistory is the default-branch history the views read; History
-// implements it.
+// implements it. Establishments come from the acceptance walk over it
+// (establish.go), the one computation align and the gate share.
 type viewHistory interface {
+	walkSource
 	Acceptance(ctx context.Context, spec string) Fact
 	Closed(ctx context.Context, t *Spec) Fact
-	recordsAt(ctx context.Context, commit string) (*Records, error)
 }
 
 func newIndex(ctx context.Context, recs *Records, h viewHistory) (*Index, error) {
 	if recs == nil {
 		return nil, fmt.Errorf("objsupersede: NewIndex needs records")
 	}
-	m := &memo{recs: recs, h: h, acc: map[string]Fact{}, at: map[string]accepted{}, closed: map[string]Fact{}, eval: map[string][]Result{}}
+	m := &memo{recs: recs, h: h, eng: newEngine(h), acc: map[string]Fact{}, closed: map[string]Fact{}, eval: map[string][]Result{}}
 	x := &Index{objects: map[string]ObjectView{}, decisions: map[string][]DecisionView{}}
 	names := make([]string, 0, len(recs.Specs))
 	for name := range recs.Specs {
@@ -294,29 +295,26 @@ func newIndex(ctx context.Context, recs *Records, h viewHistory) (*Index, error)
 			}
 		}
 	}
-	if m.err != nil {
-		return nil, m.err
+	for _, err := range []error{m.err, m.eng.err} {
+		if err != nil {
+			return nil, err
+		}
 	}
 	return x, nil
 }
 
 // memo answers one index build's history questions, each once (lane L3c
-// item 3): acceptance per spec, the acceptance commit's records per
-// successor (an establishment's cost), and the closed date per closed
-// spec. It is the Establisher Evaluate consults.
+// item 3): acceptance per spec, each establishment through one acceptance
+// walk engine (its walks, commit records, and dates), and the closed date
+// per closed spec. It is the Establisher Evaluate consults.
 type memo struct {
 	recs   *Records
 	h      viewHistory
+	eng    *engine             // the acceptance walk over h (establish.go)
 	acc    map[string]Fact     // acceptance, per spec
-	at     map[string]accepted // the acceptance commit's records, per successor
 	closed map[string]Fact     // closed date, per closed spec
 	eval   map[string][]Result // Evaluate, per spec
 	err    error               // the first history answer outside FactState (known)
-}
-
-type accepted struct {
-	recs *Records
-	err  error
 }
 
 func (m *memo) acceptance(ctx context.Context, spec string) Fact {
@@ -343,24 +341,16 @@ func (m *memo) known(f Fact, what string) Fact {
 	return unproven(err.Error())
 }
 
-// accepted returns the records of successor's acceptance commit, read
-// once; empty when its acceptance is not proven.
-func (m *memo) accepted(ctx context.Context, successor string) accepted {
-	a, ok := m.at[successor]
-	if !ok {
-		if acc := m.acceptance(ctx, successor); acc.State == FactProven {
-			a.recs, a.err = m.h.recordsAt(ctx, acc.Commit)
-		}
-		m.at[successor] = a
-	}
-	return a
+// Establishment implements Establisher, as History does: the acceptance
+// walk's answer over the memo's engine.
+func (m *memo) Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
+	return m.eng.establishment(ctx, successor, object)
 }
 
-// Establishment implements Establisher, as History does, over the memo's
-// acceptance facts and acceptance-commit records.
-func (m *memo) Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
-	a := m.accepted(ctx, successor)
-	return establishment(ctx, m.acceptance(ctx, successor), a.recs, a.err, successor, object)
+// establishedAt returns the records of an in-force establishment's
+// commit, which the walk has read.
+func (m *memo) establishedAt(ctx context.Context, e Establishment) *Records {
+	return m.eng.records(ctx, e.Commit).recs
 }
 
 func (m *memo) closedDate(ctx context.Context, t *Spec) Fact {
@@ -389,8 +379,8 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 	v := DecisionView{Decision: objectRef(r.Spec, r.Decision), Edge: r.Edge, Object: object.String()}
 	if e, ok := m.inForce(ctx, r, ref, object); ok {
 		// The conflict as it stood at the acceptance commit (SI-279), where
-		// inForceAt proved the one superseded conflict naming r.Spec.
-		c := m.accepted(ctx, r.Spec).recs.namedBy(object, r.Spec)
+		// the walk proved the one superseded conflict naming r.Spec.
+		c := m.establishedAt(ctx, e).namedBy(object, r.Spec)
 		v.State, v.Conflict, v.Establisher, v.Since = DecisionInForce, "conflict/"+c.Name, "spec/"+r.Spec, e.Date
 		return v, nil
 	}
@@ -415,7 +405,11 @@ func (m *memo) decisionView(ctx context.Context, r Result) (DecisionView, error)
 		e := checked(r.Spec, m.Establishment(ctx, r.Spec, object))
 		if e.Reason == ReasonEstablisherNotAccepted {
 			v.State = DecisionProposed
-			if reason, detail := m.recs.inForceAt(ctx, r.Spec, object); reason != "" {
+			switch reason, detail := m.recs.inForceAt(ctx, r.Spec, object, m); reason {
+			case "":
+			case ReasonAcceptanceUnproven:
+				v.State, v.Reason = DecisionNotEstablished, textOrError(Result{Outcome: Unresolved, Reason: reason, Detail: detail})
+			default:
 				v.State, v.Reason = DecisionNotEstablished, detail
 			}
 			return v, nil
@@ -487,9 +481,9 @@ func (m *memo) objectView(ctx context.Context, t *Spec, id string) ObjectView {
 		return v
 	}
 	sk := inForce[0]
-	// In force: inForceAt proved, on these records, a decision of sk with
+	// In force: the walk proved, on these records, a decision of sk with
 	// the new edge to o and the one superseded conflict naming sk for it.
-	at := m.accepted(ctx, sk).recs
+	at := m.establishedAt(ctx, est)
 	v.State, v.Since = ObjectSuperseded, est.Date
 	v.By = objectRef(sk, decidingDecision(at.Specs[sk].FM, o))
 	v.Conflict = "conflict/" + at.namedBy(o, sk).Name

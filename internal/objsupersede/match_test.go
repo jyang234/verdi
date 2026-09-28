@@ -20,6 +20,7 @@ func (f fakeEst) Establishment(_ context.Context, successor string, _ artifact.R
 }
 
 var inForce = fakeEst{
+	"prior-successor": {Commit: "c0", Date: "2024-01-15"},
 	"successor":       {Commit: "c1", Date: "2024-02-15"},
 	"story-successor": {Commit: "c2", Date: "2024-02-16"},
 }
@@ -146,6 +147,60 @@ func TestEvaluate_Conditions(t *testing.T) {
 				tc.mutate(recs)
 			}
 			check(t, result(t, evaluate(t, recs, tc.spec), tc.dc), tc.want)
+		})
+	}
+}
+
+// TestEvaluate_ConditionFive pins condition 5 as amended (SI-272 after
+// the whole-wave review, F-1): another successor refuses a new
+// replacement only while its supersession of the object is in force; one
+// not accepted or not in force refuses nothing, and the edge falls to
+// conditions 6-8; an unproven establishment is acceptance unproven, never
+// a pass; one in force wins over an earlier unproven one.
+func TestEvaluate_ConditionFive(t *testing.T) {
+	const prior = "prior-successor"
+	day := Establishment{Commit: "c0", Date: "2024-01-15"}
+	layers := []string{"prior", "successor", "conflict-feature", "conflict-story"}
+	// rivals: two other successors, each with its own superseded conflict
+	// for spec/t#dc-1 and the edge; s's own conflict is cs.
+	rivals := func() *Records {
+		return mRecs([]*Conflict{mConflict("ca", "a", vo), mConflict("cb", "b", vo), mConflict("cs", "s", vo)},
+			mSpec("a", nil, mDec("dc-1", vo)), mSpec("b", nil, mDec("dc-1", vo)), mSpec("s", nil, mDec("dc-1", vo)))
+	}
+	tests := []struct {
+		name   string
+		layers []string
+		recs   func() *Records
+		est    fakeEst
+		spec   string
+		want   want
+	}{
+		{"another successor in force: already superseded", layers, nil, fakeEst{prior: day}, "successor", want{Unresolved, ReasonAlreadySuperseded, prior, "prior-successor-closed-feature", "", ""}},
+		{"another successor not accepted refuses nothing", layers, nil, fakeEst{}, "successor", want{ResolvedNew, "", "", cFeature, "", ""}},
+		{"another successor not in force refuses nothing", layers, nil, fakeEst{prior: {Reason: ReasonEstablisherNotInForce, Detail: "no conflict challenges spec/closed-feature#ac-1"}}, "successor", want{ResolvedNew, "", "", cFeature, "", ""}},
+		{"another successor not in force: the edge falls to condition 8", []string{"prior", "successor", "conflict-story"}, nil, fakeEst{}, "successor", want{Unresolved, ReasonResolvedByOther, prior, "prior-successor-closed-feature", "", ""}},
+		{"another successor's establishment unproven: acceptance unproven", layers, nil, fakeEst{prior: {Reason: ReasonAcceptanceUnproven, Detail: "shallow history"}}, "successor",
+			want{Unresolved, ReasonAcceptanceUnproven, prior, "prior-successor-closed-feature", "", "spec/prior-successor's establishment: shallow history"}},
+		{"in force without a date is unproven, never a pass", layers, nil, fakeEst{prior: {Commit: "c0"}}, "successor",
+			want{Unresolved, ReasonAcceptanceUnproven, prior, "prior-successor-closed-feature", "", "spec/prior-successor's establishment: spec/prior-successor is reported in force without a YYYY-MM-DD acceptance date"}},
+		{"one in force wins over an earlier unproven one", nil, rivals, fakeEst{"a": {Reason: ReasonAcceptanceUnproven, Detail: "w"}, "b": day}, "s", want{Unresolved, ReasonAlreadySuperseded, "b", "cb", "", ""}},
+		{"the first unproven, in conflict order, when none is in force", nil, rivals, fakeEst{"a": {Reason: ReasonAcceptanceUnproven, Detail: "wa"}, "b": {Reason: ReasonAcceptanceUnproven, Detail: "wb"}}, "s",
+			want{Unresolved, ReasonAcceptanceUnproven, "a", "ca", "", "spec/a's establishment: wa"}},
+		{"the first in force, in conflict order", nil, rivals, fakeEst{"a": day, "b": day}, "s", want{Unresolved, ReasonAlreadySuperseded, "a", "ca", "", ""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var recs *Records
+			if tc.recs != nil {
+				recs = tc.recs()
+			} else {
+				recs = mustRead(t, layerTree(t, tc.layers...))
+			}
+			res, err := Evaluate(context.Background(), recs, tc.spec, tc.est)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, result(t, res, "dc-1"), tc.want)
 		})
 	}
 }
@@ -494,7 +549,7 @@ func TestInForceAt(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(recs)
 			}
-			reason, detail := recs.inForceAt(ctx, tc.successor, tc.object)
+			reason, detail := recs.inForceAt(ctx, tc.successor, tc.object, fakeEst{})
 			if reason != tc.reason || !strings.HasPrefix(detail, tc.detailPrefix) || (tc.detailPrefix == "") != (detail == "") {
 				t.Fatalf("got %q %q, want %q with detail starting %q", reason, detail, tc.reason, tc.detailPrefix)
 			}

@@ -162,7 +162,7 @@ func TestObjectSupersession_Scenarios(t *testing.T) {
 			{obsFeatureObject, false, "", ""},
 			{"spec/closed-feature#ac-1", false, "", ""},
 			{obsStoryObject, true, "governed spec/closed-story's completed work (closed 2024-01-10) | " + obsSinceS, "spec/successor#dc-2->/board/spec/successor#obj-dc-2"},
-			{"dc-1", false, "supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1", ""},
+			{"dc-1", false, "supersession not established: spec/successor's supersession was not in force at its acceptance: as of commit 092a88215473, no conflict challenges spec/closed-feature#ac-1", ""},
 			{"dc-3", false, "supersession not established: no conflict challenges spec/closed-feature#ac-1", ""},
 		}},
 	}

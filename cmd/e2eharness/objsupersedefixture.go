@@ -35,7 +35,7 @@ package main
 // nothing. Test-only.
 //
 // Consumer note: a cold first GET includes a full `go build` of the verdi
-// binary plus six materializations, docs builds, and serves — warm the
+// binary plus eight materializations, docs builds, and serves — warm the
 // fixture in a beforeAll with its own timeout allowance (as
 // e2e/tests/49-readiness-pilot.spec.ts does) so the default per-request
 // budget never cancels it mid-build.
@@ -96,21 +96,24 @@ package main
 //	proposed            design/successor     spec/successor     not a surface
 //	no-conflict         design/successor     spec/successor     not a surface
 //	chain-not-in-force  design/successor-v2  spec/successor-v2  /b/main/board/spec/successor
+//	constraint-target   design/successor     spec/successor     not a surface
+//	feature-criterion   main                 spec/successor     the checkout's board
 //
 // Boards: internal/workbench mounts the board twice — /board/spec/<name>
 // for the serving checkout's branch and /b/<branch>/board/spec/<name> (the
 // branch percent-encoded, as BranchBoardHref does) for any other branch,
 // cut as a managed worktree on first request (branchboard.go) — so one
 // serve per store answers every branch. The design board of accepted,
-// chain, and chain-drop is their merged design branch, which still
-// resolves. For proposed and no-conflict, main has no board that shows a
-// closed object: the closed specs are archived and archived specs have no
-// board (ADJ-39), and a closed object renders on a board only as a
-// reference card on a board whose spec links it (SI-278), which no spec on
-// main does. So their main board and every object_board are reported as
-// not a surface, never as a URL that 404s by design; "the default branch
-// shows nothing" is asserted on the docs site's closed-spec document
-// pages, where the object itself renders. An object main's successor no
+// chain, chain-drop, and feature-criterion is their merged design branch,
+// which still resolves. For proposed, no-conflict, and constraint-target, none of
+// them accepted, main has no board that shows a closed object: the closed
+// specs are archived and archived specs have no board (ADJ-39), and a
+// closed object renders on a board only as a reference card on a board
+// whose spec links it (SI-278), which no spec on main does. So their main
+// board and every object_board are reported as not a surface, never as a
+// URL that 404s by design; "the default branch shows nothing" is asserted
+// on the docs site's closed-spec document pages, where the object itself
+// renders. An object main's successor no
 // longer carries (chain-drop's spec/closed-feature#dc-1) renders only on
 // the establishing successor's board, which its object_board names. The
 // /b/main URLs handed out — chain-not-in-force's main board and
@@ -144,17 +147,21 @@ import (
 // objSupersedeStores is the fixed, deterministic set of scenario stores
 // the surface lane needs (L3c report's Item 5 handoff): the happy path
 // (accepted), the carried and dropped whole-spec-revision chains (chain,
-// chain-drop), the not-yet-accepted pair (proposed, no-conflict), and the
-// broken-chain not-in-force case (chain-not-in-force). Order is fixed so
-// the fixture's provisioning is deterministic, not map iteration.
-var objSupersedeStores = []string{"accepted", "chain", "chain-drop", "proposed", "no-conflict", "chain-not-in-force", "constraint-target"}
+// chain-drop), the not-yet-accepted pair (proposed, no-conflict), the
+// broken-chain not-in-force case (chain-not-in-force), the refusal of an
+// edge to a closed feature's constraint (constraint-target), and a closed
+// FEATURE's acceptance criterion superseded in force (feature-criterion),
+// the one store whose docs site shows the feature lens's supersession row.
+// Order is fixed so the fixture's provisioning is deterministic, not map
+// iteration.
+var objSupersedeStores = []string{"accepted", "chain", "chain-drop", "proposed", "no-conflict", "chain-not-in-force", "constraint-target", "feature-criterion"}
 
 // objSupersedeDataZone is the store's runtime data zone, excluded (never
 // committed) in every provisioned repository.
 const objSupersedeDataZone = ".verdi/data/"
 
-// objSupersedeNoMainBoard is why proposed's and no-conflict's main board is
-// not a surface (see the file doc).
+// objSupersedeNoMainBoard is why proposed's, no-conflict's, and
+// constraint-target's main board is not a surface (see the file doc).
 const objSupersedeNoMainBoard = "no board on main shows a closed object here: spec/closed-feature and spec/closed-story are archived and archived specs have no board (ADJ-39), and a closed object renders on a board only as a reference card on a board whose spec links it (SI-278), which no spec on main does; assert the default branch's absence on the docs pages"
 
 // The committed records' refs (testdata/objsupersede/records).
@@ -251,6 +258,22 @@ var objSupersedeFactsByStore = map[string]objSupersedeFacts{
 		designBranch: "design/successor", successor: "spec/successor",
 		pairs: []objSupersedeSupersession{
 			osPair(osFeatureConstraint, "spec/successor#dc-1", "spec/successor#dc-1", osConflictFeature),
+			osPair(osStoryCriterion, "spec/successor#dc-2", "spec/successor#dc-2", osConflictStory),
+		},
+	},
+	// feature-criterion: the accepted successor's dc-3 supersedes, in
+	// force, the closed FEATURE's acceptance criterion ac-1 (its one
+	// conflict for the closed feature challenges #ac-1 and #dc-1), so the
+	// docs site's closed-feature artifact page ({docs}a/spec/closed-feature/)
+	// renders the feature lens's row for ac-1 with its supersession lines
+	// (data-testid "lens-supersession-ac-1"): a story renders no feature
+	// lens, and in every other store the in-force criterion is the story's.
+	"feature-criterion": {
+		designBranch: "design/successor", successor: "spec/successor", mainSpec: "spec/successor",
+		mainSuccessors: []string{"spec/successor"},
+		pairs: []objSupersedeSupersession{
+			osPair(osFeatureCriterion, "spec/successor#dc-3", "spec/successor#dc-3", osConflictFeature),
+			osPair(osFeatureDecision, "spec/successor#dc-1", "spec/successor#dc-1", osConflictFeature),
 			osPair(osStoryCriterion, "spec/successor#dc-2", "spec/successor#dc-2", osConflictStory),
 		},
 	},

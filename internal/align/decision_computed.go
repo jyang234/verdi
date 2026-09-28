@@ -69,9 +69,10 @@ var ErrSpecNotInTree = errors.New("align: the evaluated spec is not a decodable 
 //     good enough.
 //
 // An edge's finding id is "edge-<decision>-<type>-<ref>", each part
-// store.RefSlug'd. An operational failure reading the tree's records, or a
-// spec absent from them (ErrSpecNotInTree), is an error; a target that
-// cannot be read or decoded is the finding's own unresolved text.
+// store.RefSlug'd. An operational failure reading the tree's records, a
+// spec absent from them (ErrSpecNotInTree), or a defect est reports in its
+// own computation (errReporter) is an error; a target that cannot be read
+// or decoded is the finding's own unresolved text.
 func ComputeDecisionEdges(ctx context.Context, tr objsupersede.TreeReader, spec string, est objsupersede.Establisher) ([]artifact.ConflictFinding, error) {
 	if tr == nil || est == nil {
 		return nil, fmt.Errorf("align: ComputeDecisionEdges needs a tree reader and an establisher")
@@ -94,6 +95,11 @@ func ComputeDecisionEdges(ctx context.Context, tr objsupersede.TreeReader, spec 
 	results, err := objsupersede.Evaluate(ctx, recs, spec, &memoEstablisher{inner: est})
 	if err != nil {
 		return nil, fmt.Errorf("align: %w", err)
+	}
+	if d, ok := est.(errReporter); ok {
+		if err := d.Err(); err != nil {
+			return nil, fmt.Errorf("align: the establishment computation failed: %w", err)
+		}
 	}
 
 	var out []artifact.ConflictFinding
@@ -182,10 +188,21 @@ func resultFinding(id string, r objsupersede.Result) (artifact.ConflictFinding, 
 	return f, nil
 }
 
+// errReporter is an establisher that reports a defect in its own
+// computation (objsupersede.History.Err). The establishment such a defect
+// affected reads "acceptance unproven", so ComputeDecisionEdges returns
+// the defect as an operational error rather than computing a verdict from
+// it (lane L6 review M-4): `verdi align` and `verdi gate` exit 2.
+type errReporter interface {
+	Err() error
+}
+
 // memoEstablisher answers each (successor, object) establishment once per
-// computation: History.Establishment re-reads the whole store at the
-// successor's acceptance commit on every call (L3 re-review OB-3), and one
-// spec's carried edges can ask the same question more than once.
+// computation (L3 re-review OB-3): one spec's carried edges can ask the
+// same question more than once, and ComputeDecisionEdges accepts any
+// establisher. History already memoizes its acceptance walk per
+// (successor, closed spec) for its pinned default-branch head, so for it
+// this memo saves only the repeated lookup.
 type memoEstablisher struct {
 	inner objsupersede.Establisher
 	seen  map[string]objsupersede.Establishment

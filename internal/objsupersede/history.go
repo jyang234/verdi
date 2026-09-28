@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -33,18 +35,46 @@ type Fact struct {
 }
 
 // History reads acceptance facts from the configured default branch
-// (specstate.ResolveDefaultBranch) of the repository at a store root.
+// (specstate.ResolveDefaultBranch) of the repository at a store root, at
+// the branch's commit NewHistory pins: every fact of one History reads the
+// same history. Copies share its memo, which is safe for concurrent use.
 type History struct {
 	root   string
 	branch specstate.Branch
 	ok     bool
+	head   string // the default branch's commit, pinned by NewHistory
+	unread string // why head could not be pinned, when it could not
+	cache  *historyCache
 }
 
-// NewHistory resolves root's default branch. An unresolved branch makes
-// every later fact unproven rather than failing here.
+// historyCache is a History's memo: each spec's first presence, each
+// (successor, closed spec) walk list, the positions of the store's
+// first-parent commits, and the engine that answers its establishments
+// (per (S_k, T, head), SI-270 as amended).
+type historyCache struct {
+	mu     sync.Mutex          // guards firsts, walks, and order
+	firsts map[string]Fact     // per spec
+	walks  map[string]walkList // per (successor, closed spec)
+	order  map[string]int      // nil until read
+	orderF Fact                // unproven when order cannot be read
+	engMu  sync.Mutex          // serializes Establishment over eng
+	eng    *engine
+}
+
+// NewHistory resolves root's default branch and pins its commit. An
+// unresolved branch or commit makes every later fact unproven rather than
+// failing here.
 func NewHistory(ctx context.Context, root string) History {
-	b, ok := specstate.ResolveDefaultBranch(ctx, root)
-	return History{root: root, branch: b, ok: ok}
+	h := History{root: root, cache: &historyCache{firsts: map[string]Fact{}, walks: map[string]walkList{}}}
+	h.branch, h.ok = specstate.ResolveDefaultBranch(ctx, root)
+	if h.ok {
+		head, err := gitx.RevParse(ctx, root, h.branch.Ref+"^{commit}")
+		if err != nil {
+			h.unread = err.Error()
+		}
+		h.head = head
+	}
+	return h
 }
 
 func unproven(witness string) Fact { return Fact{State: FactUnproven, Witness: witness} }
@@ -52,35 +82,165 @@ func unproven(witness string) Fact { return Fact{State: FactUnproven, Witness: w
 // noBranch is the witness when the default branch does not resolve.
 const noBranch = "the default branch could not be resolved (no CI_DEFAULT_BRANCH, no configured remote HEAD, and no single origin/main or origin/master)"
 
-// Acceptance is SI-270's acceptance point of spec: the earliest commit on
-// the default branch's first-parent chain whose tree holds the spec's
-// spec.md in either zone, dated by its committer date in UTC. A later
-// in-place edit or archive move does not move it. A shallow history, an
+// Acceptance is spec's acceptance (02 §Kind registry: merging is
+// acceptance): the earliest commit on the default branch's first-parent
+// chain whose tree holds the spec's spec.md in either zone, dated by its
+// committer date in UTC. A later in-place edit or archive move does not
+// move it. Whether a supersession it issues is in force, and since when,
+// is Establishment's answer (SI-270 as amended). A shallow history, an
 // unresolved default branch, or an unreadable commit is unproven.
 func (h History) Acceptance(ctx context.Context, spec string) Fact {
-	if !h.ok {
+	f := h.first(ctx, spec)
+	if f.State != FactProven {
+		return f
+	}
+	return h.dated(ctx, f.Commit)
+}
+
+// first is spec's first presence on the pinned commit's first-parent
+// chain: FactProven naming the earliest commit whose tree holds spec's
+// spec.md in either zone, FactAbsent when none does, or FactUnproven with
+// the witness; memoized per spec.
+func (h History) first(ctx context.Context, spec string) Fact {
+	if h.cache == nil {
+		return h.readFirst(ctx, spec)
+	}
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	f, ok := h.cache.firsts[spec]
+	if !ok {
+		f = h.readFirst(ctx, spec)
+		h.cache.firsts[spec] = f
+	}
+	return f
+}
+
+// readFirst reads first's fact.
+func (h History) readFirst(ctx context.Context, spec string) Fact {
+	switch {
+	case !h.ok:
 		return unproven(noBranch)
+	case h.unread != "":
+		return unproven(h.unread)
 	}
-	paths := []string{store.SpecRelPath(store.ZoneActive, spec), store.SpecRelPath(store.ZoneArchive, spec)}
-	commits, err := gitx.FirstParentPathCommits(ctx, h.root, h.branch.Ref, paths...)
-	if errors.Is(err, gitx.ErrShallowHistory) {
-		return unproven("shallow history: the first-parent chain of " + h.branch.Ref + " is incomplete")
-	}
+	paths := specPaths(spec)
+	commits, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, paths...)
 	if err != nil {
-		return unproven(err.Error())
+		return h.historyError(err)
 	}
+	first, err := firstHolding(ctx, h.root, commits, paths)
+	switch {
+	case err != nil:
+		return unproven(err.Error())
+	case first == "":
+		return Fact{State: FactAbsent}
+	}
+	return Fact{State: FactProven, Commit: first}
+}
+
+// specPaths are spec's spec.md paths in the active and archive zones.
+func specPaths(spec string) []string {
+	return []string{store.SpecRelPath(store.ZoneActive, spec), store.SpecRelPath(store.ZoneArchive, spec)}
+}
+
+// walk implements walkSource, memoized per (successor, closed spec).
+func (h History) walk(ctx context.Context, successor, closed string) ([]string, Fact) {
+	f := h.first(ctx, successor)
+	if f.State != FactProven {
+		return nil, f
+	}
+	if h.cache == nil {
+		return h.readWalk(ctx, f.Commit, successor, closed)
+	}
+	key := successor + "\x00" + closed
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	w, ok := h.cache.walks[key]
+	if !ok {
+		w.commits, w.fact = h.readWalk(ctx, f.Commit, successor, closed)
+		h.cache.walks[key] = w
+	}
+	return w.commits, w.fact
+}
+
+// readWalk reads the (successor, closed) walk (walkSource) from the pinned
+// commit's first-parent chain: the commits that change successor's or
+// closed's spec.md in either zone or .verdi/conflicts/ (SI-281's walk
+// set), from first, the first whose tree holds successor's spec.md.
+func (h History) readWalk(ctx context.Context, first, successor, closed string) ([]string, Fact) {
+	paths := append(append(specPaths(successor), specPaths(closed)...), conflictsDir)
+	all, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, paths...)
+	if err != nil {
+		return nil, h.historyError(err)
+	}
+	i := slices.Index(all, first)
+	if i < 0 {
+		return nil, unproven(fmt.Sprintf("the commit %s that first holds spec/%s is missing from its walk", first, successor))
+	}
+	return all[i:], Fact{State: FactProven, Commit: first}
+}
+
+// position implements walkSource: commit's index among the pinned
+// commit's first-parent commits that change a spec or a conflict, the
+// commits every walk lists, oldest first; read once per History.
+func (h History) position(ctx context.Context, commit string) (int, error) {
+	if h.cache == nil {
+		return 0, fmt.Errorf("objsupersede: a zero History has no first-parent order")
+	}
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	if h.cache.order == nil && h.cache.orderF.State == "" {
+		h.cache.order, h.cache.orderF = h.readOrder(ctx)
+	}
+	if h.cache.orderF.State == FactUnproven {
+		return 0, errors.New(h.cache.orderF.Witness)
+	}
+	p, ok := h.cache.order[commit]
+	if !ok {
+		return 0, fmt.Errorf("objsupersede: commit %s is not on %s's first-parent chain of store records", commit, h.branch.Ref)
+	}
+	return p, nil
+}
+
+// readOrder reads position's commits.
+func (h History) readOrder(ctx context.Context) (map[string]int, Fact) {
+	switch {
+	case !h.ok:
+		return nil, unproven(noBranch)
+	case h.unread != "":
+		return nil, unproven(h.unread)
+	}
+	commits, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, specsDir, conflictsDir)
+	if err != nil {
+		return nil, h.historyError(err)
+	}
+	order := make(map[string]int, len(commits))
+	for i, c := range commits {
+		order[c] = i
+	}
+	return order, Fact{State: FactProven}
+}
+
+// firstHolding returns the first of commits whose tree holds any of paths,
+// or "" when none does.
+func firstHolding(ctx context.Context, root string, commits, paths []string) (string, error) {
 	for _, c := range commits {
 		for _, p := range paths {
-			present, err := gitx.PathExistsAt(ctx, h.root, c, p)
-			if err != nil {
-				return unproven(err.Error())
-			}
-			if present {
-				return h.dated(ctx, c)
+			present, err := gitx.PathExistsAt(ctx, root, c, p)
+			if err != nil || present {
+				return c, err
 			}
 		}
 	}
-	return Fact{State: FactAbsent}
+	return "", nil
+}
+
+// historyError is the unproven fact for a failed first-parent read.
+func (h History) historyError(err error) Fact {
+	if errors.Is(err, gitx.ErrShallowHistory) {
+		return unproven("shallow history: the first-parent chain of " + h.branch.Ref + " is incomplete")
+	}
+	return unproven(err.Error())
 }
 
 // Closed is SI-270's closed date of t: the committer date of the landing
@@ -129,95 +289,43 @@ func utcDay(iso string) (string, error) {
 	return t.UTC().Format("2006-01-02"), nil
 }
 
-// Establishment implements Establisher: successor's supersession of object
-// is in force when successor is accepted and SI-275's in-force check holds
-// on its acceptance commit's tree (SI-270).
+// Establishment implements Establisher: the acceptance walk's answer
+// (establish.go) over the pinned default-branch history, memoized for
+// this History and its copies.
 func (h History) Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
-	acc := h.Acceptance(ctx, successor)
-	var recs *Records
-	var err error
-	if acc.State != FactAbsent && acc.State != FactUnproven {
-		recs, err = h.recordsAt(ctx, acc.Commit)
+	if h.cache == nil {
+		return newEngine(h).establishment(ctx, successor, object)
 	}
-	return establishment(ctx, acc, recs, err, successor, object)
+	h.cache.engMu.Lock()
+	defer h.cache.engMu.Unlock()
+	if h.cache.eng == nil {
+		h.cache.eng = newEngine(h)
+	}
+	return h.cache.eng.establishment(ctx, successor, object)
 }
 
-// recordsAt reads the records of commit's tree in h's repository.
+// Err returns the first defect the acceptance walk found in this
+// package's own computation over h (a walk re-entered at a commit it is
+// evaluating, an evaluation inconsistent with its answer, a walk that
+// breaks its source's contract, a history answer outside FactState), or
+// nil. The establishment a defect affected reads acceptance unproven,
+// never a pass; a caller that reports a verdict from h's establishments
+// surfaces Err as an operational error instead (lane L6 review M-4). A
+// zero History keeps no engine and reports nil.
+func (h History) Err() error {
+	if h.cache == nil {
+		return nil
+	}
+	h.cache.engMu.Lock()
+	defer h.cache.engMu.Unlock()
+	if h.cache.eng == nil {
+		return nil
+	}
+	return h.cache.eng.err
+}
+
+// recordsAt implements walkSource: the records of commit's tree in h's
+// repository.
 func (h History) recordsAt(ctx context.Context, commit string) (*Records, error) {
 	return ReadRecords(ctx, CommitTree{Root: h.root, Commit: commit})
-}
-
-// establishment is Establishment's answer from successor's acceptance
-// fact and, when it is proven, the records of its acceptance commit or the
-// error reading them; the views' memo shares it (views.go).
-func establishment(ctx context.Context, acc Fact, recs *Records, err error, successor string, object artifact.Ref) Establishment {
-	switch acc.State {
-	case FactAbsent:
-		return Establishment{Reason: ReasonEstablisherNotAccepted}
-	case FactUnproven:
-		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: acc.Witness}
-	}
-	if err != nil {
-		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: err.Error()}
-	}
-	if reason, detail := recs.inForceAt(ctx, successor, object); reason != "" {
-		return Establishment{Reason: reason, Detail: detail}
-	}
-	return Establishment{Commit: acc.Commit, Date: acc.Date}
-}
-
-// inForceAt is SI-275's in-force check on the records of successor's
-// acceptance commit: design §3's whole match for (successor, T), T being
-// object's spec. Every edge of successor to an object of T that is not a
-// carried candidate there (SI-273) must resolve new, object's own edge
-// among them; carried candidates are excluded, since their establishment is
-// earlier; and completeness for successor over T must hold. It returns ""
-// when in force, "acceptance unproven" when a record there fails decode
-// (SI-274(6)), and otherwise "not in force" with the first failing text.
-func (recs *Records) inForceAt(ctx context.Context, successor string, object artifact.Ref) (Reason, string) {
-	if len(recs.Failures) > 0 {
-		return ReasonAcceptanceUnproven, "records do not decode at the acceptance commit: " + strings.Join(recs.Failures, "; ")
-	}
-	s := recs.Specs[successor]
-	if s == nil {
-		return ReasonAcceptanceUnproven, fmt.Sprintf("spec/%s is not in its acceptance commit's tree", successor)
-	}
-	chain, own := recs.chain(successor), false
-	for _, d := range s.FM.Decisions {
-		for _, l := range d.Links {
-			ref, ok := fragmentEdge(l)
-			if !ok || ref.Name != object.Name {
-				continue
-			}
-			if recs.carriedCandidate(chain, d.ID, ref) {
-				if ref == object {
-					return ReasonEstablisherNotInForce, fmt.Sprintf("spec/%s carries its edge to %s from its predecessor; it issues no new replacement", successor, object)
-				}
-				continue
-			}
-			own = own || ref == object
-			if r := recs.evaluateEdge(ctx, s, d.ID, l.Ref, ref, false, nil); r.Outcome != ResolvedNew {
-				return ReasonEstablisherNotInForce, textOrError(r)
-			}
-		}
-	}
-	if !own {
-		return ReasonEstablisherNotInForce, fmt.Sprintf("spec/%s carries no edge to %s", successor, object)
-	}
-	for _, r := range recs.completeness(s) {
-		if ref, err := artifact.ParseRef(r.Edge); err != nil || ref.Name == object.Name {
-			return ReasonEstablisherNotInForce, textOrError(r)
-		}
-	}
-	return "", ""
-}
-
-// textOrError renders a result this package built; a rendering error is
-// reported inline, never dropped.
-func textOrError(r Result) string {
-	text, err := r.Text()
-	if err != nil {
-		return err.Error()
-	}
-	return text
 }

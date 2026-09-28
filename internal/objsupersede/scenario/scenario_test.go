@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -36,9 +37,12 @@ func TestLoad_CommittedManifest(t *testing.T) {
 	}
 	names := sortedKeys(m.Scenarios)
 	want := []string{"accepted", "already-superseded", "chain", "chain-drop", "chain-not-in-force", "conflict-dismissed",
-		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-fragment-link", "no-conflict", "proposed",
-		"resolved-by-other", "target-not-closed", "top-level-supersedes", "undeclared-object",
-		"unmatched-challenge", "unrelated", "unrelated-accepted"}
+		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-criterion", "feature-fragment-link",
+		"ff-close-in-pr", "ff-close-in-pr-then-conflict", "ff-landing", "ff-widening-series", "late-close",
+		"late-close-rival", "late-close-then-conflict", "late-close-tie", "no-conflict", "proposed", "rebase-landing",
+		"resolved-by-other", "same-commit-tie", "skeleton-landing", "stale-base", "target-not-closed",
+		"top-level-supersedes", "undeclared-object", "undecodable-before-point", "unmatched-challenge", "unrelated",
+		"unrelated-accepted"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("scenarios %v, want %v", names, want)
 	}
@@ -96,8 +100,19 @@ func step(m map[string]any, scenario string, i int) map[string]any {
 	return obj(obj(m, "scenarios"), scenario)["steps"].([]any)[i].(map[string]any)
 }
 
+// retype makes st a step of another operation: it drops st's layers, moves,
+// and merge and sets op to branch. It returns st.
+func retype(st map[string]any, op, branch string) map[string]any {
+	for _, k := range []string{"layers", "moves", "merge"} {
+		delete(st, k)
+	}
+	st[op] = branch
+	return st
+}
+
 func TestLoad_Negative(t *testing.T) {
 	const identity, twoOps, badMove = "commit needs a name, an email, and an initial branch", "exactly one", "needs two distinct clean relative paths"
+	const noFFDate = "a fast-forward step makes no commit, so it carries no date"
 	tests := []struct {
 		name   string
 		mutate func(m map[string]any)
@@ -138,6 +153,35 @@ func TestLoad_Negative(t *testing.T) {
 		{"a checkout no step commits to", func(m map[string]any) {
 			obj(obj(m, "scenarios"), "accepted")["checkout"] = "design/nowhere"
 		}, `checks out "design/nowhere", which no step commits to`},
+		{"a fast-forward step with a date", func(m map[string]any) {
+			retype(step(m, "accepted", 1), "fast_forward", "design/successor")
+		}, noFFDate},
+		{"a fast-forward step with an author date", func(m map[string]any) {
+			delete(retype(step(m, "chain", 1), "fast_forward", "design/successor"), "date")
+		}, noFFDate},
+		{"a rebase step with an author date", func(m map[string]any) {
+			retype(step(m, "chain", 1), "rebase", "design/successor")
+		}, "a rebase step keeps each replayed commit's author date, so it carries none"},
+		{"a rebase step without a date", func(m map[string]any) {
+			st := retype(step(m, "chain", 1), "rebase", "design/successor")
+			delete(st, "author_date")
+			delete(st, "date")
+		}, `date ""`},
+		{"a base step that fast-forwards", func(m map[string]any) {
+			retype(step(m, "", 2), "fast_forward", "main")
+		}, "base step 2 must write layers or move paths on main"},
+		{"a base step that rebases", func(m map[string]any) { retype(step(m, "", 2), "rebase", "main") }, "base step 2 must write layers or move paths on main"},
+		{"a fast-forward and a merge together", func(m map[string]any) { step(m, "accepted", 1)["fast_forward"] = "design/successor" }, twoOps},
+		{"a rebase and layers together", func(m map[string]any) { step(m, "accepted", 0)["rebase"] = "main" }, twoOps},
+		{"a fast-forward to a branch no step commits to", func(m map[string]any) {
+			delete(retype(step(m, "accepted", 1), "fast_forward", "design/nowhere"), "date")
+		}, `fast-forwards to "design/nowhere" before any step commits to it`},
+		{"a rebase onto a branch no step commits to", func(m map[string]any) {
+			retype(step(m, "accepted", 1), "rebase", "design/nowhere")
+		}, `rebases onto "design/nowhere" before any step commits to it`},
+		{"a rebase of a branch no step commits to", func(m map[string]any) {
+			retype(step(m, "chain", 3), "rebase", "main")
+		}, `rebases "design/successor-v2" before any step commits to it`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,7 +236,7 @@ func hostileGit(t *testing.T) {
 // one "name base steps" line per scenario in name order, from a build with
 // no ambient git state. TestBuild_EveryScenario reproduces it under
 // hostileGit, so no ambient setting moves any SHA of any scenario.
-const wantAllCommits = "bc01ce030463fa55f25324f2a4fabd5464cf8429c2c6faaa01a95ce58a7f5b2f"
+const wantAllCommits = "9543fe7d77124ac2828dbeed778402c852623ff38b791772c3effaca9a8bca31"
 
 func TestBuild_EveryScenario(t *testing.T) {
 	hostileGit(t)
@@ -291,6 +335,126 @@ func TestMaterialize_ManifestDrivesCommits(t *testing.T) {
 	}
 }
 
+// landingSteps is a successor's two-commit series (the spec, then its
+// resolved conflicts) and its landing on main: a fast-forward, or a
+// rebase onto a main that moved, then a fast-forward.
+func landingSteps(rebase bool) []any {
+	steps := []any{
+		map[string]any{"branch": "design/successor", "date": "2024-02-01T09:00:00Z", "message": "Propose spec/successor", "layers": []any{"successor"}},
+		map[string]any{"branch": "design/successor", "date": "2024-02-10T09:00:00Z", "message": "Resolve the conflicts", "layers": []any{"conflict-feature", "conflict-story"}},
+	}
+	if rebase {
+		steps = append(steps,
+			map[string]any{"branch": "main", "date": "2024-02-12T09:00:00Z", "message": "Move main", "layers": []any{"unrelated"}},
+			map[string]any{"branch": "design/successor", "date": "2024-02-15T09:00:00Z", "message": "Rebase", "rebase": "main"})
+	}
+	return append(steps, map[string]any{"branch": "main", "message": "Land", "fast_forward": "design/successor"})
+}
+
+// checkLanding pins a landing without a merge commit: main is the series'
+// last commit, main's history has no merge commit, main's first-parent
+// chain is want (newest first) above the base, and each of those commits
+// carries the author date, committer date, and subject in dates.
+func checkLanding(t *testing.T, repo *Repo, want []string, dates []string) {
+	t.Helper()
+	last := repo.Steps[len(repo.Steps)-1]
+	if got := gitOut(t, repo.Dir, "rev-parse", "main"); got != last || last != want[0] {
+		t.Fatalf("main at %s, last step at %s, want %s", got, last, want[0])
+	}
+	if merges := gitOut(t, repo.Dir, "rev-list", "--merges", "main"); merges != "" {
+		t.Fatalf("main's history has merge commits: %s", merges)
+	}
+	chain := strings.Fields(gitOut(t, repo.Dir, "rev-list", "--first-parent", "main"))
+	base := []string{repo.Base[2], repo.Base[1], repo.Base[0]}
+	if strings.Join(chain, ",") != strings.Join(append(slices.Clone(want), base...), ",") {
+		t.Fatalf("main's first-parent chain %v, want %v then the base", chain, want)
+	}
+	for i, c := range want {
+		if got := gitOut(t, repo.Dir, "log", "-1", "--format=%aI %cI %s", c); got != dates[i] {
+			t.Errorf("commit %s: %q, want %q", c, got, dates[i])
+		}
+	}
+}
+
+// TestMaterialize_Landings pins the fast-forward and rebase operations
+// (SI-270 as amended; whole-wave review F-4): each lands the series on
+// main with no merge commit; a rebase replays it onto the moved main, each
+// commit keeping its author date and taking the step's committer date.
+func TestMaterialize_Landings(t *testing.T) {
+	ctx := context.Background()
+	for _, rebase := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rebase=%v", rebase), func(t *testing.T) {
+			dir := mutated(t, func(m map[string]any) { obj(obj(m, "scenarios"), "accepted")["steps"] = landingSteps(rebase) })
+			repo, err := Materialize(ctx, dir, t.TempDir(), "accepted")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !rebase {
+				checkLanding(t, repo, []string{repo.Steps[1], repo.Steps[0]}, []string{
+					"2024-02-10T09:00:00+00:00 2024-02-10T09:00:00+00:00 Resolve the conflicts",
+					"2024-02-01T09:00:00+00:00 2024-02-01T09:00:00+00:00 Propose spec/successor"})
+				return
+			}
+			replayed := gitOut(t, repo.Dir, "rev-parse", repo.Steps[3]+"^")
+			if replayed == repo.Steps[0] || repo.Steps[3] == repo.Steps[1] {
+				t.Fatalf("the rebase replayed nothing: %v", repo.Steps)
+			}
+			checkLanding(t, repo, []string{repo.Steps[3], replayed, repo.Steps[2]}, []string{
+				"2024-02-10T09:00:00+00:00 2024-02-15T09:00:00+00:00 Resolve the conflicts",
+				"2024-02-01T09:00:00+00:00 2024-02-15T09:00:00+00:00 Propose spec/successor",
+				"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main"})
+		})
+	}
+}
+
+// TestBuild_Landings pins the committed landings without a merge commit
+// (whole-wave review F-4): ff-landing fast-forwards main to the
+// successor's second commit, and rebase-landing replays both commits onto
+// a main that moved, then fast-forwards.
+func TestBuild_Landings(t *testing.T) {
+	const propose, resolve = " Propose spec/successor", " Resolve the conflicts spec/successor challenges"
+	ff := Build(t, "ff-landing")
+	checkLanding(t, ff, []string{ff.Steps[1], ff.Steps[0]}, []string{
+		"2024-02-10T09:00:00+00:00 2024-02-10T09:00:00+00:00" + resolve,
+		"2024-02-01T09:00:00+00:00 2024-02-01T09:00:00+00:00" + propose})
+	rb := Build(t, "rebase-landing")
+	checkLanding(t, rb, []string{rb.Steps[3], gitOut(t, rb.Dir, "rev-parse", rb.Steps[3]+"^"), rb.Steps[2]}, []string{
+		"2024-02-10T09:00:00+00:00 2024-02-15T09:00:00+00:00" + resolve,
+		"2024-02-01T09:00:00+00:00 2024-02-15T09:00:00+00:00" + propose,
+		"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main"})
+}
+
+// TestBuild_StaleBase pins stale-base's records (whole-wave review F-1):
+// main files the conflict open, the successor's branch resolves it, main
+// then widens the still-open conflict to #ac-1, and the branch merges
+// cleanly, so main's conflict is the resolved one that also challenges
+// #ac-1, while the branch's head holds the conflict as it resolved it.
+func TestBuild_StaleBase(t *testing.T) {
+	repo := Build(t, "stale-base")
+	const conflict = ".verdi/conflicts/successor-closed-feature.md"
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(Dir(), "records", "conflicts", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(data))
+	}
+	merged := strings.Replace(read("successor-closed-feature.md"), "links:\n", "links:\n  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n", 1)
+	for _, tc := range []struct{ rev, want string }{
+		{repo.Steps[0], read("successor-closed-feature-open.md")},
+		{repo.Steps[1], read("successor-closed-feature.md")},
+		{repo.Steps[2], read("successor-closed-feature-open-widened.md")},
+		{repo.Steps[3], merged},
+	} {
+		if got := gitOut(t, repo.Dir, "show", tc.rev+":"+conflict); got != tc.want {
+			t.Errorf("%s at %s:\n%s\nwant\n%s", conflict, tc.rev, got, tc.want)
+		}
+	}
+	if parents := strings.Fields(gitOut(t, repo.Dir, "rev-list", "--parents", "-n1", repo.Steps[3])); len(parents) != 3 || parents[1] != repo.Steps[2] || parents[2] != repo.Steps[1] {
+		t.Errorf("the accepting merge %v is not main's widening merged with the successor's branch", parents)
+	}
+}
+
 // TestMaterialize_GitErrors pins that a failing git step is returned as an
 // error naming its command, never ignored (lane L3 re-review a m-5).
 func TestMaterialize_GitErrors(t *testing.T) {
@@ -311,6 +475,22 @@ func TestMaterialize_GitErrors(t *testing.T) {
 				map[string]any{"branch": "main", "date": steps["date"], "message": "Merge", "merge": "design/a"},
 			}
 		}, "scenario: git merge"},
+		{"a fast-forward of a branch that diverged", func(m map[string]any) {
+			date := step(m, "accepted", 0)["date"]
+			obj(obj(m, "scenarios"), "accepted")["steps"] = []any{
+				map[string]any{"branch": "design/a", "date": date, "message": "Write successor", "layers": []any{"successor"}},
+				map[string]any{"branch": "main", "date": date, "message": "Move main", "layers": []any{"unrelated"}},
+				map[string]any{"branch": "main", "message": "Fast-forward", "fast_forward": "design/a"},
+			}
+		}, "scenario: git merge -q --ff-only design/a"},
+		{"a rebase that conflicts", func(m map[string]any) {
+			date := step(m, "accepted", 0)["date"]
+			obj(obj(m, "scenarios"), "accepted")["steps"] = []any{
+				map[string]any{"branch": "design/a", "date": date, "message": "Write successor", "layers": []any{"successor"}},
+				map[string]any{"branch": "main", "date": date, "message": "Write it otherwise", "layers": []any{"successor-edited"}},
+				map[string]any{"branch": "design/a", "date": date, "message": "Rebase", "rebase": "main"},
+			}
+		}, "scenario: git rebase -q main"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

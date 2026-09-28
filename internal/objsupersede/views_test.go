@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -29,6 +30,54 @@ type fakeHist struct {
 
 func (f *fakeHist) Acceptance(_ context.Context, spec string) Fact {
 	f.calls["acceptance "+spec]++
+	return f.fact(spec)
+}
+
+// walk is spec's walk for any closed spec: its one acceptance commit,
+// "acc-<spec>".
+func (f *fakeHist) walk(_ context.Context, spec, _ string) ([]string, Fact) {
+	f.calls["walk "+spec]++
+	fact := f.fact(spec)
+	if fact.State != FactProven {
+		return nil, fact
+	}
+	return []string{fact.Commit}, fact
+}
+
+// dated is "acc-<spec>"'s date, the spec's acceptance date.
+func (f *fakeHist) dated(_ context.Context, commit string) Fact {
+	f.calls["dated "+commit]++
+	fact := f.fact(strings.TrimPrefix(commit, "acc-"))
+	if fact.State == FactProven && fact.Commit != commit {
+		return Fact{State: FactUnproven, Witness: "no such commit " + commit}
+	}
+	return fact
+}
+
+// position orders the acceptance commits "acc-<spec>" by date, then spec.
+func (f *fakeHist) position(_ context.Context, commit string) (int, error) {
+	type acc struct{ date, spec string }
+	var all []acc
+	for spec := range f.accepted {
+		all = append(all, acc{f.accepted[spec], spec})
+	}
+	for spec, fact := range f.facts {
+		if _, dup := f.accepted[spec]; !dup && fact.State == FactProven {
+			all = append(all, acc{fact.Date, spec})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].date < all[j].date || (all[i].date == all[j].date && all[i].spec < all[j].spec)
+	})
+	for i, a := range all {
+		if "acc-"+a.spec == commit {
+			return i, nil
+		}
+	}
+	return 0, errors.New("no position for " + commit)
+}
+
+func (f *fakeHist) fact(spec string) Fact {
 	if fact, ok := f.facts[spec]; ok {
 		return fact
 	}
@@ -150,7 +199,7 @@ func TestIndex_ObjectViews(t *testing.T) {
 			h := hist(one(), "s1", vDay1)
 			h.at["s1"] = nil
 			return h
-		}, "", "", ObjectView{Object: vo, State: ObjectUnproven, Witness: "spec/s1: acceptance unproven: blob missing"}, "supersession unproven: spec/s1: acceptance unproven: blob missing"},
+		}, "", "", ObjectView{Object: vo, State: ObjectUnproven, Witness: "spec/s1: acceptance unproven: the records at commit acc-s1 cannot be read: blob missing"}, "supersession unproven: spec/s1: acceptance unproven: the records at commit acc-s1 cannot be read: blob missing"},
 		{"two successors unproven: the first is named", func() *fakeHist {
 			h := hist(mRecs([]*Conflict{c1(), mConflict("cx", "x", vo)}, s1(vo), mSpec("x", nil, mDec("dc-1", vo))))
 			h.unproven["s1"], h.unproven["x"] = "witness s1", "witness x"
@@ -334,8 +383,8 @@ func TestIndex_DecisionViews(t *testing.T) {
 			h.at["s1"] = one()
 			h.at["s1"].Conflicts[0].FM.Status = "open"
 			return h
-		}, "", []DecisionView{notEst("conflict/c1", "spec/s1's supersession was not in force at its acceptance: the conflict conflict/c1 is not superseded")},
-			"supersession not established: spec/s1's supersession was not in force at its acceptance: the conflict conflict/c1 is not superseded"},
+		}, "", []DecisionView{notEst("conflict/c1", "spec/s1's supersession was not in force at its acceptance: as of commit acc-s1, the conflict conflict/c1 is not superseded")},
+			"supersession not established: spec/s1's supersession was not in force at its acceptance: as of commit acc-s1, the conflict conflict/c1 is not superseded"},
 		{"acceptance unproven", func() *fakeHist {
 			h := hist(one())
 			h.unproven["s1"] = "shallow history"
@@ -385,12 +434,28 @@ func TestIndex_DecisionViews(t *testing.T) {
 			return h
 		}, "", []DecisionView{notEst("conflict/c0", "more than one superseded conflict names spec/s1 for spec/t")},
 			"supersession not established: more than one superseded conflict names spec/s1 for spec/t"},
-		{"not in force at its acceptance: a rival reads not established", func() *fakeHist {
-			h := inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+		// SI-272 as amended (whole-wave review F-1): a rival refuses only
+		// while its own supersession is in force.
+		{"not in force at its acceptance: a rival in force reads not established", func() *fakeHist {
+			cx := mConflict("cx", "x", vo)
+			h := inForceAt(mRecs([]*Conflict{c1(vo), cx}, s1(mDec("dc-1", vo)), rival()))
 			h.at["s1"].Conflicts[0].FM.Status = "open"
+			h.accepted["x"], h.at["x"] = "2024-03-01", mRecs([]*Conflict{cx}, rival())
 			return h
 		}, "", []DecisionView{notEst("conflict/cx", "the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)")},
 			"supersession not established: the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)"},
+		{"not in force at its acceptance: a rival not in force refuses nothing", func() *fakeHist {
+			h := inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+			h.at["s1"].Conflicts[0].FM.Status = "open"
+			return h
+		}, "", []DecisionView{notEst("conflict/c1", "spec/s1's supersession was not in force at its acceptance: as of commit acc-s1, the conflict conflict/c1 is not superseded")},
+			"supersession not established: spec/s1's supersession was not in force at its acceptance: as of commit acc-s1, the conflict conflict/c1 is not superseded"},
+		{"proposed: a rival whose establishment is unproven is never a pass (SI-274(3))", func() *fakeHist {
+			h := hist(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+			h.unproven["x"] = "shallow history"
+			return h
+		}, "", []DecisionView{notEst("conflict/cx", "acceptance unproven: spec/x's establishment: shallow history")},
+			"supersession not established: acceptance unproven: spec/x's establishment: shallow history"},
 		{"undecodable records (SI-274(6)), though in force at acceptance", func() *fakeHist { return inForceAt(undecodable()) }, "",
 			[]DecisionView{notEst("", "records do not decode: "+broken)}, "supersession not established: records do not decode: " + broken},
 		{"undecodable records (SI-274(6)) before acceptance", func() *fakeHist { return hist(undecodable()) }, "",
@@ -429,9 +494,10 @@ func TestIndex_DecisionViews(t *testing.T) {
 }
 
 // TestIndex_Batch pins item 3's cost and purity: one index answers every
-// view of a tree, each acceptance, acceptance-commit read, and closed date
-// queried at most once; building never mutates the records, and two
-// builds are equal.
+// view of a tree, each acceptance, acceptance walk, walked commit's records
+// and date, and closed date queried at most once (the establishing
+// successor's history is its walk, not its acceptance); building never
+// mutates the records, and two builds are equal.
 func TestIndex_Batch(t *testing.T) {
 	build := func() (*Records, *fakeHist) {
 		o2 := "spec/t#ac-1"
@@ -451,7 +517,7 @@ func TestIndex_Batch(t *testing.T) {
 			t.Errorf("%s queried %d times, want once", k, n)
 		}
 	}
-	for _, key := range []string{"acceptance s1", "records acc-s1", "closed t"} {
+	for _, key := range []string{"walk s1", "records acc-s1", "dated acc-s1", "closed t"} {
 		if h.calls[key] != 1 {
 			t.Errorf("%s never queried", key)
 		}
@@ -612,6 +678,7 @@ func TestIndex_Scenarios(t *testing.T) {
 	const (
 		govF = "governed spec/closed-feature's completed work (closed 2024-01-10) | "
 		govS = "governed spec/closed-story's completed work (closed 2024-01-10) | "
+		govO = "governed spec/other-feature's completed work "
 		byF  = "superseded since 2024-02-15 by spec/successor#dc-1"
 		byS  = "superseded since 2024-02-15 by spec/successor#dc-2"
 	)
@@ -626,6 +693,28 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"closed-feature#ac-1", "", ""},
 			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
 			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		// The whole-wave review's F-4 witness on the surfaces: a landing
+		// without a merge commit is in force from the commit where §3's
+		// match first holds (SI-270 as amended), dated by it.
+		{"a fast-forward landing is in force from its second commit", "ff-landing", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-02-10 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + "superseded since 2024-02-10 by spec/successor#dc-2"},
+			{"closed-feature#ac-1", "", ""},
+			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		{"a rebase landing is in force from its replayed second commit", "rebase-landing", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-02-15 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + "superseded since 2024-02-15 by spec/successor#dc-2"},
+			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		{"a closed feature's criterion superseded in force", "feature-criterion", "", []look{
+			{"closed-feature#ac-1", "", govF + "superseded since 2024-02-15 by spec/successor#dc-3"},
+			{"closed-feature#dc-1", "", govF + byF},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-3", "supersedes spec/closed-feature#ac-1"},
 		}},
 		{"carried through two revisions", "chain", "", []look{
 			{"closed-feature#dc-1", "", govF + byF + " | carried by spec/successor-v3"},
@@ -654,8 +743,50 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"closed-feature#dc-1", "", ""},
 			{"closed-feature#ac-1", "", ""},
 			{"closed-story#ac-1", "", govS + byS},
-			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
+			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: as of commit {step 1}, no conflict challenges spec/closed-feature#ac-1"},
 			{"", "successor#dc-3", "supersession not established: no conflict challenges spec/closed-feature#ac-1"},
+		}},
+		// The whole-wave review's F-1 witness on the surfaces: a successor
+		// whose supersession never came into force (a conforming stale-base
+		// merge) refuses no later successor (SI-272 as amended).
+		{"stale base on main: the successor's closed-feature supersession is not in force", "stale-base", "main", []look{
+			{"closed-feature#dc-1", "", ""},
+			{"closed-feature#ac-1", "", ""},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: as of commit {step 3}, conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		{"stale base: a later successor reads proposed, not already superseded", "stale-base", "", []look{
+			{"closed-feature#dc-1", "", ""},
+			{"", "unrelated#dc-1", "proposed — supersedes spec/closed-feature#dc-1 when spec/unrelated is accepted"},
+		}},
+		// The lane L6 review's M-2 witness: the later edge of a widening
+		// series is not established (BL-94), and its reason names the
+		// point, so it never reads as a statement about the head (SI-281).
+		{"a widening series: the later edge's reason names the point", "ff-widening-series", "", []look{
+			{"closed-feature#dc-1", "", govF + "superseded since 2024-02-01 by spec/successor#dc-1"},
+			{"closed-feature#ac-1", "", ""},
+			{"", "successor#dc-3", "supersession not established: spec/successor's supersession was not in force at its acceptance: as of commit {step 0}, spec/successor carries no edge to spec/closed-feature#ac-1"},
+		}},
+		// The lane L6 review's I-1 witness on the surfaces: a target closed
+		// after its successor landed is superseded from its archive commit
+		// (SI-281's walk set), never from a later commit the walk visits.
+		{"a target closed after the successor landed, then a later conflict", "late-close-then-conflict", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-03-01) | superseded since 2024-03-01 by spec/successor#dc-1"},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-1", "supersedes spec/other-feature#dc-1"},
+		}},
+		{"a target closed by the pull request's last commit, then a later conflict", "ff-close-in-pr-then-conflict", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-02-10) | superseded since 2024-02-10 by spec/successor#dc-1"},
+			{"", "successor#dc-1", "supersedes spec/other-feature#dc-1"},
+		}},
+		{"a rival after a late close never ties the successor in force", "late-close-rival", "", []look{
+			{"other-feature#dc-1", "", govO + "(closed 2024-03-01) | superseded since 2024-03-01 by spec/successor#dc-1"},
+			{"", "unrelated#dc-1", "supersession not established: the object spec/other-feature#dc-1 is already superseded by spec/successor (conflict/successor-other-feature)"},
+		}},
+		{"two successors landed before a late close tie at the archive commit", "late-close-tie", "", []look{
+			{"other-feature#dc-1", "", "supersession unproven: spec/successor: acceptance unproven: spec/successor and spec/unrelated first match for spec/other-feature#dc-1 at the same commit 72718a09e3c8adf897ba25c11b8e2f67149f9e0b, so neither takes effect before the other"},
+			{"closed-story#ac-1", "", govS + byS},
 		}},
 		{"a proposed rival on the design branch never unseats the successor in force", "already-superseded", "", []look{
 			{"closed-feature#dc-1", "", govF + "superseded since 2024-01-15 by spec/prior-successor#dc-1"},
@@ -665,7 +796,8 @@ func TestIndex_Scenarios(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := scenario.Build(t, tc.scenario).Dir
+			repo := scenario.Build(t, tc.scenario)
+			dir := repo.Dir
 			if tc.branch != "" {
 				gitIn(t, dir, "checkout", "-q", tc.branch)
 			}
@@ -686,8 +818,8 @@ func TestIndex_Scenarios(t *testing.T) {
 					}
 					got = strings.Join(all, " || ")
 				}
-				if got != l.want {
-					t.Errorf("%s%s:\n got %q\nwant %q", l.object, l.decision, got, l.want)
+				if want := atSteps(repo, l.want); got != want {
+					t.Errorf("%s%s:\n got %q\nwant %q", l.object, l.decision, got, want)
 				}
 			}
 		})
