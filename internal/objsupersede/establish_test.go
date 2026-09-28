@@ -239,7 +239,7 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: detail}
 	}
 	tie := func(a, b string) Establishment {
-		return unprovenBy("spec/" + a + " and spec/" + b + " first match for spec/t#dc-1 at the same commit c1, so neither is already superseded by the other")
+		return unprovenBy("spec/" + a + " and spec/" + b + " first match for spec/t#dc-1 at the same commit c1, so neither takes effect before the other")
 	}
 	tests := []struct {
 		name  string

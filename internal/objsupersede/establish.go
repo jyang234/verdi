@@ -314,7 +314,7 @@ func (e *engine) dateOrTie(ctx context.Context, w *walkState, i int, object arti
 			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s's establishment: %s", x, xw.evals[j].witness)}
 		case evalHolds:
 			if r, _ := recs.inForceAt(ctx, x, object, e.asOf(pos)); r == "" {
-				return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s and spec/%s first match for %s at the same commit %s, so neither is already superseded by the other", w.successor, x, object, commit)}
+				return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s and spec/%s first match for %s at the same commit %s, so neither takes effect before the other", w.successor, x, object, commit)}
 			}
 		}
 	}
