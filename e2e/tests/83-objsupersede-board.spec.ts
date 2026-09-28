@@ -191,14 +191,30 @@ async function expectSuperseded(page: Page, s: Supersession, decisionHref: strin
   await expect(since).toContainText("superseded since ");
   await expect(since).toContainText(` by ${s.establishing_decision}`);
   await expectHref(since.getByRole("link", { name: s.establishing_decision, exact: true }), decisionHref);
+  // The conflict trails the since line: linked where this board serves
+  // its corpus page, as plain text under the same test id where it does
+  // not (a per-branch board, ADJ-70; SI-280 as amended: only the href is
+  // omitted, never the ref).
   const conflict = card.getByTestId(`objsupersede-${stem}-conflict`);
+  await expect(conflict).toHaveText(s.conflict);
   if (conflictHref === null) {
-    await expect(conflict).toHaveCount(0);
+    expect(await conflict.getAttribute("href")).toBeNull();
+    await expect(conflict.locator("a")).toHaveCount(0);
   } else {
-    await expect(conflict).toHaveText(s.conflict);
     await expectHref(conflict, conflictHref);
   }
   await expectUnclipped(page, card);
+}
+
+// lineFacts reads a card's §6 elements — the line spans and the trailing
+// conflict ref, an <a> or a <span> — as test id, state ("" where none),
+// and text, in order: two renders that differ only by hrefs give equal
+// facts.
+type LineFact = [testid: string, state: string, text: string];
+function lineFacts(card: Locator): Promise<LineFact[]> {
+  return card.locator('[data-testid^="objsupersede-"]').evaluateAll((els) =>
+    els.map((el) => [el.getAttribute("data-testid") ?? "", el.getAttribute("data-state") ?? "", el.textContent ?? ""] as LineFact),
+  );
 }
 
 // expectUntouched asserts a closed object's reference card renders as
@@ -359,13 +375,24 @@ test.describe("closed-spec object supersession on the board", () => {
     await expect(storyLines.getByTestId(`objsupersede-${storyStem}-edge`)).toHaveAttribute("data-state", "proposed");
     await expect(storyLines.getByTestId(`objsupersede-${storyStem}-carries`)).toContainText(`carries the replacement established by ${ci.establishing_successor} (`);
     await expectUnclipped(page, page.getByTestId(`card-${objectId(story.decision)}`));
+    // The serving card's §6 elements, with the conflict linked, for the
+    // per-branch comparison below.
+    const servingCard = page.getByTestId(refCardTestId(story.object));
+    const servingFacts = await lineFacts(servingCard);
+    expect(servingFacts.length).toBeGreaterThan(0);
+    await expect(servingCard.locator('a[href^="/a/"]')).toHaveCount(1);
 
     // The same store's /b/main board: the default-branch board of the
     // establishing successor, where no corpus page is provably served for
-    // a per-branch tree, so the conflict carries no link.
+    // a per-branch tree, so the conflict carries no link — but stays as
+    // text (SI-280 as amended): the card's elements, states and text
+    // equal the serving card's exactly, with zero /a/ hrefs.
     expect(ci.boards.main.url).not.toBe("");
     await page.goto(ci.boards.main.url);
     await expectSuperseded(page, story, `#obj-${objectId(story.establishing_decision)}`, null);
+    const branchCard = page.getByTestId(refCardTestId(story.object));
+    expect(await lineFacts(branchCard)).toEqual(servingFacts);
+    await expect(branchCard.locator('a[href^="/a/"]')).toHaveCount(0);
   });
 
   test("a decision card wearing a wall badge keeps the badge row off its lines (constraint-target)", async ({ page }) => {
