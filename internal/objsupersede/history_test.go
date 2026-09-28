@@ -231,6 +231,7 @@ func TestEvaluate_EveryScenario(t *testing.T) {
 		"conflict-open":         {"successor", "dc-1 unresolved/conflict-not-superseded" + refusal1},
 		"conflict-spans-specs":  {"successor", "dc-1 unresolved/conflict-spans-specs, dc-2 unresolved/conflict-spans-specs"},
 		"constraint-target":     {"successor", "dc-1 unresolved/object-not-criterion-or-decision" + refusal1},
+		"feature-criterion":     {"successor", happy + ", dc-3 " + newE},
 		"feature-fragment-link": {"successor", happy},
 		"ff-landing":            {"successor", happy},
 		"no-conflict":           {"successor", "dc-1 unresolved/no-conflict" + refusal1},

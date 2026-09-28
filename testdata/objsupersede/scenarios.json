@@ -366,6 +366,27 @@
         }
       ]
     },
+    "feature-criterion": {
+      "checkout": "main",
+      "steps": [
+        {
+          "branch": "design/successor",
+          "date": "2024-02-01T09:00:00Z",
+          "layers": [
+            "successor-sibling",
+            "conflict-feature-unmatched",
+            "conflict-story"
+          ],
+          "message": "Propose spec/successor"
+        },
+        {
+          "branch": "main",
+          "date": "2024-02-15T09:00:00Z",
+          "merge": "design/successor",
+          "message": "Accept spec/successor"
+        }
+      ]
+    },
     "feature-fragment-link": {
       "checkout": "design/successor",
       "steps": [

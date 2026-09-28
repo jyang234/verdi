@@ -73,6 +73,39 @@ var objSupersedeGolden = map[string]string{
     "spec/successor": "{docs}a/spec/successor/document/"
   }
 }`,
+	"feature-criterion": `{
+  "scenario": "feature-criterion", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
+  "checkout": "main", "main_branch": "main", "design_branch": "design/successor",
+  "successor": "spec/successor", "establishing_successor": "spec/successor",
+  "conflicts": ["conflict/successor-closed-feature", "conflict/successor-closed-story"],
+  "supersessions": [
+    {"object": "spec/closed-feature#ac-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#ac-1",
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor#dc-3", "decision_docs_url": "{docs}a/spec/successor/document/#dc-3",
+     "establishing_decision": "spec/successor#dc-3", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-3",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
+    {"object": "spec/closed-feature#dc-1", "object_docs_url": "{docs}a/spec/closed-feature/document/#dc-1",
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor#dc-1", "decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "establishing_decision": "spec/successor#dc-1", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-1",
+     "conflict": "conflict/successor-closed-feature", "conflict_docs_url": "{docs}a/conflict/successor-closed-feature/"},
+    {"object": "spec/closed-story#ac-1", "object_docs_url": "{docs}a/spec/closed-story/document/#ac-1",
+     "object_board": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+     "decision": "spec/successor#dc-2", "decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "establishing_decision": "spec/successor#dc-2", "establishing_decision_docs_url": "{docs}a/spec/successor/document/#dc-2",
+     "conflict": "conflict/successor-closed-story", "conflict_docs_url": "{docs}a/conflict/successor-closed-story/"}
+  ],
+  "boards": {
+    "checkout": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""},
+    "design": {"branch": "design/successor", "spec": "spec/successor", "url": "{url}b/design%2Fsuccessor/board/spec/successor", "not_a_surface": ""},
+    "main": {"branch": "main", "spec": "spec/successor", "url": "{url}board/spec/successor", "not_a_surface": ""}
+  },
+  "docs": {
+    "spec/closed-feature": "{docs}a/spec/closed-feature/document/",
+    "spec/closed-story": "{docs}a/spec/closed-story/document/",
+    "spec/successor": "{docs}a/spec/successor/document/"
+  }
+}`,
 	"chain": `{
   "scenario": "chain", "url": "{url}", "docs_url": "{docs}", "docs_commit": "{docs_commit}",
   "checkout": "main", "main_branch": "main", "design_branch": "design/successor-v3",
@@ -473,7 +506,7 @@ func TestControlServer_WiresObjSupersedeFixture(t *testing.T) {
 // — each store's checkout read from the committed manifest, the URLs and
 // commit passed as the golden's own placeholders — and pins that the
 // provisioned store list, the facts table, and the golden name the same
-// six stores. Negative: an unknown store has no facts.
+// eight stores. Negative: an unknown store has no facts.
 func TestObjSupersedeStoreInfo_MatchesGolden(t *testing.T) {
 	m, err := scenario.Load(filepath.Join(testModuleRoot, "testdata", "objsupersede"))
 	if err != nil {
@@ -491,7 +524,7 @@ func TestObjSupersedeStoreInfo_MatchesGolden(t *testing.T) {
 	sort.Strings(facts)
 	sort.Strings(stores)
 	if !reflect.DeepEqual(stores, golden) || !reflect.DeepEqual(facts, golden) {
-		t.Fatalf("stores %v, facts %v, golden %v: want the same six", stores, facts, golden)
+		t.Fatalf("stores %v, facts %v, golden %v: want the same eight", stores, facts, golden)
 	}
 	for _, name := range objSupersedeStores {
 		info, err := newObjSupersedeStoreInfo(name, m.Scenarios[name].Checkout, m.Commit.InitialBranch, "{docs_commit}", "{url}", "{docs}")
@@ -868,7 +901,7 @@ func TestObjSupersedeFixture_HermeticServeEnv(t *testing.T) {
 }
 
 // TestObjSupersedeFixture_Handler_Happy is the real witness through the
-// SHIPPED binary: the handler materializes all six scenario stores, builds
+// SHIPPED binary: the handler materializes all eight scenario stores, builds
 // each one's docs site from main, and serves each board, and then —
 //
 //   - the body matches the golden contract exactly (keys and values);
@@ -1275,8 +1308,9 @@ func checkObjSupersedeDocs(t *testing.T, got objSupersedeStoreInfo) {
 // scenario lints clean in-process — the same call `verdi lint` makes
 // (cmd/verdi/lint.go) — and, as the negative control that proves the call
 // sees the store at all (review M-1), a refusal scenario lints dirty with
-// VL-026. The six are align non-resolutions at most (no-conflict,
-// chain-not-in-force), never lint refusals: VL-026 checks shape only.
+// VL-026. The other stores are align non-resolutions at most (no-conflict,
+// chain-not-in-force), never lint refusals: VL-026 checks shape only;
+// constraint-target alone is a served lint refusal (below).
 func TestObjSupersedeStores_LintClean(t *testing.T) {
 	ctx := context.Background()
 	rows := map[string][]string{"top-level-supersedes": {"VL-026"}}

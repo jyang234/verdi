@@ -708,6 +708,12 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"", "successor#dc-1", "supersedes spec/closed-feature#dc-1"},
 			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
 		}},
+		{"a closed feature's criterion superseded in force", "feature-criterion", "", []look{
+			{"closed-feature#ac-1", "", govF + "superseded since 2024-02-15 by spec/successor#dc-3"},
+			{"closed-feature#dc-1", "", govF + byF},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-3", "supersedes spec/closed-feature#ac-1"},
+		}},
 		{"carried through two revisions", "chain", "", []look{
 			{"closed-feature#dc-1", "", govF + byF + " | carried by spec/successor-v3"},
 			{"closed-story#ac-1", "", govS + byS + " | carried by spec/successor-v3"},
