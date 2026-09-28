@@ -499,6 +499,110 @@ func commitAt(t *testing.T, dir, date, path, content string) string {
 	return gitOut(t, dir, "rev-parse", "HEAD")
 }
 
+// TestHistory_EstablishmentReadings pins SI-281's readings on real git
+// history (lane L6 review M-5): (2) two successors whose matches first hold
+// at one commit are each acceptance unproven; (3) a commit where the
+// successor issues no replacement of T (a skeleton landed first) is not
+// its point; (4) a commit before the point whose records cannot be decoded
+// or read leaves the establishment unproven for good, although the head
+// decodes; and a shallow clone proves no establishment.
+func TestHistory_EstablishmentReadings(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	tie := scenario.Build(t, "same-commit-tie")
+	skel := scenario.Build(t, "skeleton-landing")
+	undecodable := scenario.Build(t, "undecodable-before-point")
+	unreadable := scenario.Build(t, "skeleton-landing")
+	// Drop the skeleton's spec blob: only the skeleton commit, before the
+	// point, holds it, so that commit's records cannot be read.
+	oid := gitOut(t, unreadable.Dir, "rev-parse", unreadable.Steps[0]+":.verdi/specs/active/successor/spec.md")
+	if err := os.Remove(filepath.Join(unreadable.Dir, ".git", "objects", oid[:2], oid[2:])); err != nil {
+		t.Fatal(err)
+	}
+	shallow := fixturegit.ShallowClone(t, &fixturegit.Repo{Dir: scenario.Build(t, "ff-landing").Dir}, 1)
+	feature, story := obj("closed-feature", "dc-1"), obj("closed-story", "ac-1")
+	tied := func(a, b string) Establishment {
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: "spec/" + a + " and spec/" + b + " first match for spec/closed-feature#dc-1 at the same commit " + tie.Steps[1] + ", so neither takes effect before the other"}
+	}
+	unprovenBy := func(detail string) Establishment {
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: detail}
+	}
+	tests := []struct {
+		name, dir, successor string
+		object               artifact.Ref
+		want                 Establishment // Detail: its required prefix
+	}{
+		{"R2: two successors first match at one commit", tie.Dir, "successor", feature, tied("successor", "unrelated")},
+		{"R2: asked of the other", tie.Dir, "unrelated", feature, tied("unrelated", "successor")},
+		{"R2: an object only one of them supersedes is in force", tie.Dir, "successor", story, Establishment{Commit: tie.Steps[1], Date: "2024-02-15"}},
+		{"R3: a skeleton landed first is not the point", skel.Dir, "successor", feature, Establishment{Commit: skel.Steps[1], Date: "2024-02-10"}},
+		{"R3: the criterion, at the same point", skel.Dir, "successor", story, Establishment{Commit: skel.Steps[1], Date: "2024-02-10"}},
+		{"R4: records that do not decode before the point", undecodable.Dir, "successor", feature,
+			unprovenBy("records do not decode at commit " + shortCommit(undecodable.Steps[0]) + ": .verdi/conflicts/broken.md: ")},
+		{"R4: every object of the walk", undecodable.Dir, "successor", story,
+			unprovenBy("records do not decode at commit " + shortCommit(undecodable.Steps[0]) + ": .verdi/conflicts/broken.md: ")},
+		{"R4: an unreadable commit before the point", unreadable.Dir, "successor", feature,
+			unprovenBy("the records at commit " + shortCommit(unreadable.Steps[0]) + " cannot be read: objsupersede: reading .verdi/specs/active/successor/spec.md: ")},
+		{"a shallow clone proves no establishment", shallow, "successor", feature, unprovenBy("shallow history: the first-parent chain of origin/main is incomplete")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NewHistory(ctx, tc.dir).Establishment(ctx, tc.successor, tc.object)
+			if got.Reason != tc.want.Reason || got.Commit != tc.want.Commit || got.Date != tc.want.Date ||
+				!strings.HasPrefix(got.Detail, tc.want.Detail) || (tc.want.Detail == "") != (got.Detail == "") {
+				t.Fatalf("got  %+v\nwant %+v (Detail as a prefix)", got, tc.want)
+			}
+		})
+	}
+	// The head decodes: the unproven establishment is the history's, not
+	// the head's records (SI-281(4)), and acceptance is where the spec
+	// first lands, the skeleton.
+	if recs := mustRead(t, WorkTree{Root: undecodable.Dir}); len(recs.Failures) != 0 {
+		t.Fatalf("the head's records fail to decode: %v", recs.Failures)
+	}
+	if got := NewHistory(ctx, skel.Dir).Acceptance(ctx, "successor"); got != (Fact{State: FactProven, Commit: skel.Steps[0], Date: "2024-02-01"}) {
+		t.Fatalf("acceptance %+v, want the skeleton's commit", got)
+	}
+}
+
+// TestHistory_Position pins walkSource's order over the pinned default
+// branch: a first-parent commit that changes a record has a position, a
+// later one a larger one; a zero History, an unresolved default branch,
+// and a commit off the first-parent chain (a merged design-branch commit)
+// have none, each an error.
+func TestHistory_Position(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	unresolved := scenario.Build(t, "accepted")
+	gitIn(t, unresolved.Dir, "update-ref", "-d", "refs/remotes/origin/main")
+	h := NewHistory(ctx, repo.Dir)
+	base, err := h.position(ctx, repo.Base[1])
+	if err != nil {
+		t.Fatalf("position(base): %v", err)
+	}
+	merge, err := h.position(ctx, repo.Steps[1])
+	if err != nil || merge <= base {
+		t.Fatalf("position(merge) = %d, %v; want one after the base's %d", merge, err, base)
+	}
+	for _, tc := range []struct {
+		name   string
+		h      History
+		commit string
+		want   string
+	}{
+		{"a zero History", History{}, repo.Steps[1], "a zero History has no first-parent order"},
+		{"no default branch", NewHistory(ctx, unresolved.Dir), unresolved.Steps[1], noBranch},
+		{"a design-branch commit merged by its second parent", h, repo.Steps[0], "commit " + repo.Steps[0] + " is not on origin/main's first-parent chain of store records"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if p, err := tc.h.position(ctx, tc.commit); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("position = %d, %v; want an error containing %q", p, err, tc.want)
+			}
+		})
+	}
+}
+
 // TestHistory_Err pins how a defect in the acceptance walk's own
 // computation leaves History: the establishment it affected reads
 // acceptance unproven, never a pass, and Err reports the defect so align
