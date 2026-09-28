@@ -499,6 +499,49 @@ func commitAt(t *testing.T, dir, date, path, content string) string {
 	return gitOut(t, dir, "rev-parse", "HEAD")
 }
 
+// TestHistory_Err pins how a defect in the acceptance walk's own
+// computation leaves History: the establishment it affected reads
+// acceptance unproven, never a pass, and Err reports the defect so align
+// and the gate surface it as an operational error (lane L6 review M-4). A
+// History with no defect, zero or queried, reports none.
+func TestHistory_Err(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "accepted")
+	o := obj("closed-feature", "dc-1")
+	for _, tc := range []struct {
+		name   string
+		h      func() History
+		defect string // "": none
+	}{
+		{"a zero History", func() History { return History{} }, ""},
+		{"a History never queried", func() History { return NewHistory(ctx, repo.Dir) }, ""},
+		{"a History whose establishments are proven", func() History {
+			h := NewHistory(ctx, repo.Dir)
+			if got := h.Establishment(ctx, "successor", o); got.Reason != "" {
+				t.Fatalf("establishment %+v, want in force", got)
+			}
+			return h
+		}, ""},
+		{"a walk re-entered at the commit it is evaluating", func() History {
+			h := NewHistory(ctx, repo.Dir)
+			h.cache.eng = newEngine(h)
+			h.cache.eng.walkOf(ctx, "successor", "closed-feature").busy = true
+			if got := h.Establishment(ctx, "successor", o); got.Reason != ReasonAcceptanceUnproven {
+				t.Fatalf("establishment %+v, want acceptance unproven", got)
+			}
+			return h
+		}, "spec/successor's walk for spec/closed-feature was re-entered at "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.h().Err()
+			if (tc.defect == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.defect)) {
+				t.Fatalf("Err() = %v, want a defect containing %q", err, tc.defect)
+			}
+		})
+	}
+}
+
 // TestHistory_EstablishmentBelowGitRoot pins that a store below the git
 // root reads its acceptance commit's own records (lane L3 re-review a I-A),
 // never "not in its acceptance commit's tree".

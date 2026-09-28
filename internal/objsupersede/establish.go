@@ -180,8 +180,10 @@ func (e *engine) walkOf(ctx context.Context, successor, closed string) *walkStat
 }
 
 // list returns the (spec, closed) walk list with its commits' positions,
-// read once; a list that does not start at its first commit or whose
-// positions do not increase is unproven.
+// read once. A position that cannot be read leaves it unproven; a list
+// that breaks walkSource's contract (it does not start at its first
+// commit, or its positions do not increase) is this package's defect,
+// recorded, and unproven.
 func (e *engine) list(ctx context.Context, spec, closed string) walkList {
 	key := spec + "\x00" + closed
 	if l, ok := e.lists[key]; ok {
@@ -189,9 +191,14 @@ func (e *engine) list(ctx context.Context, spec, closed string) walkList {
 	}
 	commits, f := e.src.walk(ctx, spec, closed)
 	l := walkList{commits: commits, fact: e.known(f, fmt.Sprintf("spec/%s's acceptance", spec))}
+	broken := func(format string, args ...any) Fact {
+		err := fmt.Errorf("objsupersede: spec/%s's walk for spec/%s "+format, append([]any{spec, closed}, args...)...)
+		e.defect(err)
+		return unproven(err.Error())
+	}
 	if l.fact.State == FactProven {
 		if len(commits) == 0 || commits[0] != l.fact.Commit {
-			l.fact = unproven(fmt.Sprintf("spec/%s's walk does not start at the commit that first holds it", spec))
+			l.fact = broken("does not start at the commit that first holds it")
 		}
 		for i := 0; l.fact.State == FactProven && i < len(commits); i++ {
 			p, err := e.src.position(ctx, commits[i])
@@ -199,7 +206,7 @@ func (e *engine) list(ctx context.Context, spec, closed string) walkList {
 			case err != nil:
 				l.fact = unproven(err.Error())
 			case i > 0 && p <= l.pos[i-1]:
-				l.fact = unproven(fmt.Sprintf("spec/%s's walk is not in first-parent order at %s", spec, commits[i]))
+				l.fact = broken("is not in first-parent order at %s", commits[i])
 			}
 			l.pos = append(l.pos, p)
 		}
@@ -285,8 +292,10 @@ func (e *engine) answer(ctx context.Context, w *walkState, i int, object artifac
 	case w.evals[i].state != evalHolds && reason != ReasonEstablisherNotInForce:
 		// The match failed definitely at i, so object's answer there must
 		// be a definite failure; anything else is this package's defect,
-		// reported rather than passed.
-		a = Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's evaluation of %s at %s is inconsistent", w.successor, object, commit)}
+		// recorded and reported rather than passed.
+		err := fmt.Errorf("objsupersede: spec/%s's evaluation of %s at %s is inconsistent", w.successor, object, commit)
+		e.defect(err)
+		a = Establishment{Reason: ReasonAcceptanceUnproven, Detail: err.Error()}
 	case reason == ReasonEstablisherNotInForce:
 		a = Establishment{Reason: reason, Detail: fmt.Sprintf("as of commit %s, %s", shortCommit(commit), detail)}
 	case reason != "":

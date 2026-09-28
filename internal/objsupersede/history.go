@@ -304,6 +304,26 @@ func (h History) Establishment(ctx context.Context, successor string, object art
 	return h.cache.eng.establishment(ctx, successor, object)
 }
 
+// Err returns the first defect the acceptance walk found in this
+// package's own computation over h (a walk re-entered at a commit it is
+// evaluating, an evaluation inconsistent with its answer, a walk that
+// breaks its source's contract, a history answer outside FactState), or
+// nil. The establishment a defect affected reads acceptance unproven,
+// never a pass; a caller that reports a verdict from h's establishments
+// surfaces Err as an operational error instead (lane L6 review M-4). A
+// zero History keeps no engine and reports nil.
+func (h History) Err() error {
+	if h.cache == nil {
+		return nil
+	}
+	h.cache.engMu.Lock()
+	defer h.cache.engMu.Unlock()
+	if h.cache.eng == nil {
+		return nil
+	}
+	return h.cache.eng.err
+}
+
 // recordsAt implements walkSource: the records of commit's tree in h's
 // repository.
 func (h History) recordsAt(ctx context.Context, commit string) (*Records, error) {

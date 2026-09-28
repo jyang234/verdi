@@ -68,6 +68,61 @@ func (f *fakeEstablisher) Establishment(context.Context, string, artifact.Ref) o
 	return objsupersede.Establishment{Commit: "c0ffee", Date: "2024-02-15"}
 }
 
+// defectEstablisher answers every establishment acceptance unproven, as
+// objsupersede.History does when its acceptance walk finds a defect in its
+// own computation, and reports that defect through Err (nil: none).
+type defectEstablisher struct{ err error }
+
+func (d defectEstablisher) Establishment(context.Context, string, artifact.Ref) objsupersede.Establishment {
+	return objsupersede.Establishment{Reason: objsupersede.ReasonAcceptanceUnproven, Detail: "objsupersede: a defect"}
+}
+
+func (d defectEstablisher) Err() error { return d.err }
+
+// TestComputeDecisionEdges_EstablisherDefect pins that a defect the
+// establisher reports in its own computation (objsupersede.History.Err: a
+// re-entered walk, an inconsistent evaluation) is an operational error,
+// never a computed finding reading "acceptance unproven", so neither
+// `verdi align` nor `verdi gate` reports it as a verdict (lane L6 review
+// M-4); an establisher reporting none computes the findings as before.
+func TestComputeDecisionEdges_EstablisherDefect(t *testing.T) {
+	root := t.TempDir()
+	closed, err := os.ReadFile(filepath.Join(scenario.Dir(), "records", "specs", "closed-feature.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTreeFile(t, root, ".verdi/specs/archive/closed-feature/spec.md", string(closed))
+	decisions := "decisions:\n  - { id: dc-1, text: \"a\", anchor: \"#dc-1\", links: [ { type: supersedes, ref: \"spec/closed-feature#dc-1\" } ] }\n"
+	head := "kind: spec\nclass: feature\nstatus: draft\nowners: [platform-team]\nacceptance_criteria:\n  - { id: ac-1, text: \"t\", evidence: [static] }\n"
+	writeTreeFile(t, root, ".verdi/specs/active/s1/spec.md", "---\nid: spec/s1\ntitle: \"s1\"\n"+head+decisions+"---\nbody\n")
+	writeTreeFile(t, root, ".verdi/specs/active/s2/spec.md", "---\nid: spec/s2\ntitle: \"s2\"\n"+head+decisions+
+		"links:\n  - { type: supersedes, ref: \"spec/s1\" }\nsupersession:\n  carried: [ac-1, dc-1]\n---\nbody\n")
+	writeTreeFile(t, root, ".verdi/conflicts/c1.md", "---\nid: conflict/c1\nkind: conflict\ntitle: \"c1\"\nowners: [platform-team]\nstatus: superseded\nresolved_by: spec/s1\n"+
+		"links:\n  - { type: challenges, ref: \"spec/closed-feature#dc-1\" }\nfrozen: { at: 2024-02-01, commit: d49dd630388ff05fe4cd7d4084c785045ba15689 }\n---\nbody\n")
+	tests := []struct {
+		name    string
+		est     defectEstablisher
+		wantErr string // "": the findings compute
+	}{
+		{"a defect is an operational error", defectEstablisher{err: errors.New("objsupersede: spec/s1's walk for spec/closed-feature was re-entered at c1")}, "was re-entered at c1"},
+		{"no defect: the findings compute", defectEstablisher{}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ComputeDecisionEdges(context.Background(), objsupersede.WorkTree{Root: root}, "s2", tc.est)
+			if tc.wantErr == "" {
+				if err != nil || len(got) != 1 || !strings.HasPrefix(got[0].Text, "acceptance unproven: ") {
+					t.Fatalf("got %+v, %v; want one unresolved finding and no error", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || errors.Is(err, ErrSpecNotInTree) || got != nil {
+				t.Fatalf("got %+v, %v; want an operational error containing %q", got, err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func computeEdges(t *testing.T, tr objsupersede.TreeReader, spec string, est objsupersede.Establisher) []artifact.ConflictFinding {
 	t.Helper()
 	findings, err := ComputeDecisionEdges(context.Background(), tr, spec, est)

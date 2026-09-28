@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -167,11 +168,6 @@ func TestEngine_Establishment(t *testing.T) {
 			f.facts["s1"] = unproven("shallow history")
 			return f
 		}, "s1", vo, unprovenBy("shallow history")},
-		{"a walk that does not start where the spec lands", func() *fakeWalk {
-			f := walkOver(specOnly(), full())
-			f.facts["s1"] = Fact{State: FactProven, Commit: "c2"}
-			return f
-		}, "s1", vo, unprovenBy("spec/s1's walk does not start at the commit that first holds it")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -312,30 +308,51 @@ func TestEngine_ConditionFiveAsOfCommit(t *testing.T) {
 	}
 }
 
-// TestEngine_FailsClosed pins the walk's defensive answers: a walk whose
-// commits are not in first-parent order or have no position is unproven,
-// and a walk re-entered at a commit it is evaluating is acceptance
-// unproven and recorded as the engine's error, never a guessed answer.
+// TestEngine_FailsClosed pins the walk's defensive answers: every one is
+// acceptance unproven, never a guessed answer. A commit with no position
+// is a history fact (the order could not be read); a walk that breaks the
+// walk source's contract (not starting where the spec lands, not in
+// first-parent order), a walk re-entered at a commit it is evaluating, or
+// an evaluation inconsistent with its answer is this package's defect,
+// also recorded as the engine's error, which History.Err and NewIndex
+// surface as an operational error (lane L6 review M-4).
 func TestEngine_FailsClosed(t *testing.T) {
 	ctx := context.Background()
 	full := func() *Records {
 		return mRecs([]*Conflict{mConflict("c1", "s1", vo)}, mSpec("s1", nil, mDec("dc-1", vo)))
 	}
 	for _, tc := range []struct {
-		name string
-		list []string
-		want string
+		name   string
+		list   []string
+		first  string // the walk's fact's commit; "" is the list's first
+		want   string
+		defect bool
 	}{
-		{"out of first-parent order", []string{"c2", "c1"}, "spec/s1's walk is not in first-parent order at c1"},
-		{"a commit with no position", []string{"c1", "cx"}, "no position for cx"},
+		{"out of first-parent order", []string{"c2", "c1"}, "", "spec/s1's walk for spec/t is not in first-parent order at c1", true},
+		{"a walk that does not start where the spec lands", []string{"c1", "c2"}, "c2", "spec/s1's walk for spec/t does not start at the commit that first holds it", true},
+		{"a commit with no position", []string{"c1", "cx"}, "", "no position for cx", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := storeOf(map[string][]string{"s1": tc.list}, full(), full())
-			if got := newEngine(f).establishment(ctx, "s1", obj("t", "dc-1")); got != (Establishment{Reason: ReasonAcceptanceUnproven, Detail: tc.want}) {
-				t.Fatalf("got %+v, want acceptance unproven: %s", got, tc.want)
+			if tc.first != "" {
+				f.facts["s1"] = Fact{State: FactProven, Commit: tc.first}
+			}
+			e := newEngine(f)
+			got := e.establishment(ctx, "s1", obj("t", "dc-1"))
+			if got.Reason != ReasonAcceptanceUnproven || !strings.HasSuffix(got.Detail, tc.want) || (e.err != nil) != tc.defect {
+				t.Fatalf("got %+v, engine error %v; want acceptance unproven ending %q, defect recorded %v", got, e.err, tc.want, tc.defect)
 			}
 		})
 	}
+	t.Run("an evaluation inconsistent with its answer", func(t *testing.T) {
+		e := newEngine(walkOver(full()))
+		w := e.walkOf(ctx, "s1", "t")
+		w.evals = []evaluation{{state: evalFails}} // the records at c1 match: a failed evaluation there is inconsistent
+		got := e.answer(ctx, w, 0, obj("t", "dc-1"))
+		if got.Reason != ReasonAcceptanceUnproven || !strings.Contains(got.Detail, "inconsistent") || e.err == nil {
+			t.Fatalf("got %+v, engine error %v; want acceptance unproven and the defect recorded", got, e.err)
+		}
+	})
 	t.Run("a walk re-entered at the commit it is evaluating", func(t *testing.T) {
 		e := newEngine(walkOver(full()))
 		e.walkOf(ctx, "s1", "t").busy = true
