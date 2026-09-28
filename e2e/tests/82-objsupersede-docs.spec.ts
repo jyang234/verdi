@@ -15,7 +15,7 @@ import { CONTROL_URL } from "./fixtures";
 // not established: <reason>" on the successor's decision, never as a
 // supersession.
 //
-// Every store is one of the seven scenario repositories the control server
+// Every store is one of the eight scenario repositories the control server
 // provisions on demand (cmd/e2eharness/objsupersedefixture.go, lane L3d):
 // each with its own `verdi serve` and a docs site built from main. The
 // fixture JSON hands out every URL; nothing here composes one. Assertions
@@ -65,7 +65,7 @@ interface Fixture {
   stores: Record<string, Store>;
 }
 
-// The first GET builds the verdi binary and provisions seven stores (each a
+// The first GET builds the verdi binary and provisions eight stores (each a
 // materialized repository, a docs build, and a serve) — tens of seconds
 // cold — so warm the fixture ONCE under its own allowance, the pattern
 // 49-readiness-pilot.spec.ts uses; every test then finds it up.
