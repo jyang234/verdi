@@ -93,8 +93,11 @@ established the supersession of T's object o.
 - **Before acceptance** the supersession is proposed. The default branch's records and surfaces are unchanged. On the successor's
   design branch its decision shows the edge as proposed, taking effect when the successor is accepted. A proposed successor never
   presents a closed spec's object as superseded.
-- **In force** from the merge that accepts the successor, provided the records match at that commit (§3). The date shown is that
-  merge's date.
+- **In force** from the acceptance point: the earliest first-parent commit of the default branch at which the successor is present
+  and the records match (§3). For a merge-commit or squash landing that is the merge that accepts the successor; for a
+  fast-forward or rebase landing, the landed commit that completes the records; a later commit that completes records left
+  unmatched at acceptance puts the supersession in force from that commit. The date shown is that commit's date. (Amended
+  2026-09-28, owner ruling N-1; ledger SI-270 as amended, SI-281.)
 - **Permanent.** A later revision of the successor (whole-spec supersession) does not reinstate the object; it carries the
   replacement under the original conflict and date, amends it under the amendment ladder, or drops it (§3, SI-265). Replacing the
   object with something else is an amendment of the standing successor's decision, never a second challenge against the closed
