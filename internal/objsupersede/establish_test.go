@@ -409,3 +409,51 @@ func TestShortCommit(t *testing.T) {
 		}
 	}
 }
+
+// ask is one question of an ordered sequence asked of one engine or
+// History, and its answer.
+type ask struct {
+	successor string
+	object    artifact.Ref
+	want      Establishment
+}
+
+// TestEngine_ListsPerClosedSpec pins the engine's walk-list memo per
+// (successor, closed spec) (SI-281's walk set; lane L6 closure m-1): one
+// engine asked first about a closed spec whose walk is short must still
+// read the other closed spec's own, longer walk, never reuse the first.
+func TestEngine_ListsPerClosedSpec(t *testing.T) {
+	ctx := context.Background()
+	const uo = "spec/u#dc-1"
+	// s1 supersedes t#dc-1 and u#dc-1, each with its own conflict; t is
+	// closed only at c2, so (s1, t)'s match first holds there, while
+	// (s1, u)'s walk is c1 alone.
+	recs := func(tClosed bool) *Records {
+		r := mRecs([]*Conflict{mConflict("ct", "s1", vo), mConflict("cu", "s1", uo)}, mSpec("s1", nil, mDec("dc-1", vo), mDec("dc-2", uo)))
+		r.Specs["t"].Archived = tClosed
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		f    func() *fakeWalk
+		asks []ask
+	}{
+		{"the short walk asked first", func() *fakeWalk {
+			f := walkOver(recs(false), recs(true))
+			f.pairs["s1 u"], f.pairs["s1 t"] = []string{"c1"}, []string{"c1", "c2"}
+			return f
+		}, []ask{
+			{"s1", obj("u", "dc-1"), Establishment{Commit: "c1", Date: "2024-02-11"}},
+			{"s1", obj("t", "dc-1"), Establishment{Commit: "c2", Date: "2024-02-12"}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEngine(tc.f())
+			for _, a := range tc.asks {
+				if got := e.establishment(ctx, a.successor, a.object); got != a.want {
+					t.Fatalf("spec/%s, %s: got %+v, want %+v", a.successor, a.object, got, a.want)
+				}
+			}
+		})
+	}
+}

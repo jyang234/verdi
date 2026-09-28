@@ -477,6 +477,36 @@ func atSteps(repo *scenario.Repo, s string) string {
 	return s
 }
 
+// TestHistory_WalksPerClosedSpec pins History's walk memo per (successor,
+// closed spec) (SI-281's walk set; lane L6 closure m-1): one History asked
+// first about the closed story, whose walk never visits spec/other-feature's
+// archive commit, must still walk spec/other-feature's own paths, so that
+// supersession is in force from its archive commit (2024-03-01), never from
+// the later conflict filing (2024-03-10) the shorter walk reaches.
+func TestHistory_WalksPerClosedSpec(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "late-close-then-conflict")
+	for _, tc := range []struct {
+		name string
+		asks []ask
+	}{
+		{"the closed story asked first", []ask{
+			{"successor", obj("closed-story", "ac-1"), Establishment{Commit: repo.Steps[1], Date: "2024-02-15"}},
+			{"successor", obj("other-feature", "dc-1"), Establishment{Commit: repo.Steps[2], Date: "2024-03-01"}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHistory(ctx, repo.Dir)
+			for _, a := range tc.asks {
+				if got := h.Establishment(ctx, a.successor, a.object); got != a.want {
+					t.Fatalf("spec/%s, %s: got %+v, want %+v", a.successor, a.object, got, a.want)
+				}
+			}
+		})
+	}
+}
+
 // commitAt writes path on the checked-out branch, commits it with author
 // and committer date date, points origin/main at main, and returns the
 // commit.
