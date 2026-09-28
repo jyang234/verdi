@@ -47,13 +47,16 @@ type History struct {
 	cache  *historyCache
 }
 
-// historyCache is a History's memo: each spec's walk list, and the engine
-// that answers its establishments (per (S_k, T, head), SI-270 as amended).
+// historyCache is a History's memo: each spec's walk list, the positions
+// of the store's first-parent commits, and the engine that answers its
+// establishments (per (S_k, T, head), SI-270 as amended).
 type historyCache struct {
-	mu    sync.Mutex // guards walks
-	walks map[string]walkList
-	engMu sync.Mutex // serializes Establishment over eng
-	eng   *engine
+	mu     sync.Mutex // guards walks and order
+	walks  map[string]walkList
+	order  map[string]int // nil until read
+	orderF Fact           // unproven when order cannot be read
+	engMu  sync.Mutex     // serializes Establishment over eng
+	eng    *engine
 }
 
 // NewHistory resolves root's default branch and pins its commit. An
@@ -138,6 +141,47 @@ func (h History) readWalk(ctx context.Context, spec string) ([]string, Fact) {
 		return nil, unproven(fmt.Sprintf("the commit %s that first holds spec/%s is missing from its walk", first, spec))
 	}
 	return all[i:], Fact{State: FactProven, Commit: first}
+}
+
+// position implements walkSource: commit's index among the pinned
+// commit's first-parent commits that change a spec or a conflict, the
+// commits every walk lists, oldest first; read once per History.
+func (h History) position(ctx context.Context, commit string) (int, error) {
+	if h.cache == nil {
+		return 0, fmt.Errorf("objsupersede: a zero History has no first-parent order")
+	}
+	h.cache.mu.Lock()
+	defer h.cache.mu.Unlock()
+	if h.cache.order == nil && h.cache.orderF.State == "" {
+		h.cache.order, h.cache.orderF = h.readOrder(ctx)
+	}
+	if h.cache.orderF.State == FactUnproven {
+		return 0, errors.New(h.cache.orderF.Witness)
+	}
+	p, ok := h.cache.order[commit]
+	if !ok {
+		return 0, fmt.Errorf("objsupersede: commit %s is not on %s's first-parent chain of store records", commit, h.branch.Ref)
+	}
+	return p, nil
+}
+
+// readOrder reads position's commits.
+func (h History) readOrder(ctx context.Context) (map[string]int, Fact) {
+	switch {
+	case !h.ok:
+		return nil, unproven(noBranch)
+	case h.unread != "":
+		return nil, unproven(h.unread)
+	}
+	commits, err := gitx.FirstParentPathCommits(ctx, h.root, h.head, specsDir, conflictsDir)
+	if err != nil {
+		return nil, h.historyError(err)
+	}
+	order := make(map[string]int, len(commits))
+	for i, c := range commits {
+		order[c] = i
+	}
+	return order, Fact{State: FactProven}
 }
 
 // firstHolding returns the first of commits whose tree holds any of paths,

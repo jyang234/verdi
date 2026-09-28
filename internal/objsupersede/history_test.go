@@ -237,6 +237,7 @@ func TestEvaluate_EveryScenario(t *testing.T) {
 		"proposed":              {"successor", happy},
 		"rebase-landing":        {"successor", happy},
 		"resolved-by-other":     {"successor", "dc-1 unresolved/resolved-by-other" + refusal1},
+		"stale-base":            {"unrelated", "dc-1 " + newE},
 		"target-not-closed":     {"successor", "dc-1 unresolved/target-not-closed" + refusal1},
 		"top-level-supersedes":  {"successor", "dc-2 " + newE},
 		"undeclared-object":     {"successor", "dc-1 unresolved/object-not-declared" + refusal1},
@@ -347,6 +348,56 @@ func TestHistory_EstablishmentCorrective(t *testing.T) {
 	}
 }
 
+// TestHistory_EstablishmentStaleBase is the whole-wave review's F-1
+// witness, rebuilt: in a conforming stale-base merge the successor's
+// supersession of the closed feature is never in force, and under SI-272
+// as amended it never refuses a later successor, which is in force once
+// accepted; the closed story's supersession, whose records matched, is.
+func TestHistory_EstablishmentStaleBase(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	repo := scenario.Build(t, "stale-base")
+	gap := Establishment{Reason: ReasonEstablisherNotInForce, Detail: "conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"}
+	story := Establishment{Commit: repo.Steps[3], Date: "2024-02-15"}
+	before := NewHistory(ctx, repo.Dir)
+	for _, tc := range []struct {
+		successor string
+		object    artifact.Ref
+		want      Establishment
+	}{
+		{"successor", obj("closed-feature", "dc-1"), gap},
+		{"successor", obj("closed-story", "ac-1"), story},
+		{"unrelated", obj("closed-feature", "dc-1"), Establishment{Reason: ReasonEstablisherNotAccepted}},
+	} {
+		if got := before.Establishment(ctx, tc.successor, tc.object); got != tc.want {
+			t.Errorf("before spec/unrelated is accepted: spec/%s, %s: got %+v, want %+v", tc.successor, tc.object, got, tc.want)
+		}
+	}
+	// Accept spec/unrelated with a merge commit.
+	gitIn(t, repo.Dir, "checkout", "-q", "main")
+	cmd := exec.Command("git", "-C", repo.Dir, "merge", "-q", "--no-ff", "--no-verify", "-m", "Accept spec/unrelated", "design/unrelated")
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2024-03-15T09:00:00Z", "GIT_COMMITTER_DATE=2024-03-15T09:00:00Z")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge: %v\n%s", err, out)
+	}
+	gitIn(t, repo.Dir, "update-ref", "refs/remotes/origin/main", "main")
+	accepted := gitOut(t, repo.Dir, "rev-parse", "main")
+	after := NewHistory(ctx, repo.Dir)
+	for _, tc := range []struct {
+		successor string
+		object    artifact.Ref
+		want      Establishment
+	}{
+		{"unrelated", obj("closed-feature", "dc-1"), Establishment{Commit: accepted, Date: "2024-03-15"}},
+		{"successor", obj("closed-feature", "dc-1"), gap},
+		{"successor", obj("closed-story", "ac-1"), story},
+	} {
+		if got := after.Establishment(ctx, tc.successor, tc.object); got != tc.want {
+			t.Errorf("after spec/unrelated is accepted: spec/%s, %s: got %+v, want %+v", tc.successor, tc.object, got, tc.want)
+		}
+	}
+}
+
 // commitAt writes path on the checked-out branch, commits it with author
 // and committer date date, points origin/main at main, and returns the
 // commit.
@@ -399,6 +450,8 @@ func TestEvaluate_Scenarios(t *testing.T) {
 		{"S1 was not in force for T at acceptance: a sibling edge had no conflict", "chain-not-in-force", "", "successor-v2", "dc-1", "spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
 		{"the same S1 was in force for another closed spec", "chain-not-in-force", "", "successor-v2", "dc-2", "carries the replacement established by spec/successor (conflict/successor-closed-story, since 2024-02-15)"},
 		{"unrelated reuse", "unrelated", "", "unrelated", "dc-1", "the object spec/closed-feature#dc-1 is already superseded by spec/successor (conflict/successor-closed-feature)"},
+		{"stale base: the successor's records match at its own head", "stale-base", "design/successor", "successor", "dc-1", "records match; takes effect when spec/successor is accepted"},
+		{"stale base: a successor not in force never refuses a later one (F-1)", "stale-base", "", "unrelated", "dc-1", "records match; takes effect when spec/unrelated is accepted"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -3,6 +3,7 @@ package objsupersede
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -28,9 +29,11 @@ type Result struct {
 	Detail      string // decode failures, a nested reason, or a missing witness
 }
 
-// Establisher answers whether an establishing successor's supersession of
-// object was in force at its acceptance, with that acceptance's date
-// (SI-270, SI-274(3)). History implements it.
+// Establisher answers whether a successor's supersession of object is in
+// force, with its acceptance point's date (SI-270 as amended, SI-274(3)):
+// Evaluate consults it for condition 5 (SI-272 as amended) and for a
+// carried candidate's establishing successor (SI-276). History implements
+// it, as the views' memo does, through one acceptance walk (establish.go).
 type Establisher interface {
 	Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment
 }
@@ -52,7 +55,9 @@ type Establishment struct {
 // completeness result per fragment that a superseded conflict naming spec
 // (resolved_by: spec/<spec>) challenges with no matching edge on spec.
 // ADR, whole-spec, and `exempts` edges are not this package's. est answers
-// a carried candidate's establishment. A spec absent from recs is an error.
+// condition 5 and a carried candidate's establishment from default-branch
+// history, so new-edge evaluation consults it too (SI-272 as amended). A
+// spec absent from recs is an error.
 func Evaluate(ctx context.Context, recs *Records, spec string, est Establisher) ([]Result, error) {
 	if recs == nil || est == nil {
 		return nil, fmt.Errorf("objsupersede: Evaluate needs records and an establisher")
@@ -83,7 +88,8 @@ func fragmentEdge(l artifact.Link) (artifact.Ref, bool) {
 
 // evaluateEdge applies SI-271's pin, SI-274(6), and design §5's ordered
 // conditions to one edge. allowCarried false evaluates the new-replacement
-// match only (SI-270's in-force check).
+// match only (the acceptance walk, establish.go). est answers condition 5
+// and, for a carried candidate, SI-276's establishment.
 func (recs *Records) evaluateEdge(ctx context.Context, s *Spec, decision, edge string, ref artifact.Ref, allowCarried bool, est Establisher) Result {
 	r := Result{Spec: s.Name, Decision: decision, Edge: edge, Outcome: Unresolved}
 	fail := func(reason Reason) Result { r.Reason = reason; return r }
@@ -108,9 +114,9 @@ func (recs *Records) evaluateEdge(ctx context.Context, s *Spec, decision, edge s
 
 	chain := recs.chain(s.Name)
 	if !allowCarried || !recs.carriedCandidate(chain, decision, ref) {
-		if c, x := recs.establishedByOther(ref, s.Name); c != nil {
-			r.Conflict, r.Other = c.Name, x
-			return fail(ReasonAlreadySuperseded)
+		if c, x, reason, detail := recs.establishedByOther(ctx, ref, s.Name, est); c != nil {
+			r.Conflict, r.Other, r.Detail = c.Name, x, detail
+			return fail(reason)
 		}
 		c, other, reason := recs.conflictFor(ref, s.Name)
 		if c != nil {
@@ -283,17 +289,57 @@ func (recs *Records) carriedCandidate(chain []string, decision string, object ar
 	return false
 }
 
-// establishedByOther is condition 5 (SI-272): a superseded conflict
-// challenging object names a spec X other than spec, and X exists in the
-// tree and carries, on a decision, an unpinned edge to object.
-func (recs *Records) establishedByOther(object artifact.Ref, spec string) (*Conflict, string) {
+// establishedByOther is condition 5 (SI-272 as amended after the
+// whole-wave review, F-1): a superseded conflict challenging object names
+// a spec X other than spec, X exists in the tree and carries, on a
+// decision, an unpinned edge to object, and X's supersession of object is
+// in force (est; SI-270 as amended). It returns the first such conflict
+// and X, in conflict order, with ReasonAlreadySuperseded; failing that,
+// the first whose establishment is unproven, with
+// ReasonAcceptanceUnproven and the witness (SI-274(3)), never a pass; and
+// otherwise nil: an X not in force refuses nothing.
+func (recs *Records) establishedByOther(ctx context.Context, object artifact.Ref, spec string, est Establisher) (*Conflict, string, Reason, string) {
+	var uc *Conflict
+	var ux, witness string
 	for _, c := range recs.challengers(object) {
 		x := resolvedBy(c)
-		if c.superseded() && x != "" && x != spec && recs.Specs[x] != nil && decisionEdge(recs.Specs[x].FM, "", object) {
-			return c, x
+		if !recs.rival(c, x, spec, object) {
+			continue
+		}
+		switch e := checked(x, est.Establishment(ctx, x, object)); e.Reason {
+		case "":
+			return c, x, ReasonAlreadySuperseded, ""
+		case ReasonAcceptanceUnproven:
+			if uc == nil {
+				uc, ux, witness = c, x, fmt.Sprintf("spec/%s's establishment: %s", x, e.Detail)
+			}
 		}
 	}
-	return nil, ""
+	if uc != nil {
+		return uc, ux, ReasonAcceptanceUnproven, witness
+	}
+	return nil, "", "", ""
+}
+
+// rival reports whether conflict c, which challenges object, makes x a
+// successor whose supersession of object could refuse spec's new
+// replacement (condition 5): c is superseded and names x, x is not spec,
+// and x is in the tree carrying, on a decision, an unpinned edge to
+// object.
+func (recs *Records) rival(c *Conflict, x, spec string, object artifact.Ref) bool {
+	return c.superseded() && x != "" && x != spec && recs.Specs[x] != nil && decisionEdge(recs.Specs[x].FM, "", object)
+}
+
+// rivals returns, in conflict order and once each, the successors whose
+// conflicts challenging object make them spec's rivals (rival).
+func (recs *Records) rivals(object artifact.Ref, spec string) []string {
+	var out []string
+	for _, c := range recs.challengers(object) {
+		if x := resolvedBy(c); recs.rival(c, x, spec, object) && !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // conflictFor applies conditions 6-8 and SI-274(1)-(2) for the successor

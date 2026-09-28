@@ -2,13 +2,14 @@ package objsupersede
 
 // The acceptance walk: the one computation of whether an establishing
 // successor's supersession of an object is in force, and since when
-// (SI-270 as amended after the whole-wave review, F-4; SI-274(3); SI-275).
-// History runs it for align and the gate, and the views' memo for the
-// docs site and the board, so neither re-derives it.
+// (SI-270 and SI-272 as amended after the whole-wave review, F-4 and F-1;
+// SI-274(3); SI-275). History runs it for align and the gate, and the
+// views' memo for the docs site and the board, so neither re-derives it.
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -24,6 +25,9 @@ type walkSource interface {
 	// spec; FactAbsent when it never did; and FactUnproven, with the
 	// witness, when that cannot be read.
 	walk(ctx context.Context, spec string) ([]string, Fact)
+	// position is a walked commit's place on the default branch's
+	// first-parent chain: a later commit has a larger position.
+	position(ctx context.Context, commit string) (int, error)
 	// recordsAt reads the records of commit's tree.
 	recordsAt(ctx context.Context, commit string) (*Records, error)
 	// dated is commit's committer date as a proven fact, or the witness.
@@ -32,21 +36,24 @@ type walkSource interface {
 
 // engine answers establishments over one default-branch head. It
 // memoizes each walk list per spec, each (successor, closed spec) walk
-// (SI-270's point is per (S_k, T)), each commit's records, and each
-// commit's date, so one engine reads each at most once. It is not safe for
-// concurrent use; History serializes its callers.
+// (SI-270's point is per (S_k, T)), each commit's records and date, and
+// each answer at a walked commit, so one engine reads each at most once.
+// It is not safe for concurrent use; History serializes its callers.
 type engine struct {
-	src   walkSource
-	lists map[string]walkList
-	walks map[string]*walkState
-	recs  map[string]recordsAt
-	dates map[string]Fact
-	err   error // the first history answer outside FactState
+	src     walkSource
+	lists   map[string]walkList
+	walks   map[string]*walkState
+	recs    map[string]recordsAt
+	dates   map[string]Fact
+	answers map[string]Establishment // per successor, object, and walked commit
+	err     error                    // the first history answer outside FactState, or a defect
 }
 
-// walkList is one spec's walk: its commits and their fact (walkSource).
+// walkList is one spec's walk (walkSource): its commits, their positions,
+// and their fact.
 type walkList struct {
 	commits []string
+	pos     []int
 	fact    Fact
 }
 
@@ -56,35 +63,73 @@ type recordsAt struct {
 	err  error
 }
 
-// walkState is one (successor, closed spec) walk, advanced lazily: the
-// commits before next are evaluated, and it stops at the first commit
-// where §3's match for (successor, closed) holds (held) or cannot be
-// proven (stopped).
+// walkState is one (successor, closed spec) walk, evaluated lazily and in
+// order: evals[i] is commit i's evaluation, and the walk ends at the first
+// commit where §3's match for (successor, closed) holds or cannot be
+// proven. busy marks the evaluation in progress, which a nested question
+// never needs (see before).
 type walkState struct {
 	successor, closed string
 	list              walkList
-	next              int    // list.commits[:next] are evaluated
-	held              int    // the first commit where the match holds, or -1
-	stopped           string // the witness of an unproven evaluation, or ""
-	last              int    // the latest evaluated commit holding successor, or -1
+	evals             []evaluation
+	busy              bool
+}
+
+// evaluation is §3's match for a walk's (successor, closed) at one commit.
+type evaluation struct {
+	state   evalState
+	witness string // evalUnproven: why
+}
+
+type evalState int
+
+const (
+	evalAbsent   evalState = iota // the successor is not in the commit's tree
+	evalFails                     // the match fails
+	evalHolds                     // the match holds: the acceptance point
+	evalUnproven                  // the match cannot be proven here
+)
+
+// ended reports whether the walk has reached its point or an unproven
+// commit.
+func (w *walkState) ended() bool {
+	n := len(w.evals)
+	return n > 0 && (w.evals[n-1].state == evalHolds || w.evals[n-1].state == evalUnproven)
 }
 
 func newEngine(src walkSource) *engine {
-	return &engine{src: src, lists: map[string]walkList{}, walks: map[string]*walkState{}, recs: map[string]recordsAt{}, dates: map[string]Fact{}}
+	return &engine{src: src, lists: map[string]walkList{}, walks: map[string]*walkState{},
+		recs: map[string]recordsAt{}, dates: map[string]Fact{}, answers: map[string]Establishment{}}
 }
 
 // establishment answers whether successor's supersession of object is in
-// force (Establisher). The acceptance point of successor for object's
-// closed spec T is the earliest walked commit at which successor is
-// present and §3's match for (successor, T) holds (SI-275); object is
-// established there only when its own edge is one of the match's new
-// replacements, and then since that commit's committer date. No commit
-// matching is not in force, with the reason from the latest evaluated
-// commit; an evaluation that cannot be proven (a record that does not
-// decode, SI-274(6); an unreadable commit) stops the walk as acceptance
-// unproven, since the point could be that commit. A spec never on the
-// default branch is not accepted.
+// force on the default branch (Establisher): in force at any walked
+// commit.
 func (e *engine) establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
+	return e.before(ctx, successor, object, math.MaxInt)
+}
+
+// before answers whether successor's supersession of object is in force
+// at a walked commit strictly before position bound; every answer is
+// before the head. The acceptance point of successor for object's closed
+// spec T is the earliest walked commit at which successor is present and
+// §3's match for (successor, T) holds (SI-275); object is established
+// there only when its own edge is one of the match's new replacements,
+// and then since that commit's committer date. The match at a commit
+// reads condition 5 as of that commit: another successor's supersession
+// in force strictly before it (SI-272 as amended), so a supersession in
+// force is never unseated by a later one (design §4) and every nested
+// question asks about an earlier commit than the one that asks it. Two
+// successors whose matches for one object first hold at the same commit
+// are each acceptance unproven, since neither is already superseded by
+// the other and the rulings decide no order between them. No commit
+// matching before bound is not in force, with the reason from the latest
+// evaluated commit (not accepted when none before bound holds
+// successor); an evaluation that cannot be proven (a record that does not
+// decode, SI-274(6); an unreadable commit; another successor's unproven
+// establishment, SI-274(3)) is acceptance unproven, since the point could
+// be that commit.
+func (e *engine) before(ctx context.Context, successor string, object artifact.Ref, bound int) Establishment {
 	w := e.walkOf(ctx, successor, object.Name)
 	switch w.list.fact.State {
 	case FactAbsent:
@@ -92,18 +137,32 @@ func (e *engine) establishment(ctx context.Context, successor string, object art
 	case FactUnproven:
 		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: w.list.fact.Witness}
 	}
-	e.advance(ctx, w)
-	switch {
-	case w.stopped != "":
-		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: w.stopped}
-	case w.held >= 0:
-		return e.at(ctx, w, w.held, object)
-	case w.last >= 0:
-		return e.at(ctx, w, w.last, object)
+	if !e.advance(ctx, w, bound) {
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's walk was re-entered at a commit it is evaluating", successor)}
 	}
-	// The walk's first commit holds successor, so it is evaluated: this is
-	// reached only if every evaluated commit lacked it.
-	return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s is not in its acceptance commit's tree", successor)}
+	last := -1
+	for i, ev := range w.evals {
+		if w.list.pos[i] >= bound {
+			break
+		}
+		switch ev.state {
+		case evalUnproven:
+			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: ev.witness}
+		case evalHolds:
+			return e.answer(ctx, w, i, object)
+		case evalFails:
+			last = i
+		}
+	}
+	switch {
+	case last >= 0:
+		return e.answer(ctx, w, last, object)
+	case bound == math.MaxInt:
+		// The walk's first commit holds successor, so this is reached only
+		// if no commit's tree held it after all.
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s is not in its acceptance commit's tree", successor)}
+	}
+	return Establishment{Reason: ReasonEstablisherNotAccepted}
 }
 
 // walkOf returns the (successor, closed) walk, created on first use.
@@ -111,77 +170,153 @@ func (e *engine) walkOf(ctx context.Context, successor, closed string) *walkStat
 	key := successor + "\x00" + closed
 	w, ok := e.walks[key]
 	if !ok {
-		w = &walkState{successor: successor, closed: closed, list: e.list(ctx, successor), held: -1, last: -1}
+		w = &walkState{successor: successor, closed: closed, list: e.list(ctx, successor)}
 		e.walks[key] = w
 	}
 	return w
 }
 
-// list returns spec's walk list, read once.
+// list returns spec's walk list with its commits' positions, read once;
+// a list that does not start at its first commit or whose positions do
+// not increase is unproven.
 func (e *engine) list(ctx context.Context, spec string) walkList {
-	l, ok := e.lists[spec]
-	if !ok {
-		commits, f := e.src.walk(ctx, spec)
-		l = walkList{commits: commits, fact: e.known(f, fmt.Sprintf("spec/%s's acceptance", spec))}
-		if l.fact.State == FactProven && (len(commits) == 0 || commits[0] != l.fact.Commit) {
+	if l, ok := e.lists[spec]; ok {
+		return l
+	}
+	commits, f := e.src.walk(ctx, spec)
+	l := walkList{commits: commits, fact: e.known(f, fmt.Sprintf("spec/%s's acceptance", spec))}
+	if l.fact.State == FactProven {
+		if len(commits) == 0 || commits[0] != l.fact.Commit {
 			l.fact = unproven(fmt.Sprintf("spec/%s's walk does not start at the commit that first holds it", spec))
 		}
-		e.lists[spec] = l
+		for i := 0; l.fact.State == FactProven && i < len(commits); i++ {
+			p, err := e.src.position(ctx, commits[i])
+			switch {
+			case err != nil:
+				l.fact = unproven(err.Error())
+			case i > 0 && p <= l.pos[i-1]:
+				l.fact = unproven(fmt.Sprintf("spec/%s's walk is not in first-parent order at %s", spec, commits[i]))
+			}
+			l.pos = append(l.pos, p)
+		}
 	}
+	e.lists[spec] = l
 	return l
 }
 
-// advance evaluates w's commits in order until the match holds or cannot
-// be proven, or the commits run out.
-func (e *engine) advance(ctx context.Context, w *walkState) {
-	for w.held < 0 && w.stopped == "" && w.next < len(w.list.commits) {
-		i := w.next
-		w.next++
-		r := e.records(ctx, w.list.commits[i])
-		switch {
-		case r.err != nil:
-			w.stopped = r.err.Error()
-			continue
-		case len(r.recs.Failures) > 0:
-			w.stopped = "records do not decode at the acceptance commit: " + strings.Join(r.recs.Failures, "; ")
-			continue
+// advance evaluates w's commits before position bound, in order, until
+// the walk ends. A nested question about a walk that is evaluating a
+// commit always asks about an earlier one (before), so it never needs
+// that walk to advance; if it did, advance fails closed.
+func (e *engine) advance(ctx context.Context, w *walkState, bound int) bool {
+	for !w.ended() && len(w.evals) < len(w.list.commits) && w.list.pos[len(w.evals)] < bound {
+		if w.busy {
+			e.defect(fmt.Errorf("objsupersede: spec/%s's walk for spec/%s was re-entered at %s", w.successor, w.closed, w.list.commits[len(w.evals)]))
+			return false
 		}
-		s := r.recs.Specs[w.successor]
-		if s == nil {
-			continue // the successor left the branch here; nothing to evaluate
-		}
-		switch st, witness := r.recs.stMatch(ctx, s, w.closed, nil); st {
-		case matchHolds:
-			w.held = i
-		case matchUnproven:
-			w.stopped = witness
-		default:
-			w.last = i
-		}
+		w.busy = true
+		ev := e.evaluate(ctx, w, len(w.evals))
+		w.busy = false
+		w.evals = append(w.evals, ev)
 	}
+	return true
 }
 
-// at answers object's establishment from w's commit i: in force since its
-// date when i is where the match holds and object's own edge is a new
-// replacement there, and otherwise not in force with object's reason at i.
-func (e *engine) at(ctx context.Context, w *walkState, i int, object artifact.Ref) Establishment {
-	commit := w.list.commits[i]
-	recs := e.records(ctx, commit).recs
-	reason, detail := recs.inForceAt(ctx, w.successor, object, nil)
+// evaluate is w's match at its commit i, reading condition 5 as of it.
+func (e *engine) evaluate(ctx context.Context, w *walkState, i int) evaluation {
+	r := e.records(ctx, w.list.commits[i])
 	switch {
-	case reason == "" && i == w.held:
-		d := e.date(ctx, commit)
-		if d.State != FactProven {
-			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: d.Witness}
-		}
-		return Establishment{Commit: commit, Date: d.Date}
-	case reason == "" || (i != w.held && reason != ReasonEstablisherNotInForce):
+	case r.err != nil:
+		return evaluation{state: evalUnproven, witness: r.err.Error()}
+	case len(r.recs.Failures) > 0:
+		return evaluation{state: evalUnproven, witness: "records do not decode at the acceptance commit: " + strings.Join(r.recs.Failures, "; ")}
+	}
+	s := r.recs.Specs[w.successor]
+	if s == nil {
+		return evaluation{state: evalAbsent} // the successor left the branch here
+	}
+	switch st, witness := r.recs.stMatch(ctx, s, w.closed, e.asOf(w.list.pos[i])); st {
+	case matchHolds:
+		return evaluation{state: evalHolds}
+	case matchUnproven:
+		return evaluation{state: evalUnproven, witness: witness}
+	}
+	return evaluation{state: evalFails}
+}
+
+// asOf is condition 5's establisher at the commit at position pos:
+// another successor's supersession in force strictly before it.
+func (e *engine) asOf(pos int) Establisher { return asOf{e: e, bound: pos} }
+
+// asOf answers establishments as of a walked commit (engine.before).
+type asOf struct {
+	e     *engine
+	bound int
+}
+
+// Establishment implements Establisher.
+func (a asOf) Establishment(ctx context.Context, successor string, object artifact.Ref) Establishment {
+	return a.e.before(ctx, successor, object, a.bound)
+}
+
+// answer is object's establishment from w's commit i, memoized: in force
+// since i's date when the match holds at i, object's own edge is a new
+// replacement there, and no other successor ties it at i; otherwise not
+// in force with object's reason at i, or acceptance unproven.
+func (e *engine) answer(ctx context.Context, w *walkState, i int, object artifact.Ref) Establishment {
+	commit := w.list.commits[i]
+	key := w.successor + "\x00" + object.String() + "\x00" + commit
+	if a, ok := e.answers[key]; ok {
+		return a
+	}
+	recs := e.records(ctx, commit).recs
+	reason, detail := recs.inForceAt(ctx, w.successor, object, e.asOf(w.list.pos[i]))
+	var a Establishment
+	switch {
+	case w.evals[i].state != evalHolds && reason != ReasonEstablisherNotInForce:
 		// The match failed definitely at i, so object's answer there must
 		// be a definite failure; anything else is this package's defect,
 		// reported rather than passed.
-		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's evaluation of %s at %s is inconsistent", w.successor, object, commit)}
+		a = Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("objsupersede: spec/%s's evaluation of %s at %s is inconsistent", w.successor, object, commit)}
+	case reason != "":
+		a = Establishment{Reason: reason, Detail: detail}
+	default:
+		a = e.dateOrTie(ctx, w, i, object)
 	}
-	return Establishment{Reason: reason, Detail: detail}
+	e.answers[key] = a
+	return a
+}
+
+// dateOrTie is object's in-force answer at w's point i: acceptance
+// unproven when another successor's match for object also first holds at
+// i (a tie, before's doc) or cannot be proven there, and otherwise in
+// force since i's committer date.
+func (e *engine) dateOrTie(ctx context.Context, w *walkState, i int, object artifact.Ref) Establishment {
+	commit, pos := w.list.commits[i], w.list.pos[i]
+	recs := e.records(ctx, commit).recs
+	for _, x := range recs.rivals(object, w.successor) {
+		xw := e.walkOf(ctx, x, object.Name)
+		if xw.list.fact.State == FactUnproven {
+			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s's establishment: %s", x, xw.list.fact.Witness)}
+		}
+		j := indexOf(xw.list.commits, commit)
+		if j < 0 || !e.advance(ctx, xw, pos+1) || j >= len(xw.evals) {
+			continue
+		}
+		switch xw.evals[j].state {
+		case evalUnproven:
+			return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s's establishment: %s", x, xw.evals[j].witness)}
+		case evalHolds:
+			if r, _ := recs.inForceAt(ctx, x, object, e.asOf(pos)); r == "" {
+				return Establishment{Reason: ReasonAcceptanceUnproven, Detail: fmt.Sprintf("spec/%s and spec/%s first match for %s at the same commit %s, so neither is already superseded by the other", w.successor, x, object, commit)}
+			}
+		}
+	}
+	d := e.date(ctx, commit)
+	if d.State != FactProven {
+		return Establishment{Reason: ReasonAcceptanceUnproven, Detail: d.Witness}
+	}
+	return Establishment{Commit: commit, Date: d.Date}
 }
 
 // records returns commit's records, read once.
@@ -213,10 +348,15 @@ func (e *engine) known(f Fact, what string) Fact {
 		return f
 	}
 	err := fmt.Errorf("objsupersede: the history answered %s with unknown state %q", what, f.State)
+	e.defect(err)
+	return unproven(err.Error())
+}
+
+// defect records the engine's first error.
+func (e *engine) defect(err error) {
 	if e.err == nil {
 		e.err = err
 	}
-	return unproven(err.Error())
 }
 
 // matchState is §3's match for (S, T) at one commit.
@@ -240,7 +380,7 @@ type stEdge struct {
 
 // stEdges evaluates, in decision and link order, every fragment
 // `supersedes` edge of s to an object of closed spec t. est answers
-// condition 5 (SI-272).
+// condition 5 (SI-272 as amended).
 func (recs *Records) stEdges(ctx context.Context, s *Spec, t string, est Establisher) []stEdge {
 	chain := recs.chain(s.Name)
 	var out []stEdge

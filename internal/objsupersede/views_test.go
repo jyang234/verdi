@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -50,6 +51,29 @@ func (f *fakeHist) dated(_ context.Context, commit string) Fact {
 		return Fact{State: FactUnproven, Witness: "no such commit " + commit}
 	}
 	return fact
+}
+
+// position orders the acceptance commits "acc-<spec>" by date, then spec.
+func (f *fakeHist) position(_ context.Context, commit string) (int, error) {
+	type acc struct{ date, spec string }
+	var all []acc
+	for spec := range f.accepted {
+		all = append(all, acc{f.accepted[spec], spec})
+	}
+	for spec, fact := range f.facts {
+		if _, dup := f.accepted[spec]; !dup && fact.State == FactProven {
+			all = append(all, acc{fact.Date, spec})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].date < all[j].date || (all[i].date == all[j].date && all[i].spec < all[j].spec)
+	})
+	for i, a := range all {
+		if "acc-"+a.spec == commit {
+			return i, nil
+		}
+	}
+	return 0, errors.New("no position for " + commit)
 }
 
 func (f *fakeHist) fact(spec string) Fact {
@@ -409,12 +433,28 @@ func TestIndex_DecisionViews(t *testing.T) {
 			return h
 		}, "", []DecisionView{notEst("conflict/c0", "more than one superseded conflict names spec/s1 for spec/t")},
 			"supersession not established: more than one superseded conflict names spec/s1 for spec/t"},
-		{"not in force at its acceptance: a rival reads not established", func() *fakeHist {
-			h := inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+		// SI-272 as amended (whole-wave review F-1): a rival refuses only
+		// while its own supersession is in force.
+		{"not in force at its acceptance: a rival in force reads not established", func() *fakeHist {
+			cx := mConflict("cx", "x", vo)
+			h := inForceAt(mRecs([]*Conflict{c1(vo), cx}, s1(mDec("dc-1", vo)), rival()))
 			h.at["s1"].Conflicts[0].FM.Status = "open"
+			h.accepted["x"], h.at["x"] = "2024-03-01", mRecs([]*Conflict{cx}, rival())
 			return h
 		}, "", []DecisionView{notEst("conflict/cx", "the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)")},
 			"supersession not established: the object spec/t#dc-1 is already superseded by spec/x (conflict/cx)"},
+		{"not in force at its acceptance: a rival not in force refuses nothing", func() *fakeHist {
+			h := inForceAt(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+			h.at["s1"].Conflicts[0].FM.Status = "open"
+			return h
+		}, "", []DecisionView{notEst("conflict/c1", "spec/s1's supersession was not in force at its acceptance: the conflict conflict/c1 is not superseded")},
+			"supersession not established: spec/s1's supersession was not in force at its acceptance: the conflict conflict/c1 is not superseded"},
+		{"proposed: a rival whose establishment is unproven is never a pass (SI-274(3))", func() *fakeHist {
+			h := hist(mRecs([]*Conflict{c1(vo), mConflict("cx", "x", vo)}, s1(mDec("dc-1", vo)), rival()))
+			h.unproven["x"] = "shallow history"
+			return h
+		}, "", []DecisionView{notEst("conflict/cx", "acceptance unproven: spec/x's establishment: shallow history")},
+			"supersession not established: acceptance unproven: spec/x's establishment: shallow history"},
 		{"undecodable records (SI-274(6)), though in force at acceptance", func() *fakeHist { return inForceAt(undecodable()) }, "",
 			[]DecisionView{notEst("", "records do not decode: "+broken)}, "supersession not established: records do not decode: " + broken},
 		{"undecodable records (SI-274(6)) before acceptance", func() *fakeHist { return hist(undecodable()) }, "",
@@ -697,6 +737,20 @@ func TestIndex_Scenarios(t *testing.T) {
 			{"closed-story#ac-1", "", govS + byS},
 			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: no conflict challenges spec/closed-feature#ac-1"},
 			{"", "successor#dc-3", "supersession not established: no conflict challenges spec/closed-feature#ac-1"},
+		}},
+		// The whole-wave review's F-1 witness on the surfaces: a successor
+		// whose supersession never came into force (a conforming stale-base
+		// merge) refuses no later successor (SI-272 as amended).
+		{"stale base on main: the successor's closed-feature supersession is not in force", "stale-base", "main", []look{
+			{"closed-feature#dc-1", "", ""},
+			{"closed-feature#ac-1", "", ""},
+			{"closed-story#ac-1", "", govS + byS},
+			{"", "successor#dc-1", "supersession not established: spec/successor's supersession was not in force at its acceptance: conflict/successor-closed-feature challenges spec/closed-feature#ac-1, but spec/successor carries no matching edge"},
+			{"", "successor#dc-2", "supersedes spec/closed-story#ac-1"},
+		}},
+		{"stale base: a later successor reads proposed, not already superseded", "stale-base", "", []look{
+			{"closed-feature#dc-1", "", ""},
+			{"", "unrelated#dc-1", "proposed — supersedes spec/closed-feature#dc-1 when spec/unrelated is accepted"},
 		}},
 		{"a proposed rival on the design branch never unseats the successor in force", "already-superseded", "", []look{
 			{"closed-feature#dc-1", "", govF + "superseded since 2024-01-15 by spec/prior-successor#dc-1"},

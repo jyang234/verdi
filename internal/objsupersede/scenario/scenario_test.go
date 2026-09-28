@@ -38,8 +38,8 @@ func TestLoad_CommittedManifest(t *testing.T) {
 	names := sortedKeys(m.Scenarios)
 	want := []string{"accepted", "already-superseded", "chain", "chain-drop", "chain-not-in-force", "conflict-dismissed",
 		"conflict-open", "conflict-spans-specs", "constraint-target", "feature-fragment-link", "ff-landing", "no-conflict",
-		"proposed", "rebase-landing", "resolved-by-other", "target-not-closed", "top-level-supersedes", "undeclared-object",
-		"unmatched-challenge", "unrelated", "unrelated-accepted"}
+		"proposed", "rebase-landing", "resolved-by-other", "stale-base", "target-not-closed", "top-level-supersedes",
+		"undeclared-object", "unmatched-challenge", "unrelated", "unrelated-accepted"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("scenarios %v, want %v", names, want)
 	}
@@ -233,7 +233,7 @@ func hostileGit(t *testing.T) {
 // one "name base steps" line per scenario in name order, from a build with
 // no ambient git state. TestBuild_EveryScenario reproduces it under
 // hostileGit, so no ambient setting moves any SHA of any scenario.
-const wantAllCommits = "8e77b4ecf06e14689f201e8a79cf7d66d3a2695b2e6c325f352f473b4b79cfd3"
+const wantAllCommits = "22f7d48c4a9e43e7ff60c84653d6256f3e735a07071fb27c1db18160a46cbd06"
 
 func TestBuild_EveryScenario(t *testing.T) {
 	hostileGit(t)
@@ -419,6 +419,37 @@ func TestBuild_Landings(t *testing.T) {
 		"2024-02-10T09:00:00+00:00 2024-02-15T09:00:00+00:00" + resolve,
 		"2024-02-01T09:00:00+00:00 2024-02-15T09:00:00+00:00" + propose,
 		"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main"})
+}
+
+// TestBuild_StaleBase pins stale-base's records (whole-wave review F-1):
+// main files the conflict open, the successor's branch resolves it, main
+// then widens the still-open conflict to #ac-1, and the branch merges
+// cleanly, so main's conflict is the resolved one that also challenges
+// #ac-1, while the branch's head holds the conflict as it resolved it.
+func TestBuild_StaleBase(t *testing.T) {
+	repo := Build(t, "stale-base")
+	const conflict = ".verdi/conflicts/successor-closed-feature.md"
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(Dir(), "records", "conflicts", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(data))
+	}
+	merged := strings.Replace(read("successor-closed-feature.md"), "links:\n", "links:\n  - { type: challenges, ref: \"spec/closed-feature#ac-1\" }\n", 1)
+	for _, tc := range []struct{ rev, want string }{
+		{repo.Steps[0], read("successor-closed-feature-open.md")},
+		{repo.Steps[1], read("successor-closed-feature.md")},
+		{repo.Steps[2], read("successor-closed-feature-open-widened.md")},
+		{repo.Steps[3], merged},
+	} {
+		if got := gitOut(t, repo.Dir, "show", tc.rev+":"+conflict); got != tc.want {
+			t.Errorf("%s at %s:\n%s\nwant\n%s", conflict, tc.rev, got, tc.want)
+		}
+	}
+	if parents := strings.Fields(gitOut(t, repo.Dir, "rev-list", "--parents", "-n1", repo.Steps[3])); len(parents) != 3 || parents[1] != repo.Steps[2] || parents[2] != repo.Steps[1] {
+		t.Errorf("the accepting merge %v is not main's widening merged with the successor's branch", parents)
+	}
 }
 
 // TestMaterialize_GitErrors pins that a failing git step is returned as an
