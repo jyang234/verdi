@@ -198,9 +198,11 @@ type errReporter interface {
 }
 
 // memoEstablisher answers each (successor, object) establishment once per
-// computation: History.Establishment re-reads the whole store at the
-// successor's acceptance commit on every call (L3 re-review OB-3), and one
-// spec's carried edges can ask the same question more than once.
+// computation (L3 re-review OB-3): one spec's carried edges can ask the
+// same question more than once, and ComputeDecisionEdges accepts any
+// establisher. History already memoizes its acceptance walk per
+// (successor, closed spec) for its pinned default-branch head, so for it
+// this memo saves only the repeated lookup.
 type memoEstablisher struct {
 	inner objsupersede.Establisher
 	seen  map[string]objsupersede.Establishment
