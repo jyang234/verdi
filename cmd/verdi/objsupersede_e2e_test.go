@@ -27,9 +27,12 @@ import (
 )
 
 // cssHermeticEnv keeps a developer's forge credentials and CI variables
-// from reaching the binary: no forge is built, and the default branch
-// resolves from the fixture's own origin/main.
-var cssHermeticEnv = []string{"GITHUB_TOKEN=", "CI_JOB_TOKEN=", "CI_PROJECT_ID=", "CI_DEFAULT_BRANCH="}
+// from reaching the binary: no forge is built, the default branch
+// resolves from the fixture's own origin/main, and lint's CI context
+// (lint.ReadCIEnv) is empty, so a PR's target branch marks no fixture
+// branch a PR boundary.
+var cssHermeticEnv = []string{"GITHUB_TOKEN=", "CI_JOB_TOKEN=", "CI_PROJECT_ID=", "CI_DEFAULT_BRANCH=",
+	"CI=", "GITHUB_ACTIONS=", "GITHUB_BASE_REF=", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME="}
 
 const (
 	cssNew = "records match; takes effect when spec/successor is accepted"

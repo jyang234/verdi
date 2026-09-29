@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wantRootCommit is the store's root commit, the first base step's commit.
@@ -370,7 +371,7 @@ func checkLanding(t *testing.T, repo *Repo, want []string, dates []string) {
 		t.Fatalf("main's first-parent chain %v, want %v then the base", chain, want)
 	}
 	for i, c := range want {
-		if got := gitOut(t, repo.Dir, "log", "-1", "--format=%aI %cI %s", c); got != dates[i] {
+		if got := logDates(t, repo.Dir, c); got != dates[i] {
 			t.Errorf("commit %s: %q, want %q", c, got, dates[i])
 		}
 	}
@@ -513,7 +514,7 @@ func TestBuild_Dates(t *testing.T) {
 		{repo.Base[1], "2024-01-01T00:00:00+00:00 2024-01-01T00:00:00+00:00 Base layer closed"},
 		{repo.Base[2], "2024-01-09T09:00:00+00:00 2024-01-10T09:00:00+00:00 Close spec/closed-feature and spec/closed-story"},
 	} {
-		if got := gitOut(t, repo.Dir, "log", "-1", "--format=%aI %cI %s", tc.commit); got != tc.want {
+		if got := logDates(t, repo.Dir, tc.commit); got != tc.want {
 			t.Errorf("commit %s: %q, want %q", tc.commit, got, tc.want)
 		}
 	}
@@ -527,6 +528,63 @@ func TestBuild_Dates(t *testing.T) {
 	if strings.Join(names, ",") != ".verdi/specs/archive/closed-feature/spec.md,.verdi/specs/archive/closed-story/spec.md" {
 		t.Errorf("archive after the move: %v", names)
 	}
+}
+
+// TestNormalizeLogDates pins normalizeLogDates: git 2.34 renders a UTC
+// offset as "+00:00" and git 2.55 as "Z", so both must read as "+00:00";
+// any other offset is kept, and a line whose dates do not parse is refused.
+func TestNormalizeLogDates(t *testing.T) {
+	tests := []struct {
+		name, line, want string
+		wantErr          bool
+	}{
+		{"a Z offset", "2024-02-10T09:00:00Z 2024-02-15T09:00:00Z Resolve the conflicts",
+			"2024-02-10T09:00:00+00:00 2024-02-15T09:00:00+00:00 Resolve the conflicts", false},
+		{"a +00:00 offset", "2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main",
+			"2024-02-12T09:00:00+00:00 2024-02-12T09:00:00+00:00 Move main", false},
+		{"a non-UTC offset is kept", "2024-02-10T09:00:00-04:00 2024-02-15T09:00:00+05:30 Rebase",
+			"2024-02-10T09:00:00-04:00 2024-02-15T09:00:00+05:30 Rebase", false},
+		{"an unparsable author date", "2024-02-10 2024-02-15T09:00:00Z Move main", "", true},
+		{"an unparsable committer date", "2024-02-10T09:00:00Z yesterday Move main", "", true},
+		{"no subject", "2024-02-10T09:00:00Z 2024-02-15T09:00:00Z", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeLogDates(tc.line)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("normalizeLogDates(%q) = %q, %v; want %q, error %v", tc.line, got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+// logDates is commit's author date, committer date, and subject
+// ("%aI %cI %s"), both dates normalized by normalizeLogDates.
+func logDates(t *testing.T, dir, commit string) string {
+	t.Helper()
+	line, err := normalizeLogDates(gitOut(t, dir, "log", "-1", "--format=%aI %cI %s", commit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return line
+}
+
+// normalizeLogDates reads a "%aI %cI %s" line's three fields and renders
+// both dates as gitx.CommitDate does, so a UTC offset reads "+00:00" under
+// every git version and any other offset is kept.
+func normalizeLogDates(line string) (string, error) {
+	fields := strings.SplitN(line, " ", 3)
+	if len(fields) != 3 {
+		return "", fmt.Errorf("log line %q: want an author date, a committer date, and a subject", line)
+	}
+	for i, field := range fields[:2] {
+		date, err := time.Parse(time.RFC3339, field)
+		if err != nil {
+			return "", fmt.Errorf("log line %q: %w", line, err)
+		}
+		fields[i] = date.Format("2006-01-02T15:04:05-07:00")
+	}
+	return strings.Join(fields, " "), nil
 }
 
 func gitOut(t *testing.T, dir string, args ...string) string {

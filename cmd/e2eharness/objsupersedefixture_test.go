@@ -1312,6 +1312,10 @@ func checkObjSupersedeDocs(t *testing.T, got objSupersedeStoreInfo) {
 // chain-not-in-force), never lint refusals: VL-026 checks shape only;
 // constraint-target alone is a served lint refusal (below).
 func TestObjSupersedeStores_LintClean(t *testing.T) {
+	// lint.BuildContext reads CI env; a PR's target branch would make every fixture branch a PR boundary (VL-020).
+	for _, key := range []string{"CI", "CI_DEFAULT_BRANCH", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "GITHUB_ACTIONS", "GITHUB_BASE_REF"} {
+		t.Setenv(key, "")
+	}
 	ctx := context.Background()
 	rows := map[string][]string{"top-level-supersedes": {"VL-026"}}
 	for _, name := range objSupersedeStores {
