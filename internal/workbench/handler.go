@@ -98,7 +98,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 		home.Model = deps.Model
 	}
 	mux.HandleFunc("/healthz", healthHandler())
-	mux.HandleFunc("/", indexHandler(root, home))
+	mux.HandleFunc("/", indexHandler(root, home, deps.Disclosures))
 
 	// Corpus artifact pages (05 §Workbench: server-rendered, goldmark +
 	// client-side mermaid). Registered WITHOUT a method prefix (unlike

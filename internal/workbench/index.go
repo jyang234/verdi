@@ -19,10 +19,17 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/disclosureview"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// countDisclosures is the index's one read of the disclosures enumeration:
+// disclosureview.Count, the length of what /disclosures shows, read
+// through the same process-wide cache (a variable so a test can count its
+// calls per render).
+var countDisclosures = disclosureview.Count
 
 // indexHandler answers GET / with the whole-store directory home. It owns
 // exactly the "/" route; any other path that falls through to this
@@ -30,7 +37,11 @@ import (
 // renderPathNotFound — dc-5: never a bare NotFound). The stale-entry shape
 // for a deleted design branch's board address is owned by the registered
 // per-branch route (branchboard.go's dispatch), not this catch-all.
-func indexHandler(root string, home HomeDeps) http.HandlerFunc {
+//
+// extras is the serving process's own disclosed context (Deps.Disclosures)
+// — the same values /disclosures appends — so the index's count and the
+// page agree.
+func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) http.HandlerFunc {
 	home = home.resolve(root)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -41,7 +52,7 @@ func indexHandler(root string, home HomeDeps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		out, err := renderHome(r.Context(), root, home)
+		out, err := renderHome(r.Context(), root, home, extras)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return
@@ -62,7 +73,7 @@ func indexHandler(root string, home HomeDeps) http.HandlerFunc {
 // no second copy of the grouping rules. The in-review consultation (dc-4)
 // is per-render, bounded, and non-blocking: its failure is disclosed while
 // the refs-computed directory still renders fully.
-func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error) {
+func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclosure.Disclosure) ([]byte, error) {
 	var body bytes.Buffer
 
 	body.WriteString(`<p class="store-root">Store root: <code>`)
@@ -72,19 +83,9 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 	// The disclosures view (spec/disclosures-panel): one landing-page
 	// pointer so the checkout's "what is verdi not proving right now"
 	// surface is discoverable, not tribal knowledge. The pointer also
-	// carries a non-visible data-disclosures-count attribute (spec/
-	// index-coverage ac-3): the SAME enumeration the disclosures page
-	// itself shows (internal/disclosureview.Count, one call, computed
-	// once per render), for a later lane's top-bar Disclosures toggle to
-	// read without a second enumeration of its own. A count Count could
-	// not compute (an unenumerable store) omits the attribute entirely —
-	// never a false "0" — mirroring how the corpus section below discloses
-	// its own read failure inline rather than failing this page.
-	disclosuresAttr := ""
-	if n, err := disclosureview.Count(ctx, root); err == nil {
-		disclosuresAttr = ` data-disclosures-count="` + strconv.Itoa(n) + `"`
-	}
-	body.WriteString(`<p class="home-disclosures"` + disclosuresAttr + `><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
+	// carries the disclosures count, non-visible, for the top bar's
+	// Disclosures toggle (spec/index-coverage ac-3; SI-295).
+	body.WriteString(`<p class="home-disclosures"` + disclosuresCarrier(ctx, root, extras) + `><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
 
 	// The mechanical spec importer (spec-import-contract: "The page is
 	// discoverable from home before new statements are requested"): one
@@ -125,6 +126,20 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 		Title:    "Workbench",
 		BodyHTML: template.HTML(body.String()),
 	})
+}
+
+// disclosuresCarrier returns the index's non-visible disclosures carrier
+// attribute (spec/index-coverage ac-3; SI-295): data-disclosures-count
+// with the number of entries /disclosures shows — the same enumeration,
+// the same extras, one call per render — or, when the enumeration fails,
+// data-disclosures-unproven with the reason and no count, never a false
+// "0" and never a silent omission.
+func disclosuresCarrier(ctx context.Context, root string, extras []disclosure.Disclosure) string {
+	n, err := countDisclosures(ctx, root, extras...)
+	if err != nil {
+		return ` data-disclosures-unproven="` + stdhtml.EscapeString(err.Error()) + `"`
+	}
+	return ` data-disclosures-count="` + strconv.Itoa(n) + `"`
 }
 
 // writeOtherKindsSection groups every non-spec, non-external committed-zone
