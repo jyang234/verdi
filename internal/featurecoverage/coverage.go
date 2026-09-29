@@ -122,6 +122,10 @@ func Compute(ids []string, stubs []StubDecl, links []StoryLink) map[string]Cover
 		}
 	}
 
+	// Per-criterion story dedup: the story half names distinct stories, as
+	// the stub half names distinct stubs, so one story reaching a criterion
+	// through two backlinks (a duplicated implements edge) covers it once.
+	storyCounted := make(map[string]map[string]bool, len(ids))
 	for _, ln := range links {
 		c, ok := result[ln.CriterionID]
 		if !ok {
@@ -130,6 +134,15 @@ func Compute(ids []string, stubs []StubDecl, links []StoryLink) map[string]Cover
 		if ln.Unreadable != "" {
 			c.Disclosed = append(c.Disclosed, ln.Unreadable)
 		} else {
+			seen := storyCounted[ln.CriterionID]
+			if seen == nil {
+				seen = make(map[string]bool)
+				storyCounted[ln.CriterionID] = seen
+			}
+			if seen[ln.StoryRef] {
+				continue
+			}
+			seen[ln.StoryRef] = true
 			c.Stories = append(c.Stories, ln.StoryRef)
 		}
 		result[ln.CriterionID] = c

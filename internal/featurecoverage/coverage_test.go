@@ -101,6 +101,25 @@ func TestCoverage_PerCriterion(t *testing.T) {
 			},
 		},
 		{
+			// The same story reaching one criterion through two backlinks
+			// (a duplicated implements edge, or the same edge surfaced
+			// twice by the caller) is one covering story, never two: the
+			// story half names distinct stories, as the stub half names
+			// distinct stubs. The same story on a second criterion still
+			// covers that one.
+			name: "one story linked twice to a criterion counts once",
+			ids:  []string{"ac-1", "ac-2"},
+			links: []StoryLink{
+				{CriterionID: "ac-1", StoryRef: "spec/story-a"},
+				{CriterionID: "ac-1", StoryRef: "spec/story-a"},
+				{CriterionID: "ac-2", StoryRef: "spec/story-a"},
+			},
+			want: map[string]Coverage{
+				"ac-1": {Stories: []string{"spec/story-a"}},
+				"ac-2": {Stories: []string{"spec/story-a"}},
+			},
+		},
+		{
 			// An input naming a criterion this feature does not declare
 			// is ignored — it is not this feature's own criterion, and
 			// Compute never fabricates a new key for it.
