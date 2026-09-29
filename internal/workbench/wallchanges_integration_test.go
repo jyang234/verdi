@@ -131,6 +131,26 @@ func addWallSubmodule(t *testing.T, top string) {
 	runWallGit(t, top, "commit", "-q", "-m", "add submodule")
 }
 
+// checkoutSpecThroughFilter lets git rewrite the working-tree spec through
+// its end-of-line filter (the committed .gitattributes asks for CRLF), so
+// the working tree's bytes differ from HEAD's blob while git reports the
+// tree clean. It fails the test if the bytes do not actually differ.
+func checkoutSpecThroughFilter(t *testing.T, root string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(wallFixtureSpecPath))
+	if err := os.Remove(full); err != nil {
+		t.Fatal(err)
+	}
+	runWallGit(t, root, "checkout", "--", wallFixtureSpecPath)
+	got, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("\r\n")) {
+		t.Fatal("the end-of-line filter did not rewrite the working-tree spec; the case would be vacuous")
+	}
+}
+
 // wallSnapshotResult is one served snapshot: the strict-decoded value, and
 // the raw bytes of its git.changes object for wire-literal assertions.
 type wallSnapshotResult struct {
@@ -380,6 +400,14 @@ func wallServedCases() []wallServedCase {
 			},
 			wantDirty: true, wantTyped: []string{},
 			wantUnclassified: []wallUnclassifiedChange{unclassified("vendor/inner", "another-staged-path")},
+		},
+		{
+			name: "an end-of-line filter over a clean tree lists nothing (SI-298)", headSpec: wallChangesHeadSpec,
+			extraDraft: map[string]string{".gitattributes": "*.md text eol=crlf\n"},
+			edit: func(t *testing.T, _, root string) {
+				checkoutSpecThroughFilter(t, root)
+			},
+			wantDirty: false, wantTyped: []string{}, wantUnclassified: []wallUnclassifiedChange{},
 		},
 		{
 			name: "unreadable: a missing spec still lists other changes", headSpec: "",

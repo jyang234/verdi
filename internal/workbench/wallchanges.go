@@ -143,7 +143,8 @@ type wallChangedPath struct {
 // facts a byte comparison of HEAD with the working tree cannot see.
 type wallSpecStatus struct {
 	// Reported: git lists the spec path at all (a tracked change in either
-	// status column, the source of a rename, or an untracked file).
+	// status column, the source of a rename, or an untracked file). When
+	// false, nothing is listed for the spec, whatever its bytes (SI-298).
 	Reported bool
 	// Untracked: git has never seen the spec path.
 	Untracked bool
@@ -292,7 +293,10 @@ func compareSpecRevisions(head, working []byte) (specComparison, error) {
 
 // classifyWallChanges is spec/wall-changes ac-1's pure classifier: given
 // already-fetched HEAD/working-tree/status facts, it returns the
-// three-state summary. It never touches git or the filesystem.
+// three-state summary. It never touches git or the filesystem. Every entry
+// for the spec's own path is gated on git reporting the spec changed
+// (SpecStatus.Reported); the byte comparison only classifies a change git
+// has already reported.
 func classifyWallChanges(in wallChangesInputs) (*wallChanges, error) {
 	result := &wallChanges{Unclassified: []wallUnclassifiedChange{}}
 
@@ -305,6 +309,13 @@ func classifyWallChanges(in wallChangesInputs) (*wallChanges, error) {
 			result.UnreadableReason = fmt.Sprintf("HEAD does not name a commit yet, so %s has no revision at HEAD to compare against", in.SpecPath)
 		}
 		listSpec = in.SpecStatus.Reported
+	case !in.SpecStatus.Reported:
+		// Git's own status decides whether the spec changed at all
+		// (SI-298): a byte difference git does not report — an
+		// end-of-line or clean filter, an assume-unchanged entry — is
+		// nothing a commit will carry, so nothing is listed for the spec,
+		// typed or unclassified.
+		result.Typed = []designprovenance.Change{}
 	default:
 		cmp, err := compareSpecRevisions(in.HeadSpec, in.WorkingSpec)
 		if err != nil {
@@ -312,7 +323,7 @@ func classifyWallChanges(in wallChangesInputs) (*wallChanges, error) {
 		}
 		if cmp.unreadableReason != "" {
 			result.UnreadableReason = cmp.unreadableReason
-			listSpec = in.SpecStatus.Reported || !cmp.identical
+			listSpec = true
 			break
 		}
 		result.Typed = cmp.typed
@@ -320,7 +331,7 @@ func classifyWallChanges(in wallChangesInputs) (*wallChanges, error) {
 			result.Unclassified = append(result.Unclassified, wallUnclassifiedChange{Path: in.SpecPath, Reason: wallReasonProse})
 		}
 		status := in.SpecStatus
-		listSpec = cmp.unaccounted || (status.Reported && (cmp.identical || status.IndexDiverged || status.ModeChanged))
+		listSpec = cmp.unaccounted || cmp.identical || status.IndexDiverged || status.ModeChanged
 	}
 	if listSpec {
 		reason := wallReasonUnrecognizedSpec

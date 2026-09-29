@@ -176,12 +176,17 @@ func withStatus(in wallChangesInputs, status wallSpecStatus) wallChangesInputs {
 	return in
 }
 
-// withHead replaces in's HEAD revision (exists == false means none).
+// withHead replaces in's HEAD revision (exists == false means none),
+// keeping wallIn's invariant: git reports the spec exactly when HEAD's
+// bytes differ from the working tree's (a missing HEAD revision sets no
+// status; those rows state it with withStatus).
 func withHead(in wallChangesInputs, exists bool, head string) wallChangesInputs {
 	in.HeadExists = exists
 	in.HeadSpec = nil
+	in.SpecStatus = wallSpecStatus{}
 	if exists {
 		in.HeadSpec = []byte(head)
+		in.SpecStatus.Reported = head != string(in.WorkingSpec)
 	}
 	return in
 }
@@ -313,6 +318,18 @@ func TestWallChanges_Classify(t *testing.T) {
 			in:               withStatus(wallIn(wallChangesTypedOnly), wallSpecStatus{Reported: true, ModeChanged: true}),
 			wantTyped:        []string{"ac-1"},
 			wantUnclassified: []wallUnclassifiedChange{entry(wallTestSpecPath, wallReasonUnrecognizedSpec)},
+		},
+		{
+			name:             "SI-298: a byte difference git does not report (an end-of-line filter) lists nothing",
+			in:               withStatus(wallIn(strings.ReplaceAll(wallChangesHeadSpec, "\n", "\r\n")), wallSpecStatus{}),
+			wantTyped:        []string{},
+			wantUnclassified: []wallUnclassifiedChange{},
+		},
+		{
+			name:             "SI-298: a typed edit git does not report lists nothing, and other changes are still listed",
+			in:               withStatus(wallIn(wallChangesTypedOnly, wallChangedPath{Path: "notes.txt", Untracked: true}), wallSpecStatus{}),
+			wantTyped:        []string{},
+			wantUnclassified: []wallUnclassifiedChange{entry("notes.txt", wallReasonUntracked)},
 		},
 		{
 			name:             "SI-298: a spec staged then reverted",
