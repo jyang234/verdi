@@ -2,6 +2,7 @@ package gitx_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -240,5 +241,74 @@ func TestCommitDates_CancelledContext_Errors(t *testing.T) {
 	cancel()
 	if _, err := gitx.CommitDates(ctx, r.dir, []string{"HEAD"}); err == nil {
 		t.Fatal("CommitDates with a cancelled context: want an error, got nil")
+	}
+}
+
+// fakeBatchGit puts a `git` first on PATH that swallows its stdin and
+// answers exactly stream — a `cat-file --batch` answer no real git would
+// give, to pin how CommitDates treats a malformed one. The rest of PATH
+// stays reachable (the fake's own `cat`).
+func fakeBatchGit(t *testing.T, stream string) {
+	t.Helper()
+	dir := t.TempDir()
+	out := dir + "/stream"
+	if err := os.WriteFile(out, []byte(stream), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncat >/dev/null\ncat '" + out + "'\n"
+	if err := os.WriteFile(dir+"/git", []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestCommitDates_MalformedBatchStream_Errors is B1-RR2: whenever the one
+// `cat-file --batch` answer stream cannot be read in step with the queries
+// — truncated, garbled, short, or carrying bytes after the last answer —
+// CommitDates returns an error and NO map, never the dates it managed to
+// read before the stream went wrong (which a caller would present as a
+// complete answer).
+func TestCommitDates_MalformedBatchStream_Errors(t *testing.T) {
+	body := "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\ncommitter C <c@x> 1704067200 +0000\n\nmsg\n"
+	good := fmt.Sprintf("%s commit %d\n%s\n", strings.Repeat("a", 40), len(body), body)
+	tests := []struct {
+		name   string
+		revs   []string
+		stream string
+	}{
+		{name: "truncated header", revs: []string{"HEAD"}, stream: "aaaa commit 5"},
+		{name: "truncated body", revs: []string{"HEAD"}, stream: "aaaa commit 500\n" + body},
+		{name: "garbage", revs: []string{"HEAD"}, stream: "this is not a batch answer\n"},
+		{name: "an answer read, then the stream ends short", revs: []string{"HEAD", "main"}, stream: good},
+		{name: "an answer read, then garbage", revs: []string{"HEAD", "main"}, stream: good + "garbage\n"},
+		{name: "trailing bytes after the last answer", revs: []string{"HEAD"}, stream: good + "extra\n"},
+		{name: "a missing answer, then trailing bytes", revs: []string{"HEAD"}, stream: "HEAD^{commit} missing\nextra"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeBatchGit(t, tt.stream)
+			got, err := gitx.CommitDates(context.Background(), t.TempDir(), tt.revs)
+			if err == nil {
+				t.Fatalf("CommitDates over a malformed stream = %v, nil; want an error", got)
+			}
+			if got != nil {
+				t.Fatalf("CommitDates returned the partial map %v alongside its error, want nil", got)
+			}
+		})
+	}
+}
+
+// TestCommitDates_WellFormedFakeStream is the fake's own control: the same
+// fake answering a well-formed stream reads cleanly, so the rows above
+// fail for their malformation alone.
+func TestCommitDates_WellFormedFakeStream(t *testing.T) {
+	body := "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\ncommitter C <c@x> 1704067200 +0000\n\nmsg\n"
+	fakeBatchGit(t, fmt.Sprintf("%s commit %d\n%s\nmain^{commit} missing\n", strings.Repeat("a", 40), len(body), body))
+	got, err := gitx.CommitDates(context.Background(), t.TempDir(), []string{"HEAD", "main"})
+	if err != nil {
+		t.Fatalf("CommitDates over a well-formed stream: %v", err)
+	}
+	if len(got) != 1 || got["HEAD"] != "2024-01-01T00:00:00+00:00" {
+		t.Fatalf("CommitDates = %v, want only HEAD dated 2024-01-01T00:00:00+00:00", got)
 	}
 }

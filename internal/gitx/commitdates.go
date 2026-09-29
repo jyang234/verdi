@@ -35,8 +35,11 @@ const commitDateLayout = "2006-01-02T15:04:05-07:00"
 // empty map and no git process runs at all.
 //
 // The error is reserved for the one invocation itself failing — dir not a
-// repository, git unavailable, a cancelled ctx, or batch output this
-// function cannot parse — never for one rev's absence.
+// repository, git unavailable, a cancelled ctx, or an answer stream that
+// cannot be read in step with the queries (truncated, garbled, short, or
+// carrying bytes after the last answer) — never for one rev's absence.
+// With an error the map is always nil: dates read before the stream went
+// wrong are never handed back as though they were the whole answer.
 func CommitDates(ctx context.Context, dir string, revs []string) (map[string]string, error) {
 	dates := make(map[string]string, len(revs))
 	queries := make([]string, 0, len(revs))
@@ -77,6 +80,9 @@ func CommitDates(ctx context.Context, dir string, revs []string) (map[string]str
 		if date, ok := committerDate(body); ok {
 			dates[rev] = date
 		}
+	}
+	if extra, _ := answers.Peek(1); len(extra) > 0 {
+		return nil, fmt.Errorf("gitx: CommitDates: unexpected bytes after the answer for the last of %d queries", len(queries))
 	}
 	return dates, nil
 }
