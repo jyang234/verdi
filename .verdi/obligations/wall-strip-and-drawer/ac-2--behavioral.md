@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/wall-strip-and-drawer" }
-frozen: { at: 2026-09-29, commit: fe196661a03bda803eaa0863c6514279c102fd7c }
+frozen: { at: 2026-09-29, commit: d64d2d637fda0b28635c0760ac23a8d7093638fb }
 ---
 # The strip's chips keep the kept badge and flag properties
 
