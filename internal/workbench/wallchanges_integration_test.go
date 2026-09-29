@@ -393,6 +393,18 @@ func wallServedCases() []wallServedCase {
 			wantUnclassified: []wallUnclassifiedChange{unclassified(spec, "unrecognized-spec-change")},
 		},
 		{
+			name: "a typed edit beside a diverged index (the index holds a third state)", headSpec: wallChangesHeadSpec,
+			edit: func(t *testing.T, _, root string) {
+				writeWallFile(t, root, spec, wallChangesProseOnly)
+				if err := gitx.AddAll(context.Background(), root); err != nil {
+					t.Fatal(err)
+				}
+				writeWallFile(t, root, spec, wallChangesTypedOnly)
+			},
+			wantDirty: true, wantTyped: []string{"ac-1"},
+			wantUnclassified: []wallUnclassifiedChange{unclassified(spec, "unrecognized-spec-change")},
+		},
+		{
 			name: "a submodule whose only change is an untracked file (B4-R11)", headSpec: wallChangesHeadSpec,
 			edit: func(t *testing.T, top, _ string) {
 				addWallSubmodule(t, top)

@@ -320,6 +320,12 @@ func TestWallChanges_Classify(t *testing.T) {
 			wantUnclassified: []wallUnclassifiedChange{entry(wallTestSpecPath, wallReasonUnrecognizedSpec)},
 		},
 		{
+			name:             "SI-298: a typed edit beside a diverged index lists both",
+			in:               withStatus(wallIn(wallChangesTypedOnly), wallSpecStatus{Reported: true, IndexDiverged: true}),
+			wantTyped:        []string{"ac-1"},
+			wantUnclassified: []wallUnclassifiedChange{entry(wallTestSpecPath, wallReasonUnrecognizedSpec)},
+		},
+		{
 			name:             "SI-298: a byte difference git does not report (an end-of-line filter) lists nothing",
 			in:               withStatus(wallIn(strings.ReplaceAll(wallChangesHeadSpec, "\n", "\r\n")), wallSpecStatus{}),
 			wantTyped:        []string{},
