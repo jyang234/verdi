@@ -9,7 +9,7 @@ links:
   - { type: challenges, ref: "spec/case-file-flags#ac-1" }
   - { type: challenges, ref: "spec/case-file-flags#dc-3" }
   - { type: challenges, ref: "spec/case-file-flags#dc-4" }
-frozen: { at: 2026-09-29, commit: f5baa9c023861056ba2ea05fff17f64761a8897a }
+frozen: { at: 2026-09-29, commit: 6e571cc388f7c6ba31b7dc7590ca478e7d78e4cd }
 ---
 # Conflict: The redesign draws the case-file flags as chips in the case-file strip, not stamps on the case file
 

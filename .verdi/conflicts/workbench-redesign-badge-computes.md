@@ -8,7 +8,7 @@ resolved_by: spec/workbench-redesign
 links:
   - { type: challenges, ref: "spec/badge-computes#ac-5" }
   - { type: challenges, ref: "spec/badge-computes#dc-4" }
-frozen: { at: 2026-09-29, commit: f5baa9c023861056ba2ea05fff17f64761a8897a }
+frozen: { at: 2026-09-29, commit: 6e571cc388f7c6ba31b7dc7590ca478e7d78e4cd }
 ---
 # Conflict: The redesign draws case-file badges as chips in the case-file strip, not stamps on the lockup
 
