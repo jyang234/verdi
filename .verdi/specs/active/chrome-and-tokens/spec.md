@@ -17,8 +17,8 @@ constraints:
   - { id: co-1, text: "The parent's constraints co-1 to co-8 bind this story unchanged: responsiveness, no-JS use and the page budget, keyboard and accessibility, three-valued honesty, the vocabulary preset, tokens and scoping, evidence files never renamed, kept semantics, and Fable-built frontend with Playwright proof and no network.", anchor: co-1 }
 decisions:
   - { id: dc-1, text: "Workbench pages are the pages verdi serve renders; the docs site is the static site built from the default branch. The corpus pages the workbench serves under /a/ are workbench pages and get the bar. The docs site keeps its own header, and its bytes do not change (parent ac-1 and co-5).", anchor: dc-1 }
-  - { id: dc-2, text: "The full posture opens as a disclosure from the bar that needs no script (a native details element or equivalent). Its facts come from the posture model today's row renders; nothing is recomputed for the bar.", anchor: dc-2 }
-  - { id: dc-3, text: "The controls in today's board header move into the bar's controls slot unchanged, so no page loses a control before the stories that restyle them land: the readiness pill and Commit and push (wall-strip-and-drawer) and the Wall and Document switch (document-page).", anchor: dc-3 }
+  - { id: dc-2, text: "The full posture opens as a disclosure from the bar that needs no script (a native details element or equivalent), because every workbench page must work before JavaScript runs (parent co-1). It is drawn to the handoff's design, so fidelity (parent dc-10) is met by styling, not by a scripted popover. Its facts come from the posture model today's row renders; nothing is recomputed for the bar.", anchor: dc-2 }
+  - { id: dc-3, text: "The controls in today's board header move into the bar's controls slot unchanged, so no page loses a control before the stories that restyle them land: the readiness pill and Commit and push (wall-strip-and-drawer) and the Wall and Document switch (document-page). This interim bar is not the design's final state: the redesign's fidelity (parent dc-10) is judged at the risk gate after those stories land.", anchor: dc-3 }
   - { id: dc-4, text: "The posture's existing test ids move into the bar unchanged, and no Playwright file that an obligation names as evidence is renamed (parent co-6); where such a file asserts the old rows, only that assertion changes.", anchor: dc-4 }
 links:
   - { type: implements, ref: "spec/workbench-redesign#ac-1" }
@@ -84,14 +84,17 @@ its bytes do not change (parent ac-1 and co-5).
 
 ## dc-2
 
-The full posture opens as a disclosure from the bar that needs no script (a native details element or equivalent). Its
-facts come from the posture model today's row renders; nothing is recomputed for the bar.
+The full posture opens as a disclosure from the bar that needs no script (a native details element or equivalent),
+because every workbench page must work before JavaScript runs (parent co-1). It is drawn to the handoff's design, so
+fidelity (parent dc-10) is met by styling, not by a scripted popover. Its facts come from the posture model today's row
+renders; nothing is recomputed for the bar.
 
 ## dc-3
 
 The controls in today's board header move into the bar's controls slot unchanged, so no page loses a control before the
 stories that restyle them land: the readiness pill and Commit and push (wall-strip-and-drawer) and the Wall and Document
-switch (document-page).
+switch (document-page). This interim bar is not the design's final state: the redesign's fidelity (parent dc-10) is
+judged at the risk gate after those stories land.
 
 ## dc-4
 

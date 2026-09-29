@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens" }
-frozen: { at: 2026-09-29, commit: 054b19facaaee36f8dbed22c080d30b59b9d7f6e }
+frozen: { at: 2026-09-29, commit: 749cb2ba49949997cf5efa7e563ff9afbfe2b931 }
 ---
 # One top bar on every workbench page, and none of the old header rows
 
