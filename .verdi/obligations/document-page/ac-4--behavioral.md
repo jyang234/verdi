@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/document-page" }
-frozen: { at: 2026-09-29, commit: bdf8e882378163cc18731f1367d6080b540e8271 }
+frozen: { at: 2026-09-29, commit: 88ebe32308f48b37711592d4fc21bcde2d166bbe }
 ---
 # The Document page at 320 px, 200 % zoom, and without JavaScript
 
