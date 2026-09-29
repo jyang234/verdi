@@ -838,13 +838,20 @@ supersession is a relationship computed from three records:
 - **Acceptance.** The successor's spec MR merges into the default branch;
   merging is acceptance.
 
-The supersession is in force from the merge that accepts the successor, and
-only while the three records match there: every such edge on the successor
-has exactly one superseded conflict naming its object and the successor, and
-every fragment such a conflict challenges has a matching edge. Before
-acceptance it is only proposed, and no surface presents the object as
-superseded. Once in force it is permanent history, and a later revision of
-the successor does not reinstate the object.
+The supersession is in force from its acceptance point: the earliest commit
+on the default branch's first-parent history at which the successor is
+present and the three records match for that closed spec. They match when
+every such edge on the successor has exactly one superseded conflict naming
+its object and the successor, and every fragment such a conflict challenges
+has a matching edge. For a spec MR landed with a merge commit or squashed,
+the acceptance point is the merge that accepts the successor; for one landed
+by fast-forward or rebase, it is the landed commit that completes the
+records. A later commit that completes records left unmatched at acceptance
+puts the supersession in force from that commit, since history alone cannot
+tell it from a landed series. Before its acceptance point the supersession
+is only proposed, and no surface presents the object as superseded. Once in
+force it is permanent history, and a later revision of the successor does
+not reinstate the object.
 
 A later whole-spec revision of the successor (§The amendment ladder)
 **carries** the established replacement when its deciding object is
