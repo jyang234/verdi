@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/workbench:TestIndex_DisclosuresCount in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-coverage" }
-frozen: { at: 2026-09-29, commit: e0fe3b544598b5e01af5627502c1441d59c47759 }
+frozen: { at: 2026-09-29, commit: 08383b2186b86f20e0a1b50d39f88352c124e9ea }
 ---
 # The index serves the disclosures count once per render
 
