@@ -25,6 +25,11 @@ type fakeGitRunner struct {
 	showFn          func(ctx context.Context, dir, ref, path string) ([]byte, error)
 	listTreeFn      func(ctx context.Context, dir, ref, path string) ([]string, error)
 	isAncestorFn    func(ctx context.Context, dir, ancestor, ref string) (bool, error)
+	// commitDateFn is optional: a nil field means "every CommitDate call
+	// returns a fixed canned date," not a panic — unlike this struct's
+	// other Fn fields — because most existing tests exercise ComputeIndex
+	// behavior that predates CommitDate and have no reason to wire it.
+	commitDateFn func(ctx context.Context, dir, rev string) (string, error)
 }
 
 func (f *fakeGitRunner) DefaultBranch(ctx context.Context, dir string) (string, error) {
@@ -49,6 +54,19 @@ func (f *fakeGitRunner) ListTree(ctx context.Context, dir, ref, path string) ([]
 
 func (f *fakeGitRunner) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error) {
 	return f.isAncestorFn(ctx, dir, ancestor, ref)
+}
+
+// canonicalFakeDate is the fixed canned CommitDate answer a test gets when
+// it wires no commitDateFn of its own — every pre-existing test built
+// before spec/index-data, exercising behavior this fake's date reads are
+// irrelevant to.
+const canonicalFakeDate = "2024-01-01T00:00:00+00:00"
+
+func (f *fakeGitRunner) CommitDate(ctx context.Context, dir, rev string) (string, error) {
+	if f.commitDateFn == nil {
+		return canonicalFakeDate, nil
+	}
+	return f.commitDateFn(ctx, dir, rev)
 }
 
 var _ GitRunner = (*fakeGitRunner)(nil)
@@ -567,7 +585,7 @@ func TestGitRunner_MethodNames(t *testing.T) {
 	for i := 0; i < typ.NumMethod(); i++ {
 		names = append(names, typ.Method(i).Name)
 	}
-	want := "DefaultBranch,IsAncestor,ListTree,LocalDesignBranches,RemoteDesignBranches,Show"
+	want := "CommitDate,DefaultBranch,IsAncestor,ListTree,LocalDesignBranches,RemoteDesignBranches,Show"
 	got := strings.Join(sortedCopy(names), ",")
 	if got != want {
 		t.Fatalf("GitRunner method set = %q, want %q", got, want)

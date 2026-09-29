@@ -75,6 +75,19 @@ type HomeDeps struct {
 	// cannot be resolved renders bare ids, exactly like a model with no
 	// renames.
 	Model *model.Model
+
+	// Clock is the "now" seam behind the quiet-draft decision
+	// (spec/index-data ac-2, dc-3: refindex.IsQuiet is always handed an
+	// injected now, never reading the wall clock itself). nil means
+	// production: resolve() fills it with time.Now, whose EVERY call
+	// still reads the real wall clock fresh — resolve() runs once, at
+	// handler construction, not per render, so assigning the function
+	// value here (never a captured time.Time snapshot) is what keeps "nil
+	// means the wall clock read at render time" true across the whole
+	// server's lifetime. Tests and the e2e harness inject a fixed func
+	// instead (ac-2's own "tests ... set it"), so no quiet decision ever
+	// depends on when a test happened to run.
+	Clock func() time.Time
 }
 
 // resolve fills production defaults for any nil field, rooted at root.
@@ -97,6 +110,9 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 		if cfg, err := store.Open(root); err == nil {
 			h.Model = cfg.Model
 		}
+	}
+	if h.Clock == nil {
+		h.Clock = time.Now
 	}
 	return h
 }

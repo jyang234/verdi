@@ -52,6 +52,17 @@ type GitRunner interface {
 	// IsAncestor reports whether ancestor is ref itself or a real ancestor
 	// of ref (gitx.IsAncestor) — dc-5's merged-branch filter.
 	IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error)
+	// CommitDate returns rev's own committer date, normalized ISO-8601
+	// (gitx.CommitDate) — the read behind every entry's last-change date
+	// (spec/index-data ac-1): a design-branch entry's branch tip revision,
+	// or a default-branch entry's landing commit SHA. Unlike every other
+	// method on this port, a CommitDate failure is deliberately NOT
+	// propagated as an operational error by ComputeIndex's callers: ac-1
+	// requires an unreadable date to degrade only the one entry (via
+	// Entry.DateDisclosed), never the whole render — so ComputeIndex
+	// catches this method's error itself rather than letting it bubble
+	// up like DefaultBranch/ListTree/Show/IsAncestor's failures do.
+	CommitDate(ctx context.Context, dir, rev string) (string, error)
 }
 
 // gitxRunner is the small adapter (dc-2) satisfying GitRunner over
@@ -122,6 +133,10 @@ func (gitxRunner) ListTree(ctx context.Context, dir, ref, path string) ([]string
 
 func (gitxRunner) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error) {
 	return gitx.IsAncestor(ctx, dir, ancestor, ref)
+}
+
+func (gitxRunner) CommitDate(ctx context.Context, dir, rev string) (string, error) {
+	return gitx.CommitDate(ctx, dir, rev)
 }
 
 // StateResolver is the consumer-defined port (dc-2, the 04 §port pattern)
