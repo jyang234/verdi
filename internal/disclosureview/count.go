@@ -7,13 +7,12 @@ import (
 )
 
 // Count returns the number of current disclosures for the checkout at
-// root — the SAME enumeration Current builds (spec/index-coverage ac-3:
-// "the same enumeration the disclosures page shows"), never a second,
-// separately decided tally. A caller that needs only the count (the
-// index page's top-bar carrier) calls this instead of re-deriving one
-// from HTML or re-implementing a parallel enumeration.
+// root: the length of the enumeration the disclosures page shows
+// (spec/index-coverage ac-3), read through the same process-wide cache
+// (Cached) the page reads, with the same extras — never a second,
+// separately decided tally.
 func Count(ctx context.Context, root string, extras ...disclosure.Disclosure) (int, error) {
-	items, err := Current(ctx, root, extras...)
+	items, err := Cached(ctx, root, extras...)
 	if err != nil {
 		return 0, err
 	}
