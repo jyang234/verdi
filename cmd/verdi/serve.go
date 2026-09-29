@@ -20,8 +20,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jyang234/verdi/internal/buildinfo"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
@@ -236,6 +238,15 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 // runServe contains the existing single-writer runtime. It is entered only
 // after any requested readiness warm-up has fully completed.
 func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readinessDefaultSpec string, stdout, stderr io.Writer) int {
+	// SI-296: the workbench clock, read from VERDI_NOW once, here, before
+	// any server effect — a malformed value refuses the start (exit 2)
+	// with no lock taken and nothing bound.
+	clock, clockDisclosure, err := workbenchClock(os.Getenv(fixedClockEnv))
+	if err != nil {
+		fmt.Fprintln(stderr, "serve:", err)
+		return 2
+	}
+
 	dataDir := filepath.Join(root, ".verdi", "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		fmt.Fprintln(stderr, "serve:", err)
@@ -329,6 +340,11 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 		// disclosed context holds either way.
 		deps.Disclosures = append(deps.Disclosures, reviewUnavailableDisclosure(configuredKind))
 	}
+	if clockDisclosure != nil {
+		// SI-296: a fixed clock is process context the served pages
+		// disclose, beside the review-unavailable one above.
+		deps.Disclosures = append(deps.Disclosures, *clockDisclosure)
+	}
 
 	// The directory home's in-review consultation (spec/directory-home
 	// dc-4), wired in the same precedence order as the review feed above:
@@ -338,7 +354,9 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	// renders as its "MR status unavailable" notice (I-1(b)). With none of
 	// the three, no forge is configured and the chips are silently,
 	// legitimately absent (home.OpenMRs nil).
-	home := workbench.HomeDeps{}
+	// The index's clock (SI-296): VERDI_NOW's fixed instant when set; nil
+	// otherwise, which HomeDeps resolves to the wall clock at render time.
+	home := workbench.HomeDeps{Clock: clock}
 	switch {
 	case forgePort != nil:
 		home.OpenMRs = newForgeOpenMRs(forgePort, root)
@@ -417,4 +435,39 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	// the signal handler above, a clean shutdown rather than a failure.
 	_ = srv.Serve(context.Background(), ln)
 	return 0
+}
+
+// fixedClockEnv names the one variable that fixes the workbench's clock
+// (SI-296, spec/index-data ac-2/ac-3): the e2e harness runs this shipped
+// binary, so an in-process clock cannot reach the pages it serves, and the
+// harness sets this instead — the same env-seam posture as
+// VERDI_REVIEW_FEED and VERDI_OPENMR_FEED. Unset (or empty, as those seams
+// treat it) means the wall clock, read at render time.
+const fixedClockEnv = "VERDI_NOW"
+
+// fixedClockSource is the process disclosure's source id: a fixed clock
+// fakes every age and quiet mark the served pages compute, so it is never
+// applied silently.
+const fixedClockSource = "serve:fixed-clock"
+
+// workbenchClock resolves VERDI_NOW's raw value (SI-296). "" means no
+// fixed clock: a nil clock (workbench.HomeDeps' own default, the wall clock
+// read at render time) and nothing disclosed. Otherwise raw must be an
+// RFC 3339 instant, parsed strictly (no surrounding space, a required
+// offset); the result is a clock that always answers that instant and the
+// process disclosure naming it. Anything else is an error naming the
+// variable — serve refuses to start on it (an operational error, exit 2).
+func workbenchClock(raw string) (func() time.Time, *disclosure.Disclosure, error) {
+	if raw == "" {
+		return nil, nil, nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s=%q is not an RFC 3339 instant: %w", fixedClockEnv, raw, err)
+	}
+	d := disclosure.New(fixedClockSource, "", fmt.Sprintf(
+		"the workbench clock is fixed at %s by %s: every last-change age and quiet mark the served pages compute is decided against that instant, not the wall clock",
+		at.Format(time.RFC3339Nano), fixedClockEnv,
+	))
+	return func() time.Time { return at }, &d, nil
 }
