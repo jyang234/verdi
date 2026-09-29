@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/refindex:TestComputeIndex_LastChangeDates in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-data" }
-frozen: { at: 2026-09-29, commit: c8f4aad8cd1d969b578e08f27bc2d042d5bf5568 }
+frozen: { at: 2026-09-29, commit: 18b943da44eb8d366b56a31ae92c88b2a190ac6d }
 ---
 # Every index entry carries its last-change date, or a disclosure
 
