@@ -33,12 +33,13 @@ var (
 // inventory). Process extras are never cached: every call appends its own
 // after the cached lint half. The zero value is ready to use and safe for
 // concurrent use. Nothing is persisted and nothing expires by time; an
-// entry is replaced when its root's key changes, and by every Refresh.
+// entry is replaced when its root's key changes.
 //
-// Current serves the cached lint half (the index's count). Refresh never
-// does: it enumerates on every call (the disclosures page, which the
-// closed spec/disclosures-panel ac-1 requires to compute fresh per render)
-// and then refreshes the cache with its result.
+// Only the index's count reads and fills the cache (through Cached and
+// Count). The disclosures page never touches it: it calls the uncached
+// Current on every render (the closed spec/disclosures-panel: "computed
+// fresh per render, never persisted", "no file, no cache, no log is
+// written by rendering the view").
 //
 // A result is served only under a key proven complete for this call:
 //   - when the key cannot be computed (not a git repository, a symbolic
@@ -65,9 +66,8 @@ type cacheEntry struct {
 	ok    bool
 }
 
-// shared is the process-wide cache: the workbench's index reads it
-// (Cached, through Count) and its /disclosures page refreshes it
-// (Refresh).
+// shared is the process-wide cache the workbench's index count reads and
+// fills through Cached and Count.
 var shared Cache
 
 // Cached is Current served through the process-wide cache: the same
@@ -75,12 +75,6 @@ var shared Cache
 // input changes.
 func Cached(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
 	return shared.Current(ctx, root, extras...)
-}
-
-// Refresh is the process-wide cache's Refresh: Current computed fresh,
-// its lint half then stored for Cached's readers.
-func Refresh(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
-	return shared.Refresh(ctx, root, extras...)
 }
 
 // Current returns what the package-level Current returns for root and
@@ -91,31 +85,6 @@ func (c *Cache) Current(ctx context.Context, root string, extras ...disclosure.D
 		return nil, err
 	}
 	return withExtras(lintItems, extras), nil
-}
-
-// Refresh returns what the package-level Current returns for root and
-// extras, always from a fresh enumeration, never a cached one. It then
-// refreshes root's entry: the result replaces whatever the cache held and
-// is stored under the same guard as a miss (a second reading with the
-// same key and stamps, outside the racy window). A result the guard
-// refuses, or a key that cannot be computed, leaves root with no entry,
-// so a value the fresh enumeration may contradict is never served again.
-func (c *Cache) Refresh(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
-	lintItems, err := c.refresh(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	return withExtras(lintItems, extras), nil
-}
-
-func (c *Cache) refresh(ctx context.Context, root string) ([]disclosure.Disclosure, error) {
-	start := now()
-	before, err := readInputs(ctx, root)
-	if err != nil {
-		c.forget(root)
-		return enumerateFresh(ctx, root)
-	}
-	return c.lead(ctx, root, c.replace(root, before.key), before, start)
 }
 
 // lint returns root's lint half: cached when the key is unchanged,
@@ -170,21 +139,6 @@ func (c *Cache) claim(root, key string) (*cacheEntry, bool) {
 		return e, false
 	}
 	return c.putLocked(root, key), true
-}
-
-// replace gives root a new entry for key, which its caller leads,
-// whatever root held before.
-func (c *Cache) replace(root, key string) *cacheEntry {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.putLocked(root, key)
-}
-
-// forget drops root's entry.
-func (c *Cache) forget(root string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.entries, root)
 }
 
 // putLocked installs a new in-flight entry for root, evicting another

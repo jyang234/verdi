@@ -102,8 +102,9 @@ func TestDisclosuresHandler_RendersCheckoutDisclosures(t *testing.T) {
 // TestDisclosuresHandler_FreshPerRender proves ac-1's "computed fresh per
 // render": the same handler, asked twice, reflects a checkout-state change
 // (the mutable zone appearing) with no restart and no cache: the page
-// enumerates on every render (SI-295; TestDisclosuresPage_EnumeratesEveryRender
-// counts it) and only refreshes the cache the index reads.
+// enumerates on every render and neither reads nor writes the index's
+// cache (SI-295; TestDisclosuresPage_EnumeratesEveryRender and
+// TestDisclosuresPage_LeavesTheCacheAsItFoundIt).
 func TestDisclosuresHandler_FreshPerRender(t *testing.T) {
 	root := disclosuresFixtureStore(t)
 	h := NewHandler(root)

@@ -599,83 +599,6 @@ func TestCache_Bounded(t *testing.T) {
 	}
 }
 
-// The disclosures page's path (SI-295 as corrected 2026-09-29): Refresh
-// enumerates on every call and then refreshes the cache the index reads.
-
-func TestCache_RefreshAlwaysEnumerates(t *testing.T) {
-	tests := []struct {
-		name   string
-		store  func(t *testing.T) string
-		primed bool
-	}{
-		{"a quiet git-backed store the cache already holds", func(t *testing.T) string { return newCacheFixture(t).root }, true},
-		{"a quiet git-backed store the cache does not hold", func(t *testing.T) string { return newCacheFixture(t).root }, false},
-		{"a store without git (uncomputable key)", buildFixtureStore, false},
-	}
-	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := tt.store(t)
-			n := countEnumerations(t)
-			pastRacyWindow(t)
-			var c Cache
-			if tt.primed {
-				if _, err := c.Current(context.Background(), root); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := c.Current(context.Background(), root); err != nil || n.Load() != 1 {
-					t.Fatalf("priming: enumerations = %d (err %v), want 1: the cache must hold a value", n.Load(), err)
-				}
-			}
-			base := n.Load()
-			want, wantErr := fresh(t, root, extra)
-			for i := int64(1); i <= 3; i++ {
-				got, err := c.Refresh(context.Background(), root, extra)
-				sameResult(t, fmt.Sprintf("page render %d", i), got, err, want, wantErr)
-				if got := n.Load() - base; got != i {
-					t.Fatalf("after %d page renders the page enumerated %d times, want once per render", i, got)
-				}
-			}
-		})
-	}
-}
-
-func TestCache_RefreshStoresForTheIndex(t *testing.T) {
-	tests := []struct {
-		name  string
-		quiet bool
-		// wantIndex is how many times the index's read enumerates after
-		// one page render.
-		wantIndex int64
-	}{
-		{"a quiet store: the index reads the page's result", true, 0},
-		{"inputs written within the racy window: the page's result is not stored", false, 1},
-	}
-	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fx := newCacheFixture(t)
-			n := countEnumerations(t)
-			if tt.quiet {
-				pastRacyWindow(t)
-			}
-			var c Cache
-			page, err := c.Refresh(context.Background(), fx.root, extra)
-			if err != nil {
-				t.Fatal(err)
-			}
-			index, err := c.Current(context.Background(), fx.root, extra)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := n.Load() - 1; got != tt.wantIndex {
-				t.Fatalf("the index enumerated %d times after a page render, want %d", got, tt.wantIndex)
-			}
-			sameResult(t, "the index after the page", index, nil, page, nil)
-		})
-	}
-}
-
 // injectStale stores a result the checkout does not have under root's
 // current key, standing in for a value cached before a transient failure.
 func injectStale(t *testing.T, c *Cache, root string) []disclosure.Disclosure {
@@ -696,64 +619,65 @@ func injectStale(t *testing.T, c *Cache, root string) []disclosure.Disclosure {
 	return stale
 }
 
-// TestCache_PageRenderReplacesAStaleValue bounds a stale cached value (a
-// transient failure cached as a result): the next page render replaces or
-// drops it, and the index then reads the checkout's real enumeration. It
-// runs through the process-wide cache, the one the workbench's index
-// (Count) and page (Refresh) share.
-func TestCache_PageRenderReplacesAStaleValue(t *testing.T) {
+// sharedEntry returns the process-wide cache's entry for root, if any.
+func sharedEntry(root string) (*cacheEntry, bool) {
+	shared.mu.Lock()
+	defer shared.mu.Unlock()
+	e, ok := shared.entries[root]
+	return e, ok
+}
+
+// TestCurrent_LeavesTheCacheAsItFoundIt (SI-295; closed
+// spec/disclosures-panel: "no file, no cache, no log is written by
+// rendering the view"): the page's enumeration, Current, returns a fresh
+// result and leaves the process-wide cache exactly as it found it — no
+// entry stays no entry, and an entry, even a stale one, keeps its identity
+// and value, so the index still reads it.
+func TestCurrent_LeavesTheCacheAsItFoundIt(t *testing.T) {
 	tests := []struct {
-		name string
-		// clockShift steps past the racy window, so the page's result can
-		// be stored.
-		clockShift bool
-		// uncomputableDuringPage makes the page's key uncomputable.
-		uncomputableDuringPage bool
-		// wantIndexEnumerations is how many times the index enumerates
-		// after the page render: 0 when it reads the page's stored result,
-		// 1 when the stale value was dropped and nothing stored.
-		wantIndexEnumerations int64
+		name  string
+		prime func(t *testing.T, root string)
 	}{
-		{"the page's result is stored in its place", true, false, 0},
-		{"the store guard refuses the page's result: the stale value is dropped", false, false, 1},
-		{"the page's key is uncomputable: the stale value is dropped", true, true, 1},
+		{"no entry", func(*testing.T, string) {}},
+		{"an entry the index stored", func(t *testing.T, root string) {
+			if _, err := Cached(context.Background(), root); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := sharedEntry(root); !ok {
+				t.Fatal("the index must have stored an entry")
+			}
+		}},
+		{"a stale entry", func(t *testing.T, root string) { injectStale(t, &shared, root) }},
 	}
+	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fx := newCacheFixture(t)
-			if tt.clockShift {
-				pastRacyWindow(t)
+			pastRacyWindow(t)
+			tt.prime(t, fx.root)
+			before, had := sharedEntry(fx.root)
+			var items []disclosure.Disclosure
+			if had {
+				items = append(items, before.items...)
 			}
-			stale := injectStale(t, &shared, fx.root)
+
+			want, wantErr := fresh(t, fx.root, extra)
 			n := countEnumerations(t)
+			got, err := Current(context.Background(), fx.root, extra)
+			sameResult(t, "the page's enumeration", got, err, want, wantErr)
 
-			if got, err := Cached(context.Background(), fx.root); err != nil || !reflect.DeepEqual(got, stale) || n.Load() != 0 {
-				t.Fatalf("before the page render the index must read the injected value: got %v, err %v, enumerations %d", got, err, n.Load())
+			after, has := sharedEntry(fx.root)
+			if has != had || after != before {
+				t.Fatalf("the page changed the cache: entry present %v -> %v, same entry %v", had, has, after == before)
 			}
-
-			if tt.uncomputableDuringPage {
-				t.Setenv("GIT_ALTERNATE_OBJECT_DIRECTORIES", filepath.Join(t.TempDir(), "objects"))
+			if had && !reflect.DeepEqual(after.items, items) {
+				t.Fatalf("the page changed the cached value: %v -> %v", items, after.items)
 			}
-			want, wantErr := fresh(t, fx.root)
-			page, err := Refresh(context.Background(), fx.root)
-			sameResult(t, "the page render", page, err, want, wantErr)
-			if tt.uncomputableDuringPage {
-				if err := os.Unsetenv("GIT_ALTERNATE_OBJECT_DIRECTORIES"); err != nil {
-					t.Fatal(err)
+			if had {
+				index, err := Cached(context.Background(), fx.root)
+				if err != nil || !reflect.DeepEqual(index, items) || n.Load() != 0 {
+					t.Fatalf("the index must still read the entry it found: got %v (err %v, enumerations %d), want %v", index, err, n.Load(), items)
 				}
-			}
-			if n.Load() != 1 {
-				t.Fatalf("the page enumerated %d times, want 1", n.Load())
-			}
-
-			index, err := Cached(context.Background(), fx.root)
-			sameResult(t, "the index after the page", index, err, want, wantErr)
-			if got := n.Load() - 1; got != tt.wantIndexEnumerations {
-				t.Fatalf("the index enumerated %d times after the page, want %d", got, tt.wantIndexEnumerations)
-			}
-			count, err := Count(context.Background(), fx.root)
-			if err != nil || count != len(want) {
-				t.Fatalf("Count = %d (err %v), want %d", count, err, len(want))
 			}
 		})
 	}

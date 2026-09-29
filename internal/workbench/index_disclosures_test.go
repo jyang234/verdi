@@ -12,9 +12,9 @@
 // value with a fresh enumeration and with the page's own count.
 //
 // TestDisclosuresPage_EnumeratesEveryRender and
-// TestIndex_DisclosuresCountReadsThePageEnumeration prove SI-295's split
-// on a git-backed store: the page computes fresh on every render, and the
-// index reads the result the page stored, running no lint of its own.
+// TestDisclosuresPage_LeavesTheCacheAsItFoundIt prove SI-295's split on a
+// git-backed store: the page computes fresh on every render and neither
+// reads nor writes the cache; only the index reads and fills it.
 //
 // The carrier is non-visible markup on the index's existing Disclosures
 // pointer: data-disclosures-count="<n>", or data-disclosures-unproven=
@@ -307,37 +307,64 @@ func TestDisclosuresPage_EnumeratesEveryRender(t *testing.T) {
 	}
 }
 
-// TestIndex_DisclosuresCountReadsThePageEnumeration: after a page render
-// on a quiet git-backed store, the index enumerates nothing — it reads the
-// result the page stored — and carries the page's count, extras included.
-func TestIndex_DisclosuresCountReadsThePageEnumeration(t *testing.T) {
-	root := quietGitStore(t)
-	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
-	runs := &lintRuns{}
-	ctx := gitx.WithObserver(context.Background(), runs)
-	h := NewHandlerWithHome(root, Deps{Disclosures: []disclosure.Disclosure{extra}}, HomeDeps{Index: cannedIndex(nil, nil)})
+// TestDisclosuresPage_LeavesTheCacheAsItFoundIt (SI-295; closed
+// spec/disclosures-panel: "no file, no cache, no log is written by
+// rendering the view"): a page render neither fills nor replaces the
+// index's cache — with no entry the index still enumerates for itself;
+// with one, the index still reads it — and the index's count equals the
+// page's for the same inputs.
+func TestDisclosuresPage_LeavesTheCacheAsItFoundIt(t *testing.T) {
+	tests := []struct {
+		name string
+		// indexFirst renders the index before the page, so the cache holds
+		// an entry when the page renders.
+		indexFirst bool
+		// wantIndexRuns is how many times the index runs lint after the
+		// page render.
+		wantIndexRuns int
+	}{
+		{"no entry: the page does not fill the cache", false, 1},
+		{"an entry: the page leaves it, the index still reads it", true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := quietGitStore(t)
+			extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
+			runs := &lintRuns{}
+			ctx := gitx.WithObserver(context.Background(), runs)
+			h := NewHandlerWithHome(root, Deps{Disclosures: []disclosure.Disclosure{extra}}, HomeDeps{Index: cannedIndex(nil, nil)})
 
-	page := serveWith(t, h, ctx, "/disclosures")
-	if page.Code != http.StatusOK || runs.count() != 1 {
-		t.Fatalf("GET /disclosures = %d with %d lint runs, want 200 and 1", page.Code, runs.count())
-	}
-	index := serveWith(t, h, ctx, "/")
-	if index.Code != http.StatusOK {
-		t.Fatalf("GET / = %d", index.Code)
-	}
-	if got := runs.count() - 1; got != 0 {
-		t.Fatalf("the index ran lint %d times after the page render, want 0 (it reads the page's stored result)", got)
-	}
-	countMatch := indexCountRe.FindStringSubmatch(index.Body.String())
-	pageMatch := pageCountRe.FindStringSubmatch(page.Body.String())
-	if countMatch == nil || pageMatch == nil || countMatch[1] != pageMatch[1] {
-		t.Fatalf("index count %v, /disclosures count %v, want equal", countMatch, pageMatch)
-	}
-	want, err := disclosureview.Current(context.Background(), root, extra)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if countMatch[1] != strconv.Itoa(len(want)) {
-		t.Fatalf("index count %s, fresh enumeration %d", countMatch[1], len(want))
+			if tt.indexFirst {
+				if rec := serveWith(t, h, ctx, "/"); rec.Code != http.StatusOK {
+					t.Fatalf("GET / = %d", rec.Code)
+				}
+			}
+			before := runs.count()
+			page := serveWith(t, h, ctx, "/disclosures")
+			if page.Code != http.StatusOK || runs.count()-before != 1 {
+				t.Fatalf("GET /disclosures = %d with %d lint runs, want 200 and 1", page.Code, runs.count()-before)
+			}
+			before = runs.count()
+			index := serveWith(t, h, ctx, "/")
+			if index.Code != http.StatusOK {
+				t.Fatalf("GET / = %d", index.Code)
+			}
+			if got := runs.count() - before; got != tt.wantIndexRuns {
+				t.Fatalf("the index ran lint %d times after the page render, want %d", got, tt.wantIndexRuns)
+			}
+
+			countMatch := indexCountRe.FindStringSubmatch(index.Body.String())
+			pageMatch := pageCountRe.FindStringSubmatch(page.Body.String())
+			if countMatch == nil || pageMatch == nil || countMatch[1] != pageMatch[1] {
+				t.Fatalf("index count %v, /disclosures count %v, want equal", countMatch, pageMatch)
+			}
+			want, err := disclosureview.Current(context.Background(), root, extra)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if countMatch[1] != strconv.Itoa(len(want)) {
+				t.Fatalf("index count %s, fresh enumeration %d", countMatch[1], len(want))
+			}
+		})
 	}
 }

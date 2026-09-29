@@ -2,13 +2,12 @@ package disclosureview
 
 // TestCount_MatchesEnumeration (spec/index-coverage ac-3--static): for
 // every fixture store the count equals the number of entries the
-// disclosures page enumerates — the page computes fresh through Refresh
-// and stores its result, the count reads that cache with the same extras
-// — and equals a fresh Current. Where the cache key is computable
-// (git-backed stores) the count adds no second enumeration: page and count
-// together enumerate once. Where it is not (no git), every call enumerates
-// afresh, as the cache never serves a value under an unprovable key.
-
+// disclosures page enumerates for the same inputs — the page computes
+// fresh with Current, the count reads the index's cache with the same
+// extras, and both run the one enumeration (lintDisclosures plus
+// withExtras), never a separately decided tally. On a git-backed store the
+// count enumerates once and a second count reads the cache; without git
+// the key is uncomputable and every count enumerates afresh.
 import (
 	"context"
 	"os"
@@ -21,10 +20,12 @@ import (
 func TestCount_MatchesEnumeration(t *testing.T) {
 	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
 	tests := []struct {
-		name             string
-		setup            func(t *testing.T) string
-		extras           []disclosure.Disclosure
-		wantCount        int
+		name      string
+		setup     func(t *testing.T) string
+		extras    []disclosure.Disclosure
+		wantCount int
+		// wantEnumerations is how many times two successive counts run
+		// the enumeration.
 		wantEnumerations int64
 	}{
 		{"a store with a disclosure, no git", buildFixtureStore, nil, 1, 2},
@@ -43,25 +44,23 @@ func TestCount_MatchesEnumeration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := tt.setup(t)
 			pastRacyWindow(t)
-			n := countEnumerations(t)
 
-			page, err := Refresh(context.Background(), root, tt.extras...)
+			page, err := Current(context.Background(), root, tt.extras...)
 			if err != nil {
-				t.Fatalf("Refresh (the page's enumeration): %v", err)
+				t.Fatalf("Current (the page's enumeration): %v", err)
 			}
-			count, err := Count(context.Background(), root, tt.extras...)
-			if err != nil {
-				t.Fatalf("Count: %v", err)
+			n := countEnumerations(t)
+			for i := range 2 {
+				count, err := Count(context.Background(), root, tt.extras...)
+				if err != nil {
+					t.Fatalf("Count %d: %v", i+1, err)
+				}
+				if count != len(page) || count != tt.wantCount {
+					t.Fatalf("Count %d = %d, the page enumerates %d, want both %d", i+1, count, len(page), tt.wantCount)
+				}
 			}
 			if got := n.Load(); got != tt.wantEnumerations {
-				t.Fatalf("page then count enumerated %d times, want %d", got, tt.wantEnumerations)
-			}
-			items, err := Current(context.Background(), root, tt.extras...)
-			if err != nil {
-				t.Fatalf("Current: %v", err)
-			}
-			if count != len(page) || count != len(items) || count != tt.wantCount {
-				t.Fatalf("Count = %d, page enumerates %d, fresh Current %d, want all %d", count, len(page), len(items), tt.wantCount)
+				t.Fatalf("two counts enumerated %d times, want %d", got, tt.wantEnumerations)
 			}
 		})
 	}
