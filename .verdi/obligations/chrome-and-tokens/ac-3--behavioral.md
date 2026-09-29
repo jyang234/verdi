@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens" }
-frozen: { at: 2026-09-29, commit: b9f225e713231477b90e4c86cdd3f038e16fb249 }
+frozen: { at: 2026-09-29, commit: 054b19facaaee36f8dbed22c080d30b59b9d7f6e }
 ---
 # Nothing rotated, stamps drawn as chips, handwriting only on a parked sticky
 
