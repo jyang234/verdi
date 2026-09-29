@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/refindex:TestComputeIndex_LastChangeDatesFixturegit in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-data" }
-frozen: { at: 2026-09-29, commit: be706198be544721484b0d2fed7974477b3c68d7 }
+frozen: { at: 2026-09-29, commit: d79172748131f9f36664017f97c3571484f241a4 }
 ---
 # Last-change dates over a real repository
 
