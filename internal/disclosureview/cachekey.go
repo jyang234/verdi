@@ -41,6 +41,10 @@ import (
 //   - HEAD's commit and symbolic name: gitx.CurrentBranch (lint/context.go:87,
 //     gitx/branch.go:18), and HEAD as a revision in merge-base, diff, show
 //     and ancestry. Keyed: rev-parse HEAD and --symbolic-full-name HEAD.
+//   - Ref storage: under git's reftable backend HEAD and every ref live in
+//     reftable/ tables the store guard cannot stamp, so such a repository
+//     (extensions.refStorage, or a reftable directory) is an uncomputable
+//     key (SI-295).
 //   - Refs: refs/remotes/origin/HEAD's target (gitx/branch.go:38),
 //     refs/remotes/origin/{main,master,<name>} and refs/heads/<name>
 //     (specstate/defaultbranch.go:81,112,120), the resolved default
@@ -293,6 +297,9 @@ func (r *inputReader) git(ctx context.Context, root string) error {
 		return err
 	}
 	r.field("git config", config)
+	if err := refsAreStampable(config, gitDir, commonDir); err != nil {
+		return err
+	}
 
 	tracked, err := gitx.LsFiles(ctx, root)
 	if err != nil {
@@ -328,6 +335,32 @@ func (r *inputReader) git(ctx context.Context, root string) error {
 	for _, dir := range refDirs {
 		if err := r.stampTree(dir); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// refsAreStampable refuses a repository whose refs use git's reftable
+// backend (SI-295): HEAD and every ref then live in reftable/ tables that
+// the store guard does not stamp, so a ref changed and changed back during
+// an enumeration would go unseen. It is detected by extensions.refStorage
+// in the configuration (git config --list -z entries are "key\nvalue")
+// or by a reftable directory in the repository's own or common git
+// directory.
+func refsAreStampable(config []byte, gitDir, commonDir string) error {
+	for _, entry := range strings.Split(string(config), "\x00") {
+		key, value, _ := strings.Cut(entry, "\n")
+		if strings.EqualFold(key, "extensions.refstorage") && !strings.EqualFold(strings.TrimSpace(value), "files") {
+			return uncomputable("ref storage", fmt.Errorf("extensions.refStorage = %q: refs the store guard cannot stamp", value))
+		}
+	}
+	for _, dir := range []string{gitDir, commonDir} {
+		_, err := os.Lstat(filepath.Join(dir, "reftable"))
+		switch {
+		case err == nil:
+			return uncomputable("ref storage", fmt.Errorf("%s holds a reftable directory: refs the store guard cannot stamp", dir))
+		case !errors.Is(err, fs.ErrNotExist):
+			return uncomputable("ref storage", err)
 		}
 	}
 	return nil
