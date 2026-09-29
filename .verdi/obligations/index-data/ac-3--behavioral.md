@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:cmd/e2eharness:TestHarness_IndexDatesAndClock in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-data" }
-frozen: { at: 2026-09-29, commit: 18b943da44eb8d366b56a31ae92c88b2a190ac6d }
+frozen: { at: 2026-09-29, commit: be706198be544721484b0d2fed7974477b3c68d7 }
 ---
 # The e2e harness serves fixture dates and a settable clock
 
