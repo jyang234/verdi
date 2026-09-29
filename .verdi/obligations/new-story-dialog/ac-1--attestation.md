@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/new-story-dialog" }
-frozen: { at: 2026-09-29, commit: 839948274ff833f514436b11a095f7cbc89d2bd1 }
+frozen: { at: 2026-09-29, commit: 44c406745e35264e2845c42f5212e4dfb8fc61aa }
 ---
 # The owner accepts the New story dialog's visual fidelity
 
