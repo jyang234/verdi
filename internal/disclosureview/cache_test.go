@@ -486,6 +486,42 @@ func TestCache_ConcurrentCalls(t *testing.T) {
 	}
 }
 
+// TestCache_PanickingEnumerationReleasesItsEntry: a leader whose
+// enumeration panics still finishes its entry, so a later call with the
+// same key enumerates instead of waiting on an entry nobody will finish.
+func TestCache_PanickingEnumerationReleasesItsEntry(t *testing.T) {
+	fx := newCacheFixture(t)
+	pastRacyWindow(t)
+	orig := enumerateLint
+	var n atomic.Int64
+	enumerateLint = func(ctx context.Context, root string) ([]disclosure.Disclosure, error) {
+		if n.Add(1) == 1 {
+			panic("enumeration failed")
+		}
+		return orig(ctx, root)
+	}
+	t.Cleanup(func() { enumerateLint = orig })
+	var c Cache
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the first call must panic")
+			}
+		}()
+		_, _ = c.Current(context.Background(), fx.root)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	want, wantErr := fresh(t, fx.root)
+	got, err := c.Current(ctx, fx.root)
+	sameResult(t, "the call after the panic", got, err, want, wantErr)
+	if got := n.Load(); got != 2 {
+		t.Fatalf("enumerations = %d, want 2", got)
+	}
+}
+
 func TestCacheEntry_Await(t *testing.T) {
 	stored := []disclosure.Disclosure{disclosure.New("lint:VL-017", "x", "y")}
 	canceled, cancel := context.WithCancel(context.Background())

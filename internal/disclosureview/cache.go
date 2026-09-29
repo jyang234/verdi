@@ -100,15 +100,25 @@ func (c *Cache) lint(ctx context.Context, root string) ([]disclosure.Disclosure,
 		return enumerateFresh(ctx, root)
 	}
 
-	items, err := enumerateFresh(ctx, root)
+	return c.lead(ctx, root, e, before, start)
+}
+
+// lead runs e's enumeration and stores its result only when a second
+// reading proves it is the key's (see Cache). However the enumeration
+// ends — a result, an error or a panic — e is finished and, unless
+// stored, released, so no later call waits on it.
+func (c *Cache) lead(ctx context.Context, root string, e *cacheEntry, before inputs, start time.Time) (items []disclosure.Disclosure, err error) {
+	defer func() {
+		close(e.done)
+		if !e.ok {
+			c.release(root, e)
+		}
+	}()
+	items, err = enumerateFresh(ctx, root)
 	if err == nil && before.newest.Before(start.Add(-racyWindow)) {
 		if after, aerr := readInputs(ctx, root); aerr == nil && after.same(before) {
 			e.items, e.ok = items, true
 		}
-	}
-	close(e.done)
-	if !e.ok {
-		c.release(root, e)
 	}
 	return items, err
 }
