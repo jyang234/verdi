@@ -7,7 +7,10 @@ package disclosureview
 // extras, and both run the one enumeration (lintDisclosures plus
 // withExtras), never a separately decided tally. On a git-backed store the
 // count enumerates once and a second count reads the cache; without git
-// the key is uncomputable and every count enumerates afresh.
+// the key is uncomputable and every count enumerates afresh. The CI
+// variables lint reads are cleared first, so the fixed counts hold under
+// a pull-request environment too (BL-96 class: under GITHUB_BASE_REF=main
+// VL-004 adds a disclosure to a store without git).
 import (
 	"context"
 	"os"
@@ -18,6 +21,9 @@ import (
 )
 
 func TestCount_MatchesEnumeration(t *testing.T) {
+	for _, v := range ciEnvVars {
+		t.Setenv(v, "")
+	}
 	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
 	tests := []struct {
 		name      string
