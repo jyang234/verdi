@@ -7,6 +7,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -19,7 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 func TestWorkbenchClock(t *testing.T) {
@@ -52,6 +57,23 @@ func TestWorkbenchClock(t *testing.T) {
 			wantAt:     time.Date(2024, 6, 15, 12, 0, 0, 500_000_000, time.UTC),
 			wantInText: "2024-06-15T12:00:00.5Z",
 		},
+		// B1-RR3: the four places Go's time.RFC3339 layout departs from a
+		// strict RFC 3339 reading, pinned so any change is deliberate.
+		{
+			name:       "Go's layout accepts a comma decimal separator (named with a dot)",
+			raw:        "2024-06-15T12:00:00,5Z",
+			wantAt:     time.Date(2024, 6, 15, 12, 0, 0, 500_000_000, time.UTC),
+			wantInText: "2024-06-15T12:00:00.5Z",
+		},
+		{
+			name:       "Go's layout accepts a +24:00 offset",
+			raw:        "2024-06-15T12:00:00+24:00",
+			wantAt:     time.Date(2024, 6, 14, 12, 0, 0, 0, time.UTC),
+			wantInText: "2024-06-15T12:00:00+24:00",
+		},
+		{name: "Go's layout refuses a lower-case t", raw: "2024-06-15t12:00:00Z", wantErr: true},
+		{name: "Go's layout refuses a lower-case z", raw: "2024-06-15T12:00:00z", wantErr: true},
+		{name: "Go's layout refuses the leap second :60", raw: "2016-12-31T23:59:60Z", wantErr: true},
 		{name: "a relative word", raw: "yesterday", wantErr: true},
 		{name: "a bare day", raw: "2024-06-15", wantErr: true},
 		{name: "no offset", raw: "2024-06-15T12:00:00", wantErr: true},
@@ -64,7 +86,8 @@ func TestWorkbenchClock(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			clock, disclosed, err := workbenchClock(tt.raw)
+			served, err := workbenchClock(tt.raw)
+			clock, disclosed := served.now, served.disclosure
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("workbenchClock(%q) = nil error, want one", tt.raw)
@@ -301,5 +324,126 @@ func TestServe_VerdiNowMalformed_ExitsTwo(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".verdi", "data", "writer.lock")); !os.IsNotExist(err) {
 		t.Errorf("writer.lock exists (stat err %v): the refusal came after a server effect", err)
+	}
+}
+
+// TestServeVerdiNowResolvedBeforeTheWarmUp is B1-RR1 (SI-296: a malformed
+// value is refused at startup): cmdServeWithDeps resolves VERDI_NOW before
+// the --context-request readiness warm-up and before any other effect,
+// then carries the resolved clock and its disclosure into the run. Driven
+// through the REAL warm-up (readinessLoadBuilder) over a store with a
+// configured judge that counts its launches, so an ordering regression
+// would visibly launch the judge, take the transient writer lock, and
+// write .verdi/data/cache — none of which a malformed value may do.
+func TestServeVerdiNowResolvedBeforeTheWarmUp(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		verdiNow string
+		wantCode int
+		// wantWarm: the warm-up ran (one build, one judge launch).
+		wantWarm bool
+		// wantAt: the clock the run received; zero means none (the wall
+		// clock).
+		wantAt time.Time
+	}{
+		{name: "unset-warms-up-then-runs-on-the-wall-clock", verdiNow: "", wantCode: 0, wantWarm: true},
+		{name: "valid-warms-up-then-runs-on-the-fixed-clock", verdiNow: "2024-06-15T12:00:00Z", wantCode: 0, wantWarm: true, wantAt: time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)},
+		{name: "malformed-refused-before-any-effect", verdiNow: "next tuesday", wantCode: 2},
+	}
+	// Subtest names are single tokens: t.TempDir embeds them in the judge
+	// script's path, and the judge command line is whitespace-split.
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := buildContextCompileRepo(t, map[string]string{
+				".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+			})
+			counterPath := filepath.Join(t.TempDir(), "judge-calls")
+			judge := writeContextConflictJudge(t, "c=$(cat '"+counterPath+"' 2>/dev/null || echo 0); echo $((c+1)) > '"+counterPath+"'; printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+			configureContextConflictJudge(t, repo, judge, 0)
+			checkoutBranch(t, repo.Dir, "design/feature-alpha")
+			requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+			dataDir := filepath.Join(repo.Dir, ".verdi", "data")
+			if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+				t.Fatalf("precondition: %s exists before serve (stat err %v)", dataDir, err)
+			}
+
+			builds := 0
+			entered := false
+			var got servedClock
+			deps := serveCommandDeps{
+				findRoot: func(string) (string, error) { return repo.Dir, nil },
+				getenv: func(key string) string {
+					if key == fixedClockEnv {
+						return tt.verdiNow
+					}
+					return ""
+				},
+				readiness: readinessSnapshotBuilderFunc(func(ctx context.Context, root, path string) (string, *readinessload.PredecodedRequest, error) {
+					builds++
+					return readinessLoadBuilder{}.Build(ctx, root, path)
+				}),
+				run: func(_, _ string, _ readinessload.Loader, _ string, clock servedClock, _, _ io.Writer) int {
+					entered = true
+					got = clock
+					return 0
+				},
+			}
+			var stdout, stderr bytes.Buffer
+			code := cmdServeWithDeps([]string{"--http", "127.0.0.1:0", "--context-request", requestPath}, &stdout, &stderr, deps)
+			if code != tt.wantCode {
+				t.Fatalf("exit = %d, want %d; stderr=%q", code, tt.wantCode, stderr.String())
+			}
+
+			judgeCalls, judgeErr := os.ReadFile(counterPath)
+			if !tt.wantWarm {
+				if !strings.Contains(stderr.String(), "VERDI_NOW") {
+					t.Errorf("stderr %q does not name VERDI_NOW", stderr.String())
+				}
+				if builds != 0 {
+					t.Errorf("the readiness warm-up builder ran %d times before the malformed clock was refused", builds)
+				}
+				if !os.IsNotExist(judgeErr) {
+					t.Errorf("the judge was launched (calls %q, err %v) before the malformed clock was refused", judgeCalls, judgeErr)
+				}
+				if entered {
+					t.Error("the run was entered with a malformed VERDI_NOW")
+				}
+				if stdout.Len() != 0 {
+					t.Errorf("stdout = %q, want nothing (no warm-up line)", stdout.String())
+				}
+				// No writer lock, no data zone, no cache file: nothing under
+				// .verdi/data exists at all.
+				if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+					t.Errorf("%s exists after the refusal (stat err %v): a lock or cache was written first", dataDir, err)
+				}
+				if _, err := os.Stat(store.WriterLockPath(repo.Dir)); !os.IsNotExist(err) {
+					t.Errorf("a writer lock exists after the refusal (stat err %v)", err)
+				}
+				return
+			}
+
+			if builds != 1 || strings.TrimSpace(string(judgeCalls)) != "1" {
+				t.Errorf("warm-up builds = %d, judge calls = %q (err %v), want exactly one of each", builds, judgeCalls, judgeErr)
+			}
+			if !entered {
+				t.Fatal("the run was never entered")
+			}
+			if tt.wantAt.IsZero() {
+				if got.now != nil || got.disclosure != nil {
+					t.Errorf("run received a fixed clock (%v) or disclosure (%+v) with VERDI_NOW unset", got.now != nil, got.disclosure)
+				}
+				return
+			}
+			if got.now == nil {
+				t.Errorf("run received no clock, want the fixed %v", tt.wantAt)
+			} else if at := got.now(); !at.Equal(tt.wantAt) {
+				t.Errorf("run's clock = %v, want the fixed %v", at, tt.wantAt)
+			}
+			if got.disclosure == nil || got.disclosure.Source != fixedClockSource {
+				t.Errorf("run's clock disclosure = %+v, want source %s", got.disclosure, fixedClockSource)
+			}
+		})
 	}
 }
