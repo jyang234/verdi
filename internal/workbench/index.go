@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/disclosureview"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -70,8 +71,20 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 
 	// The disclosures view (spec/disclosures-panel): one landing-page
 	// pointer so the checkout's "what is verdi not proving right now"
-	// surface is discoverable, not tribal knowledge.
-	body.WriteString(`<p class="home-disclosures"><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
+	// surface is discoverable, not tribal knowledge. The pointer also
+	// carries a non-visible data-disclosures-count attribute (spec/
+	// index-coverage ac-3): the SAME enumeration the disclosures page
+	// itself shows (internal/disclosureview.Count, one call, computed
+	// once per render), for a later lane's top-bar Disclosures toggle to
+	// read without a second enumeration of its own. A count Count could
+	// not compute (an unenumerable store) omits the attribute entirely —
+	// never a false "0" — mirroring how the corpus section below discloses
+	// its own read failure inline rather than failing this page.
+	disclosuresAttr := ""
+	if n, err := disclosureview.Count(ctx, root); err == nil {
+		disclosuresAttr = ` data-disclosures-count="` + strconv.Itoa(n) + `"`
+	}
+	body.WriteString(`<p class="home-disclosures"` + disclosuresAttr + `><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
 
 	// The mechanical spec importer (spec-import-contract: "The page is
 	// discoverable from home before new statements are requested"): one
