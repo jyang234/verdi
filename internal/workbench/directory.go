@@ -18,6 +18,7 @@ import (
 	stdhtml "html"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,8 +180,10 @@ const designPrefix = "design/"
 // index-computation failure, if any (dc-5: it renders as a disclosed
 // inline notice in a still-served page, never a dead-end); inReview and
 // mrNotice come from consultOpenMRs; mrConfigured gates the second-source
-// provenance line.
-func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model) {
+// provenance line. now is the render's one clock reading (HomeDeps.Clock,
+// read once per render by the caller): every entry's quiet carrier is
+// decided against it (spec/index-data ac-2, dc-3; SI-297).
+func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model, now time.Time) {
 	buf.WriteString(`<section class="home-directory"><h2>Directory</h2>`)
 	// vocab:identity — the directory's own StatusGroup taxonomy word (L-M8 genus), not the lifecycle state
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
@@ -228,7 +231,7 @@ func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.En
 		}
 		buf.WriteString(`<ul>`)
 		for _, e := range group {
-			writeDirectoryEntry(buf, root, e, inReview, mdl)
+			writeDirectoryEntry(buf, root, e, inReview, mdl, now)
 		}
 		buf.WriteString(`</ul></section>`)
 	}
@@ -249,7 +252,7 @@ var sourceChipLabels = map[refindex.Source]string{
 // board existed), a default-branch spec (today's unprefixed addresses,
 // dc-3), or a design-branch draft (the draft-boards story's per-branch
 // address grammar, dc-3 — emitted, never invented).
-func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inReview map[string]bool, mdl *model.Model) {
+func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inReview map[string]bool, mdl *model.Model, now time.Time) {
 	name := strings.TrimPrefix(e.Ref, "spec/")
 
 	buf.WriteString(`<li class="dir-entry`)
@@ -260,7 +263,9 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 	buf.WriteString(stdhtml.EscapeString(name))
 	buf.WriteString(`" data-source="`)
 	buf.WriteString(string(e.Source))
-	buf.WriteString(`">`)
+	buf.WriteString(`"`)
+	writeDateCarriers(buf, e, now)
+	buf.WriteString(`>`)
 
 	switch {
 	// A DEFAULT-BRANCH entry keeps its full identity even when its
@@ -291,6 +296,52 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 		writeDesignEntry(buf, e, name, inReview, mdl)
 	}
 	buf.WriteString(`</li>`)
+}
+
+// writeDateCarriers writes SI-297's non-visible date carriers onto an
+// entry's own <li> — attributes only, no visible text, so the index story
+// (F7) can render ages and the quiet mark, and the e2e harness can assert
+// them, from the served page itself:
+//
+//   - data-last-change: the entry's committer date (refindex.LastChange
+//     reads it), or
+//   - data-date-unproven: the reason no date is readable — the entry's own
+//     date disclosure, or this renderer's when an entry carries neither
+//     (silence is never a pass); and
+//   - data-quiet ("true" or "false"): only on a drafts-in-progress entry
+//     with a readable date, decided by refindex.IsQuiet against now. An
+//     absent data-quiet means unproven, never not-quiet (dc-2: no entry
+//     outside that group reads quiet).
+func writeDateCarriers(buf *bytes.Buffer, e refindex.Entry, now time.Time) {
+	if _, ok := refindex.LastChange(e); !ok {
+		buf.WriteString(` data-date-unproven="`)
+		buf.WriteString(stdhtml.EscapeString(dateUnprovenReason(e)))
+		buf.WriteString(`"`)
+		return
+	}
+	buf.WriteString(` data-last-change="`)
+	buf.WriteString(stdhtml.EscapeString(e.Date))
+	buf.WriteString(`"`)
+	if e.StatusGroup == refindex.StatusGroupDraftsInProgress {
+		buf.WriteString(` data-quiet="`)
+		buf.WriteString(strconv.FormatBool(refindex.IsQuiet(e, now)))
+		buf.WriteString(`"`)
+	}
+}
+
+// dateUnprovenReason renders why e has no readable date, in the shared
+// disclosure vocabulary: its own DateDisclosed when refindex disclosed one,
+// otherwise this renderer's own disclosure naming the gap (an entry built
+// outside refindex's computation — never zero, never now).
+func dateUnprovenReason(e refindex.Entry) string {
+	if e.DateDisclosed != nil {
+		return disclosure.Render(*e.DateDisclosed)
+	}
+	text := "no last-change date was computed for this entry"
+	if e.Date != "" {
+		text = fmt.Sprintf("last-change date %q is not a committer date", e.Date)
+	}
+	return disclosure.Render(disclosure.New("workbench:date-unproven", e.Ref, text))
 }
 
 // writeDefaultEntry renders a default-branch entry: title linked to its
