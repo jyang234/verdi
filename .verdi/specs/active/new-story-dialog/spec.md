@@ -16,7 +16,7 @@ constraints:
   - { id: co-1, text: "Labels use the store's vocabulary preset (planned story, research spike), never the design's hard-coded story or New story (parent co-4).", anchor: co-1 }
 decisions:
   - { id: dc-1, text: "The dialog reuses the existing creation form's write path and its name grammar. It adds the branch preview, the inline grammar report, and the coverage list, and changes no write.", anchor: dc-1 }
-  - { id: dc-2, text: "Coverage comes from index-coverage's shared function, so the dialog, the wall, and the index never disagree about which criteria have stories.", anchor: dc-2 }
+  - { id: dc-2, text: "Coverage comes from index-coverage's shared function, so the dialog, the wall, and the index never disagree about which criteria are covered, that is, listed by a declared stub or implemented by a story (parent dc-5).", anchor: dc-2 }
 links:
   - { type: implements, ref: "spec/workbench-redesign#ac-6" }
 ---
@@ -66,4 +66,4 @@ grammar report, and the coverage list, and changes no write.
 ## dc-2
 
 Coverage comes from index-coverage's shared function, so the dialog, the wall, and the index never disagree about which
-criteria have stories.
+criteria are covered, that is, listed by a declared stub or implemented by a story (parent dc-5).
