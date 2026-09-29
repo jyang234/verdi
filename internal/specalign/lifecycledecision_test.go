@@ -717,6 +717,19 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// implemented as a lint rule instead. FUNCTION-SCOPED.
 	{File: "internal/lint/vl002.go", Func: "checkSpecPath", Rationale: "d.Status is lint.Document.Status (plain string, cast from raw frontmatter at the one decode site in walk.go); VL-002 validates path/status self-consistency of the artifact's OWN claim, never an acceptance decision — the same register internal/artifact's schema validation occupies"},
 
+	// internal/objsupersede/records.go (*Conflict).superseded: c.FM.Status
+	// is artifact.ConflictFrontmatter.Status — a CONFLICT's own frontmatter
+	// enum (open -> superseded | dismissed, 02 §Kind registry), never a
+	// feature/story lifecycle state. It is the package's ONE conflict-
+	// status read: every match condition that asks whether a conflict's
+	// own claim is resolved (SI-272's already-superseded, SI-273's carried
+	// candidacy, §5 conditions 6-8 and completeness) routes through it.
+	// The package takes every acceptance and closure fact from
+	// internal/specstate and the default branch's first-parent history
+	// (SI-270), and reads "closed" for a target from the archive zone
+	// alone (SI-277). FUNCTION-SCOPED.
+	{File: "internal/objsupersede/records.go", Func: "superseded", Rationale: "c.FM.Status is a conflict's own frontmatter enum (open -> superseded | dismissed, 02 §Kind registry), not a feature/story lifecycle state; the closed-spec object supersession match reads whether the conflict's own claim is resolved (SI-277) — never an acceptance or closure decision, which the package takes from internal/specstate and first-parent history (SI-270)"},
+
 	// internal/lint/vl004.go (vl004).Check: d.Status != "draft" is a
 	// PRE-FILTER identifying which documents carry the LEGACY "draft"
 	// claim worth cross-checking against Git — VL-004's own charter (its
@@ -728,6 +741,20 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// State), never by d.Status again — verified by reading the whole
 	// function (task-6c fix round 1 report). FUNCTION-SCOPED.
 	{File: "internal/lint/vl004.go", Func: "Check", Rationale: "d.Status != \"draft\" is a pre-filter selecting which documents get the legacy-compatibility check; the actual verdict is decided by specstate.Result.State a few lines below, never by d.Status again — VL-004's own documented charter"},
+
+	// internal/lint/vl026.go vl026ConflictSuperseded: c.Status (the
+	// caller passes d.Conflict) is artifact.ConflictFrontmatter.Status, a
+	// CONFLICT's own frontmatter enum (open -> superseded | dismissed, 02
+	// §Kind registry) — the literal "superseded" coincides with a spec
+	// lifecycle value but names no spec's state. VL-026 clause (e) asks
+	// only whether a superseded conflict with fragment challenges carries
+	// the resolved_by its own claim requires (SI-269): a shape check,
+	// never "is this spec accepted or closed". SI-277 routes VL-026's
+	// every read of that field through this ONE helper, and drops the
+	// spec-side `status: closed` read entirely (closed is the archive
+	// zone alone), so nothing else in vl026.go is allowlisted.
+	// FUNCTION-SCOPED.
+	{File: "internal/lint/vl026.go", Func: "vl026ConflictSuperseded", Rationale: "d.Conflict.Status is a conflict's own frontmatter enum (open -> superseded | dismissed, 02 §Kind registry), not a feature/story lifecycle state; VL-026 (e) checks the shape a superseded conflict's own claim requires (SI-269, SI-277) — never an acceptance or closure decision"},
 }
 
 // lifecycleDecisionSkipDir reports directories the audit deliberately does

@@ -26,6 +26,11 @@ type Facts struct {
 	// Readiness is the snapshot's facts when a caller supplied one for
 	// this spec; nil means "not supplied for this render".
 	Readiness *ReadinessFacts
+	// Supersession is the closed-spec object supersession views a caller
+	// computed for this spec's objects (design §6; SI-263); nil means
+	// "not supplied for this render", and every object renders exactly as
+	// before.
+	Supersession *SupersessionFacts
 }
 
 // ACEvidence is one criterion's evidence state as the matrix reports it.

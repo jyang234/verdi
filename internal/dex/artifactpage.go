@@ -54,6 +54,10 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 	if c := adrExemptionsConnection(p, lens.exemptions); c != nil {
 		connections = append(connections, *c)
 	}
+	featureLens, err := featureLensHTML(ix, known, mdl, lens.views, p)
+	if err != nil {
+		return err
+	}
 
 	data := pageData{
 		Title:            p.Entry.Title,
@@ -66,7 +70,7 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		MetaRows:         append(artifactMetaRows(p, mdl), ladder.Rows...),
 		BodyHTML:         template.HTML(bodyHTML),
 		DispositionsHTML: renderDispositionsTable(p.Meta.Dispositions),
-		FeatureLensHTML:  featureLensHTML(ix, known, mdl, p),
+		FeatureLensHTML:  featureLens,
 		Connections:      connections,
 		TOC:              extractTOC(bodyHTML),
 		CopyRef:          p.Entry.Ref + "@" + pinCommit,

@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,32 @@ func TestEngine_Run_Sorted(t *testing.T) {
 		a, b := findings[i-1], findings[i]
 		if a.Rule > b.Rule || (a.Rule == b.Rule && a.Path > b.Path) {
 			t.Fatalf("findings not sorted at index %d: %v then %v", i, a, b)
+		}
+	}
+}
+
+// TestAllRules_Inventory pins the engine's rule registry: every rule 02
+// §Lint rules assigns to this engine, each once, in id order. VL-023 to
+// VL-025 are reserved by the process-hardening plan and are not rules
+// yet (closed-spec object supersession design §7), so VL-026 follows
+// VL-022.
+func TestAllRules_Inventory(t *testing.T) {
+	want := []string{
+		"VL-001", "VL-002", "VL-003", "VL-004", "VL-005", "VL-006", "VL-007",
+		"VL-008", "VL-009", "VL-010", "VL-011", "VL-012", "VL-013", "VL-014",
+		"VL-015", "VL-016", "VL-017", "VL-018", "VL-019", "VL-020", "VL-021",
+		"VL-022", "VL-026",
+	}
+	var got []string
+	for _, r := range NewEngine().rules {
+		got = append(got, r.ID())
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("engine rules = %v, want %v", got, want)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i-1] >= got[i] {
+			t.Fatalf("engine rules not in strictly increasing id order at %d: %s then %s", i, got[i-1], got[i])
 		}
 	}
 }

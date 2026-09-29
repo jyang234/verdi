@@ -307,7 +307,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi gate` | The merge gate: spec accepted, no AC violated, every finding dispositioned (exit 0 / 1 / 2) |
 | `verdi close <story\|feature>` | Closure ritual: every AC evidenced, frozen rollup, archived quartet |
 | `verdi attest <spec-ref> <ac-id>` | Scaffold an unauthored attestation for a story or feature criterion; the claim stays yours to write |
-| `verdi lint` | Artifactlint (VL-001..021) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
+| `verdi lint` | Artifactlint (VL-001..VL-022 and VL-026) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
 | `verdi matrix <story\|feature>` | Compute and print the evidence fold |
 | `verdi spec doc <spec-ref> [--kind …] [--no-readiness]` | Render a spec, plan, or task document with its live readiness section |
 | `verdi sync` | Pull the CI evidence bundle into `derived/` |
