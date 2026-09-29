@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/featurecoverage:TestCoverage_PerCriterion in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-coverage" }
-frozen: { at: 2026-09-29, commit: af6fbfadb81bcedb4f9959a97f6fca816a46f103 }
+frozen: { at: 2026-09-29, commit: e0fe3b544598b5e01af5627502c1441d59c47759 }
 ---
 # One pure coverage function per accepted feature
 
