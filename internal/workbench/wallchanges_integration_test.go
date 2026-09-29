@@ -25,6 +25,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -119,6 +120,15 @@ func stageThenRevertSpec(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	writeWallFile(t, root, wallFixtureSpecPath, wallChangesHeadSpec)
+}
+
+// addWallSubmodule adds a second fixturegit repository as the submodule
+// vendor/inner of top and commits it, leaving the tree clean.
+func addWallSubmodule(t *testing.T, top string) {
+	t.Helper()
+	inner := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"inner.txt": "inner\n"}, Message: "inner"}})
+	runWallGit(t, top, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.Dir, "vendor/inner")
+	runWallGit(t, top, "commit", "-q", "-m", "add submodule")
 }
 
 // wallSnapshotResult is one served snapshot: the strict-decoded value, and
@@ -361,6 +371,15 @@ func wallServedCases() []wallServedCase {
 			edit:      func(t *testing.T, _, root string) { stageThenRevertSpec(t, root) },
 			wantDirty: true, wantTyped: []string{},
 			wantUnclassified: []wallUnclassifiedChange{unclassified(spec, "unrecognized-spec-change")},
+		},
+		{
+			name: "a submodule whose only change is an untracked file (B4-R11)", headSpec: wallChangesHeadSpec,
+			edit: func(t *testing.T, top, _ string) {
+				addWallSubmodule(t, top)
+				writeWallFile(t, top, "vendor/inner/build.log", "noise\n")
+			},
+			wantDirty: true, wantTyped: []string{},
+			wantUnclassified: []wallUnclassifiedChange{unclassified("vendor/inner", "another-staged-path")},
 		},
 		{
 			name: "unreadable: a missing spec still lists other changes", headSpec: "",

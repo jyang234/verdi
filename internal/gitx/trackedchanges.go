@@ -17,10 +17,17 @@ import (
 //     visible as one.
 //   - -z: NUL-delimited, never-quoted paths, so every legal path byte
 //     survives core.quotePath.
-//   - --untracked-files=no: untracked paths are UntrackedPaths' question;
-//     leaving them out here keeps one source for each fact and drops the
-//     expensive untracked scan from this call.
-var trackedChangesArgs = []string{"--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=no"}
+//   - --untracked-files=all: the same mode StatusDirty passes, and it is
+//     load-bearing beyond untracked paths: git hands it down to each
+//     submodule, so under =no a submodule whose only change is an
+//     untracked file inside it is not reported at all, while StatusDirty
+//     calls the tree dirty. With the same mode and no --ignore-submodules
+//     override, both queries see exactly the same submodule changes under
+//     the same submodule.<name>.ignore configuration
+//     (TestTrackedChanges_SeesWhatStatusDirtySees). The top-level untracked
+//     entries this also produces are skipped: untracked paths are
+//     UntrackedPaths' answer, one source for each fact.
+var trackedChangesArgs = []string{"--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all"}
 
 // TrackedChange is one tracked path whose index or working tree differs
 // from HEAD, as `git status --porcelain=v2` reports it.
@@ -61,16 +68,18 @@ func TrackedChanges(ctx context.Context, dir string) ([]TrackedChange, error) {
 }
 
 // parseTrackedStatus decodes `git status --porcelain=v2 -z
-// --untracked-files=no` output. Each entry is NUL-terminated:
+// --untracked-files=all` output. Each entry is NUL-terminated:
 //
 //	1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
 //	2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>NUL<origPath>
 //	u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+//	? <path>
 //
 // The fields before the path never hold a space, so splitting on the
-// fixed count keeps a path's own spaces. Any other entry — an untracked
-// '?', an ignored '!', a '#' header — is one this query never asks for, and
-// is refused rather than skipped.
+// fixed count keeps a path's own spaces. An untracked '?' entry is skipped
+// (UntrackedPaths answers untracked paths). Any other entry — an ignored
+// '!', a '#' header — is one this query never asks for, and is refused
+// rather than skipped.
 func parseTrackedStatus(out []byte) ([]TrackedChange, error) {
 	fields := bytes.Split(out, []byte{0})
 	var changes []TrackedChange
@@ -80,6 +89,8 @@ func parseTrackedStatus(out []byte) ([]TrackedChange, error) {
 			continue // the trailing NUL
 		}
 		switch entry[0] {
+		case '?':
+			continue
 		case '1':
 			parts := strings.SplitN(entry, " ", 9)
 			if len(parts) != 9 || len(parts[1]) != 2 {
@@ -107,7 +118,7 @@ func parseTrackedStatus(out []byte) ([]TrackedChange, error) {
 			}
 			changes = append(changes, TrackedChange{Path: parts[10], Index: parts[1][0], Worktree: parts[1][1], Unmerged: true, ModeWorktree: parts[6]})
 		default:
-			return nil, fmt.Errorf("unexpected `git status --porcelain=v2 --untracked-files=no` entry %q", entry)
+			return nil, fmt.Errorf("unexpected `git status --porcelain=v2` entry %q", entry)
 		}
 	}
 	return changes, nil

@@ -21,6 +21,15 @@ var trackedSeed = map[string]string{
 	"café.txt":  "accent\n",
 }
 
+// addSubmodule adds a second fixturegit repository as the submodule
+// vendor/inner of dir and commits it, leaving the tree clean.
+func addSubmodule(t *testing.T, dir string) {
+	t.Helper()
+	inner := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"inner.txt": "inner\n"}, Message: "inner"}})
+	gitIn(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.Dir, "vendor/inner")
+	gitIn(t, dir, "commit", "-q", "-m", "add submodule")
+}
+
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -98,6 +107,14 @@ func TestTrackedChanges(t *testing.T) {
 			name: "an untracked file is never reported",
 			edit: func(t *testing.T, dir string) { writeUntrackedFixture(t, dir, "new.txt", "new\n") },
 			want: nil,
+		},
+		{
+			name: "a submodule whose only change is an untracked file is reported",
+			edit: func(t *testing.T, dir string) {
+				addSubmodule(t, dir)
+				writeUntrackedFixture(t, dir, "vendor/inner/build.log", "noise\n")
+			},
+			want: []TrackedChange{{Path: "vendor/inner", Index: '.', Worktree: 'M', ModeHead: "160000", ModeWorktree: "160000"}},
 		},
 	}
 	for _, tc := range cases {
@@ -199,7 +216,11 @@ func TestParseTrackedStatus(t *testing.T) {
 			out:  unmerged + "\x00",
 			want: []TrackedChange{{Path: "conflict.txt", Index: 'U', Worktree: 'U', Unmerged: true, ModeWorktree: "100644"}},
 		},
-		{name: "an untracked entry is refused (the query never asks for one)", out: "? new.txt\x00", wantErr: true},
+		{
+			name: "an untracked entry is skipped (UntrackedPaths answers that)",
+			out:  "? new.txt\x00" + ordinary + "\x00? other.txt\x00",
+			want: []TrackedChange{{Path: "path with spaces.txt", Index: '.', Worktree: 'M', ModeHead: "100644", ModeWorktree: "100755"}},
+		},
 		{name: "an ignored entry is refused", out: "! ignored.txt\x00", wantErr: true},
 		{name: "a header line is refused", out: "# branch.oid " + hash + "\x00", wantErr: true},
 		{name: "a truncated ordinary entry", out: "1 .M N... 100644\x00", wantErr: true},
@@ -221,6 +242,76 @@ func TestParseTrackedStatus(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("parseTrackedStatus = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTrackedChanges_SeesWhatStatusDirtySees proves the parity the wall's
+// summary rests on: for every state, StatusDirty reports dirty exactly when
+// TrackedChanges or UntrackedPaths reports something — submodules included,
+// under the same submodule.<name>.ignore configuration, since both queries
+// run git status with the same untracked-files mode and no
+// --ignore-submodules override.
+func TestTrackedChanges_SeesWhatStatusDirtySees(t *testing.T) {
+	cases := []struct {
+		name      string
+		edit      func(t *testing.T, dir string)
+		wantDirty bool
+	}{
+		{name: "a clean tree with a submodule", edit: func(*testing.T, string) {}},
+		{name: "an untracked file inside the submodule", wantDirty: true, edit: func(t *testing.T, dir string) {
+			writeUntrackedFixture(t, dir, "vendor/inner/build.log", "noise\n")
+		}},
+		{name: "an untracked file inside a submodule configured ignore=untracked", edit: func(t *testing.T, dir string) {
+			gitIn(t, dir, "config", "submodule.vendor/inner.ignore", "untracked")
+			writeUntrackedFixture(t, dir, "vendor/inner/build.log", "noise\n")
+		}},
+		{name: "an edited file inside the submodule", wantDirty: true, edit: func(t *testing.T, dir string) {
+			writeUntrackedFixture(t, dir, "vendor/inner/inner.txt", "edited\n")
+		}},
+		{name: "an edited file inside a submodule configured ignore=dirty", edit: func(t *testing.T, dir string) {
+			gitIn(t, dir, "config", "submodule.vendor/inner.ignore", "dirty")
+			writeUntrackedFixture(t, dir, "vendor/inner/inner.txt", "edited\n")
+		}},
+		{name: "a new commit checked out in the submodule", wantDirty: true, edit: func(t *testing.T, dir string) {
+			sub := filepath.Join(dir, "vendor", "inner")
+			writeUntrackedFixture(t, sub, "inner.txt", "moved on\n")
+			gitIn(t, sub, "-c", "user.name=Verdi Fixture", "-c", "user.email=fixture@verdi.invalid", "commit", "-q", "-a", "-m", "moved on")
+		}},
+		{name: "a new commit in a submodule configured ignore=all", edit: func(t *testing.T, dir string) {
+			gitIn(t, dir, "config", "submodule.vendor/inner.ignore", "all")
+			sub := filepath.Join(dir, "vendor", "inner")
+			writeUntrackedFixture(t, sub, "inner.txt", "moved on\n")
+			gitIn(t, sub, "-c", "user.name=Verdi Fixture", "-c", "user.email=fixture@verdi.invalid", "commit", "-q", "-a", "-m", "moved on")
+		}},
+		{name: "an untracked file beside the submodule", wantDirty: true, edit: func(t *testing.T, dir string) {
+			writeUntrackedFixture(t, dir, "new.txt", "new\n")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: trackedSeed, Message: "seed"}})
+			addSubmodule(t, repo.Dir)
+			tc.edit(t, repo.Dir)
+			ctx := context.Background()
+			dirty, err := StatusDirty(ctx, repo.Dir)
+			if err != nil {
+				t.Fatalf("StatusDirty: %v", err)
+			}
+			tracked, err := TrackedChanges(ctx, repo.Dir)
+			if err != nil {
+				t.Fatalf("TrackedChanges: %v", err)
+			}
+			untracked, err := UntrackedPaths(ctx, repo.Dir)
+			if err != nil {
+				t.Fatalf("UntrackedPaths: %v", err)
+			}
+			if dirty != tc.wantDirty {
+				t.Fatalf("StatusDirty = %v, want %v (the case does not set up the state it names)", dirty, tc.wantDirty)
+			}
+			if sees := len(tracked) > 0 || len(untracked) > 0; sees != dirty {
+				t.Fatalf("StatusDirty = %v but TrackedChanges %+v / UntrackedPaths %v see a change = %v", dirty, tracked, untracked, sees)
 			}
 		})
 	}
