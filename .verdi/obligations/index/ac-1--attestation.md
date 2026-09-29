@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index" }
-frozen: { at: 2026-09-29, commit: 3d75b4036991122dd1ee3372ba84b509202170de }
+frozen: { at: 2026-09-29, commit: c0adfe55a49339a2ba6789f276833544f85d764f }
 ---
 # The owner accepts the index's visual fidelity
 

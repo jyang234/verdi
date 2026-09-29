@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/index" }
-frozen: { at: 2026-09-29, commit: 3d75b4036991122dd1ee3372ba84b509202170de }
+frozen: { at: 2026-09-29, commit: c0adfe55a49339a2ba6789f276833544f85d764f }
 ---
 # Four columns, every spec once, counts and empty states
 
