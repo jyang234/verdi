@@ -335,7 +335,7 @@ func (b Base) validateBase(wantKind Kind) error {
 		}
 	}
 	for i, l := range b.Links {
-		if err := l.Validate(); err != nil {
+		if err := l.ValidateFor(wantKind); err != nil {
 			return fmt.Errorf("artifact: links[%d]: %w", i, err)
 		}
 	}

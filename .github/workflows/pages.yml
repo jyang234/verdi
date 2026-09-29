@@ -46,7 +46,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Full history: the docs site's closed-spec supersession lines read
+      # each successor's acceptance point and dates from main's first-parent
+      # history (SI-270), which a shallow checkout cannot prove, so they
+      # would render "supersession unproven" (whole-wave review F-5).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"

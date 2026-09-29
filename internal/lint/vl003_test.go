@@ -814,3 +814,50 @@ func TestVL003_ContextPinReachable_Unaffected(t *testing.T) {
 		}
 	}
 }
+
+// TestVL003_ChallengesFragment is VL-003's closed-spec object supersession
+// amendment (02 §Lint rules: "their edge types are the closed five-value
+// enum, or `challenges` from a conflict"): checkLink validates each link
+// for its owning artifact's kind (artifact.Link.ValidateFor), so a
+// conflict's fragment challenge passes the type check and its fragment is
+// then resolved against the target's declared objects like any other,
+// while the same link on a spec, a decision, or an ADR still fails. A
+// conflict's pinned fragment challenge is refused here too (SI-271), which
+// is why VL-026 does not repeat it. Each case names how many VL-003
+// findings it must draw and a substring each must carry.
+func TestVL003_ChallengesFragment(t *testing.T) {
+	const closedVocab = "only implements/resolves/supersedes/exempts/depends-on may target a fragment"
+	cases := []struct {
+		name    string
+		subject memDoc
+		want    int
+		msg     string
+	}{
+		{name: "conflict fragment challenge of a declared acceptance criterion passes", subject: cssConflict("css-subject", "open", "", "spec/css-closed-archive#ac-1")},
+		{name: "conflict fragment challenge of a declared decision passes", subject: cssConflict("css-subject", "open", "", "spec/css-closed-status#dc-1")},
+		{name: "superseded conflict with a fragment challenge and resolved_by passes", subject: cssConflict("css-subject", "superseded", "spec/css-live", "spec/css-closed-archive#ac-1")},
+		{name: "conflict whole-artifact challenge still passes", subject: cssConflict("css-subject", "open", "", "spec/css-closed-archive")},
+		{name: "conflict fragment naming an undeclared object fails resolution", subject: cssConflict("css-subject", "open", "", "spec/css-closed-archive#ac-9"), want: 1, msg: "fragment #ac-9 does not resolve against spec/css-closed-archive's declared objects"},
+		{name: "conflict fragment naming a missing spec fails resolution", subject: cssConflict("css-subject", "open", "", "spec/css-missing#ac-1"), want: 1, msg: "does not resolve"},
+		{name: "conflict pinned fragment challenge fails (SI-271)", subject: cssConflict("css-subject", "open", "", "spec/css-closed-archive@"+cssSHA+"#ac-1"), want: 1, msg: "SI-271"},
+		{name: "conflict fragment challenge of an ADR object fails", subject: cssConflict("css-subject", "open", "", "adr/0001-css#dc-1"), want: 1, msg: "a conflict's fragment challenges name a spec object"},
+		{name: "feature spec top-level fragment challenge fails", subject: cssSpec("active", "css-subject", "feature", "", linksYAML("challenges", "spec/css-closed-archive#ac-1")), want: 1, msg: closedVocab},
+		{name: "story spec top-level fragment challenge fails", subject: cssSpec("active", "css-subject", "story", "", linksYAML("challenges", "spec/css-closed-archive#ac-1")), want: 1, msg: closedVocab},
+		{name: "component spec top-level fragment challenge fails", subject: cssSpec("active", "css-subject", "component", "", linksYAML("challenges", "spec/css-closed-archive#ac-1")), want: 1, msg: closedVocab},
+		{name: "decision fragment challenge fails", subject: cssSpec("active", "css-subject", "feature", "", decisionYAML("challenges", "spec/css-closed-archive#ac-1")), want: 1, msg: closedVocab},
+		{name: "ADR fragment challenge fails", subject: cssADR("0002-css", linksYAML("challenges", "spec/css-closed-archive#ac-1")), want: 1, msg: closedVocab},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := runRule(vl003{}, memSnapshot(t, append(cssBase(), tc.subject)...))
+			if len(findings) != tc.want {
+				t.Fatalf("got %d VL-003 findings, want %d:\n%s", len(findings), tc.want, findingsString(findings))
+			}
+			for _, f := range findings {
+				if f.Rule != "VL-003" || f.Path != tc.subject.relPath || !strings.Contains(f.Message, tc.msg) {
+					t.Errorf("finding %s: want a VL-003 finding on %s carrying %q", f.String(), tc.subject.relPath, tc.msg)
+				}
+			}
+		})
+	}
+}

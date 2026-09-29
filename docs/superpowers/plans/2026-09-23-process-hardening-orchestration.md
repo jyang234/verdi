@@ -49,6 +49,24 @@ From 2026-09-23 (this plan; the owner accepted the controller's defaults):
 - **D-PH-6 — X-1 first.** The shared strict-YAML seam (`artifact.DecodeStrict`) silently drops null sequence elements,
   truncates floats into integers, and accepts `yes`/`no` booleans. VR and SG add YAML fields, so this is fixed before them.
 
+From 2026-09-28 (MVP scope; the owner accepted the controller's ranking):
+
+- **D-PH-7 — MVP scope and order.** Process hardening is in the MVP's scope, ranked by value against the north star
+  (legibility, and reliable verification that what is delivered matches what was agreed). The MVP is the real-use checkpoint:
+  SI-199's local milestone of two complete real-project journeys on one release, the second unassisted.
+  1. **RWS** first, before the checkpoint and in parallel with the workbench-redesign lanes (plan PR #353), which touch the
+     workbench, not rituals or `internal/gitx`: its six UAT findings are the class most likely to break an unassisted journey.
+  2. **SLT** second, also before the checkpoint: two Tier 2 lanes that put the ground-rule linters on new code, including
+     the redesign's, as it lands.
+  3. **VR** after the checkpoint, built as the verification-reliability program's W6 (proposal PR #354) rather than as a
+     standalone wave here; X1 still precedes it.
+  4. **SG** deferred past the MVP. It hardens this repository's own build rather than the product, and its last lane (G6)
+     adopts a constitution, which under the closing-machinery finding CF-1 puts build start, gate, and close into mandatory
+     context-request mode. Its deferred-items index (G5) is the part to revisit first.
+  Step 1's units and step 2's waves apply in that order: A1 (RWS) and A2a/A2b plus A5 (SLT) now; A3a–A3c (VR) with the
+  verification program; A4a, A4b, and lanes G1–G6 (SG) held. This plan's cap of three lanes in flight counts the redesign's
+  lanes too. None of this changes the plan's stopping point (implemented, evidenced, merged; no closure claimed).
+
 ## Serialization rules
 
 The features are independent, but they share surfaces. These rules make parallel lanes safe:

@@ -86,6 +86,23 @@ type Object struct {
 	Kind     ZoneKind
 	ID       string
 	DocOrder int
+	// Height is the card's rendered height in px when it exceeds its
+	// kind's uniform footprint — a closed spec's superseded reference
+	// card, or a decision card, carrying its closed-spec object
+	// supersession lines (SI-278; design §6) — so the layout reserves the
+	// slots those lines need and no card ever renders under it. Zero, or
+	// anything below the footprint, means the footprint.
+	Height float64
+}
+
+// footprint is the object's rendered footprint (px): its kind's uniform
+// footprint, or its own Height when that is taller.
+func (o Object) footprint() (w, h float64) {
+	w, h = FootprintFor(o.Kind)
+	if o.Height > h {
+		h = o.Height
+	}
+	return w, h
 }
 
 // Grid geometry (non-binding, see package comment): one column per
@@ -169,13 +186,13 @@ func Generate(objects []Object, stored map[string]artifact.Position) (map[string
 	// card, even one dragged off the grid. Membership testing is
 	// order-independent, so map iteration order cannot leak into the
 	// layout (S8 property 1).
-	kindOf := make(map[string]ZoneKind, len(objects))
+	byID := make(map[string]Object, len(objects))
 	for _, o := range objects {
-		kindOf[o.ID] = o.Kind
+		byID[o.ID] = o
 	}
 	occupied := make([]Rect, 0, len(objects))
 	claim := func(id string, p artifact.Position) {
-		w, h := FootprintFor(kindOf[id])
+		w, h := byID[id].footprint()
 		occupied = append(occupied, Rect{X: p.X, Y: p.Y, W: w, H: h})
 	}
 	overlaps := func(r Rect) bool {
@@ -200,7 +217,7 @@ func Generate(objects []Object, stored map[string]artifact.Position) (map[string
 				out[o.ID] = p // verbatim, never inspected or "fixed"
 				continue
 			}
-			w, h := FootprintFor(o.Kind)
+			w, h := o.footprint()
 			for {
 				p := positionForSlot(next, zoneX)
 				if !overlaps(Rect{X: p.X, Y: p.Y, W: w, H: h}) {

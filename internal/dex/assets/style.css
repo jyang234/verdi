@@ -446,6 +446,72 @@ footer.site-foot {
 }
 .document-files a:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- closed-spec object supersession (design §6; SI-263, SI-278) ----------
+
+   The lines a document adds beside a closed spec's superseded criterion
+   or decision, and beside a successor's decision: the objsupersede views'
+   texts, verbatim, with the deciding decision, the conflict, and the
+   carrying revision linked. Register only — the record's own voice, one
+   quiet step below the object's text — so the original text stays the
+   loudest thing on the object; a disclosure (unproven, not established)
+   reads muted, never as a verdict. Presentation only: no word here. */
+.objsupersede {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.objsupersede--unproven,
+.objsupersede--not-established,
+.objsupersede--disclosure { color: var(--muted-solid); }
+.objsupersede--proposed { color: var(--living); }
+.objsupersede-conflict {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted-solid);
+  margin-left: 0.35rem;
+}
+.objsupersede-conflict:hover { color: var(--accent); }
+
+/* On the board (SI-278): a closed spec's reference card that carries its
+   object, and a decision card that carries its views, grow to show every
+   §6 line at rest — no hover, no focus, no clipping — and the layout
+   reserves the height they take (boardlayout.Object.Height, estimated
+   by internal/workbench's refCardHeightPx/cardHeightPx from these very
+   rules), so a grown card covers no other card. The lines sit in a plain
+   list one step below the card's own text; the reference card keeps
+   room for its peek cue below them. */
+.refcard.refcard--object { height: auto; min-height: 4.5rem; padding-bottom: 1.35rem; } /* two classes: outranks .refcard's fixed height, which follows in this file */
+.objcard:has(.objsupersede-lines) { height: auto; min-height: 8.75rem; }
+/* the object's ORIGINAL text, whole (SI-278: "its original text,
+   unchanged"): no clamp, and an unbreakable token wraps inside the card */
+.refcard-object-text {
+  margin: 0.4rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* a decision card that carries lines AND wall badges keeps the badge row
+   in flow, above the lines, instead of pinned over them at the card's
+   foot (the docs closure's B-1); cardHeightPx counts the rows */
+.objcard:has(.objsupersede-lines) .card-badges {
+  position: static;
+  margin: 0.4rem 0 0;
+}
+.objsupersede-lines {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.objsupersede-lines li { font-size: 0.68rem; line-height: 1.35; overflow-wrap: anywhere; }
+.objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+.objsupersede-lines .objsupersede-conflict { font-size: 0.66rem; margin-left: 0.3rem; }
+
 /* the board's Document tab (spec/spec-documents ac-4): a reading
    surface beside the board's working surface. One quiet header row —
    ref, kind switch, three controls — then the document carries the page. */

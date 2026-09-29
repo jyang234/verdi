@@ -1,5 +1,5 @@
-// Package lint is artifactlint: the VL-001..VL-020 rules (see engine.go's
-// allRules for the authoritative registry) from
+// Package lint is artifactlint: the VL-001..VL-022 and VL-026 rules (see
+// engine.go's allRules for the authoritative registry) from
 // 02 §Lint rules, run over a store root's committed zone plus whatever git
 // and service-discovery context each rule needs. It is dependency-light Go
 // — no frameworks, no services in the gate path (02 §Lint rules) — built

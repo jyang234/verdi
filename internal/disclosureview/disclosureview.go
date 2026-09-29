@@ -34,16 +34,17 @@ import (
 // the checkout's current condition, not a historical log — nothing here
 // writes a file, a cache, or a log).
 //
-// It calls the same decision points the producing surfaces already call:
-// the full lint engine (the same VL-001..018 run `verdi lint` performs,
-// under the same BuildContext) contributes every disclosure-severity
-// finding via the one Finding->Disclosure mapping lint's own CLI line
-// renders through; extras carries the calling process's own
-// already-computed disclosed context (e.g. the review-feed-unavailable
-// state `verdi serve` computes at startup) — already seam values, simply
-// collected. Violation-severity findings are deliberately absent: a
-// violation is a verdict failure reported through its own channel, never
-// a disclosure (the seam's own severity reasoning).
+// It calls the same decision points the producing surfaces already
+// call: the full lint engine (the same VL-001..VL-022 and VL-026 run
+// `verdi lint` performs, under the same BuildContext) contributes every
+// disclosure-severity finding via the one Finding->Disclosure mapping
+// lint's own CLI line renders through; extras carries the calling
+// process's own already-computed disclosed context (e.g. the
+// review-feed-unavailable state `verdi serve` computes at startup) —
+// already seam values, simply collected. Violation-severity findings
+// are deliberately absent: a violation is a verdict failure reported
+// through its own channel, never a disclosure (the seam's own severity
+// reasoning).
 //
 // The result is deterministically ordered (by the seam's stable id, then
 // text) so two calls against the same checkout state enumerate

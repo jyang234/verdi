@@ -10,6 +10,11 @@ import "fmt"
 type ConflictFrontmatter struct {
 	Base   `yaml:",inline"`
 	Status Status `yaml:"status"`
+
+	// ResolvedBy is the successor spec that resolved a superseded conflict
+	// whose challenges name object fragments (02 §Kind registry; SI-269's
+	// decode scope is ValidateResolvedBy's).
+	ResolvedBy string `yaml:"resolved_by,omitempty"`
 }
 
 // DecodeConflict strict-decodes and validates conflict frontmatter.
@@ -28,6 +33,7 @@ func DecodeConflict(data []byte) (*ConflictFrontmatter, error) {
 // `challenges` link is present (filing is mandatory per 03 §Challenging
 // closed decisions), and that Frozen is present iff the conflict is
 // resolved (superseded or dismissed) — open conflicts are not yet frozen.
+// It also checks resolved_by's scope and shape (ValidateResolvedBy).
 func (fm ConflictFrontmatter) Validate() error {
 	if err := fm.validateBase(KindConflict); err != nil {
 		return err
@@ -46,6 +52,10 @@ func (fm ConflictFrontmatter) Validate() error {
 	if !hasChallenges {
 		// vocab:identity — spec section title citation (03 §Challenging closed decisions)
 		return fmt.Errorf("artifact: conflict must carry at least one 'challenges' link (03 §Challenging closed decisions)")
+	}
+
+	if err := fm.ValidateResolvedBy(); err != nil {
+		return err
 	}
 
 	resolved := fm.Status == "superseded" || fm.Status == "dismissed"
