@@ -42,9 +42,20 @@ func (f fakeHomeGit) ListTree(ctx context.Context, dir, ref, path string) ([]str
 func (f fakeHomeGit) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error) {
 	return false, f.err
 }
-func (f fakeHomeGit) CommitDate(ctx context.Context, dir, rev string) (string, error) {
-	return "", f.err
+func (f fakeHomeGit) CommitDates(ctx context.Context, dir string, revs []string) (map[string]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	dates := make(map[string]string, len(revs))
+	for _, rev := range revs {
+		dates[rev] = fakeHomeGitDate
+	}
+	return dates, nil
 }
+
+// fakeHomeGitDate is the canned committer date fakeHomeGit answers for
+// every rev (B1-R6: never an empty answer standing in for a date).
+const fakeHomeGitDate = "2024-01-01T00:00:00+00:00"
 
 // fakeOpenMRs is the hermetic OpenMRLister double (co-2).
 type fakeOpenMRs struct {

@@ -94,10 +94,11 @@ type pendingDefaultEntry struct {
 // raw frontmatter status (mapStatusGroup, status.go — display-only,
 // persisted, never git-derived); every OTHER class (feature/story) instead
 // gets them from the resolved Result via effectiveStatusGroup, so a
-// statusless scaffold still renders a legible value. Either way, Date comes
-// from the SAME resolved Result's Baseline (baselineCommitDate) — the one
-// piece every default-branch entry needs from this batch regardless of
-// class.
+// statusless scaffold still renders a legible value. Either way, Date is
+// the committer date of the SAME resolved Result's landing commit
+// (landingDate, lastchange.go) — the one piece every default-branch entry
+// needs from this batch regardless of class — with every landing commit of
+// the walk read in one port call.
 func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
 	// defaultBranch is the ref name the shared resolver selected (port.go's
 	// DefaultBranch contract: e.g. "origin/main", or a local name under the
@@ -168,6 +169,13 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 		if len(results) != len(pending) {
 			return nil, fmt.Errorf("refindex: resolver returned %d results for %d candidates", len(results), len(pending))
 		}
+		// Every landing commit this walk dates, read in ONE port call
+		// (co-1; lastchange.go) — an entry with none is disclosed instead.
+		landings := make([]string, 0, len(results))
+		for _, r := range results {
+			landings = append(landings, landingCommit(r))
+		}
+		dates := readDateBatch(ctx, deps, root, landings)
 		for i, pe := range pending {
 			var group StatusGroup
 			var specStatus string
@@ -182,7 +190,7 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 				group, disclosed = effectiveStatusGroup(pe.ref, results[i])
 				specStatus = string(results[i].ArtifactStatus())
 			}
-			date, dateDisclosed := baselineCommitDate(ctx, deps, root, pe.ref, results[i].Baseline)
+			date, dateDisclosed := landingDate(pe.ref, results[i], dates)
 			entries = append(entries, Entry{
 				Ref:           pe.ref,
 				Source:        SourceDefault,
@@ -197,40 +205,6 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 	}
 
 	return entries, nil
-}
-
-// commitDateOrDisclose reads rev's committer date through deps.CommitDate,
-// degrading to a per-entry DateDisclosed disclosure — never an operational
-// error, never a zero or current-date fallback (spec/index-data ac-1) —
-// when the read fails. This is the one place a GitRunner.CommitDate error
-// is caught rather than propagated (port.go's own doc comment on why).
-func commitDateOrDisclose(ctx context.Context, deps GitRunner, root, ref, rev string) (string, *disclosure.Disclosure) {
-	date, err := deps.CommitDate(ctx, root, rev)
-	if err != nil {
-		d := disclosure.New("refindex:date-unreadable", ref, fmt.Sprintf("last-change date unreadable: %v", err))
-		return "", &d
-	}
-	return date, nil
-}
-
-// baselineCommitDate is commitDateOrDisclose's default-branch twin: a
-// default-branch entry's date is its specstate baseline's landing commit
-// (dc-1), already resolved by the SAME per-render ResolveMany batch this
-// walk already makes (co-1) — never a second, independent git read. A nil
-// baseline (no landing commit could be proven for this entry's current
-// bytes — the state is Unproven, or a first-parent landing witness is
-// missing) is disclosed rather than defaulted: for a feature/story entry
-// this always accompanies an existing StatusGroup-level Disclosed already
-// naming the same unprovenness; for a component entry (whose StatusGroup
-// stays display-only and is never itself disclosed by this condition) this
-// is ac-1's own required disclosure of the date alone — never an invented
-// fallback date.
-func baselineCommitDate(ctx context.Context, deps GitRunner, root, ref string, baseline *specstate.Baseline) (string, *disclosure.Disclosure) {
-	if baseline == nil || baseline.LandingCommit == "" {
-		d := disclosure.New("refindex:date-unreadable", ref, "no landing commit could be proven for this entry's current bytes")
-		return "", &d
-	}
-	return commitDateOrDisclose(ctx, deps, root, ref, baseline.LandingCommit)
 }
 
 // specNameFromPath extracts <name> from "<prefix>/<name>/spec.md", the only
@@ -293,6 +267,11 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 	sort.Strings(names)
 
 	var entries []Entry
+	// tips is index-paired with entries: the revision whose committer date
+	// is that entry's last change (dc-1: a design-branch entry's age is its
+	// branch tip), every one read in ONE port call once the walk finishes
+	// (co-1; lastchange.go).
+	var tips []string
 	var pending []pendingDesignEntry
 	var candidates []specstate.Candidate
 	for _, name := range names {
@@ -341,11 +320,6 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				ref,
 				fmt.Sprintf("design branch %q resolves but has no spec.md at %s yet", name, specPath),
 			)
-			// A degraded entry still has a real branch tip — dc-1's "a
-			// design-branch entry's age is its branch tip" holds even when
-			// no spec.md was ever committed there, so its date is still
-			// read, unconditionally, exactly like StatusGroup/Zone above.
-			date, dateDisclosed := commitDateOrDisclose(ctx, deps, root, ref, revision)
 			entries = append(entries, Entry{
 				Ref:         ref,
 				Source:      src,
@@ -355,10 +329,13 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				// branch's spec (had it existed) is only ever read from the
 				// active zone (specPath, above) — never derived from
 				// content that was never there to read.
-				Zone:          ZoneActive,
-				Date:          date,
-				DateDisclosed: dateDisclosed,
+				Zone: ZoneActive,
 			})
+			// A degraded entry still has a real branch tip — dc-1's "a
+			// design-branch entry's age is its branch tip" holds even when
+			// no spec.md was ever committed there, so it is dated,
+			// unconditionally, exactly like StatusGroup/Zone above.
+			tips = append(tips, revision)
 			continue
 		}
 
@@ -398,7 +375,6 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 			return nil, fmt.Errorf("refindex: resolver returned %d results for %d design-branch candidates", len(results), len(pending))
 		}
 		for i, pe := range pending {
-			date, dateDisclosed := commitDateOrDisclose(ctx, deps, root, pe.ref, pe.revision)
 			entries = append(entries, Entry{
 				Ref:    pe.ref,
 				Source: pe.source,
@@ -410,13 +386,16 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				// Unconditional per the Zone type's own doc comment:
 				// specPath (the caller's existence probe, above) is always
 				// under the active zone for a design-branch entry.
-				Zone:          ZoneActive,
-				Date:          date,
-				DateDisclosed: dateDisclosed,
+				Zone: ZoneActive,
 			})
+			tips = append(tips, pe.revision)
 		}
 	}
 
+	dates := readDateBatch(ctx, deps, root, tips)
+	for i := range entries {
+		entries[i].Date, entries[i].DateDisclosed = dates.dateFor(entries[i].Ref, tips[i])
+	}
 	return entries, nil
 }
 

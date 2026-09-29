@@ -93,3 +93,49 @@ func TestQuiet_UnparsableDate_NegativePath(t *testing.T) {
 		t.Fatal("IsQuiet with an unparsable Date = true, want false (fail closed, never quiet)")
 	}
 }
+
+// TestLastChange is the one readable-date rule IsQuiet and the directory's
+// date carriers share: a Date in the committer-date layout with no
+// DateDisclosed reads, in its own offset; anything else does not, and is
+// never a zero instant or now standing in for it.
+func TestLastChange(t *testing.T) {
+	disclosed := disclosure.New("refindex:date-unreadable", "spec/x", "test")
+	tests := []struct {
+		name   string
+		e      Entry
+		want   time.Time
+		wantOK bool
+	}{
+		{
+			name:   "canonical UTC date reads",
+			e:      Entry{Date: "2024-06-01T12:00:00+00:00"},
+			want:   time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{
+			name:   "a non-UTC offset reads as the same instant",
+			e:      Entry{Date: "2024-01-15T05:30:00+05:30"},
+			want:   time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{name: "empty date does not read", e: Entry{}, wantOK: false},
+		{name: "a disclosed date does not read, even with a Date present", e: Entry{Date: "2024-06-01T12:00:00+00:00", DateDisclosed: &disclosed}, wantOK: false},
+		{name: "an unparsable date does not read", e: Entry{Date: "not-a-date"}, wantOK: false},
+		{name: "a zulu date is not the canonical layout", e: Entry{Date: "2024-06-01T12:00:00Z"}, wantOK: false},
+		{name: "a bare day is not a committer date", e: Entry{Date: "2024-06-01"}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := LastChange(tt.e)
+			if ok != tt.wantOK {
+				t.Fatalf("LastChange(%+v) ok = %v, want %v", tt.e, ok, tt.wantOK)
+			}
+			if ok && !got.Equal(tt.want) {
+				t.Fatalf("LastChange(%+v) = %v, want %v", tt.e, got, tt.want)
+			}
+			if !ok && !got.IsZero() {
+				t.Fatalf("LastChange(%+v) = %v with ok false, want the zero instant", tt.e, got)
+			}
+		})
+	}
+}
