@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens" }
-frozen: { at: 2026-09-29, commit: e8fd75ab766ceeb9311d7ef9466d014267fe552e }
+frozen: { at: 2026-09-29, commit: b59480c53eea58221e12fb01bd58d6a128e4500d }
 ---
 # The bar keeps the displayed bytes and clean or dirty state, with the full posture one action away
 
