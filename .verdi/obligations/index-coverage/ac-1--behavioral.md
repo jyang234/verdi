@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/workbench:TestWallCoverageChips_SharedFunction in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-coverage" }
-frozen: { at: 2026-09-29, commit: add370a89e719ff10d16530021432922897070a0 }
+frozen: { at: 2026-09-29, commit: 46186349d2eeff711dd26270bd48d3b821ccee93 }
 ---
 # The wall's coverage chips come from the shared function, texts unchanged
 
