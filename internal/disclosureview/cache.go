@@ -33,7 +33,12 @@ var (
 // inventory). Process extras are never cached: every call appends its own
 // after the cached lint half. The zero value is ready to use and safe for
 // concurrent use. Nothing is persisted and nothing expires by time; an
-// entry is replaced when its root's key changes.
+// entry is replaced when its root's key changes, and by every Refresh.
+//
+// Current serves the cached lint half (the index's count). Refresh never
+// does: it enumerates on every call (the disclosures page, which the
+// closed spec/disclosures-panel ac-1 requires to compute fresh per render)
+// and then refreshes the cache with its result.
 //
 // A result is served only under a key proven complete for this call:
 //   - when the key cannot be computed (not a git repository, a symbolic
@@ -60,8 +65,9 @@ type cacheEntry struct {
 	ok    bool
 }
 
-// shared is the process-wide cache the workbench's index and /disclosures
-// page read through Cached, so the two share one enumeration.
+// shared is the process-wide cache: the workbench's index reads it
+// (Cached, through Count) and its /disclosures page refreshes it
+// (Refresh).
 var shared Cache
 
 // Cached is Current served through the process-wide cache: the same
@@ -69,6 +75,12 @@ var shared Cache
 // input changes.
 func Cached(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
 	return shared.Current(ctx, root, extras...)
+}
+
+// Refresh is the process-wide cache's Refresh: Current computed fresh,
+// its lint half then stored for Cached's readers.
+func Refresh(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
+	return shared.Refresh(ctx, root, extras...)
 }
 
 // Current returns what the package-level Current returns for root and
@@ -79,6 +91,31 @@ func (c *Cache) Current(ctx context.Context, root string, extras ...disclosure.D
 		return nil, err
 	}
 	return withExtras(lintItems, extras), nil
+}
+
+// Refresh returns what the package-level Current returns for root and
+// extras, always from a fresh enumeration, never a cached one. It then
+// refreshes root's entry: the result replaces whatever the cache held and
+// is stored under the same guard as a miss (a second reading with the
+// same key and stamps, outside the racy window). A result the guard
+// refuses, or a key that cannot be computed, leaves root with no entry,
+// so a value the fresh enumeration may contradict is never served again.
+func (c *Cache) Refresh(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
+	lintItems, err := c.refresh(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return withExtras(lintItems, extras), nil
+}
+
+func (c *Cache) refresh(ctx context.Context, root string) ([]disclosure.Disclosure, error) {
+	start := now()
+	before, err := readInputs(ctx, root)
+	if err != nil {
+		c.forget(root)
+		return enumerateFresh(ctx, root)
+	}
+	return c.lead(ctx, root, c.replace(root, before.key), before, start)
 }
 
 // lint returns root's lint half: cached when the key is unchanged,
@@ -129,11 +166,32 @@ func (c *Cache) lead(ctx context.Context, root string, e *cacheEntry, before inp
 func (c *Cache) claim(root, key string) (*cacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.entries == nil {
-		c.entries = make(map[string]*cacheEntry)
-	}
 	if e, ok := c.entries[root]; ok && e.key == key {
 		return e, false
+	}
+	return c.putLocked(root, key), true
+}
+
+// replace gives root a new entry for key, which its caller leads,
+// whatever root held before.
+func (c *Cache) replace(root, key string) *cacheEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.putLocked(root, key)
+}
+
+// forget drops root's entry.
+func (c *Cache) forget(root string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, root)
+}
+
+// putLocked installs a new in-flight entry for root, evicting another
+// root's entry if the cache is full. c.mu must be held.
+func (c *Cache) putLocked(root, key string) *cacheEntry {
+	if c.entries == nil {
+		c.entries = make(map[string]*cacheEntry)
 	}
 	if _, ok := c.entries[root]; !ok && len(c.entries) >= maxCachedRoots {
 		for other := range c.entries {
@@ -143,7 +201,7 @@ func (c *Cache) claim(root, key string) (*cacheEntry, bool) {
 	}
 	e := &cacheEntry{key: key, done: make(chan struct{})}
 	c.entries[root] = e
-	return e, true
+	return e
 }
 
 // await waits for e's enumeration and reports its stored result, or

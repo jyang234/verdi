@@ -11,9 +11,10 @@
 // that bypasses the seam is caught too (B3-R2); it compares the served
 // value with a fresh enumeration and with the page's own count.
 //
-// TestIndex_DisclosuresCountSharesThePageEnumeration proves the budget
-// half of SI-295 on a git-backed store: the index and /disclosures read
-// one cached enumeration, so the second page runs no lint at all.
+// TestDisclosuresPage_EnumeratesEveryRender and
+// TestIndex_DisclosuresCountReadsThePageEnumeration prove SI-295's split
+// on a git-backed store: the page computes fresh on every render, and the
+// index reads the result the page stored, running no lint of its own.
 //
 // The carrier is non-visible markup on the index's existing Disclosures
 // pointer: data-disclosures-count="<n>", or data-disclosures-unproven=
@@ -249,11 +250,10 @@ func TestIndex_DisclosuresCount(t *testing.T) {
 	}
 }
 
-// TestIndex_DisclosuresCountSharesThePageEnumeration: on a git-backed
-// store whose inputs are older than the cache's racy window, the index and
-// /disclosures read one enumeration — the second page runs no lint — and
-// carry the same count, extras included.
-func TestIndex_DisclosuresCountSharesThePageEnumeration(t *testing.T) {
+// quietGitStore builds a git-backed store and waits out the cache's
+// two-second racy window: a result read within it is never stored.
+func quietGitStore(t *testing.T) string {
+	t.Helper()
 	neutralizeCIEnv(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Message: "seed the store", Files: map[string]string{
 		".verdi/verdi.yaml": indexDisclosureManifestYAML,
@@ -261,29 +261,79 @@ func TestIndex_DisclosuresCountSharesThePageEnumeration(t *testing.T) {
 		".verdi/specs/active/index-panel-fixture/spec.md": indexDisclosureSpecMD,
 	}}})
 	setDefaultBranchSymref(t, repo.Dir)
-	// Step past the cache's two-second racy window: a result read within
-	// it is never stored.
 	time.Sleep(2100 * time.Millisecond)
+	return repo.Dir
+}
 
+// TestDisclosuresPage_EnumeratesEveryRender (SI-295 as corrected): the
+// page computes fresh on every render (closed spec/disclosures-panel
+// ac-1), even on an unchanged store whose enumeration the index has
+// already cached.
+func TestDisclosuresPage_EnumeratesEveryRender(t *testing.T) {
+	tests := []struct {
+		name  string
+		store func(t *testing.T) string
+	}{
+		{"a quiet git-backed store the index has cached", quietGitStore},
+		{"a store without git", func(t *testing.T) string {
+			neutralizeCIEnv(t)
+			return buildIndexDisclosureFixture(t)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := tt.store(t)
+			runs := &lintRuns{}
+			ctx := gitx.WithObserver(context.Background(), runs)
+			h := NewHandlerWithHome(root, Deps{}, HomeDeps{Index: cannedIndex(nil, nil)})
+
+			if rec := serveWith(t, h, ctx, "/"); rec.Code != http.StatusOK {
+				t.Fatalf("GET / = %d", rec.Code)
+			}
+			if rec := serveWith(t, h, ctx, "/"); rec.Code != http.StatusOK {
+				t.Fatalf("GET / = %d", rec.Code)
+			}
+			base := runs.count()
+			for render := 1; render <= 3; render++ {
+				rec := serveWith(t, h, ctx, "/disclosures")
+				if rec.Code != http.StatusOK {
+					t.Fatalf("GET /disclosures = %d", rec.Code)
+				}
+				if got := runs.count() - base; got != render {
+					t.Fatalf("after %d page renders lint ran %d times, want once per render: the page never serves a cached value", render, got)
+				}
+			}
+		})
+	}
+}
+
+// TestIndex_DisclosuresCountReadsThePageEnumeration: after a page render
+// on a quiet git-backed store, the index enumerates nothing — it reads the
+// result the page stored — and carries the page's count, extras included.
+func TestIndex_DisclosuresCountReadsThePageEnumeration(t *testing.T) {
+	root := quietGitStore(t)
 	extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
 	runs := &lintRuns{}
 	ctx := gitx.WithObserver(context.Background(), runs)
-	h := NewHandlerWithHome(repo.Dir, Deps{Disclosures: []disclosure.Disclosure{extra}}, HomeDeps{Index: cannedIndex(nil, nil)})
+	h := NewHandlerWithHome(root, Deps{Disclosures: []disclosure.Disclosure{extra}}, HomeDeps{Index: cannedIndex(nil, nil)})
 
-	index := serveWith(t, h, ctx, "/")
 	page := serveWith(t, h, ctx, "/disclosures")
-	if index.Code != http.StatusOK || page.Code != http.StatusOK {
-		t.Fatalf("GET / = %d, GET /disclosures = %d, want 200 and 200", index.Code, page.Code)
+	if page.Code != http.StatusOK || runs.count() != 1 {
+		t.Fatalf("GET /disclosures = %d with %d lint runs, want 200 and 1", page.Code, runs.count())
 	}
-	if got := runs.count(); got != 1 {
-		t.Fatalf("lint ran %d times for the index and /disclosures, want 1 (one shared enumeration)", got)
+	index := serveWith(t, h, ctx, "/")
+	if index.Code != http.StatusOK {
+		t.Fatalf("GET / = %d", index.Code)
+	}
+	if got := runs.count() - 1; got != 0 {
+		t.Fatalf("the index ran lint %d times after the page render, want 0 (it reads the page's stored result)", got)
 	}
 	countMatch := indexCountRe.FindStringSubmatch(index.Body.String())
 	pageMatch := pageCountRe.FindStringSubmatch(page.Body.String())
 	if countMatch == nil || pageMatch == nil || countMatch[1] != pageMatch[1] {
 		t.Fatalf("index count %v, /disclosures count %v, want equal", countMatch, pageMatch)
 	}
-	want, err := disclosureview.Current(context.Background(), repo.Dir, extra)
+	want, err := disclosureview.Current(context.Background(), root, extra)
 	if err != nil {
 		t.Fatal(err)
 	}

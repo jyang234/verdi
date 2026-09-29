@@ -3,11 +3,10 @@
 // now" surface. GET /disclosures enumerates every current disclosure for
 // the checkout through internal/disclosureview's shared compute path —
 // the same enumeration and the same item markup the dex's read-only
-// edition renders (ac-3's no-separate-logic-path law) — never persisted.
-// The lint half is read through disclosureview's process-wide cache
-// (SI-295), which the index's count shares: a request whose every lint
-// input is unchanged since the last enumeration reuses it, and any input
-// change, or a key it cannot prove complete, enumerates afresh.
+// edition renders (ac-3's no-separate-logic-path law) — computed fresh on
+// every request and never persisted. Each render then refreshes
+// disclosureview's in-memory cache, which the index's count reads
+// (SI-295): the page never serves a cached value.
 package workbench
 
 import (
@@ -33,7 +32,7 @@ func disclosuresHandler(root string, extras []disclosure.Disclosure) http.Handle
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		items, err := disclosureview.Cached(r.Context(), root, extras...)
+		items, err := disclosureview.Refresh(r.Context(), root, extras...)
 		if err != nil {
 			// An unenumerable store is an operational failure and must
 			// say so — a vacuous "no disclosures" here would be the exact

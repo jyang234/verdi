@@ -2,12 +2,12 @@ package disclosureview
 
 // TestCount_MatchesEnumeration (spec/index-coverage ac-3--static): for
 // every fixture store the count equals the number of entries the
-// disclosures page enumerates — the page reads Cached, the count reads the
-// same cache with the same extras — and equals a fresh Current. Where the
-// cache key is computable (git-backed stores) the count adds no second
-// enumeration: page and count together enumerate once. Where it is not
-// (no git), every call enumerates afresh, as the cache never serves a
-// value under an unprovable key.
+// disclosures page enumerates — the page computes fresh through Refresh
+// and stores its result, the count reads that cache with the same extras
+// — and equals a fresh Current. Where the cache key is computable
+// (git-backed stores) the count adds no second enumeration: page and count
+// together enumerate once. Where it is not (no git), every call enumerates
+// afresh, as the cache never serves a value under an unprovable key.
 
 import (
 	"context"
@@ -45,9 +45,9 @@ func TestCount_MatchesEnumeration(t *testing.T) {
 			pastRacyWindow(t)
 			n := countEnumerations(t)
 
-			page, err := Cached(context.Background(), root, tt.extras...)
+			page, err := Refresh(context.Background(), root, tt.extras...)
 			if err != nil {
-				t.Fatalf("Cached (the page's enumeration): %v", err)
+				t.Fatalf("Refresh (the page's enumeration): %v", err)
 			}
 			count, err := Count(context.Background(), root, tt.extras...)
 			if err != nil {
