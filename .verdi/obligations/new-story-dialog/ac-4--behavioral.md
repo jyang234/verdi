@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/new-story-dialog" }
-frozen: { at: 2026-09-29, commit: cf4b5ff48ee57337b78232d12be55e59e6c9dcdf }
+frozen: { at: 2026-09-29, commit: 1cf137299f6ee2fb04f9fbe848b161468dd0fd31 }
 ---
 # Nothing written until Create
 
