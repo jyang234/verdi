@@ -248,12 +248,13 @@ type boardGitState struct {
 	Dirty         bool     `json:"dirty"`
 
 	// Changes is spec/wall-changes ac-1's uncommitted-changes summary for
-	// THIS spec, populated only by loadBoard (below) — gitState itself is
-	// spec-independent (boarddiagram.go's own gitState call has no spec to
-	// classify and leaves this nil). It never influences Dirty above,
-	// which stays git status's own independent, repo-wide answer
-	// (ac-3: the branch-switch guard reads that same independent answer,
-	// never this field).
+	// THIS spec, populated only for the wall page and its snapshot
+	// (loadASD, below) — every other loadBoard caller (the fragment, the
+	// API actions, mutate_draft's pre-transaction load, MCP get_board)
+	// leaves it nil, and so does boarddiagram.go's spec-independent
+	// gitState call. It never influences Dirty above, which stays git
+	// status's own independent, repo-wide answer (ac-3: the branch-switch
+	// guard reads that same independent answer, never this field).
 	Changes *wallChanges `json:"changes,omitempty"`
 
 	// defaultRef is the resolved default branch's AUTHORITATIVE rev
@@ -346,15 +347,6 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
-	// spec/wall-changes ac-1: the uncommitted-changes summary for THIS
-	// spec, computed fresh per request (co-1) from git and raw (the
-	// working tree's own spec.md bytes, already read above) — never a
-	// second file read, never persisted.
-	changes, err := computeWallChanges(ctx, s.root, name, raw)
-	if err != nil {
-		return nil, nil, "", nil, err
-	}
-	git.Changes = changes
 
 	// The spec's effective lifecycle state (merge-signaled acceptance),
 	// resolved HERE — the I/O loader — and passed inward as plain values:
@@ -516,20 +508,41 @@ type boardLoadExtras struct {
 	state specstate.Result
 }
 
-// loadASD is the ASD page projection: one loadBoard plus the ASD rendered
-// facts (posture header, shell, capabilities view, client mutation
-// facts). The page, fragment, snapshot, and mutation-response renders all
-// come from exactly this one composed projection.
+// loadASD is the wall page projection: loadASDView plus the wall's
+// uncommitted-changes summary (spec/wall-changes ac-1). The page, the
+// snapshot, and the mutation response's fresh snapshot all come from
+// exactly this one composed projection, so their revision tokens agree.
+// The summary is computed fresh per request (co-1) from git and the
+// working tree's own spec.md bytes loadBoard already read — never a second
+// file read, never persisted.
 func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, error) {
-	proj, git, _, extras, err := s.loadBoard(ctx, name)
+	proj, git, asd, raw, err := s.loadASDView(ctx, name)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	changes, err := computeWallChanges(ctx, s.root, name, raw)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	git.Changes = changes
+	return proj, git, asd, nil
+}
+
+// loadASDView is the ASD projection without the changes summary: one
+// loadBoard plus the ASD rendered facts (posture header, shell,
+// capabilities view, client mutation facts), and the working tree's
+// spec.md bytes loadBoard read. The fragment, which carries no git state
+// of its own, renders from this and never pays for the summary.
+func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, []byte, error) {
+	proj, git, _, extras, err := s.loadBoard(ctx, name)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	asd, err := s.buildASDView(ctx, name, proj, git, extras.raw, extras.fm, extras.state)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return proj, git, asd, nil
+	return proj, git, asd, extras.raw, nil
 }
 
 // attachObligations enriches a board's AC cards — every class alike, story
@@ -724,7 +737,7 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, asd, err := s.loadASD(r.Context(), r.PathValue("name"))
+		proj, git, asd, _, err := s.loadASDView(r.Context(), r.PathValue("name"))
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
