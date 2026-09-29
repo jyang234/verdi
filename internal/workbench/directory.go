@@ -85,9 +85,11 @@ type HomeDeps struct {
 	// handler construction, not per render, so assigning the function
 	// value here (never a captured time.Time snapshot) is what keeps "nil
 	// means the wall clock read at render time" true across the whole
-	// server's lifetime. Tests and the e2e harness inject a fixed func
-	// instead (ac-2's own "tests ... set it"), so no quiet decision ever
-	// depends on when a test happened to run.
+	// server's lifetime. Tests inject a fixed func instead (ac-2's own
+	// "tests ... set it"), and `verdi serve` injects VERDI_NOW's fixed
+	// instant when that variable is set — the e2e harness's clock
+	// (SI-296) — so no quiet decision ever depends on when a test
+	// happened to run. renderHome reads it once per render.
 	Clock func() time.Time
 }
 
