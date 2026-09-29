@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/workbench:TestWallChanges_BranchGuardIndependent in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/wall-changes" }
-frozen: { at: 2026-09-29, commit: 601c07557c19a7a0baf79f901f8b483aed041b96 }
+frozen: { at: 2026-09-29, commit: f67d6d5a2d9e148a2e3985c597bb272d78580aa6 }
 ---
 # The branch-switch guard ignores the changes summary
 
