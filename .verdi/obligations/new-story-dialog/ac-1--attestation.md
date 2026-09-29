@@ -1,0 +1,25 @@
+---
+id: obligation/new-story-dialog--ac-1--attestation
+kind: obligation
+title: "The owner accepts the New story dialog's visual fidelity"
+owners: [platform-team]
+for_kind: attestation
+quality:
+  state: elaborated
+  claim: "The owner judges, on a running verdi serve at the candidate commit, that the New story dialog matches the handoff, except where the redesign's decisions differ."
+  falsifier: "The owner finds a part of the dialog that departs from the handoff without a recorded decision, or the attestation is not bound to the candidate commit."
+  scope: "The dialog opened from a wall and from an index call to action, light and dark, at 1440 px and 320 px."
+  producer: { kind: authenticated-human, ref: "role:owner" }
+  authoritative_source: { kind: governed-attestation, ref: "approval:owner" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
+links:
+  - { type: verifies, ref: "spec/new-story-dialog" }
+frozen: { at: 2026-09-29, commit: cf4b5ff48ee57337b78232d12be55e59e6c9dcdf }
+---
+# The owner accepts the New story dialog's visual fidelity
+
+The owner inspects it on a running `verdi serve` at the candidate commit (plan: visual acceptance at the risk gate).
+Until authenticated attestation lands (verification program W4), the evidence layer reports this obligation's source as
+missing, which is disclosed, never a pass.
