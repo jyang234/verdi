@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/wall-canvas" }
-frozen: { at: 2026-09-29, commit: 2e4a150d987d6b0fab99a80d1bb83d6130518e44 }
+frozen: { at: 2026-09-29, commit: abb2204688b89aaa71e1e0cb5e1e413c0c98c959 }
 ---
 # Cards at the new footprint with their receipts, and yarn in two layers
 
