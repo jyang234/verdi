@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/dex:TestWorkbenchChromeLeavesDocsSiteUnchanged in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens" }
-frozen: { at: 2026-09-29, commit: 83cd703ccbd03feac983e6b7258098105b95dc75 }
+frozen: { at: 2026-09-29, commit: e8fd75ab766ceeb9311d7ef9466d014267fe552e }
 ---
 # Tokens defined, and the docs site byte-identical
 

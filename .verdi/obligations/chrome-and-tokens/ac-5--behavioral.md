@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens" }
-frozen: { at: 2026-09-29, commit: 83cd703ccbd03feac983e6b7258098105b95dc75 }
+frozen: { at: 2026-09-29, commit: e8fd75ab766ceeb9311d7ef9466d014267fe552e }
 ---
 # The bar at 320 px and 200 % zoom, without JavaScript, by keyboard, within budget
 
