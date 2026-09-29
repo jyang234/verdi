@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -298,142 +299,200 @@ func TestKey_CoversLintGitReads(t *testing.T) {
 	}
 }
 
-// TestKey_CoversLintFileReads pins every I/O call site in the enumeration's
-// closure (the functions cachekey.go's inventory names). A new or removed
-// call fails here until the key is reviewed against it and the table is
-// updated.
+// TestKey_CoversLintFileReads pins every I/O call site in the
+// enumeration's whole dependency closure (B3-RR4): every non-standard
+// package `go list -deps` reports for internal/lint and internal/disclosure,
+// the packages Current reaches — gitx, specstate, store, storyresolve,
+// artifact, model and the rest, third-party ones included. Each package's
+// every non-test file is scanned, whatever its build constraints, for
+// calls into os, os/exec, os/user, io/fs, io/ioutil, syscall, net,
+// net/http, crypto/rand, math/rand, filepath's walking and resolving
+// functions and time's clock, and for such functions passed as values.
+//
+// testdata/enumeration-io-call-sites.golden is the reviewed snapshot: on
+// 2026-09-29 each call site the enumeration reaches was checked against
+// cachekey.go's inventory (keyed), and the others (gitx's write and
+// plumbing helpers, store's archive, root and tree-hash helpers,
+// storyresolve beyond LoadSpec, artifact's ULID clock) were checked as not
+// reached by lint. A new or removed call site anywhere in the closure fails
+// here until the key is reviewed against it and the golden is updated.
 func TestKey_CoversLintFileReads(t *testing.T) {
-	tests := []struct {
-		name  string
-		dir   string
-		files []string // nil: every non-test file
-		funcs []string // nil: every function
-		want  map[string]int
-	}{
-		{name: "internal/lint", dir: filepath.Join("..", "lint"), want: map[string]int{
-			"candidate.go specstate.NewProjector":       1,
-			"candidate.go store.Open":                   1,
-			"candidate.go store.SpecRelPath":            1,
-			"cienv.go os.Getenv":                        5,
-			"cienv.go specstate.ResolveDefaultBranch":   1,
-			"context.go gitx.CurrentBranch":             1,
-			"context.go gitx.MergeBase":                 1,
-			"context.go specstate.ResolveDefaultBranch": 1,
-			"engine.go specstate.NewProjector":          1,
-			"engine.go store.Open":                      1,
-			"snapshot.go os.IsNotExist":                 7,
-			"snapshot.go os.ReadDir":                    2,
-			"snapshot.go os.ReadFile":                   5,
-			"snapshot.go store.DecodeManifest":          1,
-			"snapshot.go store.DiscoverServices":        1,
-			"vl003.go filepath.Abs":                     1,
-			"vl003.go gitx.ReachableFromHEAD":           1,
-			"vl004.go os.ReadFile":                      1,
-			"vl009.go gitx.ReachableFromHEAD":           1,
-			"vl010.go gitx.DiffNameStatus":              1,
-			"vl010.go gitx.Show":                        3,
-			"vl013.go gitx.LsFiles":                     1,
-			"vl015.go gitx.Show":                        1,
-			"vl015.go os.ReadFile":                      1,
-			"vl016.go gitx.DiffNameStatus":              1,
-			"vl017.go os.IsNotExist":                    1,
-			"vl017.go os.ReadDir":                       1,
-			"vl017.go os.ReadFile":                      1,
-			"vl017.go os.Stat":                          1,
-			"vl019.go storyresolve.LoadSpec":            1,
-			"vl022.go store.RefSlug":                    1,
-			"vl022.go storyresolve.LoadSpec":            1,
-			"walk.go filepath.WalkDir":                  1,
-			"walk.go os.ReadDir":                        1,
-			"walk.go os.ReadFile":                       1,
-		}},
-		{name: "internal/specstate", dir: filepath.Join("..", "specstate"), want: map[string]int{
-			"defaultbranch.go gitx.DefaultBranch":           1,
-			"defaultbranch.go gitx.HasLocalBranch":          1,
-			"defaultbranch.go gitx.HasRemoteTrackingBranch": 3,
-			"defaultbranch.go os.Getenv":                    1,
-			"resolve.go gitx.BlobAt":                        1,
-			"resolve.go gitx.FirstParentBlobLanding":        1,
-			"resolve.go gitx.LsTree":                        1,
-			"resolve.go gitx.RevParse":                      1,
-			"resolve.go gitx.Show":                          1,
-		}},
-		{name: "internal/store discovery and open", dir: filepath.Join("..", "store"), files: []string{"discovery.go", "open.go"}, want: map[string]int{
-			"discovery.go filepath.Abs":     1,
-			"discovery.go filepath.WalkDir": 1,
-			"discovery.go os.ReadFile":      2,
-			"discovery.go os.Stat":          1,
-			"open.go os.IsNotExist":         1,
-			"open.go os.ReadFile":           2,
-		}},
-		{name: "storyresolve.LoadSpec", dir: filepath.Join("..", "storyresolve"), files: []string{"resolve.go"}, funcs: []string{"LoadSpec"}, want: map[string]int{
-			"resolve.go os.IsNotExist":  1,
-			"resolve.go os.ReadFile":    1,
-			"resolve.go store.SpecPath": 1,
-		}},
+	got := closureIOCallSites(t)
+	wantBytes, err := os.ReadFile(filepath.Join("testdata", "enumeration-io-call-sites.golden"))
+	if err != nil {
+		t.Fatalf("reading golden: %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ioCallSites(t, tt.dir, tt.files, tt.funcs)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("I/O call sites changed — review the cache key's input inventory (cachekey.go) against them, then update this table.\n got %v\nwant %v", got, tt.want)
+	want := strings.Split(strings.TrimRight(string(wantBytes), "\n"), "\n")
+	if len(got) < 10 {
+		t.Fatalf("found only %d I/O call sites in the closure — the scan is broken:\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if !reflect.DeepEqual(got, want) {
+		gotSet := map[string]bool{}
+		for _, l := range got {
+			gotSet[l] = true
+		}
+		wantSet := map[string]bool{}
+		for _, l := range want {
+			wantSet[l] = true
+		}
+		var diff []string
+		for _, l := range want {
+			if !gotSet[l] {
+				diff = append(diff, "- "+l)
 			}
-		})
+		}
+		for _, l := range got {
+			if !wantSet[l] {
+				diff = append(diff, "+ "+l)
+			}
+		}
+		t.Fatalf("I/O call sites in the enumeration's dependency closure changed; review cachekey.go's input inventory against them, then update the golden.\n%s\n--- full inventory ---\n%s", strings.Join(diff, "\n"), strings.Join(got, "\n"))
 	}
 }
 
-// ioCallSites counts calls to I/O-capable package functions — os, os/exec,
-// io/fs, io/ioutil, filepath's walking and resolving functions, and the
-// git, spec-state, store and story-resolution packages — by file.
-func ioCallSites(t *testing.T, dir string, files, funcs []string) map[string]int {
+// ioImports maps each I/O-capable standard import path to its default
+// package name; ioOnly narrows a package to the listed functions.
+var (
+	ioImports = map[string]string{
+		"os": "os", "os/exec": "exec", "os/user": "user", "io/fs": "fs", "io/ioutil": "ioutil",
+		"path/filepath": "filepath", "syscall": "syscall", "net": "net", "net/http": "http",
+		"crypto/rand": "rand", "math/rand": "rand", "math/rand/v2": "rand", "time": "time",
+	}
+	ioOnly = map[string]map[string]bool{
+		"path/filepath": {"Walk": true, "WalkDir": true, "Glob": true, "EvalSymlinks": true, "Abs": true},
+		"time":          {"Now": true, "Since": true, "Until": true},
+	}
+)
+
+// closureIOCallSites returns "<import path> <file> <callee> <call|value>
+// <count>" lines, sorted, for the enumeration's dependency closure.
+func closureIOCallSites(t *testing.T) []string {
 	t.Helper()
-	ioPkgs := map[string]bool{"os": true, "exec": true, "ioutil": true, "fs": true, "gitx": true, "specstate": true, "store": true, "storyresolve": true, "filepath": true}
-	filepathIO := map[string]bool{"Walk": true, "WalkDir": true, "Glob": true, "EvalSymlinks": true, "Abs": true}
-	if files == nil {
-		matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}\t{{.Dir}}{{end}}",
+		"github.com/jyang234/verdi/internal/lint", "github.com/jyang234/verdi/internal/disclosure")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v\n%s", err, stderr.String())
+	}
+	counts := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pkg, dir, ok := strings.Cut(line, "\t")
+		if !ok {
+			t.Fatalf("go list line %q", line)
+		}
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range matches {
-			if !strings.HasSuffix(m, "_test.go") {
-				files = append(files, filepath.Base(m))
+		for _, file := range files {
+			if strings.HasSuffix(file, "_test.go") {
+				continue
+			}
+			for site, n := range fileIOCallSites(t, file) {
+				counts[pkg+" "+filepath.Base(file)+" "+site] += n
 			}
 		}
 	}
-	wantFunc := map[string]bool{}
-	for _, f := range funcs {
-		wantFunc[f] = true
+	lines := make([]string, 0, len(counts))
+	for k, n := range counts {
+		lines = append(lines, k+" "+strconv.Itoa(n))
+	}
+	sort.Strings(lines)
+	return lines
+}
+
+// fileIOCallSites counts one file's I/O calls ("<path>.<Func> call") and
+// I/O functions used as values ("<path>.<Func> value"), resolving package
+// names through the file's own imports.
+func fileIOCallSites(t *testing.T, file string) map[string]int {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	names := map[string]string{}
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name, ok := ioImports[path]
+		if !ok {
+			continue
+		}
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		names[name] = path
+	}
+	resolve := func(e ast.Expr) (string, bool) {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok {
+			return "", false
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		path, ok := names[id.Name]
+		if !ok || (ioOnly[path] != nil && !ioOnly[path][sel.Sel.Name]) {
+			return "", false
+		}
+		return path + "." + sel.Sel.Name, true
 	}
 	counts := map[string]int{}
-	for _, name := range files {
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
+	value := func(e ast.Expr) {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok || !isFunctionName(sel.Sel.Name) {
+			return
 		}
-		for _, decl := range f.Decls {
-			if fn, ok := decl.(*ast.FuncDecl); ok && len(wantFunc) > 0 && !wantFunc[fn.Name.Name] {
-				continue
-			} else if !ok && len(wantFunc) > 0 {
-				continue
-			}
-			ast.Inspect(decl, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || !ioPkgs[pkg.Name] || (pkg.Name == "filepath" && !filepathIO[sel.Sel.Name]) {
-					return true
-				}
-				counts[name+" "+pkg.Name+"."+sel.Sel.Name]++
-				return true
-			})
+		if site, ok := resolve(e); ok {
+			counts[site+" value"]++
 		}
 	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			if site, ok := resolve(n.Fun); ok {
+				counts[site+" call"]++
+			}
+			for _, a := range n.Args {
+				value(a)
+			}
+		case *ast.AssignStmt:
+			for _, r := range n.Rhs {
+				value(r)
+			}
+		case *ast.ValueSpec:
+			for _, v := range n.Values {
+				value(v)
+			}
+		case *ast.ReturnStmt:
+			for _, r := range n.Results {
+				value(r)
+			}
+		case *ast.KeyValueExpr:
+			value(n.Value)
+		case *ast.CompositeLit:
+			for _, el := range n.Elts {
+				value(el)
+			}
+		}
+		return true
+	})
 	return counts
+}
+
+// isFunctionName reports whether an exported name read as a value is taken
+// to be a function: sentinel errors, modes, flags, separators and the
+// standard streams are not.
+func isFunctionName(name string) bool {
+	for _, prefix := range []string{"Err", "Mode", "O_", "Std", "Path", "Dev", "Sig"} {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	return true
 }
