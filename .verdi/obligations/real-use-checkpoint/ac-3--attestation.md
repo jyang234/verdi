@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/real-use-checkpoint" }
-frozen: { at: 2026-09-29, commit: 7abe7c1f76958e2b0241c6ec5466f61e765264ee }
+frozen: { at: 2026-09-29, commit: 0ae55e5c2ce00a3348c60561c6adf470841f241f }
 ---
 # The records report duration, independence, and every assist
 
