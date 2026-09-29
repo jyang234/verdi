@@ -247,6 +247,15 @@ type boardGitState struct {
 	Branches      []string `json:"branches"`
 	Dirty         bool     `json:"dirty"`
 
+	// Changes is spec/wall-changes ac-1's uncommitted-changes summary for
+	// THIS spec, populated only by loadBoard (below) — gitState itself is
+	// spec-independent (boarddiagram.go's own gitState call has no spec to
+	// classify and leaves this nil). It never influences Dirty above,
+	// which stays git status's own independent, repo-wide answer
+	// (ac-3: the branch-switch guard reads that same independent answer,
+	// never this field).
+	Changes *wallChanges `json:"changes,omitempty"`
+
 	// defaultRef is the resolved default branch's AUTHORITATIVE rev
 	// (specstate.Branch.Ref): "origin/<name>" when that remote-tracking
 	// ref exists, otherwise the local branch — the projector's own
@@ -337,6 +346,15 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
+	// spec/wall-changes ac-1: the uncommitted-changes summary for THIS
+	// spec, computed fresh per request (co-1) from git and raw (the
+	// working tree's own spec.md bytes, already read above) — never a
+	// second file read, never persisted.
+	changes, err := computeWallChanges(ctx, s.root, name, raw)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	git.Changes = changes
 
 	// The spec's effective lifecycle state (merge-signaled acceptance),
 	// resolved HERE — the I/O loader — and passed inward as plain values:

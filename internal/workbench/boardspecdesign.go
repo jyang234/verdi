@@ -35,6 +35,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/draftmutation"
 )
 
@@ -155,6 +156,22 @@ func boardActionInventory() map[string]bool {
 		inventory[action] = true
 	}
 	return inventory
+}
+
+// semanticDiffChanges computes internal/draftmutation's own semantic
+// Change classification between two spec.md byte states — spec/
+// wall-changes dc-1 ("Typed changes come from the existing semantic diff
+// ..., reused and never re-derived"), routed through THIS file because it
+// is the one internal/workbench production file the boundary witness
+// (internal/draftmutation/boundary_test.go) permits to import
+// internal/draftmutation. wallchanges.go, which owns the classifier,
+// calls this instead of importing that package a second time; its return
+// type is spelled in designprovenance terms (Change is a verbatim type
+// alias, operation.go) so wallchanges.go can consume the identical values
+// through the ordinary, unguarded internal/designprovenance import.
+func semanticDiffChanges(before, after []byte) ([]designprovenance.Change, error) {
+	changes, _, err := draftmutation.Diff(before, after)
+	return changes, err
 }
 
 // mintBrowserActor is the repository's single production
