@@ -7,10 +7,12 @@ import (
 )
 
 // Count returns the number of current disclosures for the checkout at
-// root: the length of the enumeration the disclosures page shows
-// (spec/index-coverage ac-3), read through the same process-wide cache
-// (Cached) the page reads, with the same extras — never a second,
-// separately decided tally.
+// root (spec/index-coverage ac-3): the length of the enumeration the
+// disclosures page shows for the same inputs and extras — the one
+// enumeration, lint's disclosures plus the extras, never a separately
+// decided tally. It is the index's read, served through the process-wide
+// cache (Cached), which only the index reads and fills; the page itself
+// computes fresh with Current and never touches the cache (SI-295).
 func Count(ctx context.Context, root string, extras ...disclosure.Disclosure) (int, error) {
 	items, err := Cached(ctx, root, extras...)
 	if err != nil {

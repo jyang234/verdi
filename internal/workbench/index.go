@@ -26,9 +26,10 @@ import (
 )
 
 // countDisclosures is the index's one read of the disclosures enumeration:
-// disclosureview.Count, the length of what /disclosures shows, read
-// through the same process-wide cache (a variable so a test can count its
-// calls per render).
+// disclosureview.Count, the length of what /disclosures shows for the same
+// inputs, read through disclosureview's process-wide cache, which only the
+// index uses (SI-295; a variable so a test can count its calls per
+// render).
 var countDisclosures = disclosureview.Count
 
 // indexHandler answers GET / with the whole-store directory home. It owns
