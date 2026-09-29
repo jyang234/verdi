@@ -66,8 +66,28 @@ func Build(in Input) (Document, error) {
 		doc.OutcomeKnown = true
 		doc.OutcomeText = in.Spec.Outcome.Text
 	}
+	// Closed-spec object supersession (design §6): the supplied views of
+	// each decision and criterion, converted here so a malformed view is
+	// this Build's error, never a rendering.
+	sup := in.Facts.Supersession
 	for _, d := range in.Spec.Decisions {
-		doc.Decisions = append(doc.Decisions, Item{ID: d.ID, Text: d.Text, Detail: sections[d.ID]})
+		item := Item{ID: d.ID, Text: d.Text, Detail: sections[d.ID]}
+		if sup != nil {
+			var err error
+			if v, ok := sup.Objects[d.ID]; ok {
+				if item.Supersession, err = ObjectSupersession(v, sup.Links); err != nil {
+					return Document{}, fmt.Errorf("specdoc: %s: %w", d.ID, err)
+				}
+			}
+			for _, v := range sup.Decisions[d.ID] {
+				s, err := DecisionSupersession(v, sup.Links)
+				if err != nil {
+					return Document{}, fmt.Errorf("specdoc: %s: %w", d.ID, err)
+				}
+				item.Supersedes = append(item.Supersedes, s)
+			}
+		}
+		doc.Decisions = append(doc.Decisions, item)
 	}
 	for _, c := range in.Spec.Constraints {
 		doc.Constraints = append(doc.Constraints, Item{ID: c.ID, Text: c.Text, Detail: sections[c.ID]})
@@ -80,6 +100,14 @@ func Build(in Input) (Document, error) {
 		if in.Facts.Coverage != nil {
 			cr.CoverageKnown = true
 			cr.Coverage = append([]string{}, in.Facts.Coverage[ac.ID]...)
+		}
+		if sup != nil {
+			if v, ok := sup.Objects[ac.ID]; ok {
+				var err error
+				if cr.Supersession, err = ObjectSupersession(v, sup.Links); err != nil {
+					return Document{}, fmt.Errorf("specdoc: %s: %w", ac.ID, err)
+				}
+			}
 		}
 		doc.Criteria = append(doc.Criteria, cr)
 	}

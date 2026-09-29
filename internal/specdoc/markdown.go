@@ -73,6 +73,23 @@ func RenderMarkdown(doc Document) string {
 			}
 			for _, d := range doc.Decisions {
 				w("### %s — %s <a id=\"%s\"></a>\n\n", d.ID, d.Text, d.ID)
+				// Closed-spec object supersession (design §6): the
+				// decision's own object view, then its edge views, each
+				// line verbatim — right after the original text, before
+				// the rationale, so the reader meets the object as it
+				// stands before its argument.
+				added := false
+				if d.Supersession != nil {
+					added = true
+					writeSupersession(w, "", d.ID, *d.Supersession)
+				}
+				for _, s := range d.Supersedes {
+					added = true
+					writeSupersession(w, "", d.ID, s)
+				}
+				if added {
+					w("\n")
+				}
 				if d.Detail != "" {
 					w("%s\n\n", d.Detail)
 				}
@@ -101,6 +118,12 @@ func RenderMarkdown(doc Document) string {
 				w("%d. **%s** %s <a id=\"%s\"></a>\n", i+1, c.ID, c.Text, c.ID)
 				w("%s- Evidence: %s.\n", indent, joinOr(c.Evidence, "none declared"))
 				w("%s- Coverage: %s\n", indent, coverageLine(c, doc.Words))
+				// Closed-spec object supersession (design §6): the
+				// criterion's view, one bullet per line, after its own
+				// facts.
+				if c.Supersession != nil {
+					writeSupersession(w, indent, c.ID, *c.Supersession)
+				}
 				if c.Detail != "" {
 					w("\n%s\n", indentLines(c.Detail, indent))
 				}
@@ -211,6 +234,16 @@ func RenderMarkdown(doc Document) string {
 	// vocab:identity — the stamp names the artifact's objects, not a lifecycle state label
 	w("Derived from the spec's objects; not authority. Ref `%s` · commit `%s` · kind `%s` · engine `%s`\n", doc.Stamp.Ref, doc.Stamp.Commit, doc.Kind, doc.Stamp.Engine)
 	return b.String()
+}
+
+// writeSupersession writes one Supersession beside object id as bullets
+// under indent: one per §6 line, the text verbatim inside its markup
+// (SupersessionLineMarkup).
+func writeSupersession(w func(string, ...any), indent, id string, s Supersession) {
+	stem := SupersessionStem(id, s)
+	for _, line := range s.Lines {
+		w("%s- %s\n", indent, SupersessionLineMarkdown(stem, s, line))
+	}
 }
 
 func coverageLine(c Criterion, words Words) string {

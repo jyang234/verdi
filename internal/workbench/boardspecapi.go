@@ -297,14 +297,17 @@ func stickyLanePosition(proj *BoardProjection, typ artifact.AnnotationType) (flo
 	right := float64(lane.X + lane.Width)
 	inLane := func(x, w float64) bool { return x < right && left < x+w }
 	bottom := -1.0
+	// A card carrying its closed-spec object supersession lines is as tall
+	// as the layout reserved (cardHeightPx, refCardHeightPx), never the
+	// bare footprint, so nothing lands on a line (the board closure's C-3).
 	for _, c := range proj.Cards {
-		if inLane(c.X, boardlayout.CardWidth) && c.Y+boardlayout.CardHeight > bottom {
-			bottom = c.Y + boardlayout.CardHeight
+		if inLane(c.X, boardlayout.CardWidth) && c.Y+cardHeightPx(c) > bottom {
+			bottom = c.Y + cardHeightPx(c)
 		}
 	}
 	for _, rc := range proj.RefCards {
-		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+boardlayout.RefCardHeight > bottom {
-			bottom = rc.Y + boardlayout.RefCardHeight
+		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+refCardHeightPx(rc) > bottom {
+			bottom = rc.Y + refCardHeightPx(rc)
 		}
 	}
 	for _, sv := range proj.StubViews {
@@ -945,16 +948,19 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 		return err
 	}
 	obstacles := make([]boardlayout.Rect, 0, len(proj.Cards)+len(proj.RefCards)+len(proj.StubViews))
+	// A card carrying its closed-spec object supersession lines (SI-278)
+	// is as tall as those lines make it (cardHeightPx, refCardHeightPx —
+	// the same heights the layout reserved), never the bare footprint.
 	for _, c := range proj.Cards {
 		if c.ID == req.ID {
 			continue
 		}
-		w, h := boardlayout.FootprintFor(boardlayout.ZoneKind(c.Kind))
-		obstacles = append(obstacles, boardlayout.Rect{X: c.X, Y: c.Y, W: w, H: h})
+		w, _ := boardlayout.FootprintFor(boardlayout.ZoneKind(c.Kind))
+		obstacles = append(obstacles, boardlayout.Rect{X: c.X, Y: c.Y, W: w, H: cardHeightPx(c)})
 	}
 	for _, rc := range proj.RefCards {
-		w, h := boardlayout.FootprintFor(boardlayout.ZoneReference)
-		obstacles = append(obstacles, boardlayout.Rect{X: rc.X, Y: rc.Y, W: w, H: h})
+		w, _ := boardlayout.FootprintFor(boardlayout.ZoneReference)
+		obstacles = append(obstacles, boardlayout.Rect{X: rc.X, Y: rc.Y, W: w, H: refCardHeightPx(rc)})
 	}
 	for _, sv := range proj.StubViews {
 		if "stub:"+sv.Slug == layoutKey {
@@ -964,6 +970,11 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 		obstacles = append(obstacles, boardlayout.Rect{X: sv.X, Y: sv.Y, W: w, H: h})
 	}
 	w, h := boardlayout.FootprintFor(kind)
+	for _, c := range proj.Cards {
+		if c.ID == req.ID {
+			h = cardHeightPx(c) // the dragged decision card's own rendered height
+		}
+	}
 	stored[layoutKey] = boardlayout.ResolveDrop(artifact.Position{X: req.X, Y: req.Y}, w, h, obstacles)
 	return boardlayout.WriteFile(s.specDir(name), stored, liveKeys(proj))
 }

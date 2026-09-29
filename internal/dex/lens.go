@@ -16,6 +16,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -44,6 +45,10 @@ type lensData struct {
 	// pendingByRef maps a story spec ref to its pending-supersession
 	// state; absent = the story implements no feature (nothing to prove).
 	pendingByRef map[string]pendingState
+	// views are the build commit's closed-spec object supersession views
+	// (design §6), the shared loader's, warmed once by Build; the feature
+	// lens renders a closed feature's superseded criterion rows from them.
+	views *specdocload.Views
 }
 
 // computeLensData runs the corpus-wide scans. It builds a lint.Snapshot —

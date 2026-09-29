@@ -1,0 +1,180 @@
+package gitx
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
+)
+
+// firstParentTopology is a main line whose spec arrives through a --no-ff
+// merge of a design branch, is later edited in place on main, and then
+// moves zones: the design-branch commit that added the file is reachable
+// from main only through the merge's second parent.
+type firstParentTopology struct {
+	dir                            string
+	root, design, merge, edit, mov string
+}
+
+func buildFirstParentTopology(t *testing.T) firstParentTopology {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"base.txt": "base\n"}, Message: "root"},
+	})
+	dir := repo.Dir
+	runFor(t, dir, "checkout", "-q", "-b", "design/s")
+	if err := os.MkdirAll(filepath.Join(dir, "active", "s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	design := commitFile(t, dir, "active/s/spec.md", "v1\n", "add s")
+	runFor(t, dir, "checkout", "-q", "main")
+	commitFile(t, dir, "main.txt", "main\n", "advance main")
+	runFor(t, dir, "merge", "-q", "--no-ff", "--no-edit", "design/s")
+	merge := headOf(t, dir)
+	edit := commitFile(t, dir, "active/s/spec.md", "v2\n", "edit s in place")
+	if err := os.MkdirAll(filepath.Join(dir, "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runFor(t, dir, "mv", "active/s", "archive/s")
+	runFor(t, dir, "commit", "-q", "--no-verify", "-m", "archive s")
+	return firstParentTopology{dir: dir, root: repo.Head, design: design, merge: merge, edit: edit, mov: headOf(t, dir)}
+}
+
+func TestFirstParentPathCommits_Happy(t *testing.T) {
+	isolateGitConfig(t)
+	top := buildFirstParentTopology(t)
+	tests := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{name: "merge commit, not the design commit, lands the path", paths: []string{"active/s/spec.md"}, want: []string{top.merge, top.edit, top.mov}},
+		{name: "either of two paths, oldest first", paths: []string{"active/s/spec.md", "archive/s/spec.md"}, want: []string{top.merge, top.edit, top.mov}},
+		{name: "second path alone", paths: []string{"archive/s/spec.md"}, want: []string{top.mov}},
+		{name: "never touched", paths: []string{"nowhere/spec.md"}, want: []string{}},
+		{name: "pathspec magic is literal", paths: []string{"*/s/spec.md"}, want: []string{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := FirstParentPathCommits(context.Background(), top.dir, "main", tc.paths...)
+			if err != nil {
+				t.Fatalf("FirstParentPathCommits: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v (design commit %s must never appear)", got, tc.want, top.design)
+			}
+		})
+	}
+}
+
+// TestFirstParentPathCommits_RefForms pins that ref names one commit: a
+// branch name or a full commit id walks the same chain (lane L3 review a
+// M-1).
+func TestFirstParentPathCommits_RefForms(t *testing.T) {
+	isolateGitConfig(t)
+	top := buildFirstParentTopology(t)
+	for _, ref := range []string{"main", top.mov} {
+		t.Run(ref, func(t *testing.T) {
+			got, err := FirstParentPathCommits(context.Background(), top.dir, ref, "active/s/spec.md")
+			if err != nil || !reflect.DeepEqual(got, []string{top.merge, top.edit, top.mov}) {
+				t.Fatalf("got %v, %v", got, err)
+			}
+		})
+	}
+}
+
+// TestFirstParentPathCommits_Topologies pins the other ways a path reaches
+// the default branch (lane L3 review a M-6): a squash merge lists the
+// squash commit and never the design commits; a fast-forward puts the
+// design commit itself on the first-parent chain; an `-s ours` merge brings
+// the path in nowhere.
+func TestFirstParentPathCommits_Topologies(t *testing.T) {
+	isolateGitConfig(t)
+	const p = "active/s/spec.md"
+	design := func(t *testing.T, dir string, contents ...string) string {
+		runFor(t, dir, "checkout", "-q", "-b", "design/s")
+		var last string
+		for _, c := range contents {
+			last = commitFile(t, dir, p, c, "write s")
+		}
+		runFor(t, dir, "checkout", "-q", "main")
+		return last
+	}
+	tests := []struct {
+		name  string
+		build func(t *testing.T, dir string) []string
+	}{
+		{"squash merge", func(t *testing.T, dir string) []string {
+			design(t, dir, "v1\n", "v2\n")
+			commitFile(t, dir, "main.txt", "main\n", "advance main")
+			runFor(t, dir, "merge", "-q", "--squash", "design/s")
+			runFor(t, dir, "commit", "-q", "--no-verify", "-m", "squash s")
+			return []string{headOf(t, dir)}
+		}},
+		{"fast-forward", func(t *testing.T, dir string) []string {
+			d := design(t, dir, "v1\n")
+			runFor(t, dir, "merge", "-q", "--ff-only", "design/s")
+			return []string{d}
+		}},
+		{"-s ours merge", func(t *testing.T, dir string) []string {
+			design(t, dir, "v1\n")
+			runFor(t, dir, "merge", "-q", "-s", "ours", "--no-edit", "design/s")
+			return []string{}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"base.txt": "base\n"}, Message: "root"}}).Dir
+			if err := os.MkdirAll(filepath.Join(dir, "active", "s"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			want := tc.build(t, dir)
+			got, err := FirstParentPathCommits(context.Background(), dir, "main", p)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %v, %v; want %v", got, err, want)
+			}
+		})
+	}
+}
+
+func TestFirstParentPathCommits_Negative(t *testing.T) {
+	isolateGitConfig(t)
+	top := buildFirstParentTopology(t)
+	shallow := fixturegit.ShallowClone(t, &fixturegit.Repo{Dir: top.dir, Head: top.mov}, 2)
+	tests := []struct {
+		name     string
+		dir, ref string
+		paths    []string
+		wantErr  error
+	}{
+		{name: "empty ref", dir: top.dir, ref: "", paths: []string{"a"}},
+		{name: "option-shaped ref", dir: top.dir, ref: "--all", paths: []string{"a"}},
+		{name: "range-shaped ref", dir: top.dir, ref: "main..main", paths: []string{"a"}},
+		{name: "range to another ref", dir: top.dir, ref: "main..x", paths: []string{"active/s/spec.md"}},
+		{name: "negated ref", dir: top.dir, ref: "^main", paths: []string{"active/s/spec.md"}},
+		{name: "parents-excluded shorthand", dir: top.dir, ref: "main^!", paths: []string{"active/s/spec.md"}},
+		{name: "first-parent range shorthand", dir: top.dir, ref: "main^-", paths: []string{"active/s/spec.md"}},
+		{name: "all-parents shorthand", dir: top.dir, ref: "main^@", paths: []string{"active/s/spec.md"}},
+		{name: "a tree path, not a commit", dir: top.dir, ref: "main:active", paths: []string{"active/s/spec.md"}},
+		{name: "no paths", dir: top.dir, ref: "main"},
+		{name: "empty path", dir: top.dir, ref: "main", paths: []string{""}},
+		{name: "unknown ref", dir: top.dir, ref: "no-such-branch", paths: []string{"a"}},
+		{name: "not a repository", dir: t.TempDir(), ref: "main", paths: []string{"a"}},
+		{name: "shallow clone", dir: shallow, ref: "HEAD", paths: []string{"archive/s/spec.md"}, wantErr: ErrShallowHistory},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := FirstParentPathCommits(context.Background(), tc.dir, tc.ref, tc.paths...)
+			if err == nil {
+				t.Fatalf("got %v, want an error", got)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error %v, want errors.Is %v", err, tc.wantErr)
+			}
+		})
+	}
+}

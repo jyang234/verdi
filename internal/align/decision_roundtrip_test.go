@@ -10,12 +10,7 @@ import (
 func TestGenerateDecisionConflict_MarkdownRoundTrips(t *testing.T) {
 	root := t.TempDir()
 	writeADR(t, root, "retry-policy", "accepted")
-	spec := &artifact.SpecFrontmatter{
-		Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft",
-		Decisions: []artifact.Decision{{ID: "dc-1", Text: "t", Anchor: "#dc-1", Links: []artifact.Link{
-			{Type: artifact.LinkExempts, Ref: "adr/retry-policy", Note: "reason"},
-		}}},
-	}
+	spec := writeDecisionSpec(t, root, "my-feature", artifact.Link{Type: artifact.LinkExempts, Ref: "adr/retry-policy", Note: "reason"})
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{Root: root, Spec: spec, Covers: "abc1234", ModelDigest: testModelDigest(t)})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
