@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { resolvePorts } from "./ports";
 
@@ -7,6 +9,52 @@ import { resolvePorts } from "./ports";
 // base+1, base+2 rule, so this config's baseURL/health-check URL and the
 // harness's actual bind address always agree.
 const PORTS = resolvePorts();
+
+// VERDI_E2E_SPECS (SI-268): the Makefile's e2e shard targets (e2e-1, e2e-2,
+// e2e-3) each pass the space-separated names of the spec files their shard
+// runs. Set, the default project's testMatch selects exactly those files
+// under tests/; unset (a bare `npx playwright test`), the whole suite runs as
+// before. The list fails closed: an empty list, a name that is not a spec
+// file directly under tests/ (the Makefile's empty-remainder sentinel among
+// them), or a name listed twice stops the run instead of running more or less
+// than the shard names. internal/specalign's e2eshards_test.go proves, from
+// `make -n`, that the three lists partition tests/*.spec.ts.
+const SPECS_ENV_VAR = "VERDI_E2E_SPECS";
+const shardTestMatch = resolveShardTestMatch(process.env[SPECS_ENV_VAR]);
+
+function resolveShardTestMatch(raw: string | undefined): RegExp[] | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const names = raw.split(/\s+/).filter((name) => name !== "");
+  const problems: string[] = [];
+  if (names.length === 0) {
+    problems.push("it names no spec file");
+  }
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) {
+      problems.push(`${name} is listed twice`);
+    }
+    seen.add(name);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.spec\.ts$/.test(name)) {
+      problems.push(`${name} is not a spec file name`);
+    } else if (!fs.existsSync(path.join(__dirname, "tests", name))) {
+      problems.push(`${name} is not in e2e/tests/`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `e2e: ${SPECS_ENV_VAR}=${JSON.stringify(raw)} cannot select a shard: ${problems.join("; ")}`,
+    );
+  }
+  // Playwright tests a testMatch RegExp against each file's absolute path.
+  // Anchoring on the tests/ directory and the whole file name makes each
+  // pattern select that one file, never a longer name that ends with it.
+  return names.map(
+    (name) => new RegExp(`[\\\\/]tests[\\\\/]${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+  );
+}
 
 // Chromium only (task instruction: "package.json + playwright.config
 // (chromium only)"). The suite runs fully serially (workers: 1): every
@@ -94,6 +142,8 @@ export default defineConfig({
     {
       name: "chromium",
       testDir: "./tests",
+      // One e2e shard's spec files, when VERDI_E2E_SPECS names them (above).
+      ...(shardTestMatch ? { testMatch: shardTestMatch } : {}),
       // Desktop-sized viewport (devices' default 1280x720 is too small):
       // the v1 board's yarn gesture is a RAW pointer drag (helpers.ts
       // drawYarn), and raw mouse events never auto-scroll the way

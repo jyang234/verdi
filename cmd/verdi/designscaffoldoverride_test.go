@@ -84,8 +84,8 @@ func buildPhase7RepoWithStoryTemplateOverride(t *testing.T) *fixturegit.Repo {
 //
 // guide-claim: 5.3-user-editable-templates
 func TestRunDesignStart_StoryTemplateOverride(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7RepoWithStoryTemplateOverride(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)
@@ -119,8 +119,8 @@ func TestRunDesignStart_StoryTemplateOverride(t *testing.T) {
 // store's story.md override does not leak into the feature class's own
 // scaffold — each class resolves its OWN Class.Template independently.
 func TestRunDesignStart_FeatureUnaffectedByStoryTemplateOverride(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7RepoWithStoryTemplateOverride(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)
@@ -192,8 +192,8 @@ func buildPhase7RepoWithClassMismatchStoryTemplate(t *testing.T) *fixturegit.Rep
 // directory at all — a validation failure before the branch is cut must
 // leave the repo untouched (this function's own doc comment).
 func TestRunDesignStart_ClassMismatch_Exit2_NoWrite(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7RepoWithClassMismatchStoryTemplate(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)

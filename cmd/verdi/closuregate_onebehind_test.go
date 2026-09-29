@@ -19,6 +19,7 @@ import (
 // "fresh, fully dispositioned" case) OR evaluateOneBehindReport accepts;
 // every refusal names a failed clause.
 func TestCheckDispositionCompleteCondition_OneBehind(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	specOneBehind := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/" + oneBehindReportSpecName}}
 

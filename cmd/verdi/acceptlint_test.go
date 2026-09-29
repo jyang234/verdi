@@ -27,6 +27,7 @@ import (
 // scoping helpers directly (CLAUDE.md: every function gets happy- and
 // negative-path table-driven unit tests).
 func TestQuartetPathPrefixes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		ref  artifact.Ref
@@ -62,6 +63,7 @@ func TestQuartetPathPrefixes(t *testing.T) {
 }
 
 func TestInQuartetScope(t *testing.T) {
+	t.Parallel()
 	prefixes := []string{".verdi/specs/active/stale-decline", ".verdi/attestations/jira-loan-1482"}
 	cases := []struct {
 		name string

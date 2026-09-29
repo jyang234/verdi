@@ -18,6 +18,7 @@ import (
 // for their dispatch coverage, matching the lint/dex pattern. Table-driven
 // per CLAUDE.md's testing rules.
 func TestRun_KnownVerbs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		verb       string
 		wantSubstr string
@@ -50,6 +51,7 @@ func TestRun_KnownVerbs(t *testing.T) {
 // implemented (phases 4, 7, 8, and round 6), so this uses a still-stubbed
 // verb.
 func TestRun_KnownVerbs_ExtraArgs(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"waivers", "--some-flag", "extra"}, &stderr)
 	if got != 2 {
@@ -97,6 +99,7 @@ func TestRun_GateDispatchesToRealVerb(t *testing.T) {
 // a bare "close" (no story/spec argument) must produce close's own usage
 // message, never the generic stub message.
 func TestRun_CloseDispatchesToRealVerb(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"close"}, &stderr)
 	if got != 2 {
@@ -152,6 +155,7 @@ func TestRun_LintDispatchesToRealVerb(t *testing.T) {
 // own usage message, never the generic "not implemented (phase 12)" other
 // still-stubbed verbs produce.
 func TestRun_DexDispatchesToRealVerb(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"dex"}, &stderr)
 	if got != 2 {
@@ -205,6 +209,7 @@ func TestRun_McpDispatchesToRealVerb(t *testing.T) {
 // since both are mutating verbs whose bare invocation fails on argument
 // parsing before touching any file.
 func TestRun_DispositionDispatchesToRealVerb(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"disposition"}, &stderr)
 	if got != 2 {
@@ -224,6 +229,7 @@ func TestRun_DispositionDispatchesToRealVerb(t *testing.T) {
 // subcommand) must produce model's own usage message, never the generic
 // "not implemented (phase 17)" other still-stubbed verbs would produce.
 func TestRun_ModelDispatchesToRealVerb(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"model"}, &stderr)
 	if got != 2 {
@@ -240,6 +246,7 @@ func TestRun_ModelDispatchesToRealVerb(t *testing.T) {
 // TestRun_NegativePaths covers the unknown-verb and no-args cases: both
 // exit 2 with usage, never silently succeeding (constitution 2).
 func TestRun_NegativePaths(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		args []string
@@ -266,6 +273,7 @@ func TestRun_NegativePaths(t *testing.T) {
 // TestRunContextConflictDispatch proves the registered context namespace
 // routes conflict to its own grammar rather than the compile-only usage path.
 func TestRunContextConflictDispatch(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	got := run([]string{"context", "conflict"}, &stderr)
 	if got != 2 {

@@ -7,6 +7,7 @@ import "testing"
 // byte (the parity floor), a regular rename parenthesizes the extending
 // tail, and degenerate pairs never emit an empty alternation.
 func TestDisplayAlternation(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ singular, plural, want string }{
 		{"story", "stories", "stor(y/ies)"},
 		{"Change Request", "Change Requests", "Change Request(s)"},

@@ -13,19 +13,20 @@
 // fragment-qualified form when more than one story is bound from the same
 // file (e.g. remote-and-ci#ac-1 alongside close-verb#ac-1/#ac-3).
 //
-// HONESTY (dc-1). This producer performs NO test execution and NO
+// HONESTY (dc-1, SI-267). This producer performs NO test execution and NO
 // verification of its own: it emits verdict: pass purely because it was
 // INVOKED AT ALL, and it is invoked (runProduce, sync.go) only as a step in
-// verify.yml strictly AFTER `make verify` has already exited 0 in the SAME
-// CI job (see verify.yml's own comment for the wiring this repo settled on,
-// and why: running make verify a second time, independently, in a
-// different job would risk exactly the "divergent re-run" this decision
-// forbids — a flake in either direction could make this producer disagree
-// with the real, blocking gate). Reaching this step IS the evidence; there
-// is no second test run anywhere in this file — mirroring dc-1's own
-// framing for --produce as a whole ("authoritative solely because ... not
-// because the flag was passed"): here, solely because this step in THIS
-// job, after that step, was reached.
+// verify.yml's final `verify` job, which needs every gate job of the SAME
+// workflow run and so runs only after all of them succeeded, at the same
+// commit (see verify.yml's own comment for the wiring this repo settled on,
+// and why: running the gate a second time, independently, in a different
+// run would risk exactly the "divergent re-run" this decision forbids — a
+// flake in either direction could make this producer disagree with the
+// real, blocking gate). Reaching this step IS the evidence; there is no
+// second test run anywhere in this file — mirroring dc-1's own framing for
+// --produce as a whole ("authoritative solely because ... not because the
+// flag was passed"): here, solely because this step, in the run whose gate
+// jobs all succeeded, was reached.
 //
 // DIRECTORY CONVENTION — RECONCILED by true-closure. The fold's canonical
 // local key is the OWNING SPEC's ref slug, derived/<spec-ref-slug>/<commit>/

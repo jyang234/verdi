@@ -325,6 +325,7 @@ func TestBuildGateConflictPreEffect(t *testing.T) {
 // bytes have landed), so it can no longer exercise this condition's FAIL
 // path at all.
 func TestGate_Condition1_FailsAlone(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		mainFiles map[string]string
 		branchMD  string
@@ -344,7 +345,7 @@ func TestGate_Condition1_FailsAlone(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: tc.mainFiles, Message: "scaffold"}})
-			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			pinFixtureDefaultBranch(t, repo.Dir)
 			checkoutBranch(t, repo.Dir, "feature/stale-decline")
 			writeTestFile(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "spec.md"), []byte(tc.branchMD))
 			head := commitAllOnCurrentBranch(t, repo.Dir, "diverge on the build branch")
@@ -373,6 +374,7 @@ func TestGate_Condition1_FailsAlone(t *testing.T) {
 // condition 1 too — the same Git-derived reading buildstart_test.go proves
 // for `verdi build start`.
 func TestGate_Condition1_StatuslessExactDefaultBranch_Passes(t *testing.T) {
+	t.Parallel()
 	statuslessMD := `---
 id: spec/stale-decline
 kind: spec
@@ -395,7 +397,7 @@ acceptance_criteria:
 			Message: "scaffold + statusless landed spec",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 
 	spec := mustResolveBuildSpec(t, repo.Dir)
@@ -421,6 +423,7 @@ acceptance_criteria:
 // FAILS condition 1 as a verdict — never a silent PASS into
 // AcceptedPendingBuild.
 func TestGate_Condition1_LegacySupersededExactLanded_FailsAsVerdict(t *testing.T) {
+	t.Parallel()
 	legacySupersededMD := `---
 id: spec/disclosure-seam
 kind: spec
@@ -448,7 +451,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 			Message: "scaffold + landed, legacy-superseded story",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/disclosure-seam")
 
 	// mustResolveBuildSpec hardcodes "feature/stale-decline" (this file's
@@ -660,6 +663,7 @@ frozen: { at: 2024-01-01, commit: %s }
 // conditions 1/3/4 still decide the verdict. With all three of those
 // holding, gate exits 0.
 func TestGate_SpikeBranch_EvidenceExempt(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -669,7 +673,7 @@ func TestGate_SpikeBranch_EvidenceExempt(t *testing.T) {
 			Message: "scaffold + spike spec",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	checkoutBranch(t, repo.Dir, "feature/enum-spike")
 
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/enum-spike")

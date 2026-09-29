@@ -54,6 +54,7 @@ func runModelCheckBinary(t *testing.T, bin, dir string) (stdout, stderr string, 
 // exit 0, with an OK line naming the schema, canonical's own class/
 // transition counts, and canonical's own digest.
 func TestModelCheck_NoModelYAML_OK(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 
@@ -133,6 +134,7 @@ links:
 // templates, backed here by a real .verdi/templates/ override for each
 // (ac-3's template round trip requires the file to actually exist).
 func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	vocabRenameYAML := readModelTestdata(t, "vocab-rename.yaml")
 	root := writeModelCheckStoreRoot(t, vocabRenameYAML)
@@ -168,6 +170,7 @@ func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
 // is never the frontier's exit 1), naming the specific offending template
 // file rather than a bare "model.yaml invalid" message.
 func TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "feature.md"), []byte("title: {{.Title\n"))
@@ -188,6 +191,7 @@ func TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile(t *testing.T) {
 // frontmatter field, KnownFields) also fails model check closed at exit
 // 2, naming the offending template file.
 func TestModelCheck_BrokenTemplateDecode_Exit2_NamesFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 	const brokenDecodeTemplate = `---
@@ -229,6 +233,7 @@ links:
 // variant (before this fix, model check rendered only the non-spike
 // variant and this store passed clean).
 func TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 	const brokenSpikeBranchTemplate = `---
@@ -277,6 +282,7 @@ outcome: { text: "{{.Outcome}}", anchor: outcome }
 // (before this fix, model check rendered only the with-story-ref feature
 // variant and this store passed clean).
 func TestModelCheck_BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 	const brokenNoStoryRefTemplate = `---
@@ -323,6 +329,7 @@ acceptance_criteria:
 // the declared class under check ("story"), and the class the rendered
 // content actually decoded as ("feature").
 func TestModelCheck_ClassTemplateMismatch_Exit2_NamesClasses(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "class-template-mismatch.yaml"))
 
@@ -354,6 +361,7 @@ func TestModelCheck_ClassTemplateMismatch_Exit2_NamesClasses(t *testing.T) {
 // naming the offending class and the bare-filename rule, never a bare
 // "model.yaml invalid" message.
 func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-template-path-escape.yaml"))
 
@@ -378,6 +386,7 @@ func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
 //
 // guide-claim: 9.5-model-check-migration-guard
 func TestModelCheck_FrontierViolation_Exit1_PinnedText(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-frontier-structural.yaml"))
 
@@ -404,6 +413,7 @@ func TestModelCheck_FrontierViolation_Exit1_PinnedText(t *testing.T) {
 // validation/frontier failure" prose (a disclosed plan/spec conflict:
 // spec+obligation win, per this build's own precedence rule).
 func TestModelCheck_KernelViolation_Exit2(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-kind-unknown.yaml"))
 
@@ -429,6 +439,7 @@ func TestModelCheck_KernelViolation_Exit2(t *testing.T) {
 // "model.yaml invalid". Reuses Task 5's committed fixture rather than inlining
 // the manifest (CLAUDE.md: never copy-paste shared content).
 func TestModelCheck_DuplicateVerb_Exit2_NamesRule(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-duplicate-verb.yaml"))
 
@@ -454,6 +465,7 @@ func TestModelCheck_DuplicateVerb_Exit2_NamesRule(t *testing.T) {
 // error naming the offending key AND the legal set (declared classes
 // plus the L-M13 spike pseudo-class), never a bare "model.yaml invalid".
 func TestModelCheck_VocabularyUnknownKey_Exit2_NamesKeyAndLegalSet(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-vocabulary-unknown-key.yaml"))
 
@@ -475,6 +487,7 @@ func TestModelCheck_VocabularyUnknownKey_Exit2_NamesKeyAndLegalSet(t *testing.T)
 // TestModelCheck_StoreLessCwd_Exit2 proves a missing store is
 // operational trouble (ac-3's own text names this explicitly).
 func TestModelCheck_StoreLessCwd_Exit2(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir() // no .verdi/ anywhere under this tree
 
@@ -490,6 +503,7 @@ func TestModelCheck_StoreLessCwd_Exit2(t *testing.T) {
 // TestModelCheck_UnknownSubcommand_Exit2Usage proves an unrecognized
 // `model` subcommand is a usage error (exit 2), never a silent no-op.
 func TestModelCheck_UnknownSubcommand_Exit2Usage(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 
@@ -515,6 +529,7 @@ func TestModelCheck_UnknownSubcommand_Exit2Usage(t *testing.T) {
 // subcommand at all is the same usage error, not a crash or a silent
 // default.
 func TestModelCheck_BareVerb_Exit2Usage(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, "")
 

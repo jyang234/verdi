@@ -16,7 +16,6 @@ import (
 // fixturegit repo rather than a bare t.TempDir()).
 func newFeedForTest(t *testing.T, f forge.Forge) *forgeCommentFeed {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return newForgeCommentFeed(f, resolvableDefaultBranchRoot(t))
 }
 
@@ -26,6 +25,7 @@ func newFeedForTest(t *testing.T, f forge.Forge) *forgeCommentFeed {
 // caller does the inbox-tray split, never the feed), and stamps Resolved
 // from the comment's forge thread state.
 func TestForgeCommentFeed_JoinsCommentsAndResolution(t *testing.T) {
+	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "42", SourceBranch: "design/refi-decline-flow"})
 	// A token-bearing comment on a resolved thread.
@@ -63,6 +63,7 @@ func TestForgeCommentFeed_JoinsCommentsAndResolution(t *testing.T) {
 // TestForgeCommentFeed_NoThreadNeverResolved proves a comment with no
 // thread id at all (a bare general note) is never reported resolved.
 func TestForgeCommentFeed_NoThreadNeverResolved(t *testing.T) {
+	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "7", SourceBranch: "design/refi-decline-flow"})
 	f.SeedComment("7", forge.Comment{ID: "c1", Author: "reviewer", Body: "no thread here"})
@@ -83,6 +84,7 @@ func TestForgeCommentFeed_NoThreadNeverResolved(t *testing.T) {
 // TestForgeCommentFeed_NoOpenMR proves a spec whose design branch has no
 // open MR is honestly not under review (ok=false), not an error.
 func TestForgeCommentFeed_NoOpenMR(t *testing.T) {
+	t.Parallel()
 	f := fake.New()
 	// An open MR exists, but for a DIFFERENT design branch.
 	f.SeedOpenMR("main", forge.OpenMR{ID: "9", SourceBranch: "design/other-spec"})

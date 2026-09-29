@@ -44,6 +44,7 @@ func adrMD(name, status string) string {
 //
 // guide-claim: 8.1-align-deviation-disposition
 func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -82,6 +83,7 @@ func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
 }
 
 func TestAudit_BelowThreshold_Clean(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -113,6 +115,7 @@ func TestAudit_Negative_NoStoreRoot(t *testing.T) {
 }
 
 func TestAudit_Negative_UnexpectedArgs(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	got := cmdAudit([]string{"bogus"}, &stdout, &stderr)
 	if got != 2 {
@@ -149,6 +152,7 @@ func auditWaiverMD(acID, status, expiry string) string {
 // internal/disclosure's own constructor tests and cmd/verdi's sync tool-pin
 // precedent.
 func TestLapsedWaiverDisclosure(t *testing.T) {
+	t.Parallel()
 	row := decisionsweep.WaiverAuditRow{
 		ACID:   "ac-1",
 		Path:   ".verdi/waivers/jira-loan-1/ac-1.md",
@@ -205,6 +209,7 @@ func TestLapsedWaiverDisclosure(t *testing.T) {
 // deliberately NOT a disclosure; the negative path below pins that an
 // unlapsed waiver emits no disclosure line at all.
 func TestAudit_LapsedWaiver_RendersThroughTheSeam(t *testing.T) {
+	t.Parallel()
 	build := func(t *testing.T, expiry string) *fixturegit.Repo {
 		t.Helper()
 		return fixturegit.Build(t, []fixturegit.Layer{{

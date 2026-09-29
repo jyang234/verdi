@@ -108,6 +108,7 @@ func implementsAC1() []artifact.Link {
 // TestComputeStubMatch covers R4-I-12's four-condition test, one negative
 // case per condition plus the happy path.
 func TestComputeStubMatch(t *testing.T) {
+	t.Parallel()
 	repo := buildStubMatchRepo(t)
 
 	cases := []struct {
@@ -215,6 +216,7 @@ func TestComputeStubMatch(t *testing.T) {
 // judged-cli-refusal-prose-class-state-words-still-bare and
 // judged-article-agreement-approximation-undisclosed).
 func TestComputeStubMatch_RenamedVocabulary(t *testing.T) {
+	t.Parallel()
 	mdl := &model.Model{
 		Schema: "verdi.model/v1",
 		Vocabulary: model.Vocabulary{
@@ -247,6 +249,7 @@ func TestComputeStubMatch_RenamedVocabulary(t *testing.T) {
 }
 
 func TestComputeStubMatch_UndispositionedJudgedFinding(t *testing.T) {
+	t.Parallel()
 	repo := buildStubMatchRepo(t)
 	story := draftStory("Stale Decline", implementsAC1(), nil)
 

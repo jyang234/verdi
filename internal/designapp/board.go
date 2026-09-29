@@ -130,8 +130,39 @@ func cloneBoardProjection(p *workbench.BoardProjection) *workbench.BoardProjecti
 			clone.Cards[i].Badges[j].Disclosures = cloneSlice(src.Disclosures)
 			clone.Cards[i].Badges[j].Provenance = cloneSlice(src.Provenance)
 		}
+		// Supersessions (SI-278): a decision card's closed-spec object
+		// supersession views, each carrying its lines, and each line its
+		// link slices — copied level by level, like Badges.
+		clone.Cards[i].Supersessions = cloneSlice(p.Cards[i].Supersessions)
+		for j := range clone.Cards[i].Supersessions {
+			src := p.Cards[i].Supersessions[j]
+			clone.Cards[i].Supersessions[j].Heads = cloneSlice(src.Heads)
+			clone.Cards[i].Supersessions[j].Lines = cloneSlice(src.Lines)
+			for k := range clone.Cards[i].Supersessions[j].Lines {
+				line := src.Lines[k]
+				clone.Cards[i].Supersessions[j].Lines[k].Links = cloneSlice(line.Links)
+				clone.Cards[i].Supersessions[j].Lines[k].Trailing = cloneSlice(line.Trailing)
+			}
+		}
 	}
 	clone.RefCards = cloneSlice(p.RefCards)
+	for i := range clone.RefCards {
+		// Object (SI-278): a closed spec's reference card's object view,
+		// a pointer — its own copy, with its lines and their link slices.
+		src := p.RefCards[i].Object
+		if src == nil {
+			continue
+		}
+		obj := *src
+		obj.Supersession.Heads = cloneSlice(src.Supersession.Heads)
+		obj.Supersession.Lines = cloneSlice(src.Supersession.Lines)
+		for k := range obj.Supersession.Lines {
+			line := src.Supersession.Lines[k]
+			obj.Supersession.Lines[k].Links = cloneSlice(line.Links)
+			obj.Supersession.Lines[k].Trailing = cloneSlice(line.Trailing)
+		}
+		clone.RefCards[i].Object = &obj
+	}
 	clone.Edges = cloneSlice(p.Edges)
 	clone.Stickies = cloneSlice(p.Stickies)
 	clone.Tray = cloneSlice(p.Tray)

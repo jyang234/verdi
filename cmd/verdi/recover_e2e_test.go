@@ -67,7 +67,6 @@ YAML scanner refuses.
 
 func recoverE2ERepoSpec(t *testing.T, specMD string) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -86,6 +85,7 @@ func recoverE2ERepoSpec(t *testing.T, specMD string) *fixturegit.Repo {
 // error this case exists to forbid, and stdout must still carry exactly
 // one canonical, strict-decodable projection line.
 func TestRecoverE2E_SpecBodyIsNotYAML(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepoSpec(t, recoverE2ESpecHostileBodyMD)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -110,6 +110,7 @@ func TestRecoverE2E_SpecBodyIsNotYAML(t *testing.T) {
 }
 
 func TestRecoverE2E_EmptyBranchCut(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -187,6 +188,7 @@ func gitlogArgvs(t *testing.T, path string) [][]string {
 // exactly reads (rev-parse/status/diff) then a checkout then a
 // branch -d, and carries no forbidden token.
 func TestRecoverE2E_ApplyUnwindHappyPath(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -287,6 +289,7 @@ func gitWriteArgvs(argvs [][]string) [][]string {
 // the recovery ran, so a correct unwind leaves HEAD at main's tip — NOT
 // at the cut. Exit 0, every postcondition held.
 func TestRecoverE2E_ApplyUnwindReturnBranchAhead(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	ctx := context.Background()
@@ -349,6 +352,7 @@ func TestRecoverE2E_ApplyUnwindReturnBranchAhead(t *testing.T) {
 // with no choices in the projection the error says so instead of
 // trailing an empty "known choices:" list.
 func TestRecoverE2E_UncleanTreeWithholdsTheUnwind(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -424,6 +428,7 @@ func TestRecoverE2E_UncleanTreeWithholdsTheUnwind(t *testing.T) {
 // exit 1, no checkout or branch command issued, close/checkout still
 // checked out and still existing, and the operator's file still on disk.
 func TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "close/checkout"); err != nil {
@@ -481,6 +486,7 @@ func TestRecoverE2E_UntrackedFileHiddenByStatusConfigWithholdsTheUnwind(t *testi
 // command log issues no worktree-removal (and no write at all), and all
 // three artifacts are still on disk afterwards.
 func TestRecoverE2E_ReclaimMustPreserveUntrackedHiddenByStatusConfig(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	ctx := context.Background()
@@ -581,6 +587,7 @@ func TestRecoverE2E_ReclaimMustPreserveUntrackedHiddenByStatusConfig(t *testing.
 // 1, the manual command named on stderr, and the lock file itself
 // untouched.
 func TestRecoverE2E_ApplyNoExecutor(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 	lockPath := store.WriterLockPath(repo.Dir)
@@ -638,6 +645,7 @@ func TestRecoverE2E_ApplyNoExecutor(t *testing.T) {
 // the unavailable fact and no command guessed) rather than handed
 // exit 0, nothing recognized.
 func TestRecoverE2E_ArchiveMoveWithUnreadableIndexIsDiagnosed(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := recoverE2ERepo(t)
 

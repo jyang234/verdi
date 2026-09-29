@@ -35,6 +35,19 @@ package main
 //     store no longer shows once earlier suites have written to it
 //     (R-RR1-23) — see readinesspilotfixture.go. main.go stops it with
 //     the harness.
+//   - GET  /objsupersede-fixture returns JSON describing EIGHT isolated
+//     stores, one per closed-spec object supersession scenario (design
+//     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
+//     design.md §8) — the happy path, the carried and dropped
+//     whole-spec-revision chains, the not-yet-accepted pair, the
+//     not-in-force case, the constraint-target refusal, and a closed
+//     feature's criterion superseded in force — each materialized from
+//     internal/objsupersede/scenario's committed fixture and given its own
+//     `verdi serve` (the boards) and its own docs site (dex built from
+//     main, on a loopback file server): every view URL, the record facts,
+//     and each view that is not a surface — see objsupersedefixture.go,
+//     whose doc carries the JSON contract. main.go stops them all with the
+//     harness.
 
 import (
 	"log"
@@ -67,6 +80,7 @@ type controlServer struct {
 	unprovenBoard      *unprovenBoardFixture
 	specImport         *specImportFixture
 	readinessPilot     *readinessPilotFixture
+	objSupersede       *objSupersedeFixture
 }
 
 // newControlServer wires the fixtures. openMRFeedURL is this server's own
@@ -82,6 +96,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		unprovenBoard:      newUnprovenBoardFixture(moduleRoot),
 		specImport:         newSpecImportFixture(moduleRoot),
 		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
+		objSupersede:       newObjSupersedeFixture(moduleRoot),
 	}
 }
 
@@ -116,6 +131,13 @@ func (c *controlServer) handler() http.Handler {
 	// in the shared serve's own posture — the pristine derivation the
 	// readiness pilot suite's oracles pin, untouched by earlier suites.
 	mux.HandleFunc("/readiness-pilot-fixture", c.readinessPilot.handler)
+	// The isolated closed-spec object supersession stores
+	// (objsupersedefixture.go): eight scenario repositories, each with its
+	// own `verdi serve` subprocess and its own docs site built from main —
+	// the criterion/decision-target views design docs/superpowers/specs/
+	// 2026-09-24-closed-spec-object-supersession-design.md §8 needs, which
+	// no shared-store spec models.
+	mux.HandleFunc("/objsupersede-fixture", c.objSupersede.handler)
 	return mux
 }
 

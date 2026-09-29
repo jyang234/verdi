@@ -24,6 +24,7 @@ import (
 // --- grammar table (contract 1) -----------------------------------------
 
 func TestParseGoTestProducerRef(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		ref     string
@@ -165,6 +166,7 @@ const (
 // and a runtime-kind obligation are disclosed at selection, each naming only
 // its own obligation.
 func TestGoTestProducerSelection(t *testing.T) {
+	t.Parallel()
 	testQ := func(ref, job string) obligationQualityInput {
 		return obligationQualityInput{State: "elaborated", ProducerKind: "test", ProducerRef: ref, SourceKind: "ci-job", SourceRef: job}
 	}
@@ -321,6 +323,7 @@ func testGoTestJSON(relPkg string, results map[string]string) []byte {
 // coarse record via mergeEvidenceByProducer), and carry the obligation's
 // own kind/AC id, the exact producer ref, and the passed-in provenance.
 func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 
@@ -402,6 +405,7 @@ func TestProduceGoTestEvidence_WritesPerObligationRecords(t *testing.T) {
 // obligation whose named test never runs emits no record, only a
 // disclosure naming the obligation.
 func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
@@ -440,6 +444,7 @@ func TestProduceGoTestEvidence_AbsentTestDisclosesNoRecord(t *testing.T) {
 // runner invocation (no output at all) is returned as an error, never
 // swallowed as a disclosure.
 func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
@@ -462,6 +467,7 @@ func TestProduceGoTestEvidence_RunnerErrorIsOperational(t *testing.T) {
 // package's terminal event (03 §Bundle assembly) — is an operational error
 // naming the offending event, and that no record is written for anyone.
 func TestProduceGoTestEvidence_RejectedStreamIsOperational(t *testing.T) {
+	t.Parallel()
 	const pkg = fakeModulePath + "/pkg/a"
 	cases := []struct {
 		name    string
@@ -521,6 +527,7 @@ func TestProduceGoTestEvidence_RejectedStreamIsOperational(t *testing.T) {
 // matched (contract's own honesty requirement: negative evidence is never
 // hidden).
 func TestProduceGoTestEvidence_EndToEndMatchesObligation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	const commit = "ffffffffffffffffffffffffffffffffffffffff"
@@ -584,6 +591,7 @@ func TestProduceGoTestEvidence_EndToEndMatchesObligation(t *testing.T) {
 // both ends, and regexp-quotes every name (defence in depth behind the
 // grammar), so no name can widen or break another's match.
 func TestGoTestRunPattern(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		tests []string
@@ -607,6 +615,7 @@ func TestGoTestRunPattern(t *testing.T) {
 // package or any directory above it) is disclosed as malformed on its own
 // obligation and never selected, while a sibling in the root module is.
 func TestSelectGoTestObligations_NestedModule(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	for _, dir := range []string{"nested", "deep/er/mod"} {
@@ -647,6 +656,7 @@ func TestSelectGoTestObligations_NestedModule(t *testing.T) {
 // error, and that a go.mod declaring zero, two, or a malformed module path is
 // an error rather than a guess.
 func TestGoModulePath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		gomod       *string
@@ -698,6 +708,7 @@ func goModText(s string) *string { return &s }
 // each selected obligation is disclosed by name as not run, and the step is
 // not an operational error for every other story.
 func TestProduceGoTestEvidence_NoGoModDisclosesWithoutExec(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",
 		obligationMD("story-a", "ac-1", "behavioral", obligationQualityInput{
@@ -728,6 +739,7 @@ func TestProduceGoTestEvidence_NoGoModDisclosesWithoutExec(t *testing.T) {
 // terminal action to a verdict: pass is pass, fail is fail, and a skipped
 // test abstains — never pass. Anything else is an error, never a verdict.
 func TestVerdictForOutcome(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		action  string
 		want    artifact.EvidenceVerdict
@@ -757,6 +769,7 @@ func TestVerdictForOutcome(t *testing.T) {
 // prefix or a subtest); and that a package that did not build or load yields
 // a disclosure, not a record.
 func TestBuildGoTestRecords(t *testing.T) {
+	t.Parallel()
 	sel := func(ac, kind, test string) selectedGoTestObligation {
 		return selectedGoTestObligation{
 			testProducerCandidate: testProducerCandidate{SpecName: "story-a", ACID: ac, Kind: artifact.EvidenceKind(kind), ProducerRef: "go-test:pkg/a:" + test, JobRef: "verify", ObligationID: "obligation/story-a--" + ac + "--" + kind},
@@ -839,6 +852,7 @@ func ptrResult(r gotestjson.Result) *gotestjson.Result { return &r }
 // fact a record asserts — its verdict included — so a pass and a fail for
 // the same obligation never share a digest, and equal inputs always do.
 func TestNamedTestDigest(t *testing.T) {
+	t.Parallel()
 	base := artifact.Evidence{Kind: artifact.EvidenceBehavioral, Producer: "go-test:pkg/a:TestA", EvidenceFor: []string{"ac-1"}, Verdict: artifact.VerdictPass}
 	baseDigest, err := namedTestDigest(base)
 	if err != nil {
@@ -1014,6 +1028,7 @@ var errNoOutput = errors.New("no output")
 // TestProduceGoTestEvidence_NilRunner proves a selected obligation with no
 // runner configured is an error, never a nil-interface panic.
 func TestProduceGoTestEvidence_NilRunner(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGoMod(t, root)
 	writeObligation(t, root, "story-a", "ac-1", "behavioral",

@@ -17,6 +17,7 @@ import (
 // (ac-2): multi-line usage on stdout, one line per verb, exit 0, nothing
 // on stderr. Table-driven per CLAUDE.md's testing rules.
 func TestHelp_TopLevel(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -60,6 +61,7 @@ func TestHelp_TopLevel(t *testing.T) {
 // out-of-v0-scope verb (waivers). Every case: exit 0, stdout carries that
 // verb's own usage, stderr empty.
 func TestHelp_PerVerb(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -103,6 +105,7 @@ func TestHelp_PerVerb(t *testing.T) {
 // must print EXACTLY "usage: " + initUsageText, the identical string
 // cmdInit's own flag-parsing refusals cite.
 func TestHelp_InitUsageMatchesConstant(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -131,6 +134,7 @@ func TestHelp_InitUsageMatchesConstant(t *testing.T) {
 // exit 0 — so this single assertion set distinguishes "printed usage" from
 // "tried to run".
 func TestHelp_LintNeverExecutes(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir() // deliberately not a verdi store
 
@@ -160,6 +164,7 @@ func TestHelp_LintNeverExecutes(t *testing.T) {
 // constant — help.go's verbUsage["spec"] entry is that constant, not a
 // hand-duplicated literal — so the two call sites can never drift apart.
 func TestHelp_SpecShowsEveryForm(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -194,6 +199,7 @@ func TestHelp_SpecShowsEveryForm(t *testing.T) {
 // exit 2)" — the central help intercept must never swallow these two
 // existing paths.
 func TestHelp_UnknownVerbAndNoArgsUnchanged(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -226,6 +232,7 @@ func TestHelp_UnknownVerbAndNoArgsUnchanged(t *testing.T) {
 // as before: its own usage error, on stderr, exit 2 (never help.go's
 // registry, never stdout).
 func TestHelp_DoesNotInterceptRealSubcommands(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -272,6 +279,7 @@ func topLevelUsageHasRow(verb string) bool {
 // from "verdi help" — both content-free failures a human skimming test
 // output would not necessarily notice, exactly what this guard is for.
 func TestVerbUsageRegistry_CoversEveryVerb(t *testing.T) {
+	t.Parallel()
 	verbs := make([]string, 0, len(verbPhase)+1)
 	for v := range verbPhase {
 		verbs = append(verbs, v)
@@ -301,6 +309,7 @@ func TestVerbUsageRegistry_CoversEveryVerb(t *testing.T) {
 // ("run \"verdi <verb> help\" ... for that verb's own usage") would be
 // false for the "version" row specifically.
 func TestHelp_VersionRowHelpShowsItsOwnUsage(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
@@ -330,6 +339,7 @@ func TestHelp_VersionRowHelpShowsItsOwnUsage(t *testing.T) {
 // suffixes on "--help"/"-h" as the opening token) must print help's OWN
 // verbUsage row, not a second dump of topLevelUsage.
 func TestHelp_HelpRowHelpShowsItsOwnUsage(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 

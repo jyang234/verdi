@@ -31,6 +31,7 @@ func oneBehindAlignSpec() *artifact.SpecFrontmatter {
 // would make any regeneration attempt visibly diverge Covers/Findings from
 // what this test asserts).
 func TestRunAlignForSpec_OneBehind_FreezeTrue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := oneBehindBaseRepo(t)
 	parent := repo.Head
@@ -67,6 +68,7 @@ func TestRunAlignForSpec_OneBehind_FreezeTrue(t *testing.T) {
 // `verdi align` is outside SI-231 (R-W1-9): see
 // TestRunAlign_BareAlignIgnoresOneBehind.
 func TestRunAlignForSpec_OneBehind_FreezeFalse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := oneBehindBaseRepo(t)
 	parent := repo.Head
@@ -106,6 +108,7 @@ func TestRunAlignForSpec_OneBehind_FreezeFalse(t *testing.T) {
 // never call the file "left byte-identical" while describing HEAD's
 // content. Both fall through to the fork's pre-SI-231 behavior instead.
 func TestRunAlignForSpec_OneBehind_WorkingTreeDivergence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, freeze := range []bool{true, false} {
 		t.Run(map[bool]string{true: "freeze=true", false: "freeze=false"}[freeze], func(t *testing.T) {
@@ -142,6 +145,7 @@ func TestRunAlignForSpec_OneBehind_WorkingTreeDivergence(t *testing.T) {
 // own "run `verdi align` again" remedy converges), and with --freeze it
 // freezes a regenerated report at HEAD. Neither run claims SI-231.
 func TestRunAlign_BareAlignIgnoresOneBehind(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, freeze := range []bool{false, true} {
 		t.Run(map[bool]string{false: "align", true: "align --freeze"}[freeze], func(t *testing.T) {

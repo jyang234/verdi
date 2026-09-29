@@ -23,6 +23,7 @@ import (
 // itself carrying a supersedes edge to spec/pred-feature) so the
 // predecessor-mutation removal (Step 5) has a witness here too.
 func TestRunAccept_NonMutation(t *testing.T) {
+	t.Parallel()
 	repo := buildPredecessorFlipRepo(t, "pred-feature", predFeatureAcceptedMD, "succ-feature", succFeatureWholeSpecSupersedesMD)
 	ctx := context.Background()
 
@@ -77,6 +78,7 @@ func TestRunAccept_NonMutation(t *testing.T) {
 // notice for ANY well-formed spec ref regardless of whether a spec by
 // that name even exists on disk, and performs no mutation either way.
 func TestRunAccept_AnyValidSpecRefExitsZero(t *testing.T) {
+	t.Parallel()
 	repo := buildAcceptNegativeRepo(t)
 	ctx := context.Background()
 	before := porcelainStatus(t, repo.Dir)
@@ -145,6 +147,7 @@ func buildAcceptNegativeRepo(t *testing.T) *fixturegit.Repo {
 // before this retirement — the only refusal left, since there is no more
 // business precondition to fail.
 func TestRunAccept_Negative(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("not a spec or diagram ref", func(t *testing.T) {
@@ -168,6 +171,7 @@ func TestRunAccept_Negative(t *testing.T) {
 
 // TestCmdAccept_UsageNegative proves cmdAccept's own argument-count check.
 func TestCmdAccept_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdAccept(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdAccept(no args) = %d, want 2", got)

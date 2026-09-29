@@ -92,8 +92,7 @@ func buildPreflightFixtureRepoWithSpec(t *testing.T, spec string) *fixturegit.Re
 	t.Helper()
 	// Pin the projector's default-branch resolution for the C1 pre-closure
 	// precondition (no origin remote in a fixturegit repo).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                                        "schema: verdi.layout/v1\nforge: github\n",
 			".verdi/specs/active/loan-mgmt/spec.md":                    featureV1SpecMD,
@@ -103,12 +102,15 @@ func buildPreflightFixtureRepoWithSpec(t *testing.T, spec string) *fixturegit.Re
 		},
 		Message: "preflight fixture: feature + story declaring static+behavioral+attestation",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // TestClosePreflightConflictPreEffect catches preflight using a phase other
 // than review, evaluating more than once, or changing any closure tree/Git
 // fact while returning a constitutional block or operational failure.
 func TestClosePreflightConflictPreEffect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		verdict  policyconflict.Verdict
@@ -366,6 +368,7 @@ var _ forge.Forge = erroringOpenMRsForge{}
 // unmutated fixture (asserting its refusal reason matches, not merely that
 // it also fails) — never two independently hand-asserted expectations.
 func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("no-signal: no evidence at all", func(t *testing.T) {
@@ -532,14 +535,13 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 	})
 
 	t.Run("pending-supersession: an open MR touches an implemented object", func(t *testing.T) {
-		// CI_DEFAULT_BRANCH pins lint.ResolveDefaultBranch's resolution to
-		// "main" deterministically (the fixturegit repo carries no "origin"
+		// The default branch pin below makes lint.ResolveDefaultBranch's
+		// resolution deterministic (the fixturegit repo carries no "origin"
 		// remote for the git-plumbing fallback to discover) — matching the
 		// target branch the open MR below is seeded against, exactly as a
 		// real CI job's own env would.
-		t.Setenv("CI_DEFAULT_BRANCH", "main")
-
 		repo := buildPreflightMechanicalFixtureRepo(t)
+		pinFixtureDefaultBranch(t, repo.Dir)
 		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 			featureFixtureEvidenceJSON("ac-1", "static", "pass", repo.Head),
 			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
@@ -751,6 +753,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 // pre-th-3 sole proxy for the working tree — stays byte-identical across that
 // same rewrite and would have missed it entirely.
 func TestSnapshotRepo_CatchesUntrackedDerivedRewrite(t *testing.T) {
+	t.Parallel()
 	repo := buildPreflightFixtureRepo(t)
 	writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 		featureFixtureEvidenceJSON("ac-1", "static", "pass", repo.Head))
@@ -777,6 +780,7 @@ func TestSnapshotRepo_CatchesUntrackedDerivedRewrite(t *testing.T) {
 // unmodified verdi close on that same fixture succeeds (exit 0), actually
 // archiving the quartet.
 func TestRunPreflight_StoryScope_ReadyThenClose(t *testing.T) {
+	t.Parallel()
 	repo := readyCloseFixtureRepo(t)
 	ctx := context.Background()
 
@@ -861,6 +865,7 @@ func TestRunPreflight_ReadySummaryDistinguishesDisclosures(t *testing.T) {
 // exit 0/1/2 respectively, each snapshotted before and after and asserted
 // byte-identical.
 func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("ready: exit 0, no mutation", func(t *testing.T) {
@@ -1084,6 +1089,7 @@ func TestPreflightGuardDisclosure_AgreesWithRealGuard(t *testing.T) {
 // text, so the recovery guidance an operator needs is the same one the real
 // refusal would have given them.
 func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("a dirty index is disclosed, counted, and does not change the verdict", func(t *testing.T) {
@@ -1244,6 +1250,7 @@ func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
 // real closure ritual having run. Nothing here mutates anything, and an
 // operator reading that line has no way to know it.
 func TestRunPreflight_ErrorsCarryTheModesOwnFraming(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	assertFramed := func(t *testing.T, stderr string) {
@@ -1291,6 +1298,7 @@ func TestRunPreflight_ErrorsCarryTheModesOwnFraming(t *testing.T) {
 // SAME functions, never a re-derived second predicate (close-preflight dc-2's
 // one-predicate rule).
 func TestRunPreflight_RehearsesUncommittedFoldRecords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("an uncommitted waiver the fold consumed is disclosed and counted", func(t *testing.T) {
@@ -1460,6 +1468,7 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 // already applied: a preflight rehearsal must never report READY for an
 // experiment state a real close would refuse.
 func TestClosePreflightExperimentEvidenceParity(t *testing.T) {
+	t.Parallel()
 	buildFixture := func(t *testing.T) *fixturegit.Repo {
 		t.Helper()
 		repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
@@ -1511,6 +1520,7 @@ func TestClosePreflightExperimentEvidenceParity(t *testing.T) {
 // TestCloseOrdinarySpikeExperimentAbsentClosesUnchanged proves for real
 // close.
 func TestClosePreflightExperimentEvidenceOrdinarySpikeStaysReady(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
 	var stdout, stderr bytes.Buffer
@@ -1537,6 +1547,7 @@ func TestClosePreflightExperimentEvidenceOrdinarySpikeStaysReady(t *testing.T) {
 // stderr and returns 2. Preflight must surface that SAME stderr line and
 // exit 2 itself — never a verdict-shaped NOT READY, and never READY.
 func TestClosePreflightExperimentEvidenceOperationalRefusesWithoutReady(t *testing.T) {
+	t.Parallel()
 	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
 	// Written after the fixture's own commits and its detached checkout, so
 	// it is untracked at the checked-out revision and absent from `main`.

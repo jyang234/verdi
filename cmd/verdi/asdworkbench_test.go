@@ -44,11 +44,12 @@ import (
 // injects — the served path, not a test double.
 func asdWorkbenchHandler(t *testing.T, root string) http.Handler {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, root)
 	return workbench.NewHandlerWith(filepath.FromSlash(root), workbench.Deps{Design: newServeDesignBridge()})
 }
 
 func TestASDWorkbenchRoutesMutationsThroughDesignApp(t *testing.T) {
+	t.Parallel()
 	root, head, base := designMutateStore(t)
 	handler := asdWorkbenchHandler(t, root)
 
@@ -119,6 +120,7 @@ func TestASDWorkbenchRoutesMutationsThroughDesignApp(t *testing.T) {
 // workbench cannot import designapp — designapp imports workbench — so the
 // byte equality is proven here, where both are importable).
 func TestASDWorkbenchFailureSchemaMatchesDesignApp(t *testing.T) {
+	t.Parallel()
 	root, head, base := designMutateStore(t)
 	handler := asdWorkbenchHandler(t, root)
 	// Force a kernel VERDICT through the browser action: an operation
@@ -147,6 +149,7 @@ func TestASDWorkbenchFailureSchemaMatchesDesignApp(t *testing.T) {
 }
 
 func TestASDWorkbenchPreservesUnsavedState(t *testing.T) {
+	t.Parallel()
 	root, _, base := designMutateStore(t)
 	handler := asdWorkbenchHandler(t, root)
 
@@ -243,6 +246,7 @@ func designMutateStoreWithoutPolicy(t *testing.T) (root, head string, base []byt
 // the second being SI-176's honest-absence posture for the explicit
 // browser-human mutation (never a fabricated digest or hash of absence).
 func TestASDWorkbenchProvenancePolicyUnionOnTheWire(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		fixture func(*testing.T) (string, string, []byte)

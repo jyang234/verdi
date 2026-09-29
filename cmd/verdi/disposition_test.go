@@ -114,6 +114,7 @@ func runDispositionBinary(t *testing.T, bin, dir string, args ...string) (stdout
 }
 
 func TestParseDispositionArgs_EndOfOptions(t *testing.T) {
+	t.Parallel()
 	for _, findingID := range []string{"--amend", "--rationale", "--anything"} {
 		t.Run(findingID, func(t *testing.T) {
 			var stderr bytes.Buffer
@@ -135,6 +136,7 @@ func TestParseDispositionArgs_EndOfOptions(t *testing.T) {
 }
 
 func TestParseDispositionArgs_EndOfOptionsMisuse(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -192,6 +194,7 @@ func TestParseDispositionArgs_EndOfOptionsMisuse(t *testing.T) {
 //
 // guide-claim: 8.1-align-deviation-disposition
 func TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
@@ -308,6 +311,7 @@ func TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved(t *testing.T)
 // what the disposition verb wrote, and the drifting judge's content is
 // nowhere in the frozen output.
 func TestRunDisposition_SurvivesFreeze(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
@@ -397,6 +401,7 @@ func TestRunDisposition_SurvivesFreeze(t *testing.T) {
 // source (internal/align/judge.go's normalizeJudgeText) rather than taught
 // to the verb (ADJ-53's own chosen option).
 func TestRunDisposition_JudgeNewlineTextRendersSingleLineAndDispositionsCleanly(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
@@ -459,6 +464,7 @@ func TestRunDisposition_JudgeNewlineTextRendersSingleLineAndDispositionsCleanly(
 // report before/after) — while the one deliberate write path (--amend
 // against an existing disposition) actually replaces it.
 func TestRunDisposition_Refusals(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	livingFindings := func() []artifact.Finding {
@@ -646,6 +652,7 @@ func TestRunDisposition_Refusals(t *testing.T) {
 // A plain, punctuation-bearing, multi-word rationale must still work
 // (exit 0) — the fix must not become an over-broad rejection.
 func TestRunDisposition_RationaleValidation(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	livingFindings := []artifact.Finding{
@@ -709,6 +716,7 @@ func TestRunDisposition_RationaleValidation(t *testing.T) {
 // permanently bricking the quoted finding's disposition with no sanctioned
 // escape hatch, reachable purely through the verb's own documented inputs.
 func TestRunDisposition_QuotingRationaleDoesNotBrickAnotherFinding(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	findings := []artifact.Finding{
@@ -762,6 +770,7 @@ func TestRunDisposition_QuotingRationaleDoesNotBrickAnotherFinding(t *testing.T)
 // named (a crash/kill/disk-full mid-write leaving a truncated, permanent
 // record unrecoverable for content never committed to git).
 func TestRunDisposition_UsesAtomicWrite(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, []artifact.Finding{
 		{ID: "computed-a", Kind: artifact.FindingComputed, Text: "declared boundary holds"},
@@ -860,6 +869,7 @@ const dispositionFixtureCovers = "1111111111111111111111111111111111111111"
 // carried-from: <covers-sha> and removes the now-resolved not-resurfaced
 // entry.
 func TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom(t *testing.T) {
+	t.Parallel()
 	findings := []artifact.Finding{
 		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "reworded new text"},
 	}
@@ -916,6 +926,7 @@ func TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom(t *tes
 // of the next-regeneration duplicate-not-resurfaced brick; draining it here is
 // the proof the chain is impossible for a word slug.
 func TestRunDisposition_WordCollisionSlug_CandidateConfirmed_ConsumersAgree(t *testing.T) {
+	t.Parallel()
 	const slug = "judged-collision-cv-emission-order"
 	findings := []artifact.Finding{
 		{ID: slug, Kind: artifact.FindingJudged, Text: "reworded new reading of the CV emission-order rule"},
@@ -960,6 +971,7 @@ func TestRunDisposition_WordCollisionSlug_CandidateConfirmed_ConsumersAgree(t *t
 // but the old ruling's not-resurfaced backing record is still removed
 // (superseded by the fresh, human-made decision).
 func TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom(t *testing.T) {
+	t.Parallel()
 	findings := []artifact.Finding{
 		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "this is a real regression (confidence 0.93)"},
 	}
@@ -1009,6 +1021,7 @@ func TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom(t *testing.T)
 // minting ac-2 reaffirmation provenance on a confirmation whose ac-1 candidate
 // presentation was deliberately never rendered.
 func TestRunDisposition_CollisionMember_SuffixedBackingShadow_NoLivePathReaffirmation(t *testing.T) {
+	t.Parallel()
 	// FI-13's exact shape: a suffixed collision member live+undispositioned
 	// (reworded recurrence) shadowing a same-id backing record.
 	findings := []artifact.Finding{
@@ -1067,6 +1080,7 @@ func TestRunDisposition_CollisionMember_SuffixedBackingShadow_NoLivePathReaffirm
 // likewise dispositions the live finding, leaves the backing record, and never
 // stamps.
 func TestRunDisposition_ContractViolation_BackingShadow_NoLivePathReaffirmation(t *testing.T) {
+	t.Parallel()
 	findings := []artifact.Finding{
 		{ID: "judged-contract-violation-dup", Kind: artifact.FindingJudged, Text: "judge contract violation: 2 findings shared slug \"judged-dup\" (fresh member texts)"},
 	}
@@ -1111,6 +1125,7 @@ func TestRunDisposition_ContractViolation_BackingShadow_NoLivePathReaffirmation(
 // standing on a decision that reaffirms nothing — misattributed provenance that
 // passed validation silently into the frozen archive.
 func TestRunDisposition_Amend_RecomputesCarriedFrom(t *testing.T) {
+	t.Parallel()
 	// A live finding already confirmed as a reaffirmation: accepted-deviation
 	// carrying carried-from: <covers-sha> — the exact shape runDisposition's own
 	// reaffirmation branch produces, its backing record long since removed.
@@ -1169,6 +1184,7 @@ func TestRunDisposition_Amend_RecomputesCarriedFrom(t *testing.T) {
 // matching not-resurfaced: entry dispositions exactly as before — no
 // carried-from, NotResurfaced (already empty) untouched.
 func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testing.T) {
+	t.Parallel()
 	findings := []artifact.Finding{
 		{ID: "computed-a", Kind: artifact.FindingComputed, Text: "declared boundary holds"},
 	}
@@ -1201,6 +1217,7 @@ func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testi
 // lineage ambiguous" disclosure is emitted (that branch and its
 // IsCollisionBaseMemberID guard are dissolved).
 func TestRunDisposition_CollisionBacking_ExitRampResolvesBacking(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	// The shape ReconcileJudged now produces for a collision whose slug owns a
@@ -1263,6 +1280,7 @@ func TestRunDisposition_CollisionBacking_ExitRampResolvesBacking(t *testing.T) {
 // it and silently removed the judged ruling's persisted record — an automatic
 // drain of an ac-3 entry by an unrelated finding's disposition.
 func TestRunDisposition_ComputedFindingCollidingWithJudgedNotResurfaced_DoesNotDrain(t *testing.T) {
+	t.Parallel()
 	findings := []artifact.Finding{
 		{ID: "boundary-x", Kind: artifact.FindingComputed, Text: "the declared boundary holds"},
 	}
@@ -1330,6 +1348,7 @@ func budgetAcceptedDeviationCount(t *testing.T, path string) int {
 // "finding not found" — runDisposition's lookup searched only findings: and
 // consulted not-resurfaced: only AFTER a live findings: entry was located.
 func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	// A living report carrying TWO standing accepted deviations of distinct
@@ -1503,6 +1522,7 @@ func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
 // reaffirmation provenance — misrepresenting a contrary ruling as a confirmed
 // reaffirmation of the old one.
 func TestRunDisposition_NotResurfacedReversal_NoStampNamesLineage(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("reversal (was fixed -> accepted-deviation): no stamp, names the lineage", func(t *testing.T) {

@@ -32,6 +32,7 @@ import (
 // real, unmodified verdi close on the byte-identical fixture (asserting its
 // refusal reason matches).
 func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("feature AC not evidenced: outcome floor unmet", func(t *testing.T) {
@@ -248,6 +249,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 // TestRunPreflight_FeatureScope_DefectClasses' finding-2 subtest; here the
 // floor is genuinely unsatisfied so the attestation path is legitimately named.
 func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureAC2FloorSatisfied = false // neither a behavioral record nor an attestation exists for ac-2
 	repo := buildCloseFeatureRepo(t, opts)
@@ -284,6 +286,7 @@ func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *te
 // reports ready (exit 0), then a real, unmodified verdi close on the same
 // fixture succeeds, actually archiving the feature quartet.
 func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -329,6 +332,7 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 // (dc-6) — so --preflight must rehearse exactly that, through the same
 // functions.
 func TestRunPreflight_FeatureScope_RehearsesUncommittedFoldRecords(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
@@ -393,6 +397,7 @@ func writeUncommittedFeatureAttestation(t *testing.T, root, featureSlug, acID st
 // gate's per-record disclosure detail contributes to the structured preflight
 // summary without weakening or strengthening its ready verdict.
 func TestRunPreflight_FeatureScope_PerRecordDisclosureSummary(t *testing.T) {
+	t.Parallel()
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)

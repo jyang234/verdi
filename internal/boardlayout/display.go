@@ -51,7 +51,7 @@ func ResolveDisplayOverlaps(objects []Object, stored map[string]artifact.Positio
 	claimed := make([]Rect, 0, len(withStored))
 	for _, o := range withStored {
 		p := stored[o.ID]
-		w, h := FootprintFor(o.Kind)
+		w, h := o.footprint()
 		for _, c := range claimed {
 			if (Rect{X: p.X, Y: p.Y, W: w, H: h}).intersects(c) {
 				p = ResolveDrop(p, w, h, claimed)

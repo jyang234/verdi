@@ -143,6 +143,7 @@ func copyTree(t *testing.T, src, dst string) {
 //     order is fully determined by the source sort alone: dropping the
 //     sort.Strings reds it deterministically, not flakily.
 func TestSupersededStoryRefs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   map[string][]string
@@ -208,7 +209,7 @@ func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	// files above are copied to disk, uncommitted, on purpose — they
 	// still resolve cleanly to Proposed, not Unproven, once the default
 	// branch itself resolves).
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -262,7 +263,7 @@ func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 	// See TestCmdMatrix_FeatureRef_Golden's identical note (fix-round-1
 	// finding 2): the default branch must resolve for discoverImplementing
 	// Stories to reach ANY per-candidate classification at all.
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	derivedDir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--escrow-autopay", repo.Head)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
@@ -346,7 +347,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 		},
 		Message: "feature + already-closed implementing story in archive",
 	}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -479,7 +480,7 @@ func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T)
 	// this fixture has no such successor spec at all, so the legacy
 	// status-field compatibility path is exactly what's under test here.
 	commitV2FeatureFixture(t, repo.Dir, "land the v2 fixture, mobile pre-flipped to superseded")
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -516,6 +517,7 @@ stub_reconciliation.blocked: true
 // TestCmdMatrix_StatusLine_Superseded's story-rung proof. Empty ACs/stubs
 // keep it a focused rendering unit test: the only claim is the status line.
 func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	// The status the caller resolved (I2: effectiveMatrixStatus — a landed
 	// legacy `status: superseded` projects Superseded via the projector's

@@ -139,7 +139,7 @@ a
 // branch).
 func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{
+	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                   supersedeManifestYAML,
@@ -149,6 +149,8 @@ func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 			Message: "lockbox lands",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // TestRunDesignStartSupersede_Happy is the unit-level proof (runs the
@@ -159,8 +161,9 @@ func buildSupersedeRepo(t *testing.T) *fixturegit.Repo {
 // rendering), and the extra "supersedes: N objects carried" disclosure
 // line names the right count.
 func TestRunDesignStartSupersede_Happy(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSupersedeRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	predRaw, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox", "spec.md"))
@@ -227,10 +230,11 @@ func TestRunDesignStartSupersede_Happy(t *testing.T) {
 // internal/supersede's own resolve_test.go already proves every Resolve
 // refusal reason individually, so this only proves the CLI forwards it).
 func TestRunDesignStartSupersede_Negative(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 
 	t.Run("successor dir already exists", func(t *testing.T) {
 		repo := buildSupersedeRepo(t)
+		pinFixtureDefaultBranch(t, repo.Dir)
 		ctx := context.Background()
 		if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox-v2"), 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
@@ -393,6 +397,7 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 // contract: every flag in any position, the incompatible-flag list, and
 // leftover positional arguments.
 func TestExtractSupersedeFlags(t *testing.T) {
+	t.Parallel()
 	t.Run("happy: canonical order", func(t *testing.T) {
 		ref, kind, name, incompat, rest, err := extractSupersedeFlags([]string{"--supersedes", "spec/lockbox", "--name", "lockbox-v2"})
 		if err != nil {
@@ -499,6 +504,7 @@ func TestExtractSupersedeFlags(t *testing.T) {
 // ac-11 states — the untouched scaffold raises no finding AGAINST itself,
 // VL-015 included.
 func TestDesignStartSupersedeE2E_Happy(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildSupersedeRepo(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
@@ -599,6 +605,7 @@ a.
 // malformed --supersedes ref. Every case: exit 2, no branch/spec-dir left
 // behind beyond what the case itself set up.
 func TestDesignStartSupersedeE2E_Negative(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
 
@@ -718,6 +725,7 @@ Body.
 // pins the refusal to ONE "internal error" prefix: the CLI relays
 // Compose's own classified message rather than prefixing it a second time.
 func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -770,6 +778,7 @@ func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testin
 // plain --kind/--name path, where it surfaced as an unrelated story-ref
 // complaint.
 func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildSupersedeRepo(t)
 	env := []string{"CI_DEFAULT_BRANCH=main"}
@@ -800,8 +809,9 @@ func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
 // working tree afterward, and the verb's own success disclosure is
 // unchanged.
 func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	repo := buildSupersedeRepo(t)
+	pinFixtureDefaultBranch(t, repo.Dir)
 	ctx := context.Background()
 
 	// (a) untracked file at the repo root.
@@ -898,6 +908,7 @@ func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 // gitx.AddPaths (UAT-033), never gitx.AddAll's blanket `git add -A` sweep
 // of the rest of the working tree.
 func TestDesignSupersedeGo_NoAddAll(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("designsupersede.go")
 	if err != nil {
 		t.Fatalf("reading designsupersede.go: %v", err)

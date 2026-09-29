@@ -49,7 +49,6 @@ func recoverHasState(p recovery.Projection, code recovery.StateCode) bool {
 // repository carrying one active feature spec, spec/checkout.
 func recoverFixtureStore(t *testing.T) (*fixturegit.Repo, *store.Config) {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	const checkoutSpecMD = `---
 id: spec/checkout
 kind: spec
@@ -134,6 +133,7 @@ func recoverWriteStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 // the "--"-prefix rule, and R-RR3-17's short "-f" flag) plus a clean
 // entry that must print nothing and report false.
 func TestReportForbiddenCommands_Table(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		entries [][]string
@@ -414,6 +414,7 @@ func TestRecover_ApplyViolatedPostconditionIsExit1(t *testing.T) {
 // with the projection STILL printed ("the projection still prints what
 // it observed"), the executor having already run in both.
 func TestReportApplyOutcome_ExitMapping(t *testing.T) {
+	t.Parallel()
 	held := recovery.PostconditionResult{Text: "close/checkout does not exist", Held: true, Observed: "does not exist"}
 	violated := recovery.PostconditionResult{Text: "current branch is main", Held: false, Observed: "current branch is close/checkout"}
 	// The projection printed after the postcondition lines is the
@@ -527,7 +528,7 @@ func recoverCutMergedRitualWorktree(t *testing.T, repo *fixturegit.Repo, branch 
 // Every line on the verb's error stream carries the "recover: " prefix.
 func TestRecover_ApplyReclaimRowsCarryTheVerbPrefix(t *testing.T) {
 	repo, _ := recoverFixtureStore(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	recoverCutMergedRitualWorktree(t, repo, "feature/checkout")
 
 	var stdout, stderr bytes.Buffer

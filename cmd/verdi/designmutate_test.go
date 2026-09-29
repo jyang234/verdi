@@ -169,6 +169,7 @@ func decodeMutationResult(t *testing.T, raw string) draftmutation.Result {
 }
 
 func TestDesignMutateBuiltBinaryStdinFileAndSpoofResistance(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	t.Run("stdin ignores actor and principal environment", func(t *testing.T) {
 		root, head, base := designMutateStore(t)
@@ -212,6 +213,7 @@ func TestDesignMutateBuiltBinaryStdinFileAndSpoofResistance(t *testing.T) {
 }
 
 func TestDesignMutateBuiltBinaryDiagnosticsAndExitCodes(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	t.Run("required harness", func(t *testing.T) {
 		root, head, base := designMutateStore(t)
@@ -265,6 +267,7 @@ func TestDesignMutateBuiltBinaryDiagnosticsAndExitCodes(t *testing.T) {
 }
 
 func TestDesignMutateBuiltBinaryStaleAndConcurrentCalls(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	t.Run("stale", func(t *testing.T) {
 		root, head, base := designMutateStore(t)
@@ -322,6 +325,7 @@ func TestDesignMutateBuiltBinaryStaleAndConcurrentCalls(t *testing.T) {
 }
 
 func TestDesignMutateBuiltBinaryRefusesServeWriterLock(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, head, base := designMutateStore(t)
 	request := designMutateRequest(t, root, "design/sample", head, base, []map[string]any{{"op": "set-problem", "text": "blocked", "anchor": "#problem"}})

@@ -264,6 +264,7 @@ func TestCmdContextProject_FlagShapeFailures(t *testing.T) {
 // on stderr via the same contextProjectFlagError seam every other
 // flag-shape error already goes through.
 func TestCmdContextProject_HelpIsNotSpecialCased(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		args []string
@@ -295,6 +296,7 @@ func TestCmdContextProject_HelpIsNotSpecialCased(t *testing.T) {
 // the subcommand can discover this verb the same way they already
 // discover compile.
 func TestContextCompileUsage_MentionsProject(t *testing.T) {
+	t.Parallel()
 	if !strings.Contains(contextCompileUsage, "project") {
 		t.Fatalf("contextCompileUsage = %q, want it to mention project alongside compile", contextCompileUsage)
 	}
@@ -369,6 +371,7 @@ func TestCmdContextProject_RootFlagUnusable(t *testing.T) {
 // --- policy/constitution refusals: verdict (exit 1) -----------------------
 
 func TestCmdContextProject_NotAdopted_ExitsVerdict(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectNotAdoptedFiles())
 
@@ -393,6 +396,7 @@ func TestCmdContextProject_NotAdopted_ExitsVerdict(t *testing.T) {
 }
 
 func TestCmdContextProject_OverlappingManagedPaths_ExitsVerdict(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectOverlapFiles())
 
@@ -436,6 +440,7 @@ func TestCmdContextProject_OverlappingManagedPaths_ExitsVerdict(t *testing.T) {
 // no constitution") do not name this distinct, already-started-but-broken
 // state.
 func TestCmdContextProject_IncompleteAdoption_ExitsOperational(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, map[string]string{".verdi/verdi.yaml": contextProjectVerdiYAML})
 	if err := os.MkdirAll(filepath.Join(root, ".verdi", "policy"), 0o755); err != nil {
@@ -458,6 +463,7 @@ func TestCmdContextProject_IncompleteAdoption_ExitsOperational(t *testing.T) {
 // --- symlink / non-regular-file refusals: operational (exit 2) -----------
 
 func TestCmdContextProject_SymlinkedProjectionsDir_Refused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectOneAdapterFiles(t))
 
@@ -480,6 +486,7 @@ func TestCmdContextProject_SymlinkedProjectionsDir_Refused(t *testing.T) {
 }
 
 func TestCmdContextProject_SymlinkedManagedFile_Refused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectOneAdapterFiles(t))
 
@@ -519,6 +526,7 @@ func TestCmdContextProject_SymlinkedManagedFile_Refused(t *testing.T) {
 // projected, so the command's own stderr disclosure is checked against
 // files that genuinely exist rather than a hypothetical.
 func TestCmdContextProject_ManagedPathIsDirectory_Refused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectTwoAdapterFiles(t))
 
@@ -555,6 +563,7 @@ func TestCmdContextProject_ManagedPathIsDirectory_Refused(t *testing.T) {
 // --- happy paths -----------------------------------------------------------
 
 func TestCmdContextProject_OneAdapter_HappyPath(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectOneAdapterFiles(t))
 
@@ -578,6 +587,7 @@ func TestCmdContextProject_OneAdapter_HappyPath(t *testing.T) {
 }
 
 func TestCmdContextProject_TwoAdapters_HappyPath(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectTwoAdapterFiles(t))
 
@@ -605,6 +615,7 @@ func TestCmdContextProject_TwoAdapters_HappyPath(t *testing.T) {
 }
 
 func TestCmdContextProject_ZeroAdapters_EmptyOutput(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectZeroAdapterFiles())
 
@@ -624,6 +635,7 @@ func TestCmdContextProject_ZeroAdapters_EmptyOutput(t *testing.T) {
 // --- determinism ------------------------------------------------------------
 
 func TestCmdContextProject_DeterministicAcrossIndependentRoots(t *testing.T) {
+	t.Parallel()
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 	writeContextProjectTree(t, rootA, contextProjectOneAdapterFiles(t))
@@ -645,6 +657,7 @@ func TestCmdContextProject_DeterministicAcrossIndependentRoots(t *testing.T) {
 }
 
 func TestCmdContextProject_IdempotentAcrossRepeatedRuns(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeContextProjectTree(t, root, contextProjectOneAdapterFiles(t))
 

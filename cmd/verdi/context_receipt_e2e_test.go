@@ -25,11 +25,11 @@ import (
 )
 
 func TestContextReceiptVerifyCLI_BuiltBinary(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "verdi")
-	build := exec.Command("go", "build", "-o", binary, ".")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build verdi: %v\n%s", err, output)
-	}
+	t.Parallel()
+	// buildVerdiBinary (build_shared_test.go): the shared, process-wide
+	// build-once helper — lane T1 test-speed contract step 1 — rather than
+	// this file's own separate `go build` of the identical package/flags.
+	binary := buildVerdiBinary(t)
 
 	t.Run("sole grammar and strict input", func(t *testing.T) {
 		for _, test := range []struct {

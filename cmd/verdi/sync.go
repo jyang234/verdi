@@ -364,10 +364,11 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 
 // runProduce implements `verdi sync --produce` (spec/remote-and-ci dc-1):
 // the CI-provenance producer, intended to be invoked only by CI, strictly
-// after `make verify` has already succeeded in the same job (round 6,
-// spec/close-verb ac-3/dc-1: `.github/workflows/verify.yml` — see its own
-// header comment for why the formerly-separate verdi-evidence.yml workflow
-// was folded into this one job rather than left standalone). It assembles
+// after every gate job of the same workflow run has already succeeded
+// (SI-267; round 6, spec/close-verb ac-3/dc-1: the final `verify` job of
+// `.github/workflows/verify.yml` — see its own header comment for why the
+// formerly-separate verdi-evidence.yml workflow was folded into this one
+// workflow rather than left standalone). It assembles
 // the derived bundle exactly like --or-regen's regeneration
 // path (regenerate/regenerateServices, internal/bundle), pulling
 // Pipeline/Job identifiers from the forge's CIContext when present (03
@@ -429,10 +430,11 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 	// The self-hosted evidence producer (spec/close-verb ac-3, dc-1;
 	// selfevidence.go): verdi is not a flowmap service of itself (D6-4), so
 	// regenerate() above always assembles an empty bundle for THIS repo.
-	// Reaching this line means make verify already succeeded earlier in
-	// THIS SAME CI job (see verify.yml's wiring comment) — the honest basis
-	// for the pass records this step binds, never a divergent re-run. A
-	// store with no root verdi.bindings.yaml yet is a silent no-op.
+	// Reaching this line in CI means every gate job of THIS SAME workflow
+	// run already succeeded at this commit (SI-267; see verify.yml's wiring
+	// comment) — the honest basis for the pass records this step binds,
+	// never a divergent re-run. A store with no root verdi.bindings.yaml yet
+	// is a silent no-op.
 	if err := produceSelfHostedEvidence(root, commit, prov); err != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2

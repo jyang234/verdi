@@ -56,6 +56,7 @@ func runGcBinary(t *testing.T, bin, dir string, args ...string) (stdout, stderr 
 // pre-existing derived-cache/layout-cache disclosure. Neither run prints
 // the other's own reclaim/kept lines.
 func TestGcReclaimUnmanaged_CLI_BothInvocationShapes_DiscloseTheOtherAsNotRun(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	ctx := context.Background()
 
@@ -143,6 +144,7 @@ func TestGcReclaimUnmanaged_CLI_BothInvocationShapes_DiscloseTheOtherAsNotRun(t 
 // gc_test.go's own TestGc_CLI_ReclaimsAndDisclosesScope shape for the
 // managed slice.
 func TestGcReclaimUnmanaged_CLI_Apply_ReclaimsAndPrintsTip(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n", ".verdi/.gitignore": "data/\n"},
@@ -198,6 +200,7 @@ func TestGcReclaimUnmanaged_CLI_Apply_ReclaimsAndPrintsTip(t *testing.T) {
 // CI_DEFAULT_BRANCH exposed to the child process genuinely cannot resolve
 // a default branch, so lint.ResolveDefaultBranch itself returns "".
 func TestGcReclaimUnmanaged_CLI_UnresolvableDefaultBranch_ExitsTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n", ".verdi/.gitignore": "data/\n"},
@@ -277,6 +280,7 @@ var unresolvedDetailRe = regexp.MustCompile(`unresolved-state \([^)]*\)`)
 // present EXACTLY ONCE, with no extra and no missing line, against a fully
 // literal, committed golden text.
 func TestGcReclaimUnmanaged_CLI_GoldenTranscript_AllSixExclusionReasons(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, invokingDir, wtParent := gcReclaimGoldenFixture(t)
 

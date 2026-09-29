@@ -3,13 +3,13 @@
 # as a scheduled CI job emits a kind: runtime record keyed by (story, AC)"
 # (dc-1). Deliberately a SMALL, SEPARATE workflow rather than a `schedule:`
 # trigger folded into verify.yml: verify.yml's own header comment already
-# explains why its evidence-production step must run strictly after `make
-# verify` succeeds IN THE SAME JOB (never a second, divergent re-run) — that
-# constraint has nothing to do with the runtime mechanism, which is not
-# gated on this repo's own test suite at all, so conflating the two would
-# either force a full make verify + e2e run on every cron tick for no
-# reason, or awkwardly bolt a schedule: trigger onto a job whose whole
-# shape is justified by a DIFFERENT constraint.
+# explains why its evidence-production job must run strictly after every
+# gate job of the SAME RUN succeeds (SI-267; never a second, divergent
+# re-run) — that constraint has nothing to do with the runtime mechanism,
+# which is not gated on this repo's own test suite at all, so conflating the
+# two would either force a full make verify + e2e run on every cron tick for
+# no reason, or awkwardly bolt a schedule: trigger onto a workflow whose
+# whole shape is justified by a DIFFERENT constraint.
 #
 # HONEST SCOPE (dc-3): verdi itself has no live service to probe. This job
 # invokes `verdi sync --produce-runtime` BARE — no --story/--ac/--verdict/

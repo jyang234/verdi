@@ -20,12 +20,14 @@ import (
 // an in-process fake through the unexported newProjector, so the
 // projector's own decision logic is characterized without executing real
 // git (internal/fixturegit-backed integration tests separately prove the
-// real adapter end to end).
+// real adapter end to end). RevParse resolves the default branch to the
+// commit the successor-corpus cache keys on (see successors).
 type gitReader interface {
 	Show(ctx context.Context, dir, commit, path string) ([]byte, error)
 	BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool, err error)
 	FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (commit string, found bool, err error)
 	LsTree(ctx context.Context, dir, ref, path string) ([]string, error)
+	RevParse(ctx context.Context, dir, rev string) (string, error)
 }
 
 // realGitReader adapts internal/gitx's free functions to gitReader.
@@ -47,24 +49,41 @@ func (realGitReader) LsTree(ctx context.Context, dir, ref, path string) ([]strin
 	return gitx.LsTree(ctx, dir, ref, path)
 }
 
+func (realGitReader) RevParse(ctx context.Context, dir, rev string) (string, error) {
+	return gitx.RevParse(ctx, dir, rev)
+}
+
 // Projector resolves Candidate bytes into an effective Result. Its zero
 // value is not useful — construct it via NewProjector (production) or the
 // package-private newProjector (tests, over a fake gitReader).
+//
+// corpora memoizes the default-branch successor corpus per (store root,
+// commit). A Projector without one scans the corpus on every ResolveMany
+// call that needs it, as this package did before the cache existed.
 type Projector struct {
-	git gitReader
+	git     gitReader
+	corpora *corpusCache
 }
 
+// processCorpora is the one corpus cache every NewProjector shares.
+// Production callers build a fresh NewProjector for each spec they
+// resolve, so a whole-store operation (dex build, lint) reads each
+// default-branch commit's corpus once per process through it, not once
+// per spec.
+var processCorpora = newCorpusCache(corpusCacheLimit)
+
 // NewProjector returns a Projector backed by the real git plumbing
-// (internal/gitx, execed against the process's system git). It is the
-// only constructor production callers may use.
+// (internal/gitx, execed against the process's system git) and the
+// process-wide corpus cache. It is the only constructor production
+// callers may use.
 func NewProjector() Projector {
-	return Projector{git: realGitReader{}}
+	return Projector{git: realGitReader{}, corpora: processCorpora}
 }
 
 // newProjector is the test-only seam: package tests construct a Projector
-// over an in-process fake gitReader.
+// over an in-process fake gitReader, with a corpus cache of its own.
 func newProjector(g gitReader) Projector {
-	return Projector{git: g}
+	return Projector{git: g, corpora: newCorpusCache(corpusCacheLimit)}
 }
 
 // specZonesPrefix is the store location scanSuccessors scans for
@@ -104,8 +123,12 @@ func parseCandidatePath(path string) (zone, string, error) {
 }
 
 // successorCorpus is the default-branch spec corpus — BOTH zones, see
-// specZonesPrefix — decoded at most once per ResolveMany call, over EVERY
-// spec.md path with no exclusion at scan time (fix-round-1 finding 1:
+// specZonesPrefix — built at most once per ResolveMany call (by one scan,
+// or two when a scan pinned to the resolved commit fails and successors
+// scans again at the ref) and, through the Projector's corpus cache, at
+// most once per store root and default-branch commit while that entry
+// stays cached. It is decoded over EVERY spec.md path with no exclusion
+// at scan time (fix-round-1 finding 1:
 // batch-wide exclusion at scan time hid a landed successor whenever it
 // happened to also be one of the SAME call's own candidates, and silently
 // dropped a malformed candidate's own decode failure from ever becoming a
@@ -197,9 +220,11 @@ func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
 // default branch's two spec zones (specZonesPrefix — active AND archive,
 // final fix wave I3), unconditionally — no candidate path is excluded at
 // scan time (fix-round-1 finding 1; see successorCorpus's doc comment for
-// why exclusion belongs at lookup time instead).
-func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
-	paths, err := p.git.LsTree(ctx, root, branch.Ref, specZonesPrefix)
+// why exclusion belongs at lookup time instead). rev is what every read
+// names: the default branch's ref, or the commit it resolved to when the
+// scan is cached (see successors).
+func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*successorCorpus, error) {
+	paths, err := p.git.LsTree(ctx, root, rev, specZonesPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
 	}
@@ -211,7 +236,7 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 			continue // the corpus scan cares only about spec.md leaves
 		}
 
-		content, err := p.git.Show(ctx, root, branch.Ref, path)
+		content, err := p.git.Show(ctx, root, rev, path)
 		if err != nil {
 			return nil, fmt.Errorf("specstate: reading default-branch spec %s: %w", path, err)
 		}
@@ -282,16 +307,52 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 	return corpus, nil
 }
 
-// ResolveMany projects every candidate's effective state, reading and
-// strict-decoding the default-branch active-spec corpus AT MOST ONCE for
-// the whole call, never once per candidate — batch consumers therefore
-// never trigger an O(specs²) Git+decode scan. The scan is built lazily,
-// the first time some candidate actually needs a supersession answer (an
+// successors returns the default-branch successor corpus for one
+// ResolveMany call. With a corpus cache it resolves the default branch to
+// its current commit, keys the cache on (root, commit) — never on the ref
+// name, so a branch that has moved is scanned again — and pins the scan
+// to that commit, so a cached corpus is exactly that commit's corpus.
+//
+// Every other case runs the scan at branch.Ref, as this package did
+// before the cache existed, and caches nothing: no cache; a commit that
+// does not resolve; and a pinned scan that fails. The last one matters
+// for errors: a scan error's text names the revision it read, so
+// re-running the scan at the ref returns the error callers have always
+// seen, never one naming the commit id.
+func (p Projector) successors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
+	if p.corpora == nil {
+		return p.scanSuccessors(ctx, root, branch.Ref)
+	}
+	commit, err := p.git.RevParse(ctx, root, branch.Ref+"^{commit}")
+	if err != nil || commit == "" {
+		return p.scanSuccessors(ctx, root, branch.Ref)
+	}
+	corpus, err := p.corpora.get(ctx, corpusKey{root: root, commit: commit}, func() (*successorCorpus, error) {
+		return p.scanSuccessors(ctx, root, commit)
+	})
+	if err != nil {
+		return p.scanSuccessors(ctx, root, branch.Ref)
+	}
+	return corpus, nil
+}
+
+// ResolveMany projects every candidate's effective state, building the
+// default-branch successor corpus AT MOST ONCE for the whole call, never
+// once per candidate — batch consumers therefore never trigger an
+// O(specs²) Git+decode scan. Building it takes one read-and-strict-decode
+// scan, except when a scan pinned to the resolved commit fails: then
+// successors scans a second time at the ref, and the call gets that
+// second scan's error (or, should it succeed, its corpus). The scan is
+// built lazily, the first time some candidate actually needs a
+// supersession answer (an
 // active-zone candidate whose exact bytes are already provably reachable
 // from the default branch): a call resolving only new proposals, diverged
 // candidates, or archive-zone candidates never touches the corpus at all.
 // Once built, the same corpus answers every remaining candidate in the
-// call. Resolve delegates here with a single candidate.
+// call, and the Projector's corpus cache (see successors) carries it to
+// later calls while the default branch stays at the same commit, so
+// consumers that resolve one spec per call do not rescan it either.
+// Resolve delegates here with a single candidate.
 func (p Projector) ResolveMany(ctx context.Context, root string, candidates []Candidate) ([]Result, error) {
 	branch, ok := ResolveDefaultBranch(ctx, root)
 	if !ok {
@@ -305,7 +366,7 @@ func (p Projector) ResolveMany(ctx context.Context, root string, candidates []Ca
 	var corpus *successorCorpus
 	getCorpus := func() (*successorCorpus, error) {
 		if corpus == nil {
-			built, err := p.scanSuccessors(ctx, root, branch)
+			built, err := p.successors(ctx, root, branch)
 			if err != nil {
 				return nil, err
 			}

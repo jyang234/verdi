@@ -21,14 +21,23 @@ type KV struct {
 
 // Item is a decision or constraint: its id, its declared text, and the
 // rationale found under its body heading (empty when the body has none).
+// Supersession is what a closed spec's decision that a closed-spec object
+// supersession touches adds (design §6), and Supersedes what a
+// successor's decision adds for each of its fragment `supersedes` edges,
+// in link order — both nil unless the facts supplied the views
+// (Facts.Supersession); a constraint never carries either.
 type Item struct {
-	ID     string
-	Text   string
-	Detail string
+	ID           string
+	Text         string
+	Detail       string
+	Supersession *Supersession
+	Supersedes   []Supersession
 }
 
 // Criterion is one acceptance criterion with its evidence kinds (as
-// declared, verbatim) and its computed coverage.
+// declared, verbatim) and its computed coverage. Supersession is what a
+// closed spec's criterion that a closed-spec object supersession touches
+// adds (design §6); nil unless the facts supplied the views.
 type Criterion struct {
 	ID       string
 	Text     string
@@ -38,6 +47,7 @@ type Criterion struct {
 	Coverage      []string
 	CoverageKnown bool
 	Detail        string
+	Supersession  *Supersession
 }
 
 // Question is one open question with its claiming spike stubs.

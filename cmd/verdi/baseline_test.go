@@ -27,6 +27,7 @@ func specWithImpacts(impacts []string) *artifact.SpecFrontmatter {
 // regeneration writes, keyed by the SPEC ref/commit (RefSlug(spec.id)) so
 // the workbench preview matrix actually reaches it (true-closure).
 func TestRegenerateBaseline_Happy(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: fakeGraphRunner(), GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
@@ -45,6 +46,7 @@ func TestRegenerateBaseline_Happy(t *testing.T) {
 // block in verdi.yaml) is a disclosed, graceful skip — never an error, and
 // never a partial write.
 func TestRegenerateBaseline_NoToolchain(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
@@ -62,6 +64,7 @@ func TestRegenerateBaseline_NoToolchain(t *testing.T) {
 // honest state at `design start` scaffold time, before impacts: is filled
 // in during design.
 func TestRegenerateBaseline_NoImpactedService(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: fakeGraphRunner(), GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
@@ -85,6 +88,7 @@ func TestRegenerateBaseline_NoImpactedService(t *testing.T) {
 // degrades gracefully instead of aborting the calling verb, and never
 // leaves a partial bundle on disk.
 func TestRegenerateBaseline_ToolchainUnreachable(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	fr := upstream.NewFakeRunner()
 	fr.EnqueueError("flowmap", "graph", errors.New("simulated: module unreachable"))

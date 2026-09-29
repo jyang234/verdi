@@ -80,8 +80,7 @@ y
 // fixturegit repo has no origin remote).
 func buildBodyStatusLineRepo(t *testing.T, specMD string) *fixturegit.Repo {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                                    "schema: verdi.layout/v1\nforge: github\n",
 			".verdi/specs/active/loan-mgmt/spec.md":                featureV1SpecMD,
@@ -90,6 +89,8 @@ func buildBodyStatusLineRepo(t *testing.T, specMD string) *fixturegit.Repo {
 		},
 		Message: "body status-line fixture: feature + story whose body quotes the legacy status field",
 	}})
+	pinFixtureDefaultBranch(t, repo.Dir)
+	return repo
 }
 
 // writeBodyStatusLineGateReport mirrors writeCloseGateReport for this

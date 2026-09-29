@@ -23,6 +23,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -373,7 +374,24 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		comments = nil // the feed is a review-mode input only
 	}
 
-	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))
+	// One corpus index per render, shared by the enrichments that resolve
+	// link targets (a fresh walk every render, never cached — the
+	// per-request posture corpus.go/boardpin.go/boardpeek.go take).
+	ix, err := index.Build(s.root)
+	if err != nil {
+		return nil, nil, "", nil, fmt.Errorf("workbench: building index for %s: %w", name, err)
+	}
+	// Closed-spec object supersession (SI-278; design §6): the reference
+	// cards' object views from default-branch records and the decision
+	// cards' views from this board's own tree, computed BEFORE the pure
+	// projector runs so the layout can reserve each card's rendered height
+	// (every §6 line shows at rest and covers no other card); attached
+	// after it, in the I/O tier, like every other enrichment.
+	supersession, err := computeObjectSupersession(ctx, name, fm, ix, s.root, s.fixedBranch)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()), supersession.heights())
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -442,9 +460,13 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// own disjoint fields). s.fixedBranch threads through exactly as it
 	// does into attachDiagramEditorHrefs above (ADJ-70): a per-branch
 	// board's family links stay inside the branch they resolved from.
-	if err := attachFamilyLinks(ctx, proj, s.root, s.fixedBranch); err != nil {
+	if err := attachFamilyLinks(ctx, proj, ix, s.root, s.fixedBranch); err != nil {
 		return nil, nil, "", nil, err
 	}
+	// Closed-spec object supersession (SI-278): the views computed above
+	// land on their reference and decision cards here — the same
+	// I/O-enrichment posture as every attach* call above.
+	supersession.attach(proj)
 	// The creation form's field descriptors (spec/creation-form ac-2/ac-3):
 	// the same I/O-enrichment posture as every attach* call above. Only a
 	// sealed accepted-pending-build feature wall carries the affordance

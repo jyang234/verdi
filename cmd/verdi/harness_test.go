@@ -27,6 +27,7 @@ import (
 )
 
 func TestHarnessRenderAndCheck(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := t.TempDir()
 
@@ -117,6 +118,7 @@ func TestHarnessRenderAndCheck(t *testing.T) {
 }
 
 func TestHarnessDefaultsToStoreRoot(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := newIntegrationStoreRoot(t)
 	sub := filepath.Join(root, "cmd")
@@ -151,6 +153,7 @@ func TestHarnessDefaultsToStoreRoot(t *testing.T) {
 // built-binary tests above never individually isolate (they only ever
 // pass `--host codex`/`-o <dir>` space-separated, once each).
 func TestCmdHarness_FlagShapeFailures(t *testing.T) {
+	t.Parallel()
 	// A directory `check` can succeed against, proving the two accepted
 	// inline-flag spellings really reach Check rather than merely failing
 	// to be rejected by the parser.

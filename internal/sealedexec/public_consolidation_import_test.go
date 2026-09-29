@@ -52,6 +52,13 @@ import (
 //     deltas in one inverse, whose accepted-context reverification compares
 //     the expected branch with the sealed pair's BranchBeingClosed instead of
 //     Repository.Branch alone, and nothing else.
+//   - SI-269 (closed-spec object supersession tooling, lane L1): artifact's
+//     common.go, whose validateBase checks each link with the kind-aware
+//     Link.ValidateFor instead of the context-free Link.Validate; and
+//     artifact's conflict.go, whose ConflictFrontmatter gained the optional
+//     resolved_by field and its doc comment, and whose Validate gained the
+//     ValidateResolvedBy call and one doc line naming it. Both helpers live
+//     in the unpinned conflictresolution.go. Nothing else changed.
 //
 // The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
@@ -540,6 +547,30 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 		Successor:  "bee57f259d73150a44dafeaf5efd406b61d314f46cc16304dfa285f84589e4b1",
 		Inverse: []consolidationVerdiEdit{
 			{From: "\t\tCIRef:                 snapshot.CIRef,\n"},
+		},
+	},
+	"internal/artifact/common.go": {
+		Historical: "6b49244c33914109e123e7d32c26756309203707f548bde4da721d750948fb13",
+		Successor:  "a3b46f02f3c4fd0d634dbd478c2e262391764f4ac2d41919c2475dc44b730839",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\t\tif err := l.ValidateFor(wantKind); err != nil {\n",
+				To: "\t\tif err := l.Validate(); err != nil {\n"},
+		},
+	},
+	"internal/artifact/conflict.go": {
+		Historical: "6b2aae10e61677198f51803248ec8e156823b7dcf66643e3ac0893b9e6a6b66f",
+		Successor:  "0015446a8b63d81f760a73dbf6cb9d90b4e440050cc16e2952e4a914781612df",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\n" +
+				"\t// ResolvedBy is the successor spec that resolved a superseded conflict\n" +
+				"\t// whose challenges name object fragments (02 §Kind registry; SI-269's\n" +
+				"\t// decode scope is ValidateResolvedBy's).\n" +
+				"\tResolvedBy string `yaml:\"resolved_by,omitempty\"`\n"},
+			{From: "// It also checks resolved_by's scope and shape (ValidateResolvedBy).\n"},
+			{From: "\tif err := fm.ValidateResolvedBy(); err != nil {\n" +
+				"\t\treturn err\n" +
+				"\t}\n" +
+				"\n"},
 		},
 	},
 }

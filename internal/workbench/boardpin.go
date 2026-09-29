@@ -53,14 +53,17 @@ func laneBottomPosition(proj *BoardProjection, lane boardlayout.ZoneColumn) (flo
 	right := float64(lane.X + lane.Width)
 	inLane := func(x, w float64) bool { return x < right && left < x+w }
 	bottom := -1.0
+	// A card carrying its closed-spec object supersession lines is as tall
+	// as the layout reserved (cardHeightPx, refCardHeightPx), never the
+	// bare footprint, so nothing lands on a line (the board closure's C-3).
 	for _, c := range proj.Cards {
-		if inLane(c.X, boardlayout.CardWidth) && c.Y+boardlayout.CardHeight > bottom {
-			bottom = c.Y + boardlayout.CardHeight
+		if inLane(c.X, boardlayout.CardWidth) && c.Y+cardHeightPx(c) > bottom {
+			bottom = c.Y + cardHeightPx(c)
 		}
 	}
 	for _, rc := range proj.RefCards {
-		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+boardlayout.RefCardHeight > bottom {
-			bottom = rc.Y + boardlayout.RefCardHeight
+		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+refCardHeightPx(rc) > bottom {
+			bottom = rc.Y + refCardHeightPx(rc)
 		}
 	}
 	for _, st := range proj.Stickies {

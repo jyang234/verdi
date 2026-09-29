@@ -68,6 +68,7 @@ func designImportPreviewDigestFromFile(t *testing.T, bin, root, path string) str
 // file-path apply to a created branch and an already-created retry at the
 // same commit. Stdin is empty throughout.
 func TestDesignImportRequestFileBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("file-path preview matches the stdin digest and is read-only", func(t *testing.T) {
@@ -154,6 +155,7 @@ func TestDesignImportRequestFileBuiltBinary(t *testing.T) {
 // missing file and `store.FindRoot` already gives an unresolvable root. The
 // underlying filesystem detail must survive into the operator message.
 func TestDesignImportRequestIOFailureBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	// A syntactically valid digest: apply must fail while READING the
 	// request, long before any preview digest is compared.
@@ -227,6 +229,7 @@ func TestDesignImportRequestIOFailureBuiltBinary(t *testing.T) {
 // already do. DecodeRequest wraps specimport.ErrInvalidRequest for both the
 // size cap and the strict decode, so the CLI must not relabel either.
 func TestDesignImportRequestMalformedFileBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := designImportRepo(t)
 
@@ -270,6 +273,7 @@ func (failingDesignImportReader) Read([]byte) (int, error) { return 0, errDesign
 // an unavailable stdin) is io-failure with its detail intact, while an
 // oversized envelope from a perfectly healthy reader stays invalid-request.
 func TestDesignImportRequestReaderFaultIsIOFailure(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		reader io.Reader

@@ -101,6 +101,7 @@ func decodeDecisionReportFile(t *testing.T, path string) *artifact.DecisionConfl
 // never do that: keep the prior report byte-for-byte and exit 2 when a
 // genuine prior exchange exists on disk and this run's judge fails.
 func TestAlign_DesignBranch_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignDesignRepo(t)
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "decision-conflict-report.md")
 
@@ -166,6 +167,7 @@ func TestAlign_DesignBranch_RegeneratePreservesGenuineReportOnJudgeFailure(t *te
 // deviation-report.md), and that an unresolved declared edge is reported
 // as not-yet-proven (never a bare pass).
 func TestAlign_DesignBranchMode_WritesDecisionConflictReport(t *testing.T) {
+	t.Parallel()
 	repo := buildAlignDesignRepo(t)
 
 	var stdout, stderr bytes.Buffer

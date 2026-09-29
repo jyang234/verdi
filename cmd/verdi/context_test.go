@@ -82,7 +82,7 @@ func buildContextCompileRepo(t *testing.T, specFiles map[string]string) *fixture
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
@@ -159,6 +159,7 @@ func writeContextRequestFile(t *testing.T, dir, name string, data []byte) string
 // would compile, be handed to this helper by the command, and silently
 // map to exit 2 (an operational failure) instead of exit 1 (a verdict).
 func TestContextExitCode(t *testing.T) {
+	t.Parallel()
 	refusals := []struct {
 		name string
 		err  error
@@ -494,7 +495,7 @@ func TestCmdContextCompile_NoConstitution_ExitOne(t *testing.T) {
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold, no constitution"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 	t.Chdir(repo.Dir)
 	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
 
@@ -736,7 +737,7 @@ func buildContextCompileRepoTwoAdapter(t *testing.T, specFiles map[string]string
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
 		t.Fatalf("instructionprojection.Generate: %v", err)
@@ -1149,6 +1150,7 @@ func contextRunGit(t *testing.T, dir string, args ...string) {
 // nothing — an empty root, a root that is "/", and a message that never
 // mentions the checkout at all.
 func TestRedactCheckoutRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {

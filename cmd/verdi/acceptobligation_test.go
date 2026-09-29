@@ -209,6 +209,7 @@ func decodeFixtureSpec(t *testing.T, md string) *artifact.SpecFrontmatter {
 // resolves its own frozen stamp off HEAD lazily); the no-op cases use a
 // bare t.TempDir() since they never reach that git call.
 func TestScaffoldMissingObligations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("feature class is a no-op", func(t *testing.T) {
@@ -389,6 +390,7 @@ func TestOperatorOwner(t *testing.T) {
 // text — never a fabricated claim about what the evidence specifically
 // shows.
 func TestBackstopObligationBody(t *testing.T) {
+	t.Parallel()
 	got := backstopObligationBody("spec/widget-story", "ac-1", artifact.EvidenceBehavioral, "the retry proves end to end")
 	if !contains(got, evidence.UnauthoredObligationMarker) {
 		t.Errorf("body missing the shared unauthored marker:\n%s", got)

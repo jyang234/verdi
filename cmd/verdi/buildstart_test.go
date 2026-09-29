@@ -19,6 +19,7 @@ import (
 )
 
 func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		quality   string
@@ -74,6 +75,7 @@ func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml":                        phase7ManifestYAML,
 		".verdi/specs/active/widget-story/spec.md": obligationSeamStoryCleanMD,
@@ -96,6 +98,7 @@ func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityMissingDimensionsOperational(t *testing.T) {
+	t.Parallel()
 	full := buildQualityBlock()
 	tests := []struct {
 		name    string
@@ -127,6 +130,7 @@ func TestRunBuildStart_ObligationQualityMissingDimensionsOperational(t *testing.
 }
 
 func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml":                        phase7ManifestYAML,
 		".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
@@ -145,6 +149,7 @@ func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
 }
 
 func TestRunBuildStart_ObligationQualityMisbindingIsOperationalBeforeMutation(t *testing.T) {
+	t.Parallel()
 	doc := buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock())
 	doc = strings.Replace(doc, "obligation/widget-story--", "obligation/other-story--", 1)
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
@@ -249,6 +254,7 @@ func buildBirdsEyeFeatureRepo(t *testing.T) *fixturegit.Repo {
 // a round-four class: feature spec: it has no code of its own to build
 // against.
 func TestRunBuildStart_RefusesBirdsEyeFeature(t *testing.T) {
+	t.Parallel()
 	repo := buildBirdsEyeFeatureRepo(t)
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -274,6 +280,7 @@ func TestRunBuildStart_RefusesBirdsEyeFeature(t *testing.T) {
 // TestCmdBuildStart_UsageNegative proves cmdBuildStart's own
 // argument-count check.
 func TestCmdBuildStart_UsageNegative(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := cmdBuildStart(nil, &stdout, &stderr); got != 2 {
 		t.Fatalf("cmdBuildStart(no args) = %d, want 2", got)
@@ -288,6 +295,7 @@ func TestCmdBuildStart_UsageNegative(t *testing.T) {
 // TestRunBuildVerb_UnknownSubcommand mirrors design/feature's own
 // subcommand dispatch tests.
 func TestRunBuildVerb_UnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if got := runBuildVerb([]string{"bogus"}, &stdout, &stderr); got != 2 {
 		t.Fatalf("runBuildVerb(bogus) = %d, want 2", got)
@@ -326,6 +334,7 @@ links:
 // start's own precondition via the specStateResolver seam) and starts the
 // build.
 func TestRunBuildStart_StatuslessExactDefaultBranch_Starts(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -336,7 +345,7 @@ func TestRunBuildStart_StatuslessExactDefaultBranch_Starts(t *testing.T) {
 			Message: "init store with a statusless, landed story",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -360,6 +369,7 @@ func TestRunBuildStart_StatuslessExactDefaultBranch_Starts(t *testing.T) {
 // mutation. Every refusal snapshots branches, HEAD, index, and projection
 // bytes exactly.
 func TestBuildStartConflictPreEffect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		verdict  policyconflict.Verdict
@@ -378,7 +388,7 @@ func TestBuildStartConflictPreEffect(t *testing.T) {
 				".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
 				".verdi/obligations/widget-story/ac-1--static.md": buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock()),
 			}, Message: "accepted story"}})
-			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			pinFixtureDefaultBranch(t, repo.Dir)
 			installConflictPolicyStore(t, repo.Dir)
 			requestPath := contextLifecycleRequestFile(t, repo.Dir, "build-start-context.json", "spec/widget-story", contextcompile.PhaseBuild, nil)
 			before := takeConflictLifecycleSnapshot(t, repo.Dir,
@@ -436,6 +446,7 @@ func TestBuildStartConflictPreEffect(t *testing.T) {
 // landed — never a silent proceed, and never conflated with the
 // operational Unproven case below.
 func TestRunBuildStart_UnmergedProposal_RefusesAsVerdict(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files:   map[string]string{".verdi/verdi.yaml": phase7ManifestYAML},
@@ -454,7 +465,7 @@ func TestRunBuildStart_UnmergedProposal_RefusesAsVerdict(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v\n%s", err, out)
 	}
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -513,6 +524,7 @@ frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
 // (exit 1, D-12: never re-buildable), driven through the specStateResolver
 // seam rather than a raw persisted status field.
 func TestRunBuildStart_Superseded_RefusesAsVerdict(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -523,7 +535,7 @@ func TestRunBuildStart_Superseded_RefusesAsVerdict(t *testing.T) {
 			Message: "init store with a landed supersession pair",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -574,6 +586,7 @@ frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
 // projector's own legacy-terminal-status compatibility read, not a
 // silent proceed into AcceptedPendingBuild.
 func TestRunBuildStart_LegacySupersededExactLanded_RefusesAsVerdict(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
@@ -583,7 +596,7 @@ func TestRunBuildStart_LegacySupersededExactLanded_RefusesAsVerdict(t *testing.T
 			Message: "init store with a landed, legacy-superseded story predecessor",
 		},
 	})
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinFixtureDefaultBranch(t, repo.Dir)
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}

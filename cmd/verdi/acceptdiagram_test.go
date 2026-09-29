@@ -76,6 +76,7 @@ owners: [platform-team]
 // carries a frozen: {at, commit} stamp with commit == HEAD's sha at
 // acceptance time.
 func TestRunAccept_Diagram_Happy(t *testing.T) {
+	t.Parallel()
 	repo := buildAcceptDiagramRepo(t, "loansvc-target-topology", proposedDiagramFM)
 	ctx := context.Background()
 
@@ -117,6 +118,7 @@ func TestRunAccept_Diagram_Happy(t *testing.T) {
 // builds that persists a diagram file. A normalized/whitespace-insensitive
 // comparison would not satisfy this; this test compares raw SHA-256 sums.
 func TestRunAccept_Diagram_ByteIdentityRegression(t *testing.T) {
+	t.Parallel()
 	repo := buildAcceptDiagramRepo(t, "loansvc-target-topology", proposedDiagramFM)
 	ctx := context.Background()
 
@@ -144,6 +146,7 @@ func TestRunAccept_Diagram_ByteIdentityRegression(t *testing.T) {
 // reason, non-zero exit) an accept attempt against an incumbent diagram
 // (class absent).
 func TestRunAccept_Diagram_RefusesIncumbent(t *testing.T) {
+	t.Parallel()
 	incumbentFM := `id: diagram/loansvc-topology
 kind: diagram
 title: "LoanSvc topology"
@@ -171,6 +174,7 @@ owners: [platform-team]
 // obligation ac-3--behavioral case (3): refuses an accept attempt against
 // a class: proposal diagram already status: accepted.
 func TestRunAccept_Diagram_RefusesAlreadyAccepted(t *testing.T) {
+	t.Parallel()
 	acceptedFM := `id: diagram/loansvc-target-topology
 kind: diagram
 title: "LoanSvc target topology"
@@ -200,6 +204,7 @@ frozen: { at: 2026-07-01, commit: 3e91ab2 }
 // obligation ac-3--behavioral case (4): refuses an accept attempt against
 // a ref that does not resolve to any diagram at all.
 func TestRunAccept_Diagram_RefusesUnresolvedTarget(t *testing.T) {
+	t.Parallel()
 	repo := buildAcceptDiagramRepo(t, "loansvc-target-topology", proposedDiagramFM)
 	ctx := context.Background()
 
@@ -218,6 +223,7 @@ func TestRunAccept_Diagram_RefusesUnresolvedTarget(t *testing.T) {
 // accept dispatch (accept.go) still refuses a ref that is neither a spec
 // nor a diagram ref (e.g. an adr/... ref), naming the reason.
 func TestRunAccept_Diagram_RefusesNonDiagramNonSpecRef(t *testing.T) {
+	t.Parallel()
 	repo := buildAcceptDiagramRepo(t, "loansvc-target-topology", proposedDiagramFM)
 	ctx := context.Background()
 

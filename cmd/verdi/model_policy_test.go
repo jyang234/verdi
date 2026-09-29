@@ -38,6 +38,7 @@ func writeAdoptedModelCheckStoreRoot(t *testing.T) string {
 // policy-exemption.md) round-trip clean against fixed placeholder data,
 // exactly like every other class's own template round trip.
 func TestModelCheck_PolicyScaffolds_OK(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 
 	var stdout, stderr bytes.Buffer
@@ -57,6 +58,7 @@ func TestModelCheck_PolicyScaffolds_OK(t *testing.T) {
 // the kernel round-trip humanartifact.RenderPolicy verifies — model
 // check must fail closed at exit 2, naming policy.md.
 func TestModelCheck_PolicyScaffold_StoreOverride_HardcodedID_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 	const sabotaged = `---
 schema: verdi.policy/v1
@@ -96,6 +98,7 @@ Placeholder rationale.
 // unrecognized frontmatter field fails strict decode (never the kernel
 // round trip specifically) — still exit 2, still naming the file.
 func TestModelCheck_PolicyScaffold_StoreOverride_UnknownField_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 	const sabotaged = `---
 schema: verdi.policy-overlay/v1
@@ -129,6 +132,7 @@ Placeholder rationale.
 // covers the third scaffold (policy-exemption.md) and the malformed-
 // template-syntax failure mode, over a store override.
 func TestModelCheck_PolicyExemptionScaffold_StoreOverride_BrokenSyntax_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "policy-exemption.md"), []byte("title: {{.Title\n"))
 
@@ -152,6 +156,7 @@ func TestModelCheck_PolicyExemptionScaffold_StoreOverride_BrokenSyntax_Exit2(t *
 // placeholder data checkExemptionScaffold supplies — model check must
 // fail closed at exit 2, naming policy-exemption.md.
 func TestModelCheck_PolicyExemptionScaffold_StoreOverride_HardcodedWitnessExpiryPrincipal_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 	const sabotaged = `---
 schema: verdi.policy-exemption/v1
@@ -206,6 +211,7 @@ It is not a verdi.policy/v1 scaffold and never renders as one.
 // constitution scaffold round trip against it would fail a legacy store
 // that changed nothing, which adoption's opt-in posture forbids.
 func TestModelCheck_LegacyStore_PolicyTemplateName_NotAdopted_OK(t *testing.T) {
+	t.Parallel()
 	root := writeModelCheckStoreRoot(t, "")
 	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "policy.md"), []byte(legacyPolicyTemplate))
 
@@ -230,6 +236,7 @@ func TestModelCheck_LegacyStore_PolicyTemplateName_NotAdopted_OK(t *testing.T) {
 // "not adopted" would let the model check exit 0 over a store whose
 // constitution path is structurally broken.
 func TestModelCheck_PolicyPathIsRegularFile_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeModelCheckStoreRoot(t, "")
 	writeTestFile(t, filepath.Join(root, ".verdi", "policy"), []byte("not a directory\n"))
 
@@ -249,6 +256,7 @@ func TestModelCheck_PolicyPathIsRegularFile_Exit2(t *testing.T) {
 // the same non-scaffold template now fails closed at exit 2. Adoption is
 // opt-in, and opting in is what turns the check on.
 func TestModelCheck_AdoptedStore_BrokenPolicyTemplate_Exit2(t *testing.T) {
+	t.Parallel()
 	root := writeAdoptedModelCheckStoreRoot(t)
 	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "policy.md"), []byte(legacyPolicyTemplate))
 

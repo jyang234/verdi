@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/index"
-	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 )
@@ -206,7 +205,7 @@ func TestDocumentTOC(t *testing.T) {
 func TestWriteSpecDocuments_NonSpecIsNoop(t *testing.T) {
 	out := t.TempDir()
 	p := &artifactPage{Entry: &index.Entry{Ref: "adr/0001-outbox-events", Kind: "adr", Title: "Outbox events"}}
-	if err := writeSpecDocuments(context.Background(), out, t.TempDir(), buildStamp{SHA: "0000000000000000000000000000000000000000"}, nil, p); err != nil {
+	if err := writeSpecDocuments(context.Background(), out, t.TempDir(), documentInputs{stamp: buildStamp{SHA: "0000000000000000000000000000000000000000"}}, p); err != nil {
 		t.Fatalf("non-spec page: %v", err)
 	}
 	entries, err := os.ReadDir(out)
@@ -221,7 +220,7 @@ func TestWriteSpecDocuments_NonSpecIsNoop(t *testing.T) {
 func TestWriteSpecDocuments_UnknownSpecFails(t *testing.T) {
 	repo := buildDexFixtureRepo(t)
 	p := &artifactPage{Entry: &index.Entry{Ref: "spec/no-such-spec", Kind: "spec", Title: "No such spec"}, RelPath: ".verdi/specs/active/no-such-spec/spec.md"}
-	err := writeSpecDocuments(context.Background(), t.TempDir(), repo.Dir, buildStamp{SHA: repo.Head}, nil, p)
+	err := writeSpecDocuments(context.Background(), t.TempDir(), repo.Dir, documentInputs{stamp: buildStamp{SHA: repo.Head}}, p)
 	if err == nil || !strings.Contains(err.Error(), "spec/no-such-spec") {
 		t.Fatalf("unknown spec: err = %v, want an error naming spec/no-such-spec", err)
 	}
@@ -253,7 +252,7 @@ func TestWriteSpecDocuments_KindsShareOneLoad(t *testing.T) {
 	out := t.TempDir()
 	ref := "spec/escrow-autopay"
 	p := &artifactPage{Entry: &index.Entry{Ref: ref, Kind: "spec", Title: "Escrow autopay enrollment"}, RelPath: ".verdi/specs/active/escrow-autopay/spec.md"}
-	if err := writeSpecDocuments(context.Background(), out, repo.Dir, buildStamp{SHA: repo.Head, Date: "2026-01-01"}, nil, p); err != nil {
+	if err := writeSpecDocuments(context.Background(), out, repo.Dir, documentInputs{stamp: buildStamp{SHA: repo.Head, Date: "2026-01-01"}}, p); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []specdoc.Kind{specdoc.KindSpec, specdoc.KindPlan, specdoc.KindTasks} {
@@ -289,7 +288,7 @@ func TestWriteAllSpecDocuments_FirstErrorWins(t *testing.T) {
 		{Entry: &index.Entry{Ref: "adr/0001-outbox-events", Kind: "adr", Title: "Outbox events"}},
 		{Entry: &index.Entry{Ref: "spec/no-such-spec", Kind: "spec", Title: "No such spec"}, RelPath: ".verdi/specs/active/no-such-spec/spec.md"},
 	}
-	err := writeAllSpecDocuments(context.Background(), out, repo.Dir, buildStamp{SHA: repo.Head}, nil, pages, documentSet{"spec/no-such-spec": true})
+	err := writeAllSpecDocuments(context.Background(), out, repo.Dir, documentInputs{stamp: buildStamp{SHA: repo.Head}, docs: documentSet{"spec/no-such-spec": true}}, pages)
 	if err == nil || !strings.Contains(err.Error(), "spec/no-such-spec") {
 		t.Fatalf("err = %v, want an error naming spec/no-such-spec", err)
 	}
@@ -312,7 +311,7 @@ func fakeSpecPages(n int) ([]*artifactPage, documentSet) {
 }
 
 // stubRender swaps the pool's render step for the test's duration.
-func stubRender(t *testing.T, fn func(ctx context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, p *artifactPage) error) {
+func stubRender(t *testing.T, fn func(ctx context.Context, outDir, root string, in documentInputs, p *artifactPage) error) {
 	t.Helper()
 	prev := renderSpecDocuments
 	renderSpecDocuments = fn
@@ -350,7 +349,7 @@ func TestWriteAllSpecDocuments_CallerCancel(t *testing.T) {
 		cancelOnce sync.Once
 		cancelled  = make(chan struct{})
 	)
-	stubRender(t, func(_ context.Context, _, _ string, _ buildStamp, _ *model.Model, _ *artifactPage) error {
+	stubRender(t, func(_ context.Context, _, _ string, _ documentInputs, _ *artifactPage) error {
 		rendered.Add(1)
 		cancelOnce.Do(func() {
 			cancel()
@@ -359,7 +358,7 @@ func TestWriteAllSpecDocuments_CallerCancel(t *testing.T) {
 		<-cancelled // hold this worker's slot until the cancel has taken effect
 		return nil
 	})
-	err := writeAllSpecDocuments(ctx, t.TempDir(), t.TempDir(), buildStamp{SHA: "0000000000000000000000000000000000000000"}, nil, pages, docs)
+	err := writeAllSpecDocuments(ctx, t.TempDir(), t.TempDir(), documentInputs{stamp: buildStamp{SHA: "0000000000000000000000000000000000000000"}, docs: docs}, pages)
 	if err != context.Canceled {
 		t.Fatalf("err = %v, want the caller's context.Canceled", err)
 	}
@@ -373,13 +372,13 @@ func TestWriteAllSpecDocuments_CallerCancel(t *testing.T) {
 // exits 2 through the normal path — and does not kill the process.
 func TestWriteAllSpecDocuments_PanicBecomesError(t *testing.T) {
 	pages, docs := fakeSpecPages(8)
-	stubRender(t, func(_ context.Context, _, _ string, _ buildStamp, _ *model.Model, p *artifactPage) error {
+	stubRender(t, func(_ context.Context, _, _ string, _ documentInputs, p *artifactPage) error {
 		if p.Entry.Ref == "spec/fake-003" {
 			panic("render exploded")
 		}
 		return nil
 	})
-	err := writeAllSpecDocuments(context.Background(), t.TempDir(), t.TempDir(), buildStamp{SHA: "0000000000000000000000000000000000000000"}, nil, pages, docs)
+	err := writeAllSpecDocuments(context.Background(), t.TempDir(), t.TempDir(), documentInputs{stamp: buildStamp{SHA: "0000000000000000000000000000000000000000"}, docs: docs}, pages)
 	if err == nil || !strings.Contains(err.Error(), "spec/fake-003") || !strings.Contains(err.Error(), "render exploded") {
 		t.Fatalf("err = %v, want an error naming spec/fake-003 and the panic", err)
 	}

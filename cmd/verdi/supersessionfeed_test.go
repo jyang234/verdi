@@ -16,7 +16,6 @@ import (
 // — still hermetic (CLAUDE.md: no network in any test).
 func newSupersessionLoaderForTest(t *testing.T, f forge.Forge) *forgeSupersessionLoader {
 	t.Helper()
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return newForgeSupersessionLoader(f, resolvableDefaultBranchRoot(t))
 }
 
@@ -48,6 +47,7 @@ const supersessionFeedCandidatePath = ".verdi/specs/active/loan-workflow-v2/spec
 // evidence.LoadPendingSupersessionCandidates (co-3's exact entry point),
 // returning ok=true with the confirmed candidate set.
 func TestForgeSupersessionLoader_LoadsConfirmedCandidates(t *testing.T) {
+	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "7", SourceBranch: "design/loan-workflow-v2"})
 	f.SeedFile("design/loan-workflow-v2", supersessionFeedCandidatePath, []byte(supersessionFeedCandidateSpecMD))
@@ -96,7 +96,7 @@ func (erroringSupersessionForge) ListOpenMRs(ctx context.Context, targetBranch s
 // TestForgeSupersessionLoader_TransportErrorPropagates proves a genuine
 // forge failure surfaces as an error, never silently as ok=false.
 func TestForgeSupersessionLoader_TransportErrorPropagates(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Parallel()
 	loader := newForgeSupersessionLoader(erroringSupersessionForge{fake.New()}, resolvableDefaultBranchRoot(t))
 	_, _, err := loader.LoadCandidates(context.Background(), "spec/loan-workflow", supersessionFeedCandidatePath)
 	if err == nil {

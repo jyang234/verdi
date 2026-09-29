@@ -65,6 +65,7 @@ func runGitCmd(t *testing.T, dir string, args ...string) {
 // disk, a printed reclaim line, and a printed line disclosing that
 // derived-cache/layout-cache pruning were NOT run by this invocation.
 func TestGc_CLI_ReclaimsAndDisclosesScope(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, branch := gcCLIFixture(t)
 
@@ -105,6 +106,7 @@ func TestGc_CLI_ReclaimsAndDisclosesScope(t *testing.T) {
 // verdict failure) and disclose the keep-reason, not just the reclaim
 // path above.
 func TestGc_CLI_KeepsDirtyAndDiscloses(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, branch := gcCLIFixture(t)
 
@@ -139,6 +141,7 @@ func TestGc_CLI_KeepsDirtyAndDiscloses(t *testing.T) {
 // an unexpected argument operationally (exit 2) rather than silently
 // ignoring it.
 func TestGc_CLI_UnexpectedArgument(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root, _ := gcCLIFixture(t)
 

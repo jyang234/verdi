@@ -135,25 +135,26 @@ func TestCloseEvidenceWorkflowTriggersOnCloseBranchesUnfiltered(t *testing.T) {
 }
 
 // TestCloseEvidenceWorkflowCallsVerifyThroughWorkflowCall proves the one
-// job reuses verify.yml's own `verify` job body via jobs.<id>.uses, rather
-// than duplicating its steps: the self-hosted evidence producer
-// (cmd/verdi/selfevidence.go) is only honest when invoked strictly after
-// the SAME make-verify run, in the SAME job — never a second, independent
-// run (verify.yml's own head comment). A jobs.<id>.uses caller job may only
-// carry the small whitelist of keywords GitHub documents for it (name,
-// uses, with, secrets, strategy, needs, if, permissions — NOT
-// environment:); this test also proves the caller job declares no
-// environment: (that lives on close.yml's job alone, and jobs.<job_id>.uses
-// + jobs.<job_id>.environment together is not a keyword combination GitHub
-// permits on a reusable-workflow caller job).
+// job reuses verify.yml's jobs (its gate jobs and its `verify` evidence job)
+// via jobs.<id>.uses, rather than duplicating them: the self-hosted evidence
+// producer (cmd/verdi/selfevidence.go) is only honest when invoked after
+// every gate job of the SAME run succeeded at the same commit (SI-267) —
+// never a second, independent run (verify.yml's own head comment). A
+// jobs.<id>.uses caller job may only carry the small whitelist of keywords
+// GitHub documents for it (name, uses, with, secrets, strategy, needs, if,
+// permissions — NOT environment:); this test also proves the caller job
+// declares no environment: (that lives on close.yml's job alone, and
+// jobs.<job_id>.uses + jobs.<job_id>.environment together is not a keyword
+// combination GitHub permits on a reusable-workflow caller job).
 //
 // The caller job's id is pinned to `verify` as well. GitHub documents that
 // "the github context is always associated with the caller workflow" when a
 // reusable workflow runs, which would make GITHUB_JOB the CALLER's job id;
 // community reports show the called job's id instead. Because the evidence
 // records' provenance.job_name comes from GITHUB_JOB (SI-229) and elaborated
-// obligations name CI job `verify`, both ids must be `verify` for the
-// construction to hold under either reading.
+// obligations name CI job `verify`, both ids — this caller job's and
+// verify.yml's evidence job's — must be `verify` for the construction to
+// hold under either reading.
 func TestCloseEvidenceWorkflowCallsVerifyThroughWorkflowCall(t *testing.T) {
 	doc := decodeWorkflow(t, closeEvidencePath(verdiRepoRoot))
 	if got, want := jobKeys(doc.Jobs), []string{"verify"}; !slices.Equal(got, want) {
@@ -412,16 +413,26 @@ func TestCloseDispatchChecksOutExactCommitDetached(t *testing.T) {
 	}
 }
 
-// TestCloseEvidenceCalledJobGatesThenProducesThenUploads proves, in the job
-// close-evidence.yml actually calls (resolved from its `uses:` path, not
-// assumed), that `make verify` runs before `verdi sync --produce`, which runs
-// before the upload of the "verdi-evidence" artifact from
-// .verdi/data/derived/. The self-hosted evidence producer is honest only when
-// it runs strictly after a `make verify` that already passed in the same job
-// (verify.yml's head comment), and close's `verdi sync` fetches the bundle by
-// that exact artifact name. Each command is matched by exact text and must
-// occur once, so `make verify || true` or a duplicate step does not count.
-func TestCloseEvidenceCalledJobGatesThenProducesThenUploads(t *testing.T) {
+// TestCloseEvidenceCalledWorkflowProducesOnlyAfterEveryGateJob proves SI-267's
+// shape in the workflow close-evidence.yml actually calls, resolved from its
+// `uses:` path rather than assumed (verifyWorkflowViolations,
+// verifyworkflow_test.go):
+//
+//   - its jobs are exactly merge-gate.yml's gate jobs plus `verify`, and each
+//     gate job equals merge-gate.yml's in every key and value;
+//   - `verify` needs exactly the gate jobs and declares no `if:` or
+//     `continue-on-error:`, so GitHub runs it only once every gate job of the
+//     same run has succeeded;
+//   - inside `verify`, the verdict call over every gate job's result, then
+//     `verdi sync --produce`, then the upload of "verdi-evidence" from
+//     .verdi/data/derived/ each run once, in that order.
+//
+// The self-hosted evidence producer is honest only when it runs after every
+// gate job of the same run, at the same commit, succeeded (SI-267; verify.yml's
+// head comment), and close's `verdi sync` fetches the bundle by that exact
+// artifact name. Commands are matched by exact text, so `sync --produce ||
+// true` or a duplicate step does not count.
+func TestCloseEvidenceCalledWorkflowProducesOnlyAfterEveryGateJob(t *testing.T) {
 	caller := decodeWorkflow(t, closeEvidencePath(verdiRepoRoot))
 	job, ok := caller.Jobs["verify"]
 	if !ok {
@@ -431,44 +442,8 @@ func TestCloseEvidenceCalledJobGatesThenProducesThenUploads(t *testing.T) {
 	if !ok || rel == "" {
 		t.Fatalf("close-evidence.yml: the caller job must call a local reusable workflow (uses: ./.github/workflows/<file>), got %q", job.Uses)
 	}
-	called := decodeWorkflow(t, filepath.Join(verdiRepoRoot, filepath.FromSlash(rel)))
-	if got, want := jobKeys(called.Jobs), []string{"verify"}; !slices.Equal(got, want) {
-		t.Fatalf("%s: the called workflow must declare exactly the jobs %v (its job id is GITHUB_JOB, which feeds provenance.job_name), got %v", rel, want, got)
-	}
-	steps := called.Jobs["verify"].Steps
-
-	exactlyOnce := func(cmd string) int {
-		t.Helper()
-		matches := findExactRunSteps(steps, cmd)
-		if len(matches) != 1 {
-			t.Fatalf("%s: expected exactly one run step whose command is exactly %q, found %d; decoded run steps: %v", rel, cmd, len(matches), runCommands(steps))
-		}
-		return matches[0]
-	}
-	gate := exactlyOnce("make verify")
-	produce := exactlyOnce("./.build/verdi sync --produce")
-
-	upload := -1
-	for i, step := range steps {
-		if !strings.HasPrefix(step.Uses, "actions/upload-artifact@") {
-			continue
-		}
-		if upload != -1 {
-			t.Fatalf("%s: more than one actions/upload-artifact step (indexes %d and %d)", rel, upload, i)
-		}
-		upload = i
-		if got := step.With["name"]; got != "verdi-evidence" {
-			t.Errorf(`%s: the upload step's artifact name must be "verdi-evidence" (the name close's verdi sync fetches by), got %q`, rel, got)
-		}
-		if got := step.With["path"]; got != ".verdi/data/derived/" {
-			t.Errorf(`%s: the upload step must upload ".verdi/data/derived/" (where verdi sync --produce writes the bundle), got %q`, rel, got)
-		}
-	}
-	if upload == -1 {
-		t.Fatalf("%s: no actions/upload-artifact step found", rel)
-	}
-	if gate >= produce || produce >= upload {
-		t.Errorf("%s: steps must run in the order make verify (%d) < verdi sync --produce (%d) < upload verdi-evidence (%d)", rel, gate, produce, upload)
+	for _, v := range verifyWorkflowFileViolations(t, filepath.Join(verdiRepoRoot, filepath.FromSlash(rel))) {
+		t.Errorf("%s (called by close-evidence.yml): %s", rel, v)
 	}
 }
 

@@ -79,6 +79,7 @@ func assertDesignImportDeferredDisclosure(t *testing.T, result specimport.Result
 // variables — mirroring designmutate_test.go's own spoof-resistance
 // proof for `design mutate`.
 func TestDesignImportApplyPolicyBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("proposal-only policy refuses with no branch created", func(t *testing.T) {
@@ -169,6 +170,7 @@ func TestDesignImportApplyPolicyBuiltBinary(t *testing.T) {
 // statements-deferred finding on BOTH the created result and an
 // already-created retry.
 func TestDesignImportApplyDeferralBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := designImportPolicyRepo(t, "draft-write")
 	slug := "sample-feature-deferred"
@@ -209,6 +211,7 @@ func TestDesignImportApplyDeferralBuiltBinary(t *testing.T) {
 // uppercase --preview, a duplicate flag, an unknown flag, and a rejected
 // --human flag.
 func TestDesignImportApplyMalformedBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := designImportPolicyRepo(t, "draft-write")
 	reqBytes := designImportRequestJSON(t, designImportReadyRequest(t, "sample-feature-apply-flags"))
@@ -243,6 +246,7 @@ func TestDesignImportApplyMalformedBuiltBinary(t *testing.T) {
 // edit without corrupting the original provenance, refuses a branch with
 // no import record, and refuses an invalid --spec at the usage layer.
 func TestDesignImportRecordBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("matches after apply, then discloses a later edit truthfully", func(t *testing.T) {

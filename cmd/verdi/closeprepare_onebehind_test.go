@@ -22,6 +22,7 @@ import (
 // committed one-behind report, which runAlignForSpec's own SI-231 branch
 // leaves byte-identical and never regenerates.
 func TestRunPrepare_OneBehindCommittedReport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := buildCloseFixtureRepo(t)
 	parent := repo.Head
@@ -49,6 +50,7 @@ func TestRunPrepare_OneBehindCommittedReport(t *testing.T) {
 // SI-231 or "left byte-identical"; it takes the stale-report path it takes
 // at base, disclosing what the refresh may cost.
 func TestRunPrepare_OneBehindWorkingTreeDivergence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := buildCloseFixtureRepo(t)
 	parent := repo.Head

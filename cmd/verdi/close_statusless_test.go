@@ -68,6 +68,16 @@ y
 // statused one. CI_DEFAULT_BRANCH pins the projector's default-branch
 // resolution (this fixturegit repo has no origin remote), exactly as
 // buildCloseFeatureRepo already documents for its own fixtures.
+//
+// This stays t.Setenv-based (never pinFixtureDefaultBranch's origin/HEAD
+// symref), an override-risk carve-out matching gate_test.go's
+// buildGateRepo: this file's own
+// TestRunClose_EffectiveStatePrecondition_RefusesBeforeMutation calls this
+// builder and then overrides CI_DEFAULT_BRANCH back to "" to make the
+// default branch UNRESOLVABLE for its "unproven state exits 2" subtest — an
+// override that only works against another t.Setenv, since a symref set on
+// the fixture directory is permanent, git-native state a later env-var
+// change cannot retract.
 func buildStatuslessCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
@@ -276,7 +286,6 @@ func TestRunCloseFeature_StatuslessSpec_ClosesCleanly(t *testing.T) {
 	t.Setenv("CI", "true")
 	opts := defaultCloseFeatureFixtureOpts()
 	scaffoldSHA := featureCloseScaffoldSHA(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	statuslessFeature := statuslessCloseFeatureSpecMD(closeFeatureSpecMD(scaffoldSHA, ""))
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		featureCloseScaffoldLayer,
@@ -293,6 +302,7 @@ func TestRunCloseFeature_StatuslessSpec_ClosesCleanly(t *testing.T) {
 			Message: "add statusless close-feature-fixture + its two closed implementing stories",
 		},
 	})
+	pinFixtureDefaultBranch(t, repo.Dir)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
 	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()

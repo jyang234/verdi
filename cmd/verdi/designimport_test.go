@@ -257,6 +257,7 @@ func designImportBranchExists(t *testing.T, dir, branch string) bool {
 // convention: any unrecognized design subcommand does this) and that the
 // usage line now names the import grammar this task adds.
 func TestDesignImportDispatchBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	root := designImportRepo(t)
 
@@ -287,6 +288,7 @@ func TestDesignImportDispatchBuiltBinary(t *testing.T) {
 // refusal, and malformed-flag refusals. Every failure asserts empty
 // stdout.
 func TestDesignImportSourceBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	fixtureDir := designImportSampleMarkdownDir(t)
 
@@ -419,6 +421,7 @@ func TestDesignImportSourceBuiltBinary(t *testing.T) {
 // repository untouched, a blocking (missing-evidence) preview is
 // structured exit 1, and every malformed request/flag case is exit 2.
 func TestDesignImportPreviewBuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 
 	t.Run("ready preview requires no assistance policy and is read-only", func(t *testing.T) {

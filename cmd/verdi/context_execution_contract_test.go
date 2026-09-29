@@ -35,6 +35,7 @@ import (
 )
 
 func TestContextExecutionPublicContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	for _, tc := range []struct {
 		name string
@@ -245,6 +246,7 @@ func TestContextExecutionPublicContract_Behavioral(t *testing.T) {
 }
 
 func TestScopedContextMCPContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	for _, tc := range []struct {
 		name string
@@ -536,6 +538,7 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 }
 
 func TestContextExecutionCompletionContract_Behavioral(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	t.Run("built binary completes sealed start lifecycle", func(t *testing.T) {
 		for _, test := range []struct {
@@ -835,7 +838,13 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		defer controllerConn.Close()
 		served <- fake.serve(controllerConn)
 	}()
-	t.Setenv("VERDI_HOSTILE_AMBIENT_SECRET", "must-not-cross-provider-boundary")
+	// VERDI_HOSTILE_AMBIENT_SECRET only needs to be visible to the exec'd
+	// verdi child below (this test's own assertion, further down, is that
+	// the CHILD's launched provider grandchild never sees it) — never the
+	// test process itself, so it is threaded through
+	// runSealedContextBinaryWithFilesEnv's extraEnv rather than t.Setenv
+	// (lane R4 test-speed contract step 1).
+	hostileAmbientSecretEnv := []string{"VERDI_HOSTILE_AMBIENT_SECRET=must-not-cross-provider-boundary"}
 	requestArg := "-"
 	requestInput := requestBytes
 	if outputFile {
@@ -853,7 +862,7 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		}
 		args = append(args, "--out", resultPath)
 	}
-	observation := runSealedContextBinaryWithFiles(t, bin, root, requestInput, []*os.File{childFile}, args...)
+	observation := runSealedContextBinaryWithFilesEnv(t, bin, root, requestInput, []*os.File{childFile}, hostileAmbientSecretEnv, args...)
 	if err := <-served; err != nil {
 		t.Fatalf("lifecycle controller: %v; observation=%#v", err, observation)
 	}
@@ -2942,11 +2951,30 @@ func runSealedContextBinary(t *testing.T, bin, dir string, stdin []byte, args ..
 }
 
 func runSealedContextBinaryWithFiles(t *testing.T, bin, dir string, stdin []byte, extraFiles []*os.File, args ...string) sealedContextObservation {
+	return runSealedContextBinaryWithFilesEnv(t, bin, dir, stdin, extraFiles, nil, args...)
+}
+
+// runSealedContextBinaryWithFilesEnv is runSealedContextBinaryWithFiles with
+// extra environment variables layered onto the CHILD verdi process's own
+// copy of the current environment (extraEnv wins on a duplicate key —
+// append-then-let-the-last-entry-win is the same exec.Cmd.Env convention
+// internal/fixturegit's runGit documents). This is how a variable only the
+// exec'd binary needs to see (never the test process itself) is threaded
+// through without t.Setenv (lane R4 test-speed contract step 1): t.Setenv
+// mutates the test's OWN process environment, which both leaks further than
+// necessary and panics under t.Parallel(). extraEnv == nil leaves cmd.Env
+// nil (inherit everything, unchanged from before this helper existed) so
+// every other caller of runSealedContextBinaryWithFiles/
+// runSealedContextBinary is unaffected.
+func runSealedContextBinaryWithFilesEnv(t *testing.T, bin, dir string, stdin []byte, extraFiles []*os.File, extraEnv []string, args ...string) sealedContextObservation {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.ExtraFiles = extraFiles
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

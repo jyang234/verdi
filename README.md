@@ -307,7 +307,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi gate` | The merge gate: spec accepted, no AC violated, every finding dispositioned (exit 0 / 1 / 2) |
 | `verdi close <story\|feature>` | Closure ritual: every AC evidenced, frozen rollup, archived quartet |
 | `verdi attest <spec-ref> <ac-id>` | Scaffold an unauthored attestation for a story or feature criterion; the claim stays yours to write |
-| `verdi lint` | Artifactlint (VL-001..021) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
+| `verdi lint` | Artifactlint (VL-001..VL-022 and VL-026) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
 | `verdi matrix <story\|feature>` | Compute and print the evidence fold |
 | `verdi spec doc <spec-ref> [--kind …] [--no-readiness]` | Render a spec, plan, or task document with its live readiness section |
 | `verdi sync` | Pull the CI evidence bundle into `derived/` |
@@ -405,7 +405,8 @@ $ make verify
 vet`, `golangci-lint`, `go test -race ./...`, the fixture-determinism and
 corpus golden-SHA gates, a self-lint of this repo's own store, `spec-align`
 (self-hosted spec fidelity), the two showcase gates above, and the Playwright
-e2e suite last. CI runs exactly `make verify` — local and CI verdicts agree
+e2e suite last. CI runs exactly `make verify`'s steps, split across parallel
+jobs and guarded for parity (SI-266 to SI-268), so local and CI verdicts agree
 by construction. Individual gates are available too: `make test`, `make
 lint`, `make fixture`, `make spec-align`, `make lint-showcase`, `make
 showcase-coverage`, `make e2e`.

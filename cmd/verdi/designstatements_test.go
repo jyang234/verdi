@@ -478,8 +478,8 @@ func buildPhase7RepoWithBlockedFeatureTemplate(t *testing.T) *fixturegit.Repo {
 // --outcome given together render the scaffold's statement attributes
 // with the real supplied text — never the Default* TODO placeholders.
 func TestRunDesignStart_ProblemOutcomeFlags_TODOFree(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{},
@@ -506,8 +506,8 @@ func TestRunDesignStart_ProblemOutcomeFlags_TODOFree(t *testing.T) {
 // --defer-statements commits the old TODO placeholders deliberately, with
 // an explicit disclosure line on stdout naming the deferral.
 func TestRunDesignStart_DeferStatements_DisclosesAndKeepsPlaceholders(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -544,6 +544,7 @@ func TestRunDesignStart_DeferStatements_DisclosesAndKeepsPlaceholders(t *testing
 // never reach provider title resolution or baseline regeneration, the
 // two effects the preparation boundary now runs strictly before.
 func TestRunDesignStart_StatementFlags_Negative(t *testing.T) {
+	t.Parallel()
 	manifest := phase7Manifest(t)
 	ctx := context.Background()
 
@@ -681,8 +682,8 @@ func TestRunDesignStart_StatementFlags_Negative(t *testing.T) {
 // injected Stdin and lands the collected answers as the scaffold's real
 // problem/outcome text.
 func TestRunDesignStart_TTYInterview_CollectsStatements(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{
@@ -711,6 +712,7 @@ func TestRunDesignStart_TTYInterview_CollectsStatements(t *testing.T) {
 // interview refuses (exit 2) rather than silently landing a partial or
 // empty statement.
 func TestRunDesignStart_TTYInterview_Aborted(t *testing.T) {
+	t.Parallel()
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
@@ -743,7 +745,6 @@ func TestRunDesignStart_TTYInterview_Aborted(t *testing.T) {
 // parse-refusal case below never reaches a provider at all (it exits at
 // extractFlags), so it keeps the shared fixture.
 func TestCmdDesignStart_StatementFlags_ParseAndRoundTrip(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	t.Run("--problem/--outcome round trip", func(t *testing.T) {
 		repo := buildFakeProviderRepo(t)
 		t.Chdir(repo.Dir)
@@ -861,9 +862,9 @@ func TestDesignGo_NoOwnersFlag(t *testing.T) {
 // Omitting it leaves the interview path, the only thing under test here,
 // exactly as it was.
 func TestRun_DesignStart_TTYInterview_BuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 
 	cmd := exec.Command(bin, "design", "start", "--kind", "feature", "--name", "built-binary-interview")
 	cmd.Dir = repo.Dir
@@ -899,6 +900,7 @@ func TestRun_DesignStart_TTYInterview_BuiltBinary(t *testing.T) {
 // moved: a runtime that resolves the provider BEFORE reaching this
 // refusal would otherwise make the RED run itself egress.
 func TestRun_DesignStart_NoTTY_NoFlags_Refuses_BuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
 
@@ -941,9 +943,9 @@ func TestRun_DesignStart_NoTTY_NoFlags_Refuses_BuiltBinary(t *testing.T) {
 // does commit (`git add -A`), so any sentinel left lying around would be
 // swept into the scaffold commit this test then inspects.
 func TestRun_DesignStart_NoTTYRefusalThenSameNameRetry_BuiltBinary(t *testing.T) {
+	t.Parallel()
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	const name = "same-name-retry"
 	branch := "design/" + name

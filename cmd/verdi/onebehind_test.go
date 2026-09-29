@@ -99,6 +99,7 @@ func commitOneBehindReport(t *testing.T, ctx context.Context, dir, specName, con
 }
 
 func TestEvaluateOneBehindReport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("accepted shape", func(t *testing.T) {
@@ -283,6 +284,7 @@ func TestEvaluateOneBehindReport(t *testing.T) {
 // parent itself. Each row first proves its diff really has the one-entry
 // shape it names, so it can never degrade into a two-path refusal.
 func TestEvaluateOneBehindReport_ChangeShapes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
 	cases := []struct {
@@ -387,6 +389,7 @@ func TestEvaluateOneBehindReport_ChangeShapes(t *testing.T) {
 // the report HEAD commits — otherwise close would freeze HEAD's bytes over
 // an operator's uncommitted disposition change and report it preserved.
 func TestEvaluateOneBehindReport_WorkingTreeMustEqualHEAD(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := []struct {
 		name   string
@@ -477,6 +480,7 @@ func writeOneBehindFile(t *testing.T, path, content string) {
 // The diff.relative rows (BL-34; L3b re-review RR-7) prove those paths stay
 // repository-root-relative whatever diff.relative says.
 func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
 	const manifest = "schema: verdi.layout/v1\nforge: gitlab\n"
@@ -622,6 +626,7 @@ func TestEvaluateOneBehindReport_NestedStore(t *testing.T) {
 // rather than calling HEAD "a root commit or a merge". A depth-2 clone sees
 // the parent and accepts.
 func TestEvaluateOneBehindReport_ShallowCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := oneBehindBaseRepo(t)
 	head := commitOneBehindReport(t, ctx, src.Dir, oneBehindReportSpecName, oneBehindReportContent(src.Head, oneBehindDispositionedFindingYAML))
@@ -726,6 +731,7 @@ func assertOneBehindSubmoduleFixture(t *testing.T, dir, parent, head, reportRel,
 // passed --ignore-submodules=none, each ignore row was ACCEPTED: close froze
 // the report and its covers named a parent whose code HEAD no longer has.
 func TestEvaluateOneBehindReport_SubmoduleBumpIsNeverHidden(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rel := store.DeviationReportRelPath(store.ZoneActive, oneBehindReportSpecName)
 	reportOnly := "A\t" + rel

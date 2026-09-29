@@ -23,6 +23,7 @@ import (
 // semantics) — proven over a real multi-layer fixturegit history, not a
 // single-commit repo where "first" would be trivial.
 func TestCandidateAncestorCommits_CommitItselfIsFirst(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -46,6 +47,7 @@ func TestCandidateAncestorCommits_CommitItselfIsFirst(t *testing.T) {
 // proves no depth bound: every layer's commit, all the way to the root,
 // must appear — not just a bounded prefix.
 func TestCandidateAncestorCommits_MatchesGitxLog_NoDepthLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const layerCount = 6
 	layers := make([]fixturegit.Layer, 0, layerCount)
@@ -83,6 +85,7 @@ func TestCandidateAncestorCommits_MatchesGitxLog_NoDepthLimit(t *testing.T) {
 // resolve (not a git repository at all) is a real, surfaced error — never
 // a silently-empty candidate list.
 func TestCandidateAncestorCommits_Negative(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // not a git repository
 	if _, err := candidateAncestorCommits(context.Background(), dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err == nil {
 		t.Fatal("candidateAncestorCommits(non-git root): want error, got nil")
@@ -153,6 +156,7 @@ func commitAncestorFixtureFile(t *testing.T, dir, path, content, message string)
 // is found and accepted, with the accepted commit and the walked distance
 // both disclosed.
 func TestRunSync_Ancestor_LinearHistory_AcceptsNamedAncestor(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -193,6 +197,7 @@ func TestRunSync_Ancestor_LinearHistory_AcceptsNamedAncestor(t *testing.T) {
 // — built over gitx.Log rather than a hand-rolled first-parent walk —
 // still reaches and accepts it.
 func TestRunSync_Ancestor_BranchedHistory_ReachesMergedAncestor(t *testing.T) {
+	t.Parallel()
 	dir, _, b, _, _, d := buildBranchedAncestorRepo(t)
 	const ref = "main"
 
@@ -236,6 +241,7 @@ func TestRunSync_Ancestor_BranchedHistory_ReachesMergedAncestor(t *testing.T) {
 // and — via countingForge — exactly one FetchEvidenceBundle call, proving
 // no ancestor walk was performed at all.
 func TestRunSync_Ancestor_BundleAtHead_WinsWithNoWalk(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -267,6 +273,7 @@ func TestRunSync_Ancestor_BundleAtHead_WinsWithNoWalk(t *testing.T) {
 // exhausted-walk refusal names the ref and the commit range actually
 // walked — never a bare, unqualified "no bundle" message.
 func TestRunSync_Ancestor_NoBundleAnywhere_RefusesNamingRange(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -303,6 +310,7 @@ func TestRunSync_Ancestor_NoBundleAnywhere_RefusesNamingRange(t *testing.T) {
 // `oldest..commit` two-dot notation is EXCLUSIVE of oldest, naming one fewer
 // commit than the stated walked count — the off-by-one this guards against.
 func TestRunSync_Ancestor_NoBundleAnywhere_RangeNotationNamesEveryWalkedCommit(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -340,6 +348,7 @@ func TestRunSync_Ancestor_NoBundleAnywhere_RangeNotationNamesEveryWalkedCommit(t
 // fixture's git dir (an empty shallow file, which `git log` tolerates), so
 // the test is fully hermetic (co-1: no network).
 func TestRunSync_Ancestor_NoBundleAnywhere_ShallowClone_DisclosesTruncation(t *testing.T) {
+	t.Parallel()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
 		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
@@ -399,6 +408,7 @@ func gitInitTestStore(t *testing.T, root string) string {
 // may sit at a deeper true ancestor the clone never contained. sync must
 // disclose that truncation BEFORE regenerating locally.
 func TestRunSync_OrRegen_ShallowExhaustedWalk_DisclosesTruncation(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root) // a real git repo → the walk runs and exhausts
 	// Mark it shallow the way a --depth fetch would (empty marker, tolerated
@@ -436,6 +446,7 @@ func TestRunSync_OrRegen_ShallowExhaustedWalk_DisclosesTruncation(t *testing.T) 
 // exactly as today — the disclosure fires ONLY for the shallow sub-case,
 // never for a plain absence.
 func TestRunSync_OrRegen_NonShallowExhaustedWalk_StaysQuiet(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t)
 	head := gitInitTestStore(t, root) // a real git repo, NO shallow marker
 
@@ -470,6 +481,7 @@ func TestRunSync_OrRegen_NonShallowExhaustedWalk_StaysQuiet(t *testing.T) {
 // evidence. Regeneration still proceeds afterward (disclose, then fall
 // back).
 func TestRunSync_OrRegen_UnwalkableHistory_DisclosesWalkNeverRan(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t) // a store, but NOT a git repo → gitx.Log fails
 	var stdout, stderr bytes.Buffer
 	deps := syncDeps{
@@ -507,6 +519,7 @@ func TestRunSync_OrRegen_UnwalkableHistory_DisclosesWalkNeverRan(t *testing.T) {
 // walk-never-ran disclosure line the --or-regen branch prints (that line
 // belongs only where sync is about to fall back regardless).
 func TestRunSync_NoOrRegen_UnwalkableHistory_StaysByteIdentical(t *testing.T) {
+	t.Parallel()
 	root := buildTestStore(t) // not a git repo → gitx.Log fails, same as above
 	var stdout, stderr bytes.Buffer
 	deps := syncDeps{

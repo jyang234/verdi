@@ -130,9 +130,10 @@
 #      untouched. In any other state it treats the report as stale and
 #      regenerates it, which can discard dispositions (it names which).
 #   2. Push the close branch (`git push -u origin close/<name>`). The push
-#      triggers close-evidence.yml, which runs verify.yml's `verify` job
-#      with no path filter: `make verify`, then `verdi sync --produce`, then
-#      the upload of the `verdi-evidence` artifact for R.
+#      triggers close-evidence.yml, which runs verify.yml with no path
+#      filter: its gate jobs, then, once all of them succeed, its `verify`
+#      job's `verdi sync --produce` and the upload of the `verdi-evidence`
+#      artifact for R (SI-267).
 #   3. Open the closure pull request from close/<name> to the default
 #      branch, with R as its head. The countersign reads this pull request
 #      (LANDED above), so it must be open before the dispatch.
