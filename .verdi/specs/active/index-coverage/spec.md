@@ -14,8 +14,9 @@ acceptance_criteria:
 constraints:
   - { id: co-1, text: "Coverage is family structure, never evidence-bearing state (workbench-legibility dc-4's bar, kept by parent dc-12), and nothing is persisted.", anchor: co-1 }
   - { id: co-2, text: "The function lives in one shared internal package that the wall, the index, and the dialog import; no consumer copies it.", anchor: co-2 }
+  - { id: co-3, text: "The function is pure over inputs its caller loads once per render: the feature's decoded frontmatter and one corpus index's implements backlinks. Computing coverage for every accepted feature on the index builds no wall or family projection and no second index per feature (parent dc-12: one computation per render).", anchor: co-3 }
 decisions:
-  - { id: dc-1, text: "The function is assembled from the two projections the board already computes, not written anew. The stub half is extracted from the wall projection's per-criterion stub counts (the scoping canvas's ACCoverage), so the wall's coverage chips keep their texts (parent ac-2). The story half comes from the family projection boards already render from implements edges (workbench-legibility ac-2; the board's family links).", anchor: dc-1 }
+  - { id: dc-1, text: "The function is assembled from the two projections the board already computes, not written anew. The stub half is extracted from the wall projection's per-criterion stub counts (the scoping canvas's ACCoverage), so the wall's coverage chips keep their texts (parent ac-2). The story half is read from the corpus index's implements backlinks on each criterion (spec/<feature>#<ac>), the same edges workbench-legibility ac-2's family projection renders; it is not read through the stubs' criterion lists, so a story that implements an unstubbed criterion still covers it.", anchor: dc-1 }
   - { id: dc-2, text: "A criterion counts as uncovered for the call to action only when no declared stub lists it and no story implements it (parent dc-5).", anchor: dc-2 }
 links:
   - { type: implements, ref: "spec/workbench-redesign#ac-7" }
@@ -60,12 +61,19 @@ nothing is persisted.
 The function lives in one shared internal package that the wall, the index, and the dialog import; no consumer copies
 it.
 
+## co-3
+
+The function is pure over inputs its caller loads once per render: the feature's decoded frontmatter and one corpus
+index's implements backlinks. Computing coverage for every accepted feature on the index builds no wall or family
+projection and no second index per feature (parent dc-12: one computation per render).
+
 ## dc-1
 
 The function is assembled from the two projections the board already computes, not written anew. The stub half is
 extracted from the wall projection's per-criterion stub counts (the scoping canvas's ACCoverage), so the wall's coverage
-chips keep their texts (parent ac-2). The story half comes from the family projection boards already render from
-implements edges (workbench-legibility ac-2; the board's family links).
+chips keep their texts (parent ac-2). The story half is read from the corpus index's implements backlinks on each
+criterion (spec/<feature>#<ac>), the same edges workbench-legibility ac-2's family projection renders; it is not read
+through the stubs' criterion lists, so a story that implements an unstubbed criterion still covers it.
 
 ## dc-2
 

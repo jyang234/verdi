@@ -8,7 +8,7 @@ quality:
   state: elaborated
   claim: "For every fixture feature, the function returns each criterion's covering stubs and stories exactly as declared stubs and implements edges give them, and reads no other input."
   falsifier: "A criterion's coverage differs from its stubs and implements edges, or the result depends on another input."
-  scope: "Table-driven features: uncovered, stub-covered, story-covered, both, and several stubs and stories per criterion."
+  scope: "Table-driven features: uncovered, stub-covered, story-covered through a stub, story-covered on an unstubbed criterion, both, and several stubs and stories per criterion."
   producer: { kind: test, ref: "go-test:internal/featurecoverage:TestCoverage_PerCriterion" }
   authoritative_source: { kind: ci-job, ref: "verify" }
   freshness:
@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/featurecoverage:TestCoverage_PerCriterion in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-coverage" }
-frozen: { at: 2026-09-29, commit: 46186349d2eeff711dd26270bd48d3b821ccee93 }
+frozen: { at: 2026-09-29, commit: 9fd6a10c37abfab8acea534f1f4b1733b25b9059 }
 ---
 # One pure coverage function per accepted feature
 
