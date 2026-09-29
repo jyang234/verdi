@@ -35,6 +35,15 @@ package main
 //     store no longer shows once earlier suites have written to it
 //     (R-RR1-23) — see readinesspilotfixture.go. main.go stops it with
 //     the harness.
+//   - POST /clock, GET /clock  the settable harness clock (indexdates.go,
+//     spec/index-data ac-3): refindex.IsQuiet reads it, never the wall
+//     clock, for every following GET /index-dates call.
+//   - GET  /index-dates  the live directory index (refindex.ComputeIndex
+//     over this scratch store) with each entry's date, date disclosure,
+//     and quiet verdict against the clock above — a machine-readable
+//     window a Playwright spec can assert against without any visible
+//     age/quiet markup on the served page (indexdates.go's own doc
+//     comment).
 //   - GET  /objsupersede-fixture returns JSON describing EIGHT isolated
 //     stores, one per closed-spec object supersession scenario (design
 //     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
@@ -81,6 +90,10 @@ type controlServer struct {
 	specImport         *specImportFixture
 	readinessPilot     *readinessPilotFixture
 	objSupersede       *objSupersedeFixture
+	// clock is the settable "now" GET /index-dates decides quiet against
+	// (indexdates.go, spec/index-data ac-2/ac-3) — never the wall clock
+	// read directly.
+	clock *harnessClock
 }
 
 // newControlServer wires the fixtures. openMRFeedURL is this server's own
@@ -97,6 +110,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		specImport:         newSpecImportFixture(moduleRoot),
 		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
 		objSupersede:       newObjSupersedeFixture(moduleRoot),
+		clock:              &harnessClock{},
 	}
 }
 
@@ -138,6 +152,12 @@ func (c *controlServer) handler() http.Handler {
 	// 2026-09-24-closed-spec-object-supersession-design.md §8 needs, which
 	// no shared-store spec models.
 	mux.HandleFunc("/objsupersede-fixture", c.objSupersede.handler)
+	// The settable harness clock and the live index-dates window
+	// (indexdates.go, spec/index-data ac-2/ac-3): a machine-readable
+	// alternative to visible age/quiet markup, which no story has added
+	// to the served page yet.
+	mux.HandleFunc("/clock", c.clockHandler)
+	mux.HandleFunc("/index-dates", c.indexDatesHandler)
 	return mux
 }
 
