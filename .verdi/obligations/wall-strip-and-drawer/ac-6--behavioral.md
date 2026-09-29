@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/wall-strip-and-drawer" }
-frozen: { at: 2026-09-29, commit: 49220b472016f65dabd052f5edc38138483cfbd2 }
+frozen: { at: 2026-09-29, commit: fe196661a03bda803eaa0863c6514279c102fd7c }
 ---
 # The rail is gone and every item has a home
 

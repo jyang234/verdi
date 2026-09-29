@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/workbench:TestCaseFileStrip_BadgeAndFlagChips in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/wall-strip-and-drawer" }
-frozen: { at: 2026-09-29, commit: 49220b472016f65dabd052f5edc38138483cfbd2 }
+frozen: { at: 2026-09-29, commit: fe196661a03bda803eaa0863c6514279c102fd7c }
 ---
 # The strip's chip markup carries the badge contract
 
