@@ -46,8 +46,8 @@ runners; coarse suite records for the Playwright suite; the verification program
 Options considered: (a) `playwright:<file>:<title path>` with the file closing at its first `:`; (b) a colon-free encoding of the
 title (an index or a hash), which a renamed or reordered test would silently re-point; (c) matching on the test's own title
 alone, which is ambiguous when two describe blocks share a title. Chosen (a): it is legible, it names exactly what Playwright
-reports, and a rename surfaces as a missing producer. About fifty test titles and seventy describe titles in `e2e/tests/` contain `:` (2026-09-29), so the split rule is
-required; none contains `›`.
+reports, and a rename surfaces as a missing producer. About fifty test titles and seventy describe titles in `e2e/tests/`
+contain `:` (2026-09-29), so the split rule is required; none contains `›`.
 
 ## 4. Where the record is produced (SI-293)
 
