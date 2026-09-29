@@ -522,6 +522,77 @@ func TestCache_PanickingEnumerationReleasesItsEntry(t *testing.T) {
 	}
 }
 
+// TestCache_WaiterOfAnUnstoredLeaderEnumerates (B3-RR2): a call that
+// shares an entry whose leader stored nothing — the guard refused the
+// leader's result — enumerates for itself and returns the real result,
+// never an empty one; a call sharing a stored result returns it without
+// enumerating. Adapted from the re-review's waiter probe, made
+// deterministic: an entry that is finished but not yet released is the
+// state a waiter sees after its leader's refusal, whichever of the two
+// arrives first.
+func TestCache_WaiterOfAnUnstoredLeaderEnumerates(t *testing.T) {
+	stored := []disclosure.Disclosure{disclosure.New("lint:VL-999", "stored", "the leader's stored result")}
+	tests := []struct {
+		name string
+		// leader returns the entry a leader holds for the key, and a
+		// function that finishes it.
+		leader           func() (*cacheEntry, func())
+		wantStored       bool
+		wantEnumerations int64
+	}{
+		{"the leader stored nothing and has finished", func() (*cacheEntry, func()) {
+			e := &cacheEntry{done: make(chan struct{})}
+			close(e.done)
+			return e, func() {}
+		}, false, 1},
+		{"the leader stored nothing and finishes while the call runs", func() (*cacheEntry, func()) {
+			e := &cacheEntry{done: make(chan struct{})}
+			return e, func() { close(e.done) }
+		}, false, 1},
+		{"the leader stored a result", func() (*cacheEntry, func()) {
+			e := &cacheEntry{done: make(chan struct{}), items: stored, ok: true}
+			close(e.done)
+			return e, func() {}
+		}, true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newCacheFixture(t)
+			pastRacyWindow(t)
+			in, err := readInputs(context.Background(), fx.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var c Cache
+			e, finish := tt.leader()
+			e.key = in.key
+			c.entries = map[string]*cacheEntry{fx.root: e}
+			n := countEnumerations(t)
+
+			type result struct {
+				items []disclosure.Disclosure
+				err   error
+			}
+			out := make(chan result, 1)
+			go func() {
+				items, err := c.Current(context.Background(), fx.root)
+				out <- result{items, err}
+			}()
+			finish()
+			got := <-out
+
+			want, wantErr := fresh(t, fx.root)
+			if tt.wantStored {
+				want, wantErr = stored, nil
+			}
+			sameResult(t, "the waiting call", got.items, got.err, want, wantErr)
+			if got := n.Load(); got != tt.wantEnumerations {
+				t.Fatalf("the waiting call enumerated %d times, want %d", got, tt.wantEnumerations)
+			}
+		})
+	}
+}
+
 func TestCacheEntry_Await(t *testing.T) {
 	stored := []disclosure.Disclosure{disclosure.New("lint:VL-017", "x", "y")}
 	canceled, cancel := context.WithCancel(context.Background())
