@@ -185,6 +185,12 @@ Every Wave 6 page preserves the pilot's primary interaction model:
 - the complete concern set even when the queue changes prominence; and
 - explicit `proven`, `violated-with-witness`, and `unproven` language.
 
+**Amended 2026-09-28 (owner decision D-WR-2, SI-287).** On the readiness page, `spec/workbench-redesign` ac-4 replaces the
+exact-three-preview rule: the page follows the adopted design, where the four areas are a stepper, a ranked Focus next list
+shows every current concern, and Known problems in later steps and Completed checks follow. Every other property in this
+list still binds, including the complete concern set, the per-request derivation stamp, and guidance first
+(spec-documents ac-12).
+
 The shell is presentation. Each feature's application core supplies the facts
 and permissible actions that populate it.
 
@@ -713,6 +719,10 @@ The promoted Wave 3.5 cockpit becomes live and lifecycle-complete:
   reviewed markup-only change; and
 - broader role obligations are presented without implying that one solo author
   satisfied independent-review or countersign requirements.
+
+**Amended 2026-09-28 (owner decision D-WR-2, SI-287).** The byte-compatibility of the four areas, the three-row preview, and
+complete expansion no longer binds the readiness page: its markup follows `spec/workbench-redesign` ac-4. The four areas, the
+complete concern set, and the solo-author language stay, as §3.1 states.
 
 ## 9. CSE coordinator and workbench
 
