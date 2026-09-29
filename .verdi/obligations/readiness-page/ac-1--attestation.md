@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/readiness-page" }
-frozen: { at: 2026-09-29, commit: f7ab175c02065518c033d50178130f21f7bcd778 }
+frozen: { at: 2026-09-29, commit: 01c200e50eacb38505ba12850d187be361d1301a }
 ---
 # The owner accepts the readiness page's visual fidelity
 

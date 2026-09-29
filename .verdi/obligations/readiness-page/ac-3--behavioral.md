@@ -8,7 +8,7 @@ quality:
   state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/readiness-page" }
-frozen: { at: 2026-09-29, commit: f7ab175c02065518c033d50178130f21f7bcd778 }
+frozen: { at: 2026-09-29, commit: 01c200e50eacb38505ba12850d187be361d1301a }
 ---
 # Human review labeled plainly, three-valued states, solo-author language
 
