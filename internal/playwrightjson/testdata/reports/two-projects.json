@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/two-projects.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-two-projects"
     ],
@@ -108,12 +109,12 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 4,
+                      "duration": 3,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:51:23.298Z",
+                      "startTime": "2026-09-30T15:49:28.202Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -142,12 +143,12 @@
                       "workerIndex": 1,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 4,
+                      "duration": 3,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:51:24.978Z",
+                      "startTime": "2026-09-30T15:49:28.489Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -167,8 +168,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-09-30T13:51:21.746Z",
-    "duration": 3500.2779999999993,
+    "startTime": "2026-09-30T15:49:27.937Z",
+    "duration": 579.826,
     "expected": 2,
     "skipped": 0,
     "unexpected": 0,

@@ -508,6 +508,32 @@ func TestProducePlaywrightEvidence_HelperDeclaredTest(t *testing.T) {
 	playwrightAssertOutcomes(t, root, stdout, cases)
 }
 
+// TestProducePlaywrightEvidence_TestFreeFile proves SI-308: a named file that
+// exists but declares no tests is run like any other, and the report of that
+// run (no-tests.json, a real run with --pass-with-no-tests) carries no error
+// of its own and no test, so each obligation naming a test in it gets no
+// record and design §5 row 4's disclosure, never an operational error.
+func TestProducePlaywrightEvidence_TestFreeFile(t *testing.T) {
+	t.Parallel()
+	const file = "playwright:e2e/tests/no-tests.spec.ts:"
+	cases := []playwrightOutcomeCase{
+		{ac: "ac-1", kind: "behavioral", ref: file + "removed › was here", absent: "did not run: its title path is not in the run's report"},
+		{ac: "ac-2", kind: "static", ref: file + "never written", absent: "did not run: its title path is not in the run's report"},
+	}
+	root := t.TempDir()
+	playwrightSpecFiles(t, root, "no-tests.spec.ts")
+	playwrightWriteCases(t, root, cases)
+	runner := &playwrightFakeRunner{report: playwrightReportFixture(t, "no-tests", root)}
+	stdout, err := playwrightProduce(t, root, runner)
+	if err != nil {
+		t.Fatalf("playwrightProduceEvidence = %v, want no operational error", err)
+	}
+	if want := []playwrightRunCall{{root: root, specs: []string{"no-tests.spec.ts"}}}; !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("runner calls = %+v, want %+v", runner.calls, want)
+	}
+	playwrightAssertOutcomes(t, root, stdout, cases)
+}
+
 // TestProducePlaywrightEvidence_DuplicateElsewhereIsNotOperational proves the
 // operational duplicate is only the NAMED title path shared in the named
 // file: a duplicate of another title path in that file ("outcomes › fails",

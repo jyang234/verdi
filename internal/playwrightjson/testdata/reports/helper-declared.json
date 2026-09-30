@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/helper-declared.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-helper-declared"
     ],
@@ -97,7 +98,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T15:43:55.146Z",
+                      "startTime": "2026-09-30T15:49:29.371Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -139,7 +140,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T15:43:55.166Z",
+                      "startTime": "2026-09-30T15:49:29.391Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -159,8 +160,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-09-30T15:43:54.862Z",
-    "duration": 321.05300000000005,
+    "startTime": "2026-09-30T15:49:29.097Z",
+    "duration": 312.52199999999993,
     "expected": 2,
     "skipped": 0,
     "unexpected": 0,

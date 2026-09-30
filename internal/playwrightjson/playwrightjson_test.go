@@ -232,6 +232,10 @@ func TestDecode_CapturedReports(t *testing.T) {
 				{"shared checks for home › renders", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
 			},
 		}},
+		// A named file that declares no tests, run with --pass-with-no-tests
+		// as the producer runs (SI-308): no error of the run's own, and no
+		// file suite, since the reporter drops a suite without tests.
+		{name: "no-tests", files: map[string][]want{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

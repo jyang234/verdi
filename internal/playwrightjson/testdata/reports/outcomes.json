@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/outcomes.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-outcomes"
     ],
@@ -98,7 +99,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:55.976Z",
+                      "startTime": "2026-09-30T15:49:19.524Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -137,12 +138,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1,
+                  "duration": 2,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-09-30T13:43:56.001Z",
+                  "startTime": "2026-09-30T15:49:19.546Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -184,7 +185,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:56.008Z",
+                      "startTime": "2026-09-30T15:49:19.554Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -237,7 +238,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:56.014Z",
+                      "startTime": "2026-09-30T15:49:19.559Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -277,7 +278,7 @@
                       "workerIndex": 1,
                       "parallelIndex": 0,
                       "status": "timedOut",
-                      "duration": 502,
+                      "duration": 505,
                       "error": {
                         "message": "\u001b[31mTest timeout of 500ms exceeded.\u001b[39m",
                         "stack": "\u001b[31mTest timeout of 500ms exceeded.\u001b[39m"
@@ -290,7 +291,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:56.305Z",
+                      "startTime": "2026-09-30T15:49:19.824Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -339,7 +340,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.278Z",
+                      "startTime": "2026-09-30T15:49:20.624Z",
                       "annotations": [
                         {
                           "type": "skip",
@@ -392,7 +393,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.278Z",
+                      "startTime": "2026-09-30T15:49:20.625Z",
                       "annotations": [
                         {
                           "type": "skip",
@@ -444,7 +445,7 @@
                           "stdout": [],
                           "stderr": [],
                           "retry": 0,
-                          "startTime": "2026-09-30T13:43:57.301Z",
+                          "startTime": "2026-09-30T15:49:20.642Z",
                           "annotations": [],
                           "attachments": []
                         }
@@ -486,7 +487,7 @@
                           "stdout": [],
                           "stderr": [],
                           "retry": 0,
-                          "startTime": "2026-09-30T13:43:57.318Z",
+                          "startTime": "2026-09-30T15:49:20.648Z",
                           "annotations": [],
                           "attachments": []
                         }
@@ -530,7 +531,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.324Z",
+                      "startTime": "2026-09-30T15:49:20.652Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -591,7 +592,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.332Z",
+                      "startTime": "2026-09-30T15:49:20.658Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -636,7 +637,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.357Z",
+                      "startTime": "2026-09-30T15:49:20.670Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -673,7 +674,7 @@
                       "workerIndex": 3,
                       "parallelIndex": 0,
                       "status": "failed",
-                      "duration": 5,
+                      "duration": 4,
                       "error": {
                         "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m",
                         "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:60:31",
@@ -697,7 +698,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.640Z",
+                      "startTime": "2026-09-30T15:49:20.926Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -721,7 +722,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 1,
-                      "startTime": "2026-09-30T13:43:57.947Z",
+                      "startTime": "2026-09-30T15:49:21.202Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -774,7 +775,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:57.968Z",
+                      "startTime": "2026-09-30T15:49:21.221Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -817,7 +818,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 1,
-                      "startTime": "2026-09-30T13:43:58.256Z",
+                      "startTime": "2026-09-30T15:49:21.490Z",
                       "annotations": [],
                       "attachments": [
                         {
@@ -898,7 +899,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:58.559Z",
+                      "startTime": "2026-09-30T15:49:21.765Z",
                       "annotations": [
                         {
                           "type": "fail",
@@ -961,7 +962,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:43:58.583Z",
+                      "startTime": "2026-09-30T15:49:21.787Z",
                       "annotations": [
                         {
                           "type": "fail",
@@ -990,8 +991,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-09-30T13:43:55.693Z",
-    "duration": 2910.357,
+    "startTime": "2026-09-30T15:49:19.260Z",
+    "duration": 2542.39,
     "expected": 7,
     "skipped": 3,
     "unexpected": 5,

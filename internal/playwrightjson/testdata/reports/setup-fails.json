@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/setup-fails.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-setup-fails"
     ],
@@ -72,8 +73,8 @@
     }
   ],
   "stats": {
-    "startTime": "2026-09-30T13:44:00.030Z",
-    "duration": 4.165999999999997,
+    "startTime": "2026-09-30T15:49:22.893Z",
+    "duration": 4.609999999999957,
     "expected": 0,
     "skipped": 0,
     "unexpected": 0,

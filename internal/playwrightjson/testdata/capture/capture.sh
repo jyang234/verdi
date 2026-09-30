@@ -10,11 +10,12 @@
 # they never join the e2e shards.
 #
 # Each scenario runs exactly as the producer runs its named files: one worker,
-# --retries=0, the JSON reporter writing to a file, output outside the tree,
-# and recording off. The only change made to a report is path normalization,
-# so the committed bytes do not depend on who captured them: the repository
-# root becomes /verdi, the scratch directory /capture-tmp, and the node
-# binary node. Nothing else is edited; timings are the capture's own.
+# --retries=0, --pass-with-no-tests (SI-308), the JSON reporter writing to a
+# file, output outside the tree, and recording off. The only change made to a
+# report is path normalization, so the committed bytes do not depend on who
+# captured them: the repository root becomes /verdi, the scratch directory
+# /capture-tmp, and the node binary node. Nothing else is edited; timings are
+# the capture's own.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -40,13 +41,13 @@ run_scenario() {
 	cd "$e2e" && NODE_PATH="$e2e/node_modules" PLAYWRIGHT_JSON_OUTPUT_FILE="$tmp/$1.json" \
 		CAPTURE_MARKER="$tmp/$1.marker" \
 		exec npx playwright test -c "$here/$1.config.ts" --workers=1 --retries=0 \
-		--reporter=json --output="$tmp/output-$1"
+		--pass-with-no-tests --reporter=json --output="$tmp/output-$1"
 }
 
 # Every scenario by default; name scenarios to re-capture only those.
 scenarios=("$@")
 if [ ${#scenarios[@]} -eq 0 ]; then
-	scenarios=(outcomes duplicate setup-fails global-timeout sigint two-projects helper-declared)
+	scenarios=(outcomes duplicate setup-fails global-timeout sigint two-projects helper-declared no-tests)
 fi
 
 for scenario in "${scenarios[@]}"; do

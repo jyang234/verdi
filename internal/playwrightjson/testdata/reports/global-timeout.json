@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/global-timeout.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-global-timeout"
     ],
@@ -97,7 +98,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:44:01.001Z",
+                      "startTime": "2026-09-30T15:49:23.690Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -131,7 +132,7 @@
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-09-30T13:44:01.022Z",
+                      "startTime": "2026-09-30T15:49:23.710Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -178,8 +179,8 @@
     }
   ],
   "stats": {
-    "startTime": "2026-09-30T13:44:00.656Z",
-    "duration": 3002.748,
+    "startTime": "2026-09-30T15:49:23.436Z",
+    "duration": 3002.526,
     "expected": 1,
     "skipped": 2,
     "unexpected": 0,

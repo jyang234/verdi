@@ -67,8 +67,9 @@ func playwrightToolLog(t *testing.T, logs, tool string) []string {
 
 // TestPlaywrightProducerRealRunner_Invocation pins the real runner's two commands
 // through the fake-tool seam: `make e2e-setup` at the store root, then, in
-// e2e/, exactly `npx playwright test --workers=1 --retries=0 --reporter=json
-// --trace=off --output=<beside the report>` with no positional argument —
+// e2e/, exactly `npx playwright test --workers=1 --retries=0
+// --pass-with-no-tests --reporter=json --trace=off --output=<beside the
+// report>` with no positional argument —
 // Playwright's positional filters are regular-expression substring matches
 // that could select extra files — and the files named only through
 // VERDI_E2E_SPECS, the harness's exact, fail-closed selector (SI-268). The
@@ -76,6 +77,9 @@ func playwrightToolLog(t *testing.T, logs, tool string) []string {
 // inherited V1_ACCEPTANCE (which adds the v1-acceptance project) is removed,
 // an inherited VERDI_E2E_SPECS is replaced, and the tools' output goes to the
 // runner's log. A failing test's nonzero Playwright exit is not an error.
+// --pass-with-no-tests (SI-308) keeps a named file that declares no tests
+// from becoming Playwright's run-level "No tests found" error: its named
+// title paths are then only absent from the report.
 func TestPlaywrightProducerRealRunner_Invocation(t *testing.T) {
 	logs := playwrightFakeTools(t, "0", "1")
 	t.Setenv("V1_ACCEPTANCE", "1")
@@ -102,7 +106,7 @@ func TestPlaywrightProducerRealRunner_Invocation(t *testing.T) {
 	}
 	wantNpx := []string{
 		filepath.Join(realRoot, "e2e"),
-		"playwright", "test", "--workers=1", "--retries=0", "--reporter=json", "--trace=off", "--output=" + filepath.Join(work, "test-results"),
+		"playwright", "test", "--workers=1", "--retries=0", "--pass-with-no-tests", "--reporter=json", "--trace=off", "--output=" + filepath.Join(work, "test-results"),
 		"VERDI_E2E_SPECS=a.spec.ts b.spec.ts", "PLAYWRIGHT_JSON_OUTPUT_FILE=" + reportPath, "V1_ACCEPTANCE=<unset>",
 	}
 	if got := playwrightToolLog(t, logs, "npx"); !reflect.DeepEqual(got, wantNpx) {

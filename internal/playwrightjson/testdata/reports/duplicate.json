@@ -8,6 +8,7 @@
       "/verdi/internal/playwrightjson/testdata/capture/duplicate.config.ts",
       "--workers=1",
       "--retries=0",
+      "--pass-with-no-tests",
       "--reporter=json",
       "--output=/capture-tmp/output-duplicate"
     ],
@@ -80,8 +81,8 @@
     }
   ],
   "stats": {
-    "startTime": "2026-09-30T13:43:59.338Z",
-    "duration": 21.137,
+    "startTime": "2026-09-30T15:49:22.349Z",
+    "duration": 9.389999999999986,
     "expected": 0,
     "skipped": 0,
     "unexpected": 0,

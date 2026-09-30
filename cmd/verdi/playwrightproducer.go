@@ -16,8 +16,9 @@
 // HONESTY. As with the go-test producer, a renamed or removed test surfaces as
 // a missing producer, a closure blocker, never a silent pass: a named file
 // that does not exist, or a title path the report does not carry (the test
-// did not run), emits no record, only a disclosure, and withdraws any earlier
-// record for its producer at the same commit (SI-238). A malformed ref is
+// did not run, or its file declares no tests, SI-308), emits no record, only
+// a disclosure, and withdraws any earlier record for its producer at the same
+// commit (SI-238). A malformed ref is
 // disclosed and skipped on its own obligation, never an operational error for
 // the others (SI-303). Only what makes the whole run untrustworthy is an
 // operational error (exit 2) that writes nothing: a run that could not be
@@ -209,7 +210,8 @@ func playwrightSelectObligations(candidates []testProducerCandidate, jobName str
 // fakes in unit tests; the real runner only in production).
 type playwrightRunner interface {
 	// RunPlaywright runs exactly specs (file names under root's e2e/tests/)
-	// once through the harness — one worker, no retries, recording off — with
+	// once through the harness — one worker, no retries, recording off, and a
+	// file that declares no tests no error of the run's own — with
 	// Playwright's JSON reporter writing to reportPath. A failing test is not
 	// an error here: the report says what ran. Only a run that could not be
 	// carried out is.
@@ -230,8 +232,16 @@ type playwrightRealRunner struct {
 // files, so the files reach the harness only through VERDI_E2E_SPECS, its
 // exact, fail-closed selector (SI-268). Screenshots and video stay off by the
 // config's defaults (e2e/playwright.config.ts sets neither).
+//
+// --pass-with-no-tests (SI-308): without it, a run whose named files all
+// exist but declare no tests stops with Playwright's own "No tests found"
+// error, a run-level error that would withhold every record of the run.
+// Because the selector is exact, a zero-test run can come only from such
+// files, so with the flag their named title paths are simply absent from the
+// report: each such obligation gets no record and a disclosure (SI-294's
+// absent title path), and no other obligation is affected.
 func playwrightRunArgs(outputDir string) []string {
-	return []string{"playwright", "test", "--workers=1", "--retries=0", "--reporter=json", "--trace=off", "--output=" + outputDir}
+	return []string{"playwright", "test", "--workers=1", "--retries=0", "--pass-with-no-tests", "--reporter=json", "--trace=off", "--output=" + outputDir}
 }
 
 // playwrightRunEnvOverrides are the variables the run sets or removes: an
