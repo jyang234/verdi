@@ -714,8 +714,10 @@ func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 
 // TestTakeOverStale_Direct drives takeOverStale itself over each lock it can
 // find, including its operational failures: it removes only a stale lock,
-// answers nil (re-evaluate) for every other, and reports an error — having
-// removed nothing — when it cannot open, flock, or unlink the lock.
+// answers nil (re-evaluate) for every other — a symlink at the lock path
+// included, even one naming a stale lock, since the re-check's os.Lstat
+// never counts a symlink as the file it judged — and reports an error,
+// having removed nothing, when it cannot open, flock, or unlink the lock.
 func TestTakeOverStale_Direct(t *testing.T) {
 	self := os.Getpid()
 	selfStart := secondsAgo(time.Hour)
@@ -757,6 +759,13 @@ func TestTakeOverStale_Direct(t *testing.T) {
 		}, "", false},
 		{"a dead holder's lock", staleBodies[0].seed, "", true},
 		{"an aged empty body", staleBodies[1].seed, "", true},
+		{"a symlink at the lock path naming a dead holder's lock", func(t *testing.T, path string) {
+			target := filepath.Join(filepath.Dir(path), "target.lock")
+			staleBodies[0].seed(t, target)
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}, "", false},
 		{"the lock cannot be opened", func(t *testing.T, path string) {
 			notRoot(t)
 			staleBodies[0].seed(t, path)
