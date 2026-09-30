@@ -244,24 +244,26 @@ func playwrightRunArgs(outputDir string) []string {
 	return []string{"playwright", "test", "--workers=1", "--retries=0", "--pass-with-no-tests", "--reporter=json", "--trace=off", "--output=" + outputDir}
 }
 
-// playwrightRunEnvOverrides are the variables the run sets or removes: an
-// inherited V1_ACCEPTANCE would add the config's second project
-// (v1-acceptance, every file under e2e/tests-v1/), and inherited selector or
-// report variables would redirect the run.
-var playwrightRunEnvOverrides = []string{"V1_ACCEPTANCE", "VERDI_E2E_SPECS", "PLAYWRIGHT_JSON_OUTPUT_FILE", "PLAYWRIGHT_JSON_OUTPUT_DIR", "PLAYWRIGHT_JSON_OUTPUT_NAME", "PWD"}
+// playwrightRunEnvOverridden reports whether name is one of the variables
+// the run sets or removes: an inherited V1_ACCEPTANCE would add the config's
+// second project (v1-acceptance, every file under e2e/tests-v1/), and
+// inherited selector or report variables would redirect the run.
+func playwrightRunEnvOverridden(name string) bool {
+	switch name {
+	case "V1_ACCEPTANCE", "VERDI_E2E_SPECS", "PLAYWRIGHT_JSON_OUTPUT_FILE", "PLAYWRIGHT_JSON_OUTPUT_DIR", "PLAYWRIGHT_JSON_OUTPUT_NAME", "PWD":
+		return true
+	}
+	return false
+}
 
-// playwrightRunEnv is parent without playwrightRunEnvOverrides, plus the
-// harness selector, the report path, and PWD for dir (what os/exec sets
-// itself when it inherits the environment).
+// playwrightRunEnv is parent without the variables playwrightRunEnvOverridden
+// names, plus the harness selector, the report path, and PWD for dir (what
+// os/exec sets itself when it inherits the environment).
 func playwrightRunEnv(parent []string, dir string, specs []string, reportPath string) []string {
 	env := make([]string, 0, len(parent)+3)
 	for _, kv := range parent {
 		name, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, o := range playwrightRunEnvOverrides {
-			drop = drop || name == o
-		}
-		if !drop {
+		if !playwrightRunEnvOverridden(name) {
 			env = append(env, kv)
 		}
 	}

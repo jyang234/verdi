@@ -89,9 +89,23 @@ const (
 	OutcomeSkipped    = "skipped"
 )
 
-var attemptStatuses = map[string]bool{StatusPassed: true, StatusFailed: true, StatusTimedOut: true, StatusSkipped: true, StatusInterrupted: true}
+// isAttemptStatus reports whether s is one of the attempt statuses above.
+func isAttemptStatus(s string) bool {
+	switch s {
+	case StatusPassed, StatusFailed, StatusTimedOut, StatusSkipped, StatusInterrupted:
+		return true
+	}
+	return false
+}
 
-var outcomes = map[string]bool{OutcomeExpected: true, OutcomeUnexpected: true, OutcomeFlaky: true, OutcomeSkipped: true}
+// isOutcome reports whether s is one of the test outcomes above.
+func isOutcome(s string) bool {
+	switch s {
+	case OutcomeExpected, OutcomeUnexpected, OutcomeFlaky, OutcomeSkipped:
+		return true
+	}
+	return false
+}
 
 // Report is one decoded JSON report.
 type Report struct {
@@ -525,10 +539,10 @@ func decodeTest(tj testJSON, titlePath []string) (Test, error) {
 	case tj.Results == nil:
 		return Test{}, errors.New("it has no results")
 	}
-	if !attemptStatuses[*tj.ExpectedStatus] {
+	if !isAttemptStatus(*tj.ExpectedStatus) {
 		return Test{}, fmt.Errorf("unknown expected status %q", *tj.ExpectedStatus)
 	}
-	if !outcomes[*tj.Status] {
+	if !isOutcome(*tj.Status) {
 		return Test{}, fmt.Errorf("unknown test outcome %q", *tj.Status)
 	}
 	tc := Test{TitlePath: titlePath, ProjectName: *tj.ProjectName, ExpectedStatus: *tj.ExpectedStatus, Outcome: *tj.Status}
@@ -538,7 +552,7 @@ func decodeTest(tj testJSON, titlePath []string) (Test, error) {
 			return Test{}, fmt.Errorf("attempt %d has no status", i)
 		case rj.Retry == nil:
 			return Test{}, fmt.Errorf("attempt %d has no retry index", i)
-		case !attemptStatuses[*rj.Status]:
+		case !isAttemptStatus(*rj.Status):
 			return Test{}, fmt.Errorf("unknown attempt status %q", *rj.Status)
 		case *rj.Retry != i:
 			return Test{}, fmt.Errorf("attempt %d has retry %d: attempts are out of retry order", i, *rj.Retry)
