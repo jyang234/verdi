@@ -3,6 +3,7 @@ package playwrightjson
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -349,6 +350,23 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 			})
 		}, `unknown field "category"`},
 
+		{"an attempt error that is not an object", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { failingResult(t, r)["error"] = 5 })
+		}, "a test error is not a JSON object: json: cannot unmarshal number"},
+		{"an attempt error that is null", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { failingResult(t, r)["error"] = nil })
+		}, "a test error is not a JSON object: null"},
+		{"a step error that is not an object", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				firstResult(t, r)["steps"] = []any{map[string]any{"title": "s", "duration": 1, "error": "boom"}}
+			})
+		}, "a test error is not a JSON object: json: cannot unmarshal string"},
+		{"a step error that is null", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				firstResult(t, r)["steps"] = []any{map[string]any{"title": "s", "duration": 1, "error": nil}}
+			})
+		}, "a test error is not a JSON object: null"},
+
 		{"unknown attempt status", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { firstResult(t, r)["status"] = "flaky" })
 		}, `unknown attempt status "flaky"`},
@@ -447,6 +465,41 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 	}
 }
 
+// TestDecode_NonObjectsNameTheirCause proves the config and a run error, each
+// an open object, are refused when they are not a JSON object, with an error
+// that says why and wraps the decoding error when there is one, never a
+// "<nil>" cause.
+func TestDecode_NonObjectsNameTheirCause(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		edit     func(r map[string]any)
+		want     string
+		wantType bool // the error wraps a *json.UnmarshalTypeError
+	}{
+		{"a null config", func(r map[string]any) { r["config"] = nil }, "the config is not a JSON object: null", false},
+		{"an array config", func(r map[string]any) { r["config"] = []any{} }, "the config is not a JSON object: json: cannot unmarshal array", true},
+		{"a null run error", func(r map[string]any) { r["errors"] = []any{nil} }, "run error 0: not a JSON object: null", false},
+		{"a number run error", func(r map[string]any) { r["errors"] = []any{5} }, "run error 0: not a JSON object: json: cannot unmarshal number", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Decode(bytes.NewReader(mutated(t, "outcomes", tc.edit)))
+			if err == nil {
+				t.Fatalf("Decode = nil error, want one containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "<nil>") {
+				t.Errorf("Decode error = %q, want it to contain %q and no <nil>", err, tc.want)
+			}
+			var typeErr *json.UnmarshalTypeError
+			if got := errors.As(err, &typeErr); got != tc.wantType {
+				t.Errorf("errors.As(%q, *json.UnmarshalTypeError) = %v, want %v", err, got, tc.wantType)
+			}
+		})
+	}
+}
+
 // TestDecode_OpenFieldsStayOpen proves the fields this decoder leaves open —
 // the config beyond the run shape, a project's user metadata, and the
 // TestError payloads — accept keys the pinned schema does not list, while the
@@ -466,6 +519,9 @@ func TestDecode_OpenFieldsStayOpen(t *testing.T) {
 		}},
 		{"a test error's cause", func(t *testing.T, r map[string]any) {
 			obj(t, failingResult(t, r), "error")["cause"] = map[string]any{"message": "m", "detail": 1}
+		}},
+		{"a step error's key", func(t *testing.T, r map[string]any) {
+			firstResult(t, r)["steps"] = []any{map[string]any{"title": "s", "duration": 1, "error": map[string]any{"message": "m", "futureKey": 1}}}
 		}},
 		{"a run error's key", func(t *testing.T, r map[string]any) {
 			r["errors"] = []any{map[string]any{"message": "m", "futureKey": 1}}

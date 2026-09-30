@@ -43,7 +43,12 @@
 //     own errors): the worker serializes it from whatever value the test
 //     threw, and adds keys the public TestError type does not list (for
 //     example errorContext, from an aria-snapshot matcher); only a run
-//     error's message is read, to name it.
+//     error's message is read, to name it, and must be a string when
+//     present.
+//
+// Open is not shapeless: the config and every TestError must be a JSON
+// object (an attempt's or step's error may also be absent), never null or
+// another JSON value.
 package playwrightjson
 
 import (
@@ -241,7 +246,7 @@ type resultJSON struct {
 	ShardIndex    int                 `json:"shardIndex"`
 	Status        *string             `json:"status"`
 	Duration      float64             `json:"duration"`
-	Error         json.RawMessage     `json:"error"`
+	Error         testErrorJSON       `json:"error"`
 	Errors        []reportedErrorJSON `json:"errors"`
 	Stdout        []stdioJSON         `json:"stdout"`
 	Stderr        []stdioJSON         `json:"stderr"`
@@ -266,10 +271,25 @@ type stdioJSON struct {
 }
 
 type stepJSON struct {
-	Title    string          `json:"title"`
-	Duration float64         `json:"duration"`
-	Error    json.RawMessage `json:"error"`
-	Steps    []stepJSON      `json:"steps"`
+	Title    string        `json:"title"`
+	Duration float64       `json:"duration"`
+	Error    testErrorJSON `json:"error"`
+	Steps    []stepJSON    `json:"steps"`
+}
+
+// testErrorJSON is an attempt's or a step's TestError: an open object (see
+// the package doc), never read for a verdict. The reporter writes an object
+// or omits the key (an undefined error), so any other JSON value, null
+// included, is refused; an absent error leaves the zero value.
+type testErrorJSON struct{}
+
+// UnmarshalJSON accepts a JSON object only. encoding/json calls it for a
+// present key, null included, because the field is not a pointer.
+func (*testErrorJSON) UnmarshalJSON(raw []byte) error {
+	if _, err := decodeObject(raw); err != nil {
+		return fmt.Errorf("a test error is %w", err)
+	}
+	return nil
 }
 
 type attachmentJSON struct {
@@ -363,12 +383,25 @@ func strictDecode(raw []byte, v any) error {
 	return nil
 }
 
+// decodeObject reads raw as a JSON object whose keys stay open. null and any
+// other JSON value are refused, wrapping the decoding error when there is one.
+func decodeObject(raw []byte) (map[string]json.RawMessage, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("not a JSON object: %w", err)
+	}
+	if obj == nil {
+		return nil, errors.New("not a JSON object: null")
+	}
+	return obj, nil
+}
+
 // decodeConfig reads the open config's run shape: version, rootDir, workers,
 // and each project, strictly.
 func decodeConfig(raw json.RawMessage) (Report, error) {
-	var config map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &config); err != nil || config == nil {
-		return Report{}, fmt.Errorf("the config is not an object: %v", err)
+	config, err := decodeObject(raw)
+	if err != nil {
+		return Report{}, fmt.Errorf("the config is %w", err)
 	}
 	var report Report
 	for _, field := range []struct {
@@ -408,9 +441,9 @@ func decodeConfig(raw json.RawMessage) (Report, error) {
 
 // errorMessage reads a TestError's message, leaving its other keys open.
 func errorMessage(raw json.RawMessage) (string, error) {
-	var e map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &e); err != nil || e == nil {
-		return "", fmt.Errorf("not an object: %v", err)
+	e, err := decodeObject(raw)
+	if err != nil {
+		return "", err
 	}
 	msg, ok := e["message"]
 	if !ok {
