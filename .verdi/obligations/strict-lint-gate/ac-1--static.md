@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/specalign:TestStrictLintTargetIsWired in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/strict-lint-gate" }
-frozen: { at: 2026-09-30, commit: 9643a79dd1a137f2f9b5cf09d1f905ea997d0a7c }
+frozen: { at: 2026-09-30, commit: 21d64a8446e9fabd2e48d0ed6f093952853c543a }
 ---
 # The strict target is configured and wired, and the parity file is pinned
 
