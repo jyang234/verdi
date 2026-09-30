@@ -1,7 +1,7 @@
 # Playwright Test Producer — Authority Design
 
-Status: draft authority text, awaiting its one independent cross-model review. It is ratified by the owner's merge of the pull
-request that carries it. That pull request applies the 03 and 08 text of §8 to the workspace origin (`docs/design/specs/`) and to
+Status: ratified by the owner's merge of PR #376 on 2026-09-30 (main `85a42556`), without the independent cross-model review
+(the owner's call). Its ratification text was applied by the follow-up change on `design/ratify-story-revision`, which applies the 03 and 08 text of §8 to the workspace origin (`docs/design/specs/`) and to
 the self-hosted mirror (`spec/verdi-evidence-model`). Ledger: SI-292 through SI-294. Backlog: BL-98.
 
 The owner chose this route on 2026-09-29 for the workbench redesign's seven frontend stories. It pairs with the story

@@ -1,7 +1,7 @@
 # Story Supersession Proof — Authority Design
 
-Status: draft authority text, awaiting its one independent cross-model review. It is ratified by the owner's merge of the pull
-request that carries it. That pull request applies the 02, 03, and 08 text of §7 to the workspace origins (`docs/design/specs/`)
+Status: ratified by the owner's merge of PR #376 on 2026-09-30 (main `85a42556`), without the independent cross-model review
+(the owner's call). Its ratification text was applied by the follow-up change on `design/ratify-story-revision`, which applies the 02, 03, and 08 text of §7 to the workspace origins (`docs/design/specs/`)
 and to the self-hosted mirrors (`spec/verdi-artifact-contract`, `spec/verdi-evidence-model`). Ledger: SI-290, SI-291. Backlog:
 BL-97.
 

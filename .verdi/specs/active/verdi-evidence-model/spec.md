@@ -61,9 +61,12 @@ spec levels:
   pass/fail and the flowmap coverage delta — because unmanaged per-test AC
   mapping would rot and poison the matrix's credibility. The one sanctioned
   exception is an elaborated evidence obligation that names a single test as
-  its producer (`go-test:<package>:<TestName>`): that obligation is matched
-  per test, and a renamed or removed test surfaces as a missing producer, a
-  closure blocker, never as a silent pass.
+  its producer — a Go test (`go-test:<package>:<TestName>`) or a Playwright
+  test (`playwright:<file>:<title path>`, where `<file>` is the test file's
+  path under `e2e/tests/` and `<title path>` joins its enclosing describe
+  titles and its own title with ` › `): that obligation is matched per test,
+  and a renamed or removed test surfaces as a missing producer, a closure
+  blocker, never as a silent pass.
 - **Dangling bindings are errors, not empty cells.** `verdi lint` validates
   discovered binding declarations against the named spec's ACs — story or
   feature (VL-003 extended scope) — and `verdi matrix`/the fold fails loudly
@@ -299,24 +302,31 @@ Authoritative-source matching compares an obligation's CI-job reference with
 
 **Bundle assembly.** `verdicts.json` is verdi-assembled, never
 upstream-native: a graph's `obligations[]` joined against a service's
-`verdi.bindings.yaml` sidecar produces the static-kind records above; a
-`go test -json` suite run produces coarse behavioral records (suite
-pass/fail, no per-test AC mapping — see §Declarations); for each elaborated
-obligation naming a test producer, the same job also emits one record for
-that obligation, carrying its own kind and acceptance criterion — `pass` on
-the named test's terminal pass, `fail` on its failure, `abstain` when
-skipped, and no record, with a disclosure, when the test did not run; a
-malformed or truncated result stream is an operational error. `tests.json` is a
-small, verdi-owned summary of that same `go test -json` run (pass/fail
-counts, not a per-AC join). `review.json` is the upstream `groundwork
-review --json` record(s), stored verbatim — every field preserved
-unchanged. `boundary-diff.json` is verdi-computed from two strict-decoded
-boundary contracts (upstream's `groundwork diff` has no JSON mode), with
-the breaking-change verdict cross-checked against `groundwork diff`'s own
-exit code. A regenerated graph's obligation status maps directly:
-SATISFIED → `pass`, VIOLATED → `fail`, CANT-PROVE → `abstain`, UNMATCHED →
-a hard error (never a silent abstain — an unmatched rule means its
-producer never fired at all).
+`verdi.bindings.yaml` sidecar produces the static-kind records above; a `go
+test -json` suite run produces coarse behavioral records (suite pass/fail,
+no per-test AC mapping — see §Declarations); for each elaborated obligation
+naming a test producer, the same job also emits one record for that
+obligation, carrying its own kind and acceptance criterion — `pass` on the
+named test's terminal pass, `fail` on its failure, `abstain` when skipped,
+and no record, with a disclosure, when the test did not run; a malformed or
+truncated result stream is an operational error. An elaborated obligation
+naming a Playwright test is produced by the same evidence job, which runs
+the named test files once, serially and without retries, and reads
+Playwright's machine-readable report: `pass` when the named test ran once
+and passed, `fail` when it failed, timed out, was interrupted, or needed
+another attempt, `abstain` when skipped, and no record, with a disclosure,
+when the file or the test did not run; a missing, malformed, or truncated
+report, a run-level error, or two tests in one file sharing the named title
+path is an operational error. `tests.json` is a small, verdi-owned summary
+of that same `go test -json` run (pass/fail counts, not a per-AC join).
+`review.json` is the upstream `groundwork review --json` record(s), stored
+verbatim — every field preserved unchanged. `boundary-diff.json` is
+verdi-computed from two strict-decoded boundary contracts (upstream's
+`groundwork diff` has no JSON mode), with the breaking-change verdict
+cross-checked against `groundwork diff`'s own exit code. A regenerated
+graph's obligation status maps directly: SATISFIED → `pass`, VIOLATED →
+`fail`, CANT-PROVE → `abstain`, UNMATCHED → a hard error (never a silent
+abstain — an unmatched rule means its producer never fired at all).
 
 **Provenance classes.** `source: ci` is **authoritative**; `source: local` is
 **advisory** — the workbench renders advisory evidence as a preview matrix,
@@ -675,14 +685,16 @@ else. The story spec adds an `exempts` edge with a required reason
 invalidated, but the feature ACs it implements still stand.
 
 - **Story supersession.** File a conflict (`.verdi/conflicts/<name>.md`,
-  §Challenging closed decisions) with the discovery as witness; author
-  story-spec v2 (`supersedes` v1) on a design branch; accept it — the
-  stub-matched fast path applies when the feature mapping is unchanged
-  (§Lifecycle: the feature-first cascade); re-point the build branch. The
-  frozen v1 is preserved, never content-edited — accepting v2 flips v1's
-  `status:` to `superseded` (the sanctioned status-only ritual edit, 02
-  §Kind registry), making its state legible everywhere without consulting
-  backlinks.
+  §Challenging closed decisions) with the discovery as witness and a
+  `challenges` edge naming the whole v1; author story-spec v2 (`supersedes`
+  v1) on a design branch; resolve the conflict to `status: superseded` on
+  that branch; accept v2 by merging it — the stub-matched fast path applies
+  when the feature mapping is unchanged (§Lifecycle: the feature-first
+  cascade); re-point the build branch. The frozen v1 is preserved, never
+  content-edited: v1 is superseded once v2's edge and the resolved conflict
+  are both on the default branch, a state derived from those two records (02
+  §Kind registry) and legible everywhere without an edit to v1. Either
+  record alone leaves v1 disclosed-unproven.
 - **Decomposition** is the special case: supersede with two or more smaller
   story specs whose `implements` edges re-cover the same feature ACs. The
   feature is untouched — the payoff of downward-blindness.
