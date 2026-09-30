@@ -13,8 +13,8 @@ constraints:
   - { id: co-1, text: "The parent's constraints bind this story unchanged: no new git primitive and no widened declaration without an owner-visible decision (co-1), the declaration is data checked by the gate (co-2), every test is hermetic over fixturegit repositories with pushes only to a local bare remote (co-3), and recovery's semantics do not change (co-4).", anchor: co-1 }
 decisions:
   - { id: dc-1, text: "The registry lives in internal/writescope and is returned by a function, never held in a package variable (docs/ground-rules.md), the same shape as the CLI-verb and MCP-tool inventories (parent dc-4). Its values are typed, so an unknown field cannot compile and an unknown enum value fails its Validate.", anchor: dc-1 }
-  - { id: dc-2, text: "Reachability is computed statically from the module's source, with interface calls resolved to every implementation, over the entry points the CLI-verb inventory, the MCP-tool inventory, and the workbench's action and route handlers define, and it reaches the non-gitx writers too (the execution-workspace reconciler's and garbage collector's writes to worktree administrative entries), so a verb that changes git state only through them is still found (parent dc-2, dc-7). A new module dependency for this needs a ledger entry before it is added; the standard library's go/parser and go/types are enough.", anchor: dc-2 }
-  - { id: dc-3, text: "The census of 2026-09-30 is the starting set of declarations, each read through parent dc-7's field readings. A declaration describes what its ritual does at this story's base, except where the parent has already ruled the behavior a defect to fix: design start (including its --supersedes path), the commit-to-design ritual, accept diagram, and constitution propose are declared scoped, as parent ac-4, dc-3, and dc-11 require (only the board's Commit and push declares carried). Those declarations sit in the counted awaiting-fix list until spec/ritual-effect-witness fixes the rituals and empties it; its behavioral witness lands in the same change as those fixes, so no merged witness ever passes against a declaration the ritual does not meet. Nothing is widened to pass (parent co-1).", anchor: dc-3 }
+  - { id: dc-2, text: "Reachability is computed statically from the module's source, with interface calls resolved to every implementation, over the entry points the CLI-verb inventory, the MCP-tool inventory, and the workbench's actions define, where a workbench action is any workbench request that can mutate a repository, including the branch routes that ensure a managed worktree, which parent dc-6 names among the workbench's mutating entry points, and it reaches the non-gitx writers too (the execution-workspace reconciler's and garbage collector's writes to worktree administrative entries), so a verb that changes git state only through them is still found (parent dc-2, dc-7). A new module dependency for this needs a ledger entry before it is added; the standard library's go/parser and go/types are enough.", anchor: dc-2 }
+  - { id: dc-3, text: "The census of 2026-09-30 is the starting set of declarations, each read through parent dc-7's field readings. A declaration describes what its ritual does at this story's base, except where the parent has already ruled the behavior a defect to fix. accept diagram, design start --supersedes, and constitution propose are declared scoped, as parent dc-11 rules. Plain design start and the commit-to-design ritual must never carry a foreign entry (parent ac-4), which a refusal would also meet; this story chooses the scoped fix for them too, because a refusal would stop an operator whose unrelated work is staged, and one fix mode for all five rituals keeps parent dc-3's first-state rule simple. Only the board's Commit and push declares carried (parent dc-3). The five sit in the counted awaiting-fix list until spec/ritual-effect-witness fixes the rituals and empties it; its behavioral witness lands in the same change as those fixes, so no merged witness ever passes against a declaration the ritual does not meet. Nothing is widened to pass (parent co-1).", anchor: dc-3 }
 links:
   - { type: implements, ref: "spec/ritual-write-scope-v3#ac-1" }
 ---
@@ -60,18 +60,22 @@ an unknown field cannot compile and an unknown enum value fails its Validate.
 ## dc-2
 
 Reachability is computed statically from the module's source, with interface calls resolved to every implementation,
-over the entry points the CLI-verb inventory, the MCP-tool inventory, and the workbench's action and route handlers
-define, and it reaches the non-gitx writers too (the execution-workspace reconciler's and garbage collector's writes to
-worktree administrative entries), so a verb that changes git state only through them is still found (parent dc-2, dc-7).
-A new module dependency for this needs a ledger entry before it is added; the standard library's go/parser and go/types
-are enough.
+over the entry points the CLI-verb inventory, the MCP-tool inventory, and the workbench's actions define, where a
+workbench action is any workbench request that can mutate a repository, including the branch routes that ensure a
+managed worktree, which parent dc-6 names among the workbench's mutating entry points, and it reaches the non-gitx
+writers too (the execution-workspace reconciler's and garbage collector's writes to worktree administrative entries), so
+a verb that changes git state only through them is still found (parent dc-2, dc-7). A new module dependency for this
+needs a ledger entry before it is added; the standard library's go/parser and go/types are enough.
 
 ## dc-3
 
 The census of 2026-09-30 is the starting set of declarations, each read through parent dc-7's field readings. A
 declaration describes what its ritual does at this story's base, except where the parent has already ruled the behavior
-a defect to fix: design start (including its --supersedes path), the commit-to-design ritual, accept diagram, and
-constitution propose are declared scoped, as parent ac-4, dc-3, and dc-11 require (only the board's Commit and push
-declares carried). Those declarations sit in the counted awaiting-fix list until spec/ritual-effect-witness fixes the
-rituals and empties it; its behavioral witness lands in the same change as those fixes, so no merged witness ever passes
-against a declaration the ritual does not meet. Nothing is widened to pass (parent co-1).
+a defect to fix. accept diagram, design start --supersedes, and constitution propose are declared scoped, as parent
+dc-11 rules. Plain design start and the commit-to-design ritual must never carry a foreign entry (parent ac-4), which a
+refusal would also meet; this story chooses the scoped fix for them too, because a refusal would stop an operator whose
+unrelated work is staged, and one fix mode for all five rituals keeps parent dc-3's first-state rule simple. Only the
+board's Commit and push declares carried (parent dc-3). The five sit in the counted awaiting-fix list until
+spec/ritual-effect-witness fixes the rituals and empties it; its behavioral witness lands in the same change as those
+fixes, so no merged witness ever passes against a declaration the ritual does not meet. Nothing is widened to pass
+(parent co-1).

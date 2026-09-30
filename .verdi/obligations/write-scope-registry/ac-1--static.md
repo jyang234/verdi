@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/writescope:TestRegistry_CoversEveryMutatingVerb in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/write-scope-registry" }
-frozen: { at: 2026-09-30, commit: 0b9c80d7026c1a35a910cd82b068d6a01011b3f3 }
+frozen: { at: 2026-09-30, commit: caead5fdfe77834ddee4da91a4616c11e279ba71 }
 ---
 # Every mutating verb is declared, and gitx is fully classified
 
