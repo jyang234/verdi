@@ -30,6 +30,12 @@ const (
 	ssMissingSuccess = "no story spec on the default branch names it via a whole-spec links: supersedes edge"
 	ssScanIncomplete = "the default-branch conflict scan is incomplete"
 	ssOldLinkOnly    = "carries no validatable supersession: block"
+
+	// SS-R1: conflict file names a plain `git ls-tree` C-quotes (a
+	// non-ASCII byte, a double quote), which the scan must read by their
+	// real names.
+	ssNonASCIIPath = ".verdi/conflicts/résumé.md"
+	ssQuotePath    = ".verdi/conflicts/a\"b.md"
 )
 
 // ssStory is a schema-valid story spec implementing ss-feature#ac-1, with
@@ -383,6 +389,36 @@ func TestProjector_StorySupersession(t *testing.T) {
 			},
 			candidate: ssV1Path,
 			wantState: AcceptedPendingBuild,
+		},
+		// SS-R1: a conflict at a name plain `git ls-tree` C-quotes is read
+		// by its real name.
+		{
+			name:      "SS-R1: a malformed conflict at a non-ASCII name: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssNonASCIIPath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssNonASCIIPath, "failed to decode"}},
+		},
+		{
+			name:      "SS-R1: a malformed conflict at a name holding a double quote: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssQuotePath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssQuotePath, "failed to decode"}},
+		},
+		{
+			name:      "SS-R1: a superseded conflict at a non-ASCII name plus v2's edge: superseded, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNonASCIIPath: ssConflict("ss-story-resume", "superseded", "", "spec/ss-story")},
+			candidate: ssV1Path,
+			wantState: Superseded,
+			want:      []ssWant{{"superseded by " + ssV2Path, ssNonASCIIPath}},
+		},
+		{
+			name:      "SS-R1: a superseded conflict at a name holding a double quote plus v2's edge: superseded, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssQuotePath: ssConflict("ss-story-quote", "superseded", "", "spec/ss-story")},
+			candidate: ssV1Path,
+			wantState: Superseded,
+			want:      []ssWant{{"superseded by " + ssV2Path, ssQuotePath}},
 		},
 	}
 

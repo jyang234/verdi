@@ -51,15 +51,24 @@ func isRung3Story(fm *artifact.SpecFrontmatter) bool {
 // scanConflicts reads and strict-decodes, through internal/artifact, every
 // conflict record in the tree at rev — the same revision scanSuccessors
 // reads the spec zones at, so a corpus, and the cache entry keyed on its
-// commit, always covers exactly that commit's conflict set. A conflict that
-// fails strict decode is recorded in conflictFailures under its path (a
-// scan failure, never a skipped file); a superseded conflict is credited to
-// every spec its challenges links name as a whole spec. An operational read
-// failure is an error.
+// commit, always covers exactly that commit's conflict set. The tree is
+// listed NUL-terminated (LsTreeEntries), so a file name a plain listing
+// would C-quote (a non-ASCII byte, a double quote, a backslash, a control
+// character) is read by its real name, never skipped (review SS-R1). A
+// conflict that fails strict decode is recorded in conflictFailures under
+// its path (a scan failure, never a skipped file); a superseded conflict is
+// credited to every spec its challenges links name as a whole spec. An
+// operational read failure is an error.
 func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *successorCorpus) error {
-	paths, err := p.git.LsTree(ctx, root, rev, conflictsDir())
+	entries, err := p.git.LsTreeEntries(ctx, root, rev)
 	if err != nil {
 		return fmt.Errorf("specstate: scanning default-branch conflicts: %w", err)
+	}
+	var paths []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Path, conflictsDir()+"/") {
+			paths = append(paths, e.Path)
+		}
 	}
 	sort.Strings(paths)
 	for _, cp := range paths {

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // memoGit is a content-addressed fake gitReader for the corpus-memo tests.
@@ -133,6 +135,28 @@ func (g *memoGit) LsTree(ctx context.Context, dir, rev, prefix string) ([]string
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// LsTreeEntries lists every path of rev's tree as a regular-file blob,
+// sorted by path — the NUL-terminated listing the conflict scan reads. It
+// is not counted as a corpus scan (the spec-zone LsTree that precedes it at
+// the same revision is) and fails with lsTreeErr, like LsTree.
+func (g *memoGit) LsTreeEntries(ctx context.Context, dir, rev string) ([]gitx.TreeEntry, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.lsTreeErr != nil {
+		return nil, fmt.Errorf("memoGit: ls-tree %s: %w", rev, g.lsTreeErr)
+	}
+	tree, err := g.treeLocked(rev)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]gitx.TreeEntry, 0, len(tree))
+	for path, content := range tree {
+		entries = append(entries, gitx.TreeEntry{Mode: "100644", Type: "blob", Object: fmt.Sprintf("%x", sha1.Sum(content)), Path: path})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
 }
 
 func (g *memoGit) RevParse(ctx context.Context, dir, rev string) (string, error) {

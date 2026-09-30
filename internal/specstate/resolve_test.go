@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // stubGit is the in-process fake gitReader every projector table test
@@ -18,10 +19,11 @@ import (
 // need FirstParentBlobLanding) gets a loud failure instead of a silent
 // nil-pointer deref if that expectation is ever violated.
 type stubGit struct {
-	show   func(ctx context.Context, dir, commit, path string) ([]byte, error)
-	blobAt func(ctx context.Context, dir, ref, path string) (string, bool, error)
-	fpbl   func(ctx context.Context, dir, ref, path, oid string) (string, bool, error)
-	lsTree func(ctx context.Context, dir, ref, path string) ([]string, error)
+	show          func(ctx context.Context, dir, commit, path string) ([]byte, error)
+	blobAt        func(ctx context.Context, dir, ref, path string) (string, bool, error)
+	fpbl          func(ctx context.Context, dir, ref, path, oid string) (string, bool, error)
+	lsTree        func(ctx context.Context, dir, ref, path string) ([]string, error)
+	lsTreeEntries func(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error)
 }
 
 func (s stubGit) Show(ctx context.Context, dir, commit, path string) ([]byte, error) {
@@ -50,6 +52,34 @@ func (s stubGit) LsTree(ctx context.Context, dir, ref, path string) ([]string, e
 		panic("stubGit: unexpected LsTree call")
 	}
 	return s.lsTree(ctx, dir, ref, path)
+}
+
+// LsTreeEntries answers the full-tree listing the conflict scan reads:
+// from lsTreeEntries when set, otherwise from lsTree over the whole tree
+// (prefix ""), each path a regular blob — so a row that models its tree
+// through lsTree alone answers both listings from that one tree. It panics
+// when neither is set.
+func (s stubGit) LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error) {
+	if s.lsTreeEntries != nil {
+		return s.lsTreeEntries(ctx, dir, ref)
+	}
+	if s.lsTree == nil {
+		panic("stubGit: unexpected LsTreeEntries call")
+	}
+	paths, err := s.lsTree(ctx, dir, ref, "")
+	if err != nil {
+		return nil, err
+	}
+	return blobEntries(paths), nil
+}
+
+// blobEntries lists each path as a regular-file blob tree entry.
+func blobEntries(paths []string) []gitx.TreeEntry {
+	entries := make([]gitx.TreeEntry, 0, len(paths))
+	for _, p := range paths {
+		entries = append(entries, gitx.TreeEntry{Mode: "100644", Type: "blob", Object: fakeOID, Path: p})
+	}
+	return entries
 }
 
 // stubCommit is the commit every stubGit resolves the default branch to.
@@ -1087,6 +1117,7 @@ body
 		otherContent := []byte("---\nid: spec/other\nkind: spec\nclass: feature\ntitle: Other\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
 
 		lsTreeCalls := map[string]int{}
+		entriesCalls := 0
 		showCounts := map[string]int{}
 		var allPaths []string
 		allPaths = append(allPaths, otherPaths...)
@@ -1098,6 +1129,10 @@ body
 			lsTree: func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
 				lsTreeCalls[prefix]++
 				return allPaths, nil
+			},
+			lsTreeEntries: func(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error) {
+				entriesCalls++
+				return blobEntries(allPaths), nil
 			},
 			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
 				showCounts[path]++
@@ -1121,11 +1156,15 @@ body
 		if len(results) != numCandidates {
 			t.Fatalf("ResolveMany returned %d results, want %d", len(results), numCandidates)
 		}
-		// One listing of the spec zones and one of the conflicts
-		// directory (the story-supersession conflict scan, SI-290), each
-		// exactly once per ResolveMany call.
-		if want := map[string]int{specZonesPrefix: 1, ".verdi/conflicts": 1}; !reflect.DeepEqual(lsTreeCalls, want) {
-			t.Fatalf("LsTree calls by prefix = %v, want %v (each exactly once per ResolveMany call)", lsTreeCalls, want)
+		// One listing of the spec zones and one NUL-terminated tree
+		// listing for the conflict scan (the story-supersession conflict
+		// scan, SI-290; review SS-R1), each exactly once per ResolveMany
+		// call.
+		if want := map[string]int{specZonesPrefix: 1}; !reflect.DeepEqual(lsTreeCalls, want) {
+			t.Fatalf("LsTree calls by prefix = %v, want %v (exactly once per ResolveMany call)", lsTreeCalls, want)
+		}
+		if entriesCalls != 1 {
+			t.Fatalf("LsTreeEntries calls = %d, want 1 (the conflict scan lists the tree exactly once per ResolveMany call)", entriesCalls)
 		}
 		for _, path := range otherPaths {
 			if showCounts[path] != 1 {
@@ -1209,12 +1248,13 @@ func onlyPath(paths ...string) func(context.Context, string, string, string) ([]
 // underPrefix is onlyPath's PREFIX-FAITHFUL sibling: it answers each LsTree
 // call with only the paths under the requested prefix, exactly as the real
 // `git ls-tree -r -- <prefix>` does — load-bearing for the archive-zone
-// successor rows, where WHAT the scan asks for decides what it can see.
+// successor rows, where WHAT the scan asks for decides what it can see. An
+// empty prefix is the whole tree (stubGit.LsTreeEntries' fallback).
 func underPrefix(paths ...string) func(context.Context, string, string, string) ([]string, error) {
 	return func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
 		var out []string
 		for _, p := range paths {
-			if strings.HasPrefix(p, prefix+"/") {
+			if prefix == "" || strings.HasPrefix(p, prefix+"/") {
 				out = append(out, p)
 			}
 		}
