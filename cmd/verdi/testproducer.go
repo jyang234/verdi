@@ -344,9 +344,14 @@ func goTestProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure.Dis
 
 // selectGoTestObligations narrows candidates to exactly this CI job's own
 // authoritative obligations (SI-229: authoritative_source.ref ==
-// jobName), excludes a runtime-kind obligation (03 §Evidence kinds: runtime
-// evidence is post-deploy), then grammar-parses each survivor's producer ref
-// and rejects a package path that crosses into a nested module under root.
+// jobName), skips silently an obligation whose producer ref is the
+// Playwright producer's (a "playwright:" ref: each per-test producer handles
+// only its own scheme, SI-307 (8), so playwrightproducer.go alone selects or
+// discloses it, whatever its kind or form), excludes a runtime-kind
+// obligation (03 §Evidence kinds: runtime evidence is post-deploy), then
+// grammar-parses each survivor's producer ref and rejects a package path that
+// crosses into a nested module under root. Every other ref that is not
+// go-test: still fails the grammar and is disclosed as malformed.
 // jobName == "" (not running in a named CI job at all) naturally selects
 // nothing, since an elaborated obligation's authoritative_source.ref is
 // always non-blank (internal/artifact/obligation.go's Validate). A rejected
@@ -359,6 +364,9 @@ func selectGoTestObligations(root string, candidates []testProducerCandidate, jo
 	var discl []disclosure.Disclosure
 	for _, c := range candidates {
 		if jobName == "" || c.JobRef != jobName {
+			continue
+		}
+		if strings.HasPrefix(c.ProducerRef, playwrightProducerScheme) {
 			continue
 		}
 		if c.Kind == artifact.EvidenceRuntime {
