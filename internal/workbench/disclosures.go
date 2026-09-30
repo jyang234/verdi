@@ -4,7 +4,8 @@
 // the checkout through internal/disclosureview's shared compute path —
 // the same enumeration and the same item markup the dex's read-only
 // edition renders (ac-3's no-separate-logic-path law) — computed fresh on
-// every request and never persisted.
+// every request and never persisted: the page neither reads nor writes
+// disclosureview's cache, which only the index's count uses (SI-295).
 package workbench
 
 import (
@@ -23,7 +24,7 @@ const disclosuresNote = "Enumerated fresh from this checkout's current state on 
 
 // disclosuresHandler serves GET /disclosures. extras is the serving
 // process's own disclosed context (Deps.Disclosures) — already seam
-// values, appended to the fresh enumeration on every render.
+// values, appended to the lint enumeration on every render, never cached.
 func disclosuresHandler(root string, extras []disclosure.Disclosure) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

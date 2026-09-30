@@ -17,6 +17,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/featurecoverage"
 	"github.com/jyang234/verdi/internal/model"
 )
 
@@ -571,27 +572,36 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 
 	// StubViews/ACCoverage/OQClaims: the scoping canvas's pure-frontmatter
 	// projection (co-2). Keyed for every declared AC/OQ up front so "no
-	// stub"/"unclaimed" is an explicit 0, not a missing key. Each count is
-	// per STUB, not per entry — see the field docs: a stub repeating an id
-	// in its own list still counts once, so "covered by N stubs" and the
-	// >1 multi-claim smell never overstate the declaring stubs.
-	p.ACCoverage = make(map[string]int, len(fm.AcceptanceCriteria))
-	for _, ac := range fm.AcceptanceCriteria {
-		p.ACCoverage[ac.ID] = 0
+	// stub"/"unclaimed" is an explicit 0, not a missing key.
+	//
+	// ACCoverage's stub half is the shared spec/index-coverage function
+	// (internal/featurecoverage.Compute), not a private recount: the wall,
+	// the index, and the New story dialog all read this same computation
+	// (co-2), so a chip and a call-to-action can never disagree.
+	// Compute's own per-stub dedup keeps the count per STUB, not per
+	// entry — a stub repeating an id in its own list still counts once,
+	// so "covered by N stubs" never overstates the declaring stubs.
+	// OQClaims (the open-question multi-claim smell) is not part of that
+	// shared contract — spike stubs resolve open questions, never
+	// acceptance criteria — so it stays computed here exactly as before.
+	acIDs := make([]string, len(fm.AcceptanceCriteria))
+	for i, ac := range fm.AcceptanceCriteria {
+		acIDs[i] = ac.ID
 	}
 	p.OQClaims = make(map[string]int, len(fm.OpenQuestions))
 	for _, q := range fm.OpenQuestions {
 		p.OQClaims[q.ID] = 0
 	}
+	stubDecls := make([]featurecoverage.StubDecl, 0, len(fm.Stubs))
 	for _, st := range fm.Stubs {
 		p.StubViews = append(p.StubViews, StubView{
 			Slug: st.Slug, Spike: st.Spike, Resolves: st.Resolves, AcceptanceCriteria: st.AcceptanceCriteria,
 		})
-		// counted is scoped to THIS stub: it collapses a repeated id inside
-		// one entry list without flattening two distinct stubs that each
-		// declare the same id (which legitimately count 2).
-		counted := make(map[string]bool)
 		if st.Spike {
+			// counted collapses a repeated id inside one spike's own
+			// resolves list without flattening two distinct spikes that
+			// each resolve the same question (which legitimately count 2).
+			counted := make(map[string]bool, len(st.Resolves))
 			for _, oqID := range st.Resolves {
 				if counted[oqID] {
 					continue
@@ -601,13 +611,12 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 			}
 			continue
 		}
-		for _, acID := range st.AcceptanceCriteria {
-			if counted[acID] {
-				continue
-			}
-			counted[acID] = true
-			p.ACCoverage[acID]++
-		}
+		stubDecls = append(stubDecls, featurecoverage.StubDecl{Slug: st.Slug, AcceptanceCriteria: st.AcceptanceCriteria})
+	}
+	coverage := featurecoverage.Compute(acIDs, stubDecls, nil)
+	p.ACCoverage = make(map[string]int, len(acIDs))
+	for _, id := range acIDs {
+		p.ACCoverage[id] = len(coverage[id].Stubs)
 	}
 
 	// (1) The object model, in document order per block.

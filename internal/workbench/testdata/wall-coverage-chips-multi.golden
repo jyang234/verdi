@@ -1,0 +1,3 @@
+<span class="coverage-chip coverage-chip--covered" data-testid="coverage-ac-1" data-coverage="2">covered by 2 stubs</span>
+<span class="coverage-chip coverage-chip--covered" data-testid="coverage-ac-2" data-coverage="1">covered by 1 stub</span>
+<span class="coverage-chip coverage-chip--none" data-testid="coverage-ac-3" data-coverage="0">no stub</span>

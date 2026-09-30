@@ -114,4 +114,25 @@ type Entry struct {
 	// from — see the Zone type's own doc comment. Always populated by
 	// ComputeIndex's production code paths, for every Entry kind alike.
 	Zone Zone
+	// Date is this entry's last-change committer date, normalized
+	// ISO-8601 (gitx.CommitDates' canonical form): a design-branch
+	// entry's branch tip, or a default-branch entry's landing commit —
+	// the commit where its current bytes landed on the default branch
+	// (spec/index-data ac-1, dc-1). Empty when the date could not be
+	// read; DateDisclosed then names why. Never a zero value or the
+	// current date standing in for an unreadable one. LastChange
+	// (quiet.go) is the one way to read it as an instant.
+	Date string
+	// DateDisclosed is non-nil exactly when Date could not be read
+	// (ac-1): the entry's effective lifecycle state is unproven, so
+	// specstate returned no landing commit to date (source
+	// refindex:date-unproven, naming specstate's own disclosure — SI-297),
+	// or the commit-date read failed or answered nothing readable (source
+	// refindex:date-unreadable). A disclosure channel
+	// of its own, independent of Disclosed above — which may already be
+	// populated for an unrelated reason (e.g. a design branch with no
+	// draft spec yet, or an unproven effective lifecycle state) and
+	// disclosure.Disclosure carries only one Text string apiece, so the
+	// two reasons are never conflated into one field.
+	DateDisclosed *disclosure.Disclosure
 }
