@@ -27,12 +27,14 @@ import (
 // written to the predecessor. A spike (class: story, spike: true) is out of
 // scope on both sides and keeps today's behavior.
 
-// conflictsPrefix is the store directory the conflict scan lists on the
+// conflictsDir returns the store directory the conflict scan reads on the
 // default branch (.verdi/conflicts), derived from internal/store's layout.
-var conflictsPrefix = path.Dir(filepath.ToSlash(store.ConflictPath("", "x")))
+func conflictsDir() string {
+	return path.Dir(filepath.ToSlash(store.ConflictPath("", "x")))
+}
 
 // isConflictRecordPath reports whether p is where a conflict record sits:
-// a direct <name>.md child of conflictsPrefix (store.ConflictPath). Any
+// a direct <name>.md child of conflictsDir (store.ConflictPath). Any
 // other entry the listing returns — a nested file, a non-.md file — is not
 // a conflict record and is not read.
 func isConflictRecordPath(p string) bool {
@@ -55,7 +57,7 @@ func isRung3Story(fm *artifact.SpecFrontmatter) bool {
 // every spec its challenges links name as a whole spec. An operational read
 // failure is an error.
 func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *successorCorpus) error {
-	paths, err := p.git.LsTree(ctx, root, rev, conflictsPrefix)
+	paths, err := p.git.LsTree(ctx, root, rev, conflictsDir())
 	if err != nil {
 		return fmt.Errorf("specstate: scanning default-branch conflicts: %w", err)
 	}
