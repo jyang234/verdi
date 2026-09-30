@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/specalign:TestGitRecorderSeamStaticContract in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/gitx-recorder-seam" }
-frozen: { at: 2026-09-30, commit: b74f35500b7f685387bb4940a58fbb04de4eb303 }
+frozen: { at: 2026-09-30, commit: e505e029796170de0b26bc3a1f05335b50a124cf }
 ---
 # One shared token list, git only through gitx, no update-ref in branch creation
 
