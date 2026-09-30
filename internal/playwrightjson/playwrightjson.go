@@ -27,10 +27,11 @@
 // ({message, location}). Anything after the report is refused, and so is an
 // unknown attempt status, test outcome, or expected status. The verdict
 // fields must be present, not merely zero: the report's config, suites,
-// errors, and stats; a suite's title, file and specs; a spec's title, file,
-// and tests; a test's projectName, expectedStatus, status and results; an
-// attempt's status and retry; and the config's version, rootDir, workers and
-// projects.
+// errors, and stats; a file suite's title, file, and specs; a describe
+// suite's title and specs; a spec's title, file, and tests; a test's
+// projectName, expectedStatus, status, and results; an attempt's status and
+// retry; the config's version, rootDir, workers, and projects; and each
+// project's name, retries, and repeatEach.
 //
 // Three kinds of field stay open, each decoded only as JSON and never read
 // for a verdict:

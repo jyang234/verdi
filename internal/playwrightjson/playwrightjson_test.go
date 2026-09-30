@@ -391,6 +391,12 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 		{"a test with no project name", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(firstTest(t, r), "projectName") })
 		}, "has no projectName"},
+		{"a test with no expected status", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(firstTest(t, r), "expectedStatus") })
+		}, "it has no expectedStatus"},
+		{"a test with no status", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(firstTest(t, r), "status") })
+		}, "it has no status"},
 		{"a spec with no tests", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(firstSpec(t, r), "tests") })
 		}, "has no tests"},
@@ -400,6 +406,17 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 		{"a suite with no specs", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(fileSuite(t, r, "other.spec.ts"), "specs") })
 		}, "has no specs"},
+		{"a file suite with no file", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(fileSuite(t, r, "other.spec.ts"), "file") })
+		}, "a file suite has no file or title"},
+		{"a file suite with no title", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(fileSuite(t, r, "other.spec.ts"), "title") })
+		}, "a file suite has no file or title"},
+		{"a describe suite with no title", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				delete(arr(t, fileSuite(t, r, "other.spec.ts"), "suites")[0].(map[string]any), "title")
+			})
+		}, "a describe suite has no title"},
 		{"a status of another type", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { firstResult(t, r)["status"] = 1 })
 		}, "cannot unmarshal number"},
@@ -421,6 +438,30 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 		{"no workers", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(obj(t, r, "config"), "workers") })
 		}, "config has no workers"},
+		{"a project with no name", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				delete(arr(t, obj(t, r, "config"), "projects")[0].(map[string]any), "name")
+			})
+		}, "project 0 has no name, retries, or repeatEach"},
+		{"a project with no retries", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				delete(arr(t, obj(t, r, "config"), "projects")[0].(map[string]any), "retries")
+			})
+		}, "project 0 has no name, retries, or repeatEach"},
+		{"a project with no repeatEach", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) {
+				delete(arr(t, obj(t, r, "config"), "projects")[0].(map[string]any), "repeatEach")
+			})
+		}, "project 0 has no name, retries, or repeatEach"},
+		{"a config that is an array", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { r["config"] = []any{} })
+		}, "the config is not a JSON object"},
+		{"a run error that is not an object", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { r["errors"] = []any{"Error: boom"} })
+		}, "run error 0: not a JSON object"},
+		{"a run error whose message is not a string", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { r["errors"] = []any{map[string]any{"message": 5}} })
+		}, "run error 0: message: json: cannot unmarshal number"},
 		{"no stats", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(r, "stats") })
 		}, "has no stats"},
