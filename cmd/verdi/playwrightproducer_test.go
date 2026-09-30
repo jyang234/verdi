@@ -605,7 +605,8 @@ func playwrightDuplicateOtherSpec(t *testing.T, r map[string]any) {
 // a title that itself contains " › "); a run that is not the producer's (more
 // than one project — a real run whose one test appears once per project and
 // must never be read as a duplicate — another rootDir, an unnamed file,
-// retries, or workers); and a missing runner.
+// retries, workers, a repeat-each above one, or a test of a project other
+// than the run's one); and a missing runner.
 func TestProducePlaywrightEvidence_OperationalErrorsWriteNothing(t *testing.T) {
 	t.Parallel()
 	const (
@@ -690,6 +691,24 @@ func TestProducePlaywrightEvidence_OperationalErrorsWriteNothing(t *testing.T) {
 				r["config"].(map[string]any)["workers"] = 2
 			})}
 		}, "2 workers"},
+		{"repeat-each", both, func(t *testing.T, root string) playwrightRunner {
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
+				r["config"].(map[string]any)["projects"].([]any)[0].(map[string]any)["repeatEach"] = 2
+			})}
+		}, "repeat-each 2"},
+		{"a test of another project", both, func(t *testing.T, root string) playwrightRunner {
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
+				for _, s := range r["suites"].([]any) {
+					suite := s.(map[string]any)
+					if suite["file"] != "other.spec.ts" {
+						continue
+					}
+					describe := suite["suites"].([]any)[0].(map[string]any)
+					spec := describe["specs"].([]any)[0].(map[string]any)
+					spec["tests"].([]any)[0].(map[string]any)["projectName"] = "chromium"
+				}
+			})}
+		}, `a test in other.spec.ts belongs to project "chromium", not the run's ""`},
 		{"no runner", both, func(t *testing.T, root string) playwrightRunner { return nil }, "no Playwright runner"},
 	}
 	for _, c := range cases {
