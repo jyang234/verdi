@@ -36,6 +36,12 @@ const (
 	// real names.
 	ssNonASCIIPath = ".verdi/conflicts/résumé.md"
 	ssQuotePath    = ".verdi/conflicts/a\"b.md"
+
+	// SS-R3 (SI-306 (4a)): conflict files store layout never places —
+	// nested, or empty-named — are scan failures, never read.
+	ssNestedPath    = ".verdi/conflicts/sub/x.md"
+	ssEmptyNamePath = ".verdi/conflicts/.md"
+	ssNotRecord     = "is not at a conflict record path"
 )
 
 // ssStory is a schema-valid story spec implementing ss-feature#ac-1, with
@@ -162,6 +168,7 @@ func TestProjector_StorySupersession(t *testing.T) {
 		candidate string
 		wantState State
 		want      []ssWant
+		absent    []string // no disclosure may contain any of these
 	}{
 		// Case 1.
 		{
@@ -379,7 +386,11 @@ func TestProjector_StorySupersession(t *testing.T) {
 			want:      []ssWant{{"superseded by " + ssV2Path, ssConflictPath}},
 		},
 		{
-			name: "entries under the conflicts directory that are not conflict records are not read",
+			// SI-306 (4a): a nested .md under the conflicts directory is a
+			// conflict file (artifact.ClassifyPath) that store layout never
+			// places there — a scan failure naming it, never read. A non-.md
+			// entry there, and every path outside it, is not a conflict file.
+			name: "a nested conflict file is a scan failure; entries that are not conflict files are not read",
 			tree: map[string]string{
 				ssV1Path:                         v1,
 				".verdi/conflicts/notes.txt":     "not a record\n",
@@ -388,7 +399,9 @@ func TestProjector_StorySupersession(t *testing.T) {
 				".verdi/specs/active/x/notes.md": "a spec-zone file, not a conflict\n",
 			},
 			candidate: ssV1Path,
-			wantState: AcceptedPendingBuild,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {".verdi/conflicts/nested/x.md", ssNotRecord}},
+			absent:    []string{"notes.txt", "conflicts-extra", "specs/active/x/notes.md"},
 		},
 		// SS-R1: a conflict at a name plain `git ls-tree` C-quotes is read
 		// by its real name.
@@ -420,6 +433,37 @@ func TestProjector_StorySupersession(t *testing.T) {
 			wantState: Superseded,
 			want:      []ssWant{{"superseded by " + ssV2Path, ssQuotePath}},
 		},
+		// SS-R3 (SI-306 (4a)): a nested or empty-named conflict file is a
+		// scan failure — never read, never credited — whether or not its
+		// bytes would decode.
+		{
+			name:      "SS-R3: a malformed nested conflict file: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssNestedPath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssNestedPath, ssNotRecord}},
+		},
+		{
+			name:      "SS-R3: a well-formed superseded nested conflict file is never credited: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNestedPath: resolved},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssNestedPath, ssNotRecord}},
+		},
+		{
+			name:      "SS-R3: a malformed empty-named conflict file: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssEmptyNamePath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssEmptyNamePath, ssNotRecord}},
+		},
+		{
+			name:      "SS-R3: a well-formed superseded empty-named conflict file is never credited: unproven, naming it",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssEmptyNamePath: resolved},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssEmptyNamePath, ssNotRecord}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -430,6 +474,13 @@ func TestProjector_StorySupersession(t *testing.T) {
 				t.Fatalf("Resolve: %v", err)
 			}
 			ssAssert(t, tt.candidate, result, tt.wantState, tt.want)
+			for _, sub := range tt.absent {
+				for i, d := range result.Disclosures {
+					if strings.Contains(d, sub) {
+						t.Fatalf("Resolve(%s).Disclosures[%d] = %q, want no disclosure containing %q", tt.candidate, i, d, sub)
+					}
+				}
+			}
 		})
 	}
 }
@@ -467,5 +518,46 @@ func TestProjector_StorySupersession_BatchAgreesWithSingle(t *testing.T) {
 		if batch[i].State != wantStates[i] {
 			t.Fatalf("ResolveMany[%d] (%s) = %s, want %s", i, c.Path, batch[i].State, wantStates[i])
 		}
+	}
+}
+
+// TestConflictPathClassification pins which default-branch paths the
+// conflict scan treats as conflict files (artifact.ClassifyPath's reading)
+// and which of those sit at a conflict record path (store.ConflictPath); a
+// conflict file off a record path is a scan failure (SI-306 (4a)).
+func TestConflictPathClassification(t *testing.T) {
+	tests := []struct {
+		path       string
+		wantFile   bool
+		wantRecord bool
+	}{
+		{".verdi/conflicts/ss-story-wrong.md", true, true},
+		{ssNonASCIIPath, true, true},
+		{ssQuotePath, true, true},
+		{".verdi/conflicts/a b.md", true, true},
+		{ssNestedPath, true, false},
+		{".verdi/conflicts/a/b/c.md", true, false},
+		{ssEmptyNamePath, true, false},
+		{".verdi/conflicts/notes.txt", false, false},
+		{".verdi/conflicts/x.md.bak", false, false},
+		{".verdi/conflicts", false, false},
+		{".verdi/conflicts-extra/y.md", false, false},
+		{".verdi/specs/active/x/spec.md", false, false},
+		{"sub/.verdi/conflicts/x.md", false, false},
+		{"conflicts/x.md", false, false},
+		{"", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := isConflictFile(tt.path); got != tt.wantFile {
+				t.Fatalf("isConflictFile(%q) = %v, want %v", tt.path, got, tt.wantFile)
+			}
+			if got := tt.wantFile && isConflictRecordPath(tt.path); got != tt.wantRecord {
+				t.Fatalf("isConflictFile && isConflictRecordPath(%q) = %v, want %v", tt.path, got, tt.wantRecord)
+			}
+		})
+	}
+	if got, want := conflictsDir(), ".verdi/conflicts"; got != want {
+		t.Fatalf("conflictsDir() = %q, want %q", got, want)
 	}
 }

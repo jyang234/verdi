@@ -33,10 +33,24 @@ func conflictsDir() string {
 	return path.Dir(filepath.ToSlash(store.ConflictPath("", "x")))
 }
 
+// isConflictFile reports whether p, repository-relative, is a conflict
+// file as artifact.ClassifyPath (and so lint) classifies one: any .md under
+// conflictsDir, at any depth, including an empty-named one. Any other entry
+// — a non-.md file there, or anything outside it — is not a conflict file
+// and is not read.
+func isConflictFile(p string) bool {
+	rel, ok := strings.CutPrefix(p, path.Dir(conflictsDir())+"/")
+	if !ok {
+		return false
+	}
+	kind, ok := artifact.ClassifyPath(rel)
+	return ok && kind == string(artifact.KindConflict)
+}
+
 // isConflictRecordPath reports whether p is where a conflict record sits:
-// a direct <name>.md child of conflictsDir (store.ConflictPath). Any
-// other entry the listing returns — a nested file, a non-.md file — is not
-// a conflict record and is not read.
+// a direct <name>.md child of conflictsDir (store.ConflictPath). A conflict
+// file anywhere else — nested, or empty-named — is a scan failure, never
+// read (SI-306 (4a)).
 func isConflictRecordPath(p string) bool {
 	name, ok := strings.CutSuffix(path.Base(p), ".md")
 	return ok && name != "" && p == filepath.ToSlash(store.ConflictPath("", name))
@@ -49,16 +63,18 @@ func isRung3Story(fm *artifact.SpecFrontmatter) bool {
 }
 
 // scanConflicts reads and strict-decodes, through internal/artifact, every
-// conflict record in the tree at rev — the same revision scanSuccessors
+// conflict file in the tree at rev — the same revision scanSuccessors
 // reads the spec zones at, so a corpus, and the cache entry keyed on its
 // commit, always covers exactly that commit's conflict set. The tree is
 // listed NUL-terminated (LsTreeEntries), so a file name a plain listing
 // would C-quote (a non-ASCII byte, a double quote, a backslash, a control
-// character) is read by its real name, never skipped (review SS-R1). A
-// conflict that fails strict decode is recorded in conflictFailures under
-// its path (a scan failure, never a skipped file); a superseded conflict is
-// credited to every spec its challenges links name as a whole spec. An
-// operational read failure is an error.
+// character) is read by its real name, never skipped (review SS-R1). Every
+// failure is recorded in conflictFailures under its path — a scan failure,
+// never a skipped file: a conflict file that is not at a conflict record
+// path is never read (SI-306 (4a)), and a record that fails strict decode
+// is never credited. A superseded conflict is credited to every spec its
+// challenges links name as a whole spec. An operational read failure is an
+// error.
 func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *successorCorpus) error {
 	entries, err := p.git.LsTreeEntries(ctx, root, rev)
 	if err != nil {
@@ -66,13 +82,14 @@ func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *
 	}
 	var paths []string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Path, conflictsDir()+"/") {
+		if isConflictFile(e.Path) {
 			paths = append(paths, e.Path)
 		}
 	}
 	sort.Strings(paths)
 	for _, cp := range paths {
 		if !isConflictRecordPath(cp) {
+			corpus.conflictFailures[cp] = fmt.Sprintf("default-branch conflict file %s is not at a conflict record path (%s/<name>.md) — never read, never credited", cp, conflictsDir())
 			continue
 		}
 		content, err := p.git.Show(ctx, root, rev, cp)
