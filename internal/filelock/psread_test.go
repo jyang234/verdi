@@ -63,6 +63,26 @@ func TestPSLstart_RunsPSInUTCAndTheCLocale(t *testing.T) {
 	})
 }
 
+// TestPSLstart_ProductionBoundIsAFewSeconds pins the production bound on
+// one `ps -o lstart=` exec (SI-300 as amended: bounded by a timeout, a few
+// seconds): psTimeout 5s and psWaitDelay 1s, so a read that ps never
+// answers returns within 6s once the killed exec has exited.
+// TestPSLstart_HangIsBounded shrinks both to see the bound quickly, so it
+// cannot notice the production values changing; this test does.
+func TestPSLstart_ProductionBoundIsAFewSeconds(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		got, want time.Duration
+	}{
+		{"psTimeout", psTimeout, 5 * time.Second},
+		{"psWaitDelay", psWaitDelay, time.Second},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %s, want %s", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
 // hangPS makes every `ps -o lstart=` exec run argv instead — a command that
 // does not answer for 30 seconds — and shrinks psTimeout and psWaitDelay so
 // the bound shows quickly. The originals are restored when t ends.
