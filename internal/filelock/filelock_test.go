@@ -2,6 +2,7 @@ package filelock
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1056,5 +1057,65 @@ func TestLease_ConcurrentLeasesAndReleaseAreRaceClean(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("Release racing concurrent leases never completed")
+	}
+}
+
+// TestTakeoverFailed pins acquire's answer when takeOverStale did not leave
+// the lock to re-evaluate: its *ErrHeld (another detector is taking the
+// lock over) passes through as that very value, and any other failure is an
+// operational error naming the stale lock and wrapping the cause.
+func TestTakeoverFailed(t *testing.T) {
+	held := &ErrHeld{}
+	cause := errors.New("flock: no locks available")
+	cases := []struct {
+		name string
+		err  error
+		held bool
+	}{
+		{"another detector holds the takeover flock", held, true},
+		{"any other failure", cause, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := takeoverFailed("/store/writer.lock", "pid 7 dead", tc.err)
+			if tc.held {
+				if got != error(held) {
+					t.Fatalf("takeoverFailed(*ErrHeld) = %v, want that same *ErrHeld", got)
+				}
+				return
+			}
+			if errors.As(got, new(*ErrHeld)) || !errors.Is(got, cause) {
+				t.Fatalf("takeoverFailed(%v) = %v, want an operational error wrapping it", tc.err, got)
+			}
+			for _, part := range []string{"/store/writer.lock", "pid 7 dead", "could not take it over"} {
+				if !strings.Contains(got.Error(), part) {
+					t.Fatalf("takeoverFailed = %q, want it to name %q", got, part)
+				}
+			}
+		})
+	}
+}
+
+// TestModifiedWithinMidFlushWindow pins the age test lockFileYoung and
+// takeOverStale share: within lockMidFlushWindow of now (a future mtime
+// included) is young, past it is not.
+func TestModifiedWithinMidFlushWindow(t *testing.T) {
+	cases := []struct {
+		name string
+		age  time.Duration
+		want bool
+	}{
+		{"now", 0, true},
+		{"just inside the window", lockMidFlushWindow - 500*time.Millisecond, true},
+		{"just past the window", lockMidFlushWindow + time.Second, false},
+		{"long past the window", time.Hour, false},
+		{"in the future", -time.Minute, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modifiedWithinMidFlushWindow(time.Now().Add(-tc.age)); got != tc.want {
+				t.Fatalf("modifiedWithinMidFlushWindow(now-%s) = %t, want %t", tc.age, got, tc.want)
+			}
+		})
 	}
 }
