@@ -454,10 +454,12 @@ func LeaseIfHeldByCurrentProcess(path string) (release func(), held bool, err er
 // start time (ownProcessStart, SI-300). If the path already exists,
 // inspect the holder recorded inside — alive (per alive, above) yields
 // ErrHeld (the caller should proxy/reuse rather than proceed);
-// dead/stale removes the lock and retries acquisition, up to a small
-// bound (guards a takeover race between two simultaneous stale
-// detectors: both remove+recreate, only one O_EXCL create wins, the loser
-// retries and finds the winner's fresh live lock).
+// dead/stale takes the lock over (takeOverStale, SI-302: on platforms with
+// flock(2) the detector removes only the exact file it judged, under a
+// flock on that file, so two detectors of one stale lock can never both
+// remove it) and retries acquisition, up to a small bound: a takeover
+// that finds the lock changed under it re-evaluates from scratch, reading
+// the new holder's live lock, and only one O_EXCL create can win.
 //
 // The own start is read once per call, BEFORE the exclusive create, so the
 // ps exec it may cost never widens the window between the create and the
@@ -524,8 +526,8 @@ func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 		if retriesLeft <= 0 {
 			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body older than %s) but exceeded takeover retries", path, lockMidFlushWindow)
 		}
-		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body) but could not remove: %w", path, rmErr)
+		if terr := takeOverStale(path); terr != nil {
+			return nil, takeoverFailed(path, "empty/partial body", terr)
 		}
 		return acquire(path, retriesLeft-1, start)
 	}
@@ -535,10 +537,22 @@ func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 	if retriesLeft <= 0 {
 		return nil, fmt.Errorf("filelock: stale lock %s (pid %d dead) but exceeded takeover retries", path, info.PID)
 	}
-	if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("filelock: stale lock %s (pid %d dead) but could not remove: %w", path, info.PID, rmErr)
+	if terr := takeOverStale(path); terr != nil {
+		return nil, takeoverFailed(path, fmt.Sprintf("pid %d dead", info.PID), terr)
 	}
 	return acquire(path, retriesLeft-1, start)
+}
+
+// takeoverFailed is acquire's answer when takeOverStale did not leave the
+// lock to re-evaluate: its *ErrHeld (another detector is taking the lock
+// over) passes through unchanged, and any other error is operational, named
+// with the stale lock it concerned.
+func takeoverFailed(path, why string, err error) error {
+	var held *ErrHeld
+	if errors.As(err, &held) {
+		return held
+	}
+	return fmt.Errorf("filelock: stale lock %s (%s) but could not take it over: %w", path, why, err)
 }
 
 // lockReadFile and lockStat are acquire's read of an existing lock's body
@@ -669,7 +683,14 @@ func lockFileYoung(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return time.Since(st.ModTime()) <= lockMidFlushWindow, nil
+	return modifiedWithinMidFlushWindow(st.ModTime()), nil
+}
+
+// modifiedWithinMidFlushWindow reports whether modTime lies within
+// lockMidFlushWindow of now: lockFileYoung's test, and takeOverStale's for a
+// lock it judges through its own open handle.
+func modifiedWithinMidFlushWindow(modTime time.Time) bool {
+	return time.Since(modTime) <= lockMidFlushWindow
 }
 
 // lockDecodeRetries/lockDecodeRetryDelay bound decodeLockInfo's tolerance
