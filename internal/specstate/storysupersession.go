@@ -171,8 +171,13 @@ func (c *successorCorpus) conflictFailureMessages() []string {
 //     Unproven (SI-291): each story successor with no resolved conflict;
 //     each resolved conflict when no story successor exists; each other
 //     link-only successor (a feature or spike naming a story) with today's
-//     missing-block disclosure; and, when a conflict failed strict decode,
-//     the incomplete conflict scan and every failure (SI-304).
+//     missing-block disclosure; when a conflict failed strict decode, the
+//     incomplete conflict scan and every failure (SI-304); and, when a
+//     spec failed strict decode, the incomplete spec scan and every
+//     failure, as resolveOne's fallback would report them (review SS-R2).
+//     An incomplete spec scan cannot prove that no story successor
+//     exists, so a resolved conflict's disclosure then claims only that
+//     no spec the scan could decode names the predecessor.
 func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Baseline) (Result, bool) {
 	var stories []string
 	var disclosures []string
@@ -204,13 +209,10 @@ func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Bas
 			candidatePath, succ,
 		))
 	}
+	specFailures := c.failuresExcluding(candidatePath)
 	if len(stories) == 0 {
 		for _, conflict := range resolved {
-			disclosures = append(disclosures, fmt.Sprintf(
-				// vocab:identity — machinery diagnostic naming the conflict status field, the frontmatter link type, and the lifecycle states involved
-				"specstate: %s is challenged as a whole spec by %s, a conflict with status: superseded, but no story spec on the default branch names it via a whole-spec links: supersedes edge — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
-				candidatePath, conflict,
-			))
+			disclosures = append(disclosures, missingSuccessorDisclosure(candidatePath, conflict, len(specFailures) == 0))
 		}
 	}
 	if failures := c.conflictFailureMessages(); len(failures) > 0 {
@@ -224,5 +226,28 @@ func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Bas
 	if len(disclosures) == 0 {
 		return Result{}, false
 	}
+	if len(specFailures) > 0 {
+		disclosures = append(disclosures, specScanIncompleteDisclosure(candidatePath))
+		disclosures = append(disclosures, specFailures...)
+	}
 	return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, true
+}
+
+// missingSuccessorDisclosure names a superseded conflict that challenges
+// candidatePath as a whole spec when no story successor names it. With a
+// complete spec scan the negative is proven; with an incomplete one it
+// covers only the specs the scan could decode, and says so (review SS-R2).
+func missingSuccessorDisclosure(candidatePath, conflict string, specScanComplete bool) string {
+	if specScanComplete {
+		return fmt.Sprintf(
+			// vocab:identity — machinery diagnostic naming the conflict status field, the frontmatter link type, and the lifecycle states involved
+			"specstate: %s is challenged as a whole spec by %s, a conflict with status: superseded, but no story spec on the default branch names it via a whole-spec links: supersedes edge — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
+			candidatePath, conflict,
+		)
+	}
+	return fmt.Sprintf(
+		// vocab:identity — machinery diagnostic naming the conflict status field, the frontmatter link type, and the lifecycle states involved
+		"specstate: %s is challenged as a whole spec by %s, a conflict with status: superseded, but no story spec the default-branch scan could decode names it via a whole-spec links: supersedes edge, and that scan is incomplete, so a successor among the specs it could not decode is not ruled out — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
+		candidatePath, conflict,
+	)
 }

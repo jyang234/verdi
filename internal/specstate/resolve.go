@@ -604,11 +604,7 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 
 	if failures := corpus.failuresExcluding(c.Path); len(failures) > 0 {
 		disclosures := make([]string, 0, len(failures)+1)
-		disclosures = append(disclosures, fmt.Sprintf(
-			// vocab:identity — machinery diagnostic naming the lifecycle state this scan could not rule out
-			"specstate: %s cannot be proven not-superseded — the default-branch active-spec scan is incomplete",
-			c.Path,
-		))
+		disclosures = append(disclosures, specScanIncompleteDisclosure(c.Path))
 		disclosures = append(disclosures, failures...)
 		return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, nil
 	}
@@ -619,6 +615,18 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		Baseline:    baseline,
 		Disclosures: migrationDisclosures(c.Path, c.Content),
 	}, nil
+}
+
+// specScanIncompleteDisclosure is the witness that the default-branch spec
+// scan could not strict-decode every spec (the failures follow it), so no
+// negative about candidatePath's successors can be proven. resolveOne's
+// fallback and storyVerdict's unproven outcome both report it.
+func specScanIncompleteDisclosure(candidatePath string) string {
+	return fmt.Sprintf(
+		// vocab:identity — machinery diagnostic naming the lifecycle state this scan could not rule out
+		"specstate: %s cannot be proven not-superseded — the default-branch active-spec scan is incomplete",
+		candidatePath,
+	)
 }
 
 // linkOnlyDisclosure is final fix wave I4's disclosure: candidatePath is

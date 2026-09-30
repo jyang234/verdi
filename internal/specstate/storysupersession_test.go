@@ -25,6 +25,7 @@ const (
 	ssSpikePath      = ".verdi/specs/active/ss-spike/spec.md"
 	ssConflictPath   = ".verdi/conflicts/ss-story-wrong.md"
 	ssGarbledPath    = ".verdi/conflicts/ss-garbled.md"
+	ssBrokenSpecPath = ".verdi/specs/active/ss-broken/spec.md"
 	ssFrozenStamp    = "frozen: { at: \"2026-09-29\", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }\n"
 	ssMissingRecord  = "no conflict with status: superseded challenges the whole spec"
 	ssMissingSuccess = "no story spec on the default branch names it via a whole-spec links: supersedes edge"
@@ -36,6 +37,11 @@ const (
 	// real names.
 	ssNonASCIIPath = ".verdi/conflicts/résumé.md"
 	ssQuotePath    = ".verdi/conflicts/a\"b.md"
+
+	// SS-R2: the spec scan's own incompleteness, and the "no successor"
+	// wording an incomplete spec scan can still prove.
+	ssSpecScanIncomplete   = "the default-branch active-spec scan is incomplete"
+	ssMissingSuccessHedged = "no story spec the default-branch scan could decode names it via a whole-spec links: supersedes edge"
 
 	// SS-R3 (SI-306 (4a)): conflict files store layout never places —
 	// nested, or empty-named — are scan failures, never read.
@@ -161,6 +167,10 @@ func TestProjector_StorySupersession(t *testing.T) {
 	legacyClosed := ssStory("ss-story", "status: closed\n"+ssFrozenStamp)
 	legacyAccepted := ssStory("ss-story", "status: accepted-pending-build\n"+ssFrozenStamp)
 	feature := ssFeature("ss-feature")
+	// v2Broken carries v2's edge but fails strict decode (an unknown
+	// field), so the spec scan is incomplete and cannot see the edge.
+	v2Broken := ssStory("ss-story-v2", "bogus_field: nope\n", ssSupersedes("ss-story"))
+	brokenSpec := "---\nid: spec/ss-broken\nkind: spec\nbogus_field: nope\n---\nbody\n"
 
 	tests := []struct {
 		name      string
@@ -432,6 +442,42 @@ func TestProjector_StorySupersession(t *testing.T) {
 			candidate: ssV1Path,
 			wantState: Superseded,
 			want:      []ssWant{{"superseded by " + ssV2Path, ssQuotePath}},
+		},
+		// SS-R2: an incomplete spec scan keeps its witness, and the
+		// "no successor" disclosure asserts no negative it cannot prove.
+		{
+			name:      "SS-R2: a superseded conflict and a v2 that fails strict decode: unproven, naming the incomplete spec scan and v2's failure",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2Broken, ssConflictPath: resolved},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want: []ssWant{
+				{ssV1Path, ssConflictPath, ssMissingSuccessHedged},
+				{ssV1Path, ssSpecScanIncomplete},
+				{ssV2Path, "failed to decode"},
+			},
+			absent: []string{ssMissingSuccess},
+		},
+		{
+			name:      "SS-R2: v2's edge with no resolved conflict and another spec failing strict decode: unproven, keeping the spec scan's witness",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssBrokenSpecPath: brokenSpec},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssSpecScanIncomplete}, {ssBrokenSpecPath, "failed to decode"}},
+		},
+		{
+			name:      "SS-R2: an unreadable conflict and a spec failing strict decode: unproven, naming both incomplete scans",
+			tree:      map[string]string{ssV1Path: v1, ssGarbledPath: garbled, ssBrokenSpecPath: brokenSpec},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssScanIncomplete}, {ssGarbledPath, "failed to decode"}, {ssSpecScanIncomplete}, {ssBrokenSpecPath, "failed to decode"}},
+		},
+		{
+			name:      "SS-R2: a superseded conflict with no successor and a complete spec scan keeps the definite wording",
+			tree:      map[string]string{ssV1Path: v1, ssConflictPath: resolved},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssConflictPath, ssMissingSuccess}},
+			absent:    []string{ssSpecScanIncomplete, ssMissingSuccessHedged},
 		},
 		// SS-R3 (SI-306 (4a)): a nested or empty-named conflict file is a
 		// scan failure — never read, never credited — whether or not its
