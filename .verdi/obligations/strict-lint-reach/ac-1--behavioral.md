@@ -16,11 +16,11 @@ quality:
     rule: "Rerun go-test:internal/lintratchet:TestRetroWitness_ReadinessLoaderGlobals in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/strict-lint-reach" }
-frozen: { at: 2026-09-30, commit: 39479c741cf3041646cb743f3dce70a4cd437884 }
+frozen: { at: 2026-09-30, commit: e1ac39ff01f2c5916cc48fd8852d54059888d56d }
 ---
 # The strict target reports the readiness loader globals before their removal and not after
 
 CI job `verify` must record producer `go-test:internal/lintratchet:TestRetroWitness_ReadinessLoaderGlobals` at the exact
 candidate commit. It runs the Makefile's pinned golangci-lint; where that binary is absent it skips with a printed
-reason, so in CI job verify, which installs it (SI-309), its record is pass or fail, and a skip there would be recorded
-as abstain, never as a pass.
+reason, so in CI job verify, which has it (ledger SI-309), its record is pass or fail, and a skip there would be
+recorded as abstain, never as a pass.
