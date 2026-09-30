@@ -86,9 +86,10 @@ func strictUnmarshal(raw []byte, dst any) error {
 // reading of one kernel record of that process's start. (A platform that
 // derives lstart from its boot time, as Linux does, moves every reading
 // when the wall clock is stepped between the two; the tolerance absorbs
-// such a step up to its bound.) The tolerance keeps its pre-SI-300 value
-// for the locks that still record their creation time — those written by
-// an older binary, and those whose holder could not read its own start
+// such a step up to its bound, and a larger one is the open exposure
+// BL-109 records.) The tolerance keeps its pre-SI-300 value for the locks
+// that still record their creation time — those written by an older
+// binary, and those whose holder could not read its own start
 // (ownProcessStart's fallback) — which are judged by the same rule as
 // before: live only if created within this long of their holder's process
 // start (a start now read alike in every environment, so a prober in a
@@ -104,8 +105,11 @@ const lockStartTolerance = 5 * time.Minute
 // comparison read one clock whatever TZ or locale either process runs
 // under (psLstart's environment override). It is read afresh on every
 // call, never cached, so it always reflects the current psLstart (test
-// seams included); the process start cannot change, so every reading
-// agrees.
+// seams included). The process start itself cannot change, but its
+// reading can: a platform that derives lstart from its boot time, as
+// Linux does, moves every later reading when the wall clock is stepped,
+// exactly as lockStartTolerance describes — the tolerance absorbs a step
+// up to its bound, and a larger one is the open exposure BL-109 records.
 //
 // Disclosed fallback: when the process's own start cannot be read (ps
 // unavailable, failing, unparseable, or not answering within psTimeout),
