@@ -2,6 +2,7 @@ package filelock
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,140 @@ func TestRelease_Negative(t *testing.T) {
 			t.Fatalf("Release(already-removed lock file): want nil (os.ErrNotExist tolerated), got %v", err)
 		}
 	})
+}
+
+// TestRelease_LeavesAReplacedLockInPlace pins SI-302's Release rule: a
+// holder removes the lock path only while it still names the holder's own
+// open file. Once the path names another file — another holder's lock
+// (the lock this holder had was taken from it, say by an older binary's
+// by-name takeover), even one with byte-identical contents — Release
+// closes its own handle, returns nil, and leaves that file exactly where it
+// is. When the path cannot be inspected at all, Release says so and still
+// removes nothing.
+func TestRelease_LeavesAReplacedLockInPlace(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace func(t *testing.T, ours []byte) []byte
+	}{
+		{"replaced by another holder's lock", func(t *testing.T, _ []byte) []byte {
+			other, err := json.Marshal(Info{PID: os.Getppid(), Start: time.Now().Add(-time.Hour).Unix()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return other
+		}},
+		{"replaced by a file with identical bytes", func(_ *testing.T, ours []byte) []byte {
+			return ours
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			f, err := Acquire(path)
+			if err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			ours, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			theirs := tc.replace(t, ours)
+			if err := os.WriteFile(path, theirs, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := Release(f, path); err != nil {
+				t.Fatalf("Release after the path was replaced: %v, want nil", err)
+			}
+			after, err := os.Lstat(path)
+			if err != nil {
+				t.Fatalf("Release removed the lock that replaced its own: %v", err)
+			}
+			if !os.SameFile(before, after) {
+				t.Fatal("the replacing lock file is no longer the one on disk after Release")
+			}
+			if got, err := os.ReadFile(path); err != nil || string(got) != string(theirs) {
+				t.Fatalf("replacing lock body after Release = %q, %v, want %q", got, err, theirs)
+			}
+		})
+	}
+
+	t.Run("an uninspectable path is reported and left in place", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: directory permission bits do not restrict access")
+		}
+		sub := filepath.Join(t.TempDir(), "sub")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(sub, "writer.lock")
+		f, err := Acquire(path)
+		if err != nil {
+			t.Fatalf("Acquire: %v", err)
+		}
+		if err := os.Chmod(sub, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+		if _, err := os.Lstat(path); err == nil {
+			t.Skip("this environment does not enforce directory permission bits")
+		}
+
+		if err := Release(f, path); err == nil {
+			t.Fatal("Release with the lock path uninspectable = nil, want an error")
+		}
+		if err := os.Chmod(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("the lock is gone after an uninspectable Release: %v", err)
+		}
+	})
+}
+
+// TestRelease_LeavesAnotherProcessesLockInPlace is the cross-process form of
+// the rule above: this process acquires a lock, the lock is taken from it
+// (removed by name, as a pre-SI-302 detector's takeover does) and a real
+// child process acquires the path. This process's Release must leave the
+// child's lock on disk; the child then releases its own lock cleanly.
+func TestRelease_LeavesAnotherProcessesLockInPlace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	child, stop := startHolderChild(t, path, nil)
+	theirs, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Release(f, path); err != nil {
+		t.Fatalf("Release after another process took the path: %v, want nil", err)
+	}
+	after, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Release removed the child process's lock: %v", err)
+	}
+	if !os.SameFile(theirs, after) {
+		t.Fatal("the child process's lock file is no longer the one on disk after Release")
+	}
+	if got := readLockBody(t, path); got.PID != child {
+		t.Fatalf("lock body after Release names pid %d, want the child's %d", got.PID, child)
+	}
+	if err := stop(); err != nil {
+		t.Fatalf("the child could not release its own lock: %v", err)
+	}
 }
 
 // TestAcquire_HeldByLiveProcess proves a lock recording OUR OWN pid
@@ -922,5 +1057,94 @@ func TestLease_ConcurrentLeasesAndReleaseAreRaceClean(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("Release racing concurrent leases never completed")
+	}
+}
+
+// TestErrHeld_Error pins the held answer's message: a lock whose body
+// names its holder says which pid holds it and the start it recorded; a
+// zero Info — a body still being written, or a stale lock whose takeover
+// flock another process holds (SI-302) — says only what was observed: the
+// holder is not known yet, and why. It never names "pid 0" or the Unix
+// epoch, and never claims the holder has not recorded itself: under
+// EWOULDBLOCK another detector may already have taken the lock over and
+// recorded itself while a third holds the old file's flock.
+func TestErrHeld_Error(t *testing.T) {
+	const start = 1700000000
+	cases := []struct {
+		name string
+		info Info
+		want string
+	}{
+		{"a recorded holder", Info{PID: 4242, Start: start},
+			"filelock: lock held by live pid 4242 (recorded start " + time.Unix(start, 0).Format(time.RFC3339) + ")"},
+		{"a zero Info", Info{},
+			"filelock: lock held, but the holder is not known yet: its body is still being written, or another process holds its takeover flock"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (&ErrHeld{Info: tc.info}).Error(); got != tc.want {
+				t.Fatalf("ErrHeld{%+v}.Error() = %q, want %q", tc.info, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTakeoverFailed pins acquire's answer when takeOverStale did not leave
+// the lock to re-evaluate: its *ErrHeld (another detector is taking the
+// lock over) passes through as that very value, and any other failure is an
+// operational error naming the stale lock and wrapping the cause.
+func TestTakeoverFailed(t *testing.T) {
+	held := &ErrHeld{}
+	cause := errors.New("flock: no locks available")
+	cases := []struct {
+		name string
+		err  error
+		held bool
+	}{
+		{"another detector holds the takeover flock", held, true},
+		{"any other failure", cause, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := takeoverFailed("/store/writer.lock", "pid 7 dead", tc.err)
+			if tc.held {
+				if got != error(held) {
+					t.Fatalf("takeoverFailed(*ErrHeld) = %v, want that same *ErrHeld", got)
+				}
+				return
+			}
+			if errors.As(got, new(*ErrHeld)) || !errors.Is(got, cause) {
+				t.Fatalf("takeoverFailed(%v) = %v, want an operational error wrapping it", tc.err, got)
+			}
+			for _, part := range []string{"/store/writer.lock", "pid 7 dead", "could not take it over"} {
+				if !strings.Contains(got.Error(), part) {
+					t.Fatalf("takeoverFailed = %q, want it to name %q", got, part)
+				}
+			}
+		})
+	}
+}
+
+// TestModifiedWithinMidFlushWindow pins the age test lockFileYoung and
+// takeOverStale share: within lockMidFlushWindow of now (a future mtime
+// included) is young, past it is not.
+func TestModifiedWithinMidFlushWindow(t *testing.T) {
+	cases := []struct {
+		name string
+		age  time.Duration
+		want bool
+	}{
+		{"now", 0, true},
+		{"just inside the window", lockMidFlushWindow - 500*time.Millisecond, true},
+		{"just past the window", lockMidFlushWindow + time.Second, false},
+		{"long past the window", time.Hour, false},
+		{"in the future", -time.Minute, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modifiedWithinMidFlushWindow(time.Now().Add(-tc.age)); got != tc.want {
+				t.Fatalf("modifiedWithinMidFlushWindow(now-%s) = %t, want %t", tc.age, got, tc.want)
+			}
+		})
 	}
 }

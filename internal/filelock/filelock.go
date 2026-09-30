@@ -22,6 +22,7 @@
 package filelock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,19 +41,37 @@ import (
 
 // Info is the lock body: O_CREATE|O_EXCL JSON {pid, start}.
 type Info struct {
-	PID   int   `json:"pid"`
-	Start int64 `json:"start"` // unix seconds the lock was created
+	PID int `json:"pid"`
+	// Start is the unix seconds the holder process started, per
+	// `ps -o lstart=` read in UTC (SI-300, ownProcessStart); locks written
+	// before SI-300, and locks whose holder could not read its own start
+	// at acquisition, carry their creation time instead.
+	Start int64 `json:"start"`
 }
 
 // ErrHeld means the lock is held by a live process: the caller should
 // proxy (dial the socket) or reuse the winner's result rather than
-// proceeding as if it owned the resource.
+// proceeding as if it owned the resource. Info is zero when the holder is
+// not known: the lock's body was young and empty or partial (its creator
+// is mid-flush), or it was stale and another process held the takeover
+// flock on it (SI-302, takeOverStale). That process may be a detector
+// about to take the lock over, or one whose re-check is about to fail
+// because a third has already taken it over and recorded itself.
 type ErrHeld struct {
 	Info Info
 }
 
+// Error names the holder's pid and the start its lock body records — the
+// holder's process start for an SI-300 lock, the creation time for an
+// older or fallback one (Info.Start), so it says "recorded start". For a
+// zero Info it says only what was observed — the holder is not known yet,
+// and the two reasons that can be — rather than naming pid 0 and the Unix
+// epoch.
 func (e *ErrHeld) Error() string {
-	return fmt.Sprintf("filelock: lock held by live pid %d (started %s)", e.Info.PID, time.Unix(e.Info.Start, 0).Format(time.RFC3339))
+	if e.Info == (Info{}) {
+		return "filelock: lock held, but the holder is not known yet: its body is still being written, or another process holds its takeover flock"
+	}
+	return fmt.Sprintf("filelock: lock held by live pid %d (recorded start %s)", e.Info.PID, time.Unix(e.Info.Start, 0).Format(time.RFC3339))
 }
 
 // strictUnmarshal decodes raw into dst with DisallowUnknownFields and
@@ -70,20 +89,108 @@ func strictUnmarshal(raw []byte, dst any) error {
 // lockStartTolerance bounds how far a live pid's actual process start time
 // (per `ps -o lstart=`) may drift from the lock's recorded start before
 // it is treated as a DIFFERENT process that happens to have reused the
-// pid, rather than the lock's genuine holder. Generous on purpose: the
-// real holder's own startup work between process start and lock-write can
-// itself take some seconds; a true pid-reuse collision is expected to
-// differ by much more than this in practice (a different, unrelated
-// process started at an unrelated time).
+// pid, rather than the lock's genuine holder. Since SI-300 the recorded
+// start is the holder's own `ps -o lstart=` reading (ownProcessStart),
+// taken in the probe's zone and locale whatever the two processes' own
+// environments (psEnvOverride), so a genuine SI-300 holder agrees with the
+// probe however long it ran before acquiring: both are ps's whole-second
+// reading of one kernel record of that process's start. (A platform that
+// derives lstart from its boot time, as Linux does, moves every reading
+// when the wall clock is stepped between the two; the tolerance absorbs
+// such a step up to its bound, and a larger one is the open exposure
+// BL-109 records.) The tolerance keeps its pre-SI-300 value for the locks
+// that still record their creation time — those written by an older
+// binary, and those whose holder could not read its own start
+// (ownProcessStart's fallback) — which are judged by the same rule as
+// before: live only if created within this long of their holder's process
+// start (a start now read alike in every environment, so a prober in a
+// skewed zone or locale no longer misreads them). A true pid-reuse
+// collision is expected to differ by much more than this in practice (a
+// different, unrelated process started at an unrelated time).
 const lockStartTolerance = 5 * time.Minute
 
-// psLstart execs `ps -o lstart= -p <pid>` and parses its stdout as the
-// named process's actual start time — the cross-check I-12 asks for.
-// Overridable in tests (both to avoid a real ps dependency in some paths
-// and to exercise the "ps output unparseable" fallback deterministically).
+// ownProcessStart is the start Acquire records (SI-300, 01 §D3): this
+// process's own OS start time, read through psLstart on os.Getpid() — the
+// same source, environment, parsing, and whole-second resolution probe
+// reads a holder's start through — so both sides of the liveness
+// comparison read one clock whatever TZ or locale either process runs
+// under (psLstart's environment override). It is read afresh on every
+// call, never cached, so it always reflects the current psLstart (test
+// seams included). The process start itself cannot change, but its
+// reading can: a platform that derives lstart from its boot time, as
+// Linux does, moves every later reading when the wall clock is stepped,
+// exactly as lockStartTolerance describes — the tolerance absorbs a step
+// up to its bound, and a larger one is the open exposure BL-109 records.
+//
+// Disclosed fallback: when the process's own start cannot be read (ps
+// unavailable, failing, unparseable, or not answering within psTimeout),
+// it returns the current time — the lock's acquisition time, exactly the
+// value recorded before SI-300 — and acquisition proceeds. Such a lock is
+// judged like a pre-SI-300 one: a prober whose ps also fails keeps it live
+// through probe's kill-probe-only fallback, but a prober whose ps works
+// judges it by the tolerance, so a holder that acquired more than
+// lockStartTolerance after it started stays exposed to BL-101's stale
+// misjudgment in this fallback case only.
+func ownProcessStart() int64 {
+	if st, err := psLstart(os.Getpid()); err == nil {
+		return st.Unix()
+	}
+	return time.Now().Unix()
+}
+
+// psLstart reads the named process's actual start time from
+// `ps -o lstart= -p <pid>` — the cross-check I-12 asks for — bounded by
+// psTimeout (readLstart has the environment). Overridable in tests (both
+// to avoid a real ps dependency in some paths and to exercise the "ps
+// output unparseable" fallback deterministically).
 var psLstart = func(pid int) (time.Time, error) {
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout)
+	defer cancel()
+	return readLstart(ctx, pid)
+}
+
+// psEnvOverride is appended to every `ps -o lstart=` exec's environment,
+// where it wins over the inherited values (exec.Cmd keeps the last value
+// of a repeated key): TZ=UTC0 makes ps print the start in UTC whatever
+// zone this process runs in — including a POSIX TZ rule string such as
+// JST-9, which ps honours but Go's time.Local does not — and LC_ALL=C
+// makes it print the English day and month names lstartLayouts parse.
+// parseLstart reads the output in time.UTC to match, so a recording holder
+// and a probing process read one clock whatever their own environments
+// (SI-300 as amended, FL-R1).
+func psEnvOverride() []string { return []string{"TZ=UTC0", "LC_ALL=C"} }
+
+// lstartCommand builds the `ps -o lstart= -p <pid>` exec readLstart runs
+// under ctx. A var only so a test can substitute a command that checks its
+// environment or does not answer (the psTimeout bound).
+var lstartCommand = func(ctx context.Context, pid int) *exec.Cmd {
+	return exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+}
+
+// psTimeout bounds one `ps -o lstart=` exec: past it the exec is killed and
+// the read fails, which is ownProcessStart's acquisition-time fallback on
+// the recording side and probe's undecided (kill-probe-only) answer on the
+// probing side. psWaitDelay then bounds how long the exec's output pipe may
+// stay open after the kill (a ps wrapper whose own child still holds it),
+// so a read returns within psTimeout+psWaitDelay once the killed process
+// has exited. Vars only so tests can shrink them.
+var (
+	psTimeout   = 5 * time.Second
+	psWaitDelay = time.Second
+)
+
+// readLstart runs lstartCommand for pid under ctx with psEnvOverride and
+// parses its stdout as the process's start. A read cut off by ctx says so,
+// naming the bound it did not answer within.
+func readLstart(ctx context.Context, pid int) (time.Time, error) {
+	cmd := lstartCommand(ctx, pid)
+	cmd.Env = append(os.Environ(), psEnvOverride()...)
+	cmd.WaitDelay = psWaitDelay
+	out, err := cmd.Output()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return time.Time{}, fmt.Errorf("filelock: ps -o lstart= -p %d: no answer within %s: %w", pid, psTimeout, ctxErr)
+		}
 		return time.Time{}, fmt.Errorf("filelock: ps -o lstart= -p %d: %w", pid, err)
 	}
 	return parseLstart(strings.TrimSpace(string(out)))
@@ -98,9 +205,12 @@ var lstartLayouts = []string{
 	"Mon Jan 2 15:04:05 2006",
 }
 
+// parseLstart reads s, ps's lstart output under psEnvOverride, as a UTC
+// time — never time.Local, which differs between processes (and ignores a
+// POSIX TZ rule string ps honours).
 func parseLstart(s string) (time.Time, error) {
 	for _, layout := range lstartLayouts {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
 			return t, nil
 		}
 	}
@@ -111,9 +221,9 @@ func parseLstart(s string) (time.Time, error) {
 // SAME process that wrote recordedStart, closing S4's documented
 // PID-reuse gap. It delegates to probe and keeps probe's documented
 // kill-probe-only fallback: when probe cannot decide (the ps cross-check
-// failed or its output was unparseable), alive reports true rather than
-// guessing stale (the narrow, disclosed limitation S4 and PLAN.md's
-// ledger both name). Inspect (inspect.go, R-RR3-6) calls probe directly
+// failed, timed out, or its output was unparseable), alive reports true
+// rather than guessing stale (the narrow, disclosed limitation S4 and
+// PLAN.md's ledger both name). Inspect (inspect.go, R-RR3-6) calls probe directly
 // so it can report that same undecided case as LockUndecidable instead —
 // this function's own contract, and Peek's built on it, are unchanged.
 func alive(pid int, recordedStart int64) bool {
@@ -129,12 +239,12 @@ func alive(pid int, recordedStart int64) bool {
 // only) first, then, for a live pid, a cross-check of its actual start
 // time against recordedStart within lockStartTolerance. decided is false
 // in exactly one case — the ps cross-check itself could not be completed
-// (its output could not be obtained or parsed) — with reason carrying the
-// ps error text; every other outcome (pid absent/not signalable, pid
-// alive and start time within tolerance, pid alive but start time
-// drifted far enough that a different process must have reused it) is
-// decided, with reason set only for the not-alive decided cases (empty
-// for a decided-alive result).
+// (its output could not be obtained within psTimeout, or not parsed) —
+// with reason carrying the ps error text; every other outcome (pid
+// absent/not signalable, pid alive and start time within tolerance, pid
+// alive but start time drifted far enough that a different process must
+// have reused it) is decided, with reason set only for the not-alive
+// decided cases (empty for a decided-alive result).
 func probe(pid int, recordedStart int64) (isAlive, decided bool, reason string) {
 	if pid <= 0 {
 		return false, true, fmt.Sprintf("pid %d is not a valid process id", pid)
@@ -351,21 +461,28 @@ func LeaseIfHeldByCurrentProcess(path string) (release func(), held bool, err er
 }
 
 // Acquire implements I-12(a) end to end: create path with O_CREATE|O_EXCL
-// and write {pid,start} JSON on success. If the path already exists,
+// and write {pid,start} JSON on success, start being this process's own OS
+// start time (ownProcessStart, SI-300). If the path already exists,
 // inspect the holder recorded inside — alive (per alive, above) yields
 // ErrHeld (the caller should proxy/reuse rather than proceed);
-// dead/stale removes the lock and retries acquisition, up to a small
-// bound (guards a takeover race between two simultaneous stale
-// detectors: both remove+recreate, only one O_EXCL create wins, the loser
-// retries and finds the winner's fresh live lock).
+// dead/stale takes the lock over (takeOverStale, SI-302: on platforms with
+// flock(2) the detector removes only the exact file it judged, under a
+// flock on that file, so two detectors of one stale lock can never both
+// remove it) and retries acquisition, up to a small bound: a takeover
+// that finds the lock changed under it re-evaluates from scratch, reading
+// the new holder's live lock, and only one O_EXCL create can win.
+//
+// The own start is read once per call, BEFORE the exclusive create, so the
+// ps exec it may cost never widens the window between the create and the
+// body flush that racing readers must treat as mid-flush.
 func Acquire(path string) (*os.File, error) {
-	return acquire(path, 5)
+	return acquire(path, 5, ownProcessStart())
 }
 
-func acquire(path string, retriesLeft int) (*os.File, error) {
+func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err == nil {
-		info := Info{PID: os.Getpid(), Start: time.Now().Unix()}
+		info := Info{PID: os.Getpid(), Start: start}
 		if encErr := json.NewEncoder(f).Encode(info); encErr != nil {
 			_ = f.Close()
 			_ = os.Remove(path)
@@ -378,11 +495,11 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 		return nil, fmt.Errorf("filelock: acquiring lock %s: %w", path, err)
 	}
 
-	data, rerr := os.ReadFile(path)
+	data, rerr := lockReadFile(path)
 	if rerr != nil {
 		// Lost the race with the remover between our OpenFile and this Read.
 		if errors.Is(rerr, os.ErrNotExist) && retriesLeft > 0 {
-			return acquire(path, retriesLeft-1)
+			return acquire(path, retriesLeft-1, start)
 		}
 		return nil, fmt.Errorf("filelock: lock %s exists but is unreadable: %w", path, rerr)
 	}
@@ -403,7 +520,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 			// Lost the race with a concurrent remover between our read and
 			// this stat — retry acquisition rather than fail hard.
 			if errors.Is(serr, os.ErrNotExist) && retriesLeft > 0 {
-				return acquire(path, retriesLeft-1)
+				return acquire(path, retriesLeft-1, start)
 			}
 			return nil, fmt.Errorf("filelock: lock %s exists but its empty/partial body could not be aged: %w", path, serr)
 		}
@@ -420,10 +537,10 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 		if retriesLeft <= 0 {
 			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body older than %s) but exceeded takeover retries", path, lockMidFlushWindow)
 		}
-		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body) but could not remove: %w", path, rmErr)
+		if terr := takeOverStale(path); terr != nil {
+			return nil, takeoverFailed(path, "empty/partial body", terr)
 		}
-		return acquire(path, retriesLeft-1)
+		return acquire(path, retriesLeft-1, start)
 	}
 	if alive(info.PID, info.Start) {
 		return nil, &ErrHeld{Info: info}
@@ -431,15 +548,46 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 	if retriesLeft <= 0 {
 		return nil, fmt.Errorf("filelock: stale lock %s (pid %d dead) but exceeded takeover retries", path, info.PID)
 	}
-	if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("filelock: stale lock %s (pid %d dead) but could not remove: %w", path, info.PID, rmErr)
+	if terr := takeOverStale(path); terr != nil {
+		return nil, takeoverFailed(path, fmt.Sprintf("pid %d dead", info.PID), terr)
 	}
-	return acquire(path, retriesLeft-1)
+	return acquire(path, retriesLeft-1, start)
 }
 
-// Release closes f and removes path — the holder's own clean path. A
-// crash leaves the lock behind on disk exactly as I-12 intends: the next
-// acquirer's alive() probe discovers the dead pid and takes over.
+// takeoverFailed is acquire's answer when takeOverStale did not leave the
+// lock to re-evaluate: its *ErrHeld (another detector is taking the lock
+// over) passes through unchanged, and any other error is operational, named
+// with the stale lock it concerned.
+func takeoverFailed(path, why string, err error) error {
+	var held *ErrHeld
+	if errors.As(err, &held) {
+		return held
+	}
+	return fmt.Errorf("filelock: stale lock %s (%s) but could not take it over: %w", path, why, err)
+}
+
+// lockReadFile and lockStat are acquire's read of an existing lock's body
+// and lockFileYoung's stat of it — os.ReadFile and os.Stat, vars only so a
+// test can remove the lock between two of acquire's steps, the concurrent
+// remover acquire's two ENOENT retry branches exist for.
+var (
+	lockReadFile = os.ReadFile
+	lockStat     = os.Stat
+)
+
+// Release closes f and removes path — the holder's own clean path — but
+// only while path still names f itself (SI-302): the identity is checked
+// while f is still open, so its inode cannot have been reused. When path
+// names another file — the lock was taken from this holder and another
+// process now holds one there (an older binary's by-name takeover, say),
+// even with byte-identical contents — Release leaves that file in place and
+// returns nil, exactly as when path is already gone: this holder's own
+// release is complete. When path cannot be inspected, Release returns an
+// error and removes nothing. Holders take no flock (takeOverStale says
+// why), so the check and the remove are two steps; only a detector that
+// misjudged this live holder stale, or an older binary, can act between
+// them. A crash leaves the lock behind on disk exactly as I-12 intends: the
+// next acquirer's alive() probe discovers the dead pid and takes over.
 // Release is the sole owner release and deregisters exactly the
 // registered handle (deregisterAcquired only removes a registry entry
 // that still names this exact *os.File), before closing it — so no
@@ -459,8 +607,15 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 // Releasing a handle with no leases (the common case) never waits.
 func Release(f *os.File, path string) error {
 	deregisterAcquired(path, f)
+	ours, identErr := stillOurRegisteredFile(f, path)
 	if cerr := f.Close(); cerr != nil {
 		return fmt.Errorf("filelock: closing lock %s: %w", path, cerr)
+	}
+	if identErr != nil {
+		return fmt.Errorf("filelock: lock %s left in place: %w", path, identErr)
+	}
+	if !ours {
+		return nil
 	}
 	if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 		return fmt.Errorf("filelock: removing lock %s: %w", path, rerr)
@@ -535,11 +690,18 @@ func lockBodyIncomplete(err error) bool {
 // returned unwrapped so the caller can distinguish os.ErrNotExist (the file
 // was removed out from under us — lost a race) from a real stat failure.
 func lockFileYoung(path string) (bool, error) {
-	st, err := os.Stat(path)
+	st, err := lockStat(path)
 	if err != nil {
 		return false, err
 	}
-	return time.Since(st.ModTime()) <= lockMidFlushWindow, nil
+	return modifiedWithinMidFlushWindow(st.ModTime()), nil
+}
+
+// modifiedWithinMidFlushWindow reports whether modTime lies within
+// lockMidFlushWindow of now: lockFileYoung's test, and takeOverStale's for a
+// lock it judges through its own open handle.
+func modifiedWithinMidFlushWindow(modTime time.Time) bool {
+	return time.Since(modTime) <= lockMidFlushWindow
 }
 
 // lockDecodeRetries/lockDecodeRetryDelay bound decodeLockInfo's tolerance
