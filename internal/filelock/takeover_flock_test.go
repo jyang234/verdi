@@ -949,9 +949,10 @@ func TestBodyStale(t *testing.T) {
 
 // TestTakeoverHandleHelpers covers the helpers takeOverStale reads its open
 // handle through: readOpenLock reads the whole body from offset 0 whatever
-// the handle's own offset; lockFlock takes the flock once and answers
-// EWOULDBLOCK to a second handle on the same file; and every helper reports
-// an error on a closed handle rather than a guessed answer.
+// the handle's own offset; judgeOpenLock judges the file its handle names,
+// not whatever the path names by then; lockFlock takes the flock once and
+// answers EWOULDBLOCK to a second handle on the same file; and every helper
+// reports an error on a closed handle rather than a guessed answer.
 func TestTakeoverHandleHelpers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "writer.lock")
 	writeLockInfo(t, path, Info{PID: 1, Start: 2})
@@ -976,6 +977,31 @@ func TestTakeoverHandleHelpers(t *testing.T) {
 		got, err := readOpenLock(f)
 		if err != nil || string(got) != string(want) {
 			t.Fatalf("readOpenLock = %q, %v, want %q", got, err, want)
+		}
+	})
+	t.Run("judgeOpenLock judges the handle's file, not the path's", func(t *testing.T) {
+		self := os.Getpid()
+		selfStart := secondsAgo(time.Hour)
+		fakeProcessStarts(t, map[int]time.Time{self: selfStart})
+		judged := filepath.Join(t.TempDir(), "writer.lock")
+		staleBodies[0].seed(t, judged)
+		stale, err := os.ReadFile(judged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(judged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		if err := os.Remove(judged); err != nil {
+			t.Fatal(err)
+		}
+		writeLockInfo(t, judged, Info{PID: self, Start: selfStart.Unix()})
+
+		body, isStale, err := judgeOpenLock(f)
+		if err != nil || !isStale || string(body) != string(stale) {
+			t.Fatalf("judgeOpenLock = %q, %t, %v, want the handle's stale body %q, true", body, isStale, err, stale)
 		}
 	})
 	t.Run("lockFlock excludes a second handle", func(t *testing.T) {
