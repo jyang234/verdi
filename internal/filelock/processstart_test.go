@@ -220,6 +220,118 @@ func TestAcquire_OwnStartUnreadableRecordsAcquisitionTime(t *testing.T) {
 	}
 }
 
+// TestAcquire_ReadsItsOwnStartOnceBeforeTheCreate pins when Acquire reads
+// the start it records and which branches record it (FL-R2): exactly once
+// per call, before the exclusive create — the uncontended lock path does
+// not exist yet at that read, so the ps exec never widens the mid-flush
+// window — and every takeover and retry branch records that one
+// precomputed start, never a fresh reading or the current time. The
+// seam's own start lies ten minutes back, so a branch recording the
+// current time is caught. The two ENOENT rows remove the lock between two
+// of acquire's steps (the concurrent remover those branches exist for)
+// through the lockReadFile and lockStat seams, and prove the branch ran.
+func TestAcquire_ReadsItsOwnStartOnceBeforeTheCreate(t *testing.T) {
+	self := os.Getpid()
+	ownStart := secondsAgo(10 * time.Minute)
+	always := func() bool { return true }
+	cases := []struct {
+		name         string
+		setup        func(t *testing.T, path string) (reached func() bool)
+		absentAtRead bool
+	}{
+		{"uncontended", func(*testing.T, string) func() bool { return always }, true},
+		{"dead-pid takeover", func(t *testing.T, path string) func() bool {
+			writeLockInfo(t, path, Info{PID: reapedPID(t), Start: ownStart.Unix()})
+			return always
+		}, false},
+		{"empty-body takeover", func(t *testing.T, path string) func() bool {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-lockMidFlushWindow - time.Minute)
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+			return always
+		}, false},
+		{"lock removed between the exclusive create and its read", func(t *testing.T, path string) func() bool {
+			writeLockInfo(t, path, Info{PID: startSleeper(t), Start: ownStart.Unix()})
+			orig := lockReadFile
+			var removed, sawENOENT bool
+			lockReadFile = func(name string) ([]byte, error) {
+				if !removed {
+					removed = true
+					if err := os.Remove(name); err != nil {
+						t.Errorf("removing the lock under acquire: %v", err)
+					}
+				}
+				data, err := orig(name)
+				sawENOENT = sawENOENT || errors.Is(err, os.ErrNotExist)
+				return data, err
+			}
+			t.Cleanup(func() { lockReadFile = orig })
+			return func() bool { return sawENOENT }
+		}, false},
+		{"lock removed between its read and its age check", func(t *testing.T, path string) func() bool {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			orig := lockStat
+			var removed, sawENOENT bool
+			lockStat = func(name string) (os.FileInfo, error) {
+				if !removed {
+					removed = true
+					if err := os.Remove(name); err != nil {
+						t.Errorf("removing the lock under acquire: %v", err)
+					}
+				}
+				info, err := orig(name)
+				sawENOENT = sawENOENT || errors.Is(err, os.ErrNotExist)
+				return info, err
+			}
+			t.Cleanup(func() { lockStat = orig })
+			return func() bool { return sawENOENT }
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			reached := tc.setup(t, path)
+			var reads int
+			var existedAtRead bool
+			orig := psLstart
+			psLstart = func(pid int) (time.Time, error) {
+				if pid != self {
+					return time.Time{}, fmt.Errorf("fake ps: no process start known for pid %d", pid)
+				}
+				reads++
+				_, err := os.Lstat(path)
+				existedAtRead = err == nil
+				return ownStart, nil
+			}
+			t.Cleanup(func() { psLstart = orig })
+
+			f, err := Acquire(path)
+			if err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			t.Cleanup(func() { _ = Release(f, path) })
+			if !reached() {
+				t.Fatal("the branch under test was never reached")
+			}
+			if reads != 1 {
+				t.Errorf("Acquire read its own start %d times, want exactly once per call", reads)
+			}
+			if tc.absentAtRead && existedAtRead {
+				t.Error("the lock path already existed when Acquire read its own start, want the read before the exclusive create")
+			}
+			if got := readLockBody(t, path); got != (Info{PID: self, Start: ownStart.Unix()}) {
+				t.Errorf("lock body = %+v, want {PID:%d Start:%d}: the start precomputed before the create", got, self, ownStart.Unix())
+			}
+		})
+	}
+}
+
 // TestProbe_ProcessStartDrift pins the comparison SI-300 keeps (01 §D3): a
 // live pid is its lock's holder iff its OS process start agrees with the
 // recorded start within lockStartTolerance, in either direction; outside

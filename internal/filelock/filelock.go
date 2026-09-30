@@ -478,7 +478,7 @@ func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 		return nil, fmt.Errorf("filelock: acquiring lock %s: %w", path, err)
 	}
 
-	data, rerr := os.ReadFile(path)
+	data, rerr := lockReadFile(path)
 	if rerr != nil {
 		// Lost the race with the remover between our OpenFile and this Read.
 		if errors.Is(rerr, os.ErrNotExist) && retriesLeft > 0 {
@@ -536,6 +536,15 @@ func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 	}
 	return acquire(path, retriesLeft-1, start)
 }
+
+// lockReadFile and lockStat are acquire's read of an existing lock's body
+// and lockFileYoung's stat of it — os.ReadFile and os.Stat, vars only so a
+// test can remove the lock between two of acquire's steps, the concurrent
+// remover acquire's two ENOENT retry branches exist for.
+var (
+	lockReadFile = os.ReadFile
+	lockStat     = os.Stat
+)
 
 // Release closes f and removes path — the holder's own clean path. A
 // crash leaves the lock behind on disk exactly as I-12 intends: the next
@@ -635,7 +644,7 @@ func lockBodyIncomplete(err error) bool {
 // returned unwrapped so the caller can distinguish os.ErrNotExist (the file
 // was removed out from under us — lost a race) from a real stat failure.
 func lockFileYoung(path string) (bool, error) {
-	st, err := os.Stat(path)
+	st, err := lockStat(path)
 	if err != nil {
 		return false, err
 	}
