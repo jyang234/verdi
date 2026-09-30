@@ -150,12 +150,15 @@ func parseCandidatePath(path string) (zone, string, error) {
 // path that names it via a links: {type: supersedes} edge WITHOUT a
 // validatable supersession: block — the story-class shape, which can
 // never carry the block (internal/artifact's validateStory rejects it
-// outright). One signal is not proof, so such a claim never projects
+// outright). One signal is not proof, so such a claim alone never projects
 // Superseded; but discarding it entirely (the pre-fix behavior) silently
 // accepted a predecessor a reviewed, merged successor claims to replace.
 // resolveOne projects the predecessor Unproven with a disclosure naming
 // the successor and the missing proof (final fix wave I4) — three-valued
-// honesty, no invented mechanism.
+// honesty, no invented mechanism. For a story predecessor the missing
+// proof is the rung-3 conflict: a story successor's edge plus a
+// superseded conflict challenging the whole predecessor projects it
+// Superseded (SI-290; storysupersession.go).
 //
 // failures maps every corpus path that failed strict decode to a
 // human-readable witness message, keyed by path so a per-candidate lookup
@@ -165,10 +168,23 @@ func parseCandidatePath(path string) (zone, string, error) {
 // verdict while still blocking every OTHER candidate's (a spec can never
 // supersede itself, but it can very much be the undetected successor of
 // something else in the same batch).
+//
+// The corpus also carries what story supersession reads (SI-290, SI-291,
+// SI-304; storysupersession.go), from the same tree at the same revision:
+// rung3Stories marks every default-branch spec path that decoded as a
+// non-spike story (the successors a story predecessor's rung-3 proof
+// counts); resolvedBy maps a predecessor's bare name to every conflict path
+// whose status is superseded and whose challenges links name that whole
+// spec; and conflictFailures maps every conflict path that failed strict
+// decode to its witness message.
 type successorCorpus struct {
 	supersedesBy map[string][]string
 	linkOnlyBy   map[string][]string
 	failures     map[string]string
+
+	rung3Stories     map[string]bool
+	resolvedBy       map[string][]string
+	conflictFailures map[string]string
 }
 
 // supersessorsFor returns the sorted default-branch paths that validly
@@ -220,7 +236,8 @@ func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
 // default branch's two spec zones (specZonesPrefix — active AND archive,
 // final fix wave I3), unconditionally — no candidate path is excluded at
 // scan time (fix-round-1 finding 1; see successorCorpus's doc comment for
-// why exclusion belongs at lookup time instead). rev is what every read
+// why exclusion belongs at lookup time instead) — and then every conflict
+// record (scanConflicts), at the same revision. rev is what every read
 // names: the default branch's ref, or the commit it resolved to when the
 // scan is cached (see successors).
 func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*successorCorpus, error) {
@@ -230,7 +247,14 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*succe
 	}
 	sort.Strings(paths)
 
-	corpus := &successorCorpus{supersedesBy: map[string][]string{}, linkOnlyBy: map[string][]string{}, failures: map[string]string{}}
+	corpus := &successorCorpus{
+		supersedesBy:     map[string][]string{},
+		linkOnlyBy:       map[string][]string{},
+		failures:         map[string]string{},
+		rung3Stories:     map[string]bool{},
+		resolvedBy:       map[string][]string{},
+		conflictFailures: map[string]string{},
+	}
 	for _, path := range paths {
 		if !strings.HasSuffix(path, "/spec.md") {
 			continue // the corpus scan cares only about spec.md leaves
@@ -262,6 +286,9 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*succe
 		if decodeErr != nil {
 			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr)
 			continue
+		}
+		if isRung3Story(fm) {
+			corpus.rung3Stories[path] = true
 		}
 		if fm.Supersession != nil {
 			// The two-signal successor shape: a WHOLE-SPEC supersedes edge
@@ -303,6 +330,9 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*succe
 	}
 	for name := range corpus.linkOnlyBy {
 		sort.Strings(corpus.linkOnlyBy[name])
+	}
+	if err := p.scanConflicts(ctx, root, rev, corpus); err != nil {
+		return nil, err
 	}
 	return corpus, nil
 }
@@ -509,11 +539,13 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 	// landed commit, but the successor a class: story predecessor is
 	// bound to can never carry a validated supersession: block (internal/
 	// artifact's validateStory rejects it outright), so the two-signal
-	// successor-corpus proof above can NEVER independently confirm story-
-	// level supersession — without this fallback, a landed, legacy-
-	// superseded story predecessor would silently read as
-	// AcceptedPendingBuild and every consumer that migrated onto this
-	// projector would proceed as though it were still buildable. Checked
+	// block proof above can NEVER independently confirm story-level
+	// supersession — without this fallback, a landed, legacy-superseded
+	// story predecessor would silently read as AcceptedPendingBuild and
+	// every consumer that migrated onto this projector would proceed as
+	// though it were still buildable. (The rung-3 route below, SI-290, can
+	// confirm it from the successor's edge plus the resolved conflict; this
+	// legacy read still wins first, I-40, SI-304.) Checked
 	// BEFORE the incomplete-scan Unproven case below: an explicit terminal
 	// status is a direct, self-contained statement about THIS candidate
 	// that does not depend on the corpus scan being complete to be
@@ -532,26 +564,33 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		}, nil
 	}
 
-	// Final fix wave I4: a successor names this predecessor via a
-	// links: supersedes edge but carries no validatable supersession:
-	// block — the story-class shape, which can never carry the block, so
-	// the two-signal proof above can never confirm it. One signal is not
-	// proof (never Superseded — no invented mechanism), but a reviewed,
-	// merged successor's claim is not nothing either (never silent
-	// AcceptedPendingBuild): the predecessor projects disclosed-unproven,
-	// naming each claiming successor and the missing proof. Checked AFTER
-	// the legacy-terminal read above — an explicit persisted terminal
-	// status is a positive, self-contained statement that still wins —
-	// and BEFORE the scan-incompleteness fallback below (this is a more
-	// specific witness than "the scan could not complete").
-	if linkOnly := corpus.linkOnlySupersessorsFor(c.Path, name); len(linkOnly) > 0 {
+	// A story predecessor (SI-290): its state comes from the rung-3
+	// records — a story successor's whole-spec supersedes edge and a
+	// superseded conflict challenging the whole spec, both on the default
+	// branch (storyVerdict). Checked AFTER the legacy-terminal read above
+	// (I-40 still wins first) and BEFORE the spec-scan-incompleteness
+	// fallback below (each of its witnesses is more specific than "the
+	// scan could not complete").
+	if isRung3Story(probeSpec(c.Content)) {
+		if result, decided := corpus.storyVerdict(c.Path, name, baseline); decided {
+			return result, nil
+		}
+	} else if linkOnly := corpus.linkOnlySupersessorsFor(c.Path, name); len(linkOnly) > 0 {
+		// Final fix wave I4: a successor names this predecessor via a
+		// links: supersedes edge but carries no validatable supersession:
+		// block, so the two-signal proof above can never confirm it. One
+		// signal is not proof (never Superseded — no invented mechanism),
+		// but a reviewed, merged successor's claim is not nothing either
+		// (never silent AcceptedPendingBuild): the predecessor projects
+		// disclosed-unproven, naming each claiming successor and the
+		// missing proof. Checked AFTER the legacy-terminal read above — an
+		// explicit persisted terminal status is a positive, self-contained
+		// statement that still wins — and BEFORE the scan-incompleteness
+		// fallback below (this is a more specific witness than "the scan
+		// could not complete").
 		disclosures := make([]string, 0, len(linkOnly))
 		for _, succ := range linkOnly {
-			disclosures = append(disclosures, fmt.Sprintf(
-				// vocab:identity — machinery diagnostic naming the frontmatter link/block fields and the lifecycle states involved
-				"specstate: %s is named as a predecessor by %s via a links: supersedes edge, but that successor carries no validatable supersession: block — supersession cannot be proven from Git alone; reported unproven with this disclosure, never silently accepted-pending-build",
-				c.Path, succ,
-			))
+			disclosures = append(disclosures, linkOnlyDisclosure(c.Path, succ))
 		}
 		return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, nil
 	}
@@ -573,6 +612,17 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		Baseline:    baseline,
 		Disclosures: migrationDisclosures(c.Path, c.Content),
 	}, nil
+}
+
+// linkOnlyDisclosure is final fix wave I4's disclosure: candidatePath is
+// named as a predecessor by succ through a whole-spec supersedes edge that
+// no supersession: block accompanies.
+func linkOnlyDisclosure(candidatePath, succ string) string {
+	return fmt.Sprintf(
+		// vocab:identity — machinery diagnostic naming the frontmatter link/block fields and the lifecycle states involved
+		"specstate: %s is named as a predecessor by %s via a links: supersedes edge, but that successor carries no validatable supersession: block — supersession cannot be proven from Git alone; reported unproven with this disclosure, never silently accepted-pending-build",
+		candidatePath, succ,
+	)
 }
 
 // migrationDisclosures returns the compatibility disclosure the design's
@@ -641,13 +691,25 @@ func legacyTerminalStatusDisclosure(path, legacyStatus string, projected State) 
 // dead in that call path today — never a live fail-open gap — and stays
 // tolerant here only as this function's own defensive posture.
 func probeLegacyStatus(content []byte) string {
-	rawFM, _, splitErr := artifact.SplitFrontmatter(content)
-	if splitErr != nil {
-		return ""
-	}
-	fm, err := artifact.DecodeSpec(rawFM)
-	if err != nil {
+	fm := probeSpec(content)
+	if fm == nil {
 		return ""
 	}
 	return string(fm.Status)
+}
+
+// probeSpec tolerantly decodes a spec document's frontmatter through
+// internal/artifact.DecodeSpec, returning nil when it cannot be split or
+// decoded. resolveOne reaches it only for a candidate whose own strict
+// decode the corpus scan did not record as failed (see probeLegacyStatus).
+func probeSpec(content []byte) *artifact.SpecFrontmatter {
+	rawFM, _, splitErr := artifact.SplitFrontmatter(content)
+	if splitErr != nil {
+		return nil
+	}
+	fm, err := artifact.DecodeSpec(rawFM)
+	if err != nil {
+		return nil
+	}
+	return fm
 }
