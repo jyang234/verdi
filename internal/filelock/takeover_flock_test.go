@@ -579,7 +579,11 @@ func TestTakeover_UnlinksUnderTheFlock(t *testing.T) {
 // (the body re-check — including a creator's late flush into an aged empty
 // lock), an aged empty lock made young (the re-judgement), the lock
 // vanishing, and nothing changing. Only the last two take the lock; every
-// other row leaves the lock found at the path exactly as it was.
+// other row leaves the lock found at the path exactly as it was. Only the
+// last passes its re-check: every other row must re-evaluate from scratch
+// without ever reaching takeoverRechecked — a detector that let a vanished
+// path pass would go on to unlink whatever lock another process created
+// there after its re-check, which the row simulates and requires to survive.
 func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 	self := os.Getpid()
 	selfStart := secondsAgo(time.Hour)
@@ -595,6 +599,9 @@ func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 		// sameFile: the file found at the path afterwards is the seeded one
 		// (true) or the one atJudged put there (false); unused on acquire.
 		sameFile bool
+		// rechecks: the re-check under the flock passes, so the detector
+		// reaches takeoverRechecked.
+		rechecks bool
 	}{
 		{"another detector holds the takeover flock", staleBodies[0].seed, func(t *testing.T, path string) {
 			other, err := os.Open(path)
@@ -605,27 +612,27 @@ func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 			if err := lockFlock(other); err != nil {
 				t.Fatalf("taking the other detector's flock: %v", err)
 			}
-		}, &Info{}, true},
+		}, &Info{}, true, false},
 		{"the path now names a live holder's lock", staleBodies[0].seed, func(t *testing.T, path string) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
 			writeLive(t, path)
-		}, &live, false},
-		{"the body was rewritten in place with a live holder's", staleBodies[0].seed, writeLive, &live, true},
-		{"the creator flushed its body late into the aged empty lock", staleBodies[1].seed, writeLive, &live, true},
+		}, &live, false, false},
+		{"the body was rewritten in place with a live holder's", staleBodies[0].seed, writeLive, &live, true, false},
+		{"the creator flushed its body late into the aged empty lock", staleBodies[1].seed, writeLive, &live, true, false},
 		{"the aged empty lock was made young", staleBodies[1].seed, func(t *testing.T, path string) {
 			now := time.Now()
 			if err := os.Chtimes(path, now, now); err != nil {
 				t.Fatal(err)
 			}
-		}, &Info{}, true},
+		}, &Info{}, true, false},
 		{"the lock vanished", staleBodies[0].seed, func(t *testing.T, path string) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-		}, nil, false},
-		{"nothing changed", staleBodies[0].seed, func(*testing.T, string) {}, nil, false},
+		}, nil, false, false},
+		{"nothing changed", staleBodies[0].seed, func(*testing.T, string) {}, nil, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -636,36 +643,54 @@ func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var found os.FileInfo
+			var found, gap os.FileInfo
+			rechecked := false
 			orig := takeoverHook
 			takeoverHook = func(s takeoverStep) {
-				if s != takeoverJudged || found != nil {
-					return
-				}
-				tc.atJudged(t, path)
-				found, _ = os.Lstat(path)
-				if found == nil {
-					found = seeded // the lock vanished; nothing to compare
+				switch {
+				case s == takeoverJudged && found == nil:
+					tc.atJudged(t, path)
+					found, _ = os.Lstat(path)
+					if found == nil {
+						found = seeded // the lock vanished; nothing to compare
+					}
+				case s == takeoverRechecked:
+					rechecked = true
+					// Another process creates its lock at a path the re-check
+					// should have found gone, before the unlink.
+					if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) && gap == nil {
+						writeLockInfo(t, path, Info{PID: os.Getppid(), Start: 42})
+						gap, _ = os.Lstat(path)
+					}
 				}
 			}
 			t.Cleanup(func() { takeoverHook = orig })
 
 			f, err := Acquire(path)
+			if err == nil {
+				t.Cleanup(func() { _ = Release(f, path) })
+			}
 			if found == nil {
 				t.Fatal("the detector never judged the lock stale through its own handle")
+			}
+			if rechecked != tc.rechecks {
+				t.Errorf("the detector reached takeoverRechecked = %t, want %t", rechecked, tc.rechecks)
+			}
+			if gap != nil {
+				if after, lerr := os.Lstat(path); lerr != nil || !os.SameFile(after, gap) {
+					t.Errorf("the detector unlinked the lock another process created at the path after its re-check (Acquire = %v)", err)
+				}
 			}
 			if tc.held == nil {
 				if err != nil {
 					t.Fatalf("Acquire = %v, want the lock taken over", err)
 				}
-				t.Cleanup(func() { _ = Release(f, path) })
 				if got := readLockBody(t, path); got != live {
 					t.Fatalf("lock body after takeover = %+v, want ours %+v", got, live)
 				}
 				return
 			}
 			if err == nil {
-				_ = Release(f, path)
 				t.Fatal("Acquire took the lock over, want *ErrHeld")
 			}
 			var held *ErrHeld
