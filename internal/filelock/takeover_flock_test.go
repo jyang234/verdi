@@ -647,6 +647,17 @@ func TestTakeOverStale_Direct(t *testing.T) {
 		{"a live holder's lock", func(t *testing.T, path string) {
 			writeLockInfo(t, path, Info{PID: self, Start: selfStart.Unix()})
 		}, "", false},
+		{"a live holder's lock another handle has flocked", func(t *testing.T, path string) {
+			writeLockInfo(t, path, Info{PID: self, Start: selfStart.Unix()})
+			other, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = other.Close() })
+			if err := lockFlock(other); err != nil {
+				t.Fatal(err)
+			}
+		}, "", false},
 		{"a garbled body", func(t *testing.T, path string) {
 			if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
 				t.Fatal(err)
