@@ -73,6 +73,12 @@ type syncDeps struct {
 	// syncDeps construction site leaves it nil, which is harmless since
 	// they never call produceGoTestEvidence.
 	NamedGoTest namedGoTestRunner
+
+	// Playwright is the Playwright per-test producer's execution seam
+	// (SI-293, playwrightproducer.go). Only runProduce's --produce path uses
+	// it, and only when a selected obligation names an existing file; every
+	// other construction site leaves it nil.
+	Playwright playwrightRunner
 }
 
 // cmdSync is `verdi sync`'s real entry point, invoked by dispatch.go. It
@@ -211,7 +217,7 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	}
 	runner := upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 
-	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, NamedGoTest: realNamedGoTestRunner{}, Stdout: stdout, Stderr: stderr}
+	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, NamedGoTest: realNamedGoTestRunner{}, Playwright: realPlaywrightRunner{Log: stderr}, Stdout: stdout, Stderr: stderr}
 	return runSync(ctx, root, ref, commit, orRegen, produce, forceLocal, deps)
 }
 
@@ -448,6 +454,16 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 	// test's real result. jobName == "" (not a detected CI job at all)
 	// naturally selects nothing, so this is a no-op off the CI path.
 	if err := produceGoTestEvidence(ctx, root, commit, ciInfo.JobName, deps.NamedGoTest, prov, deps.Stdout); err != nil {
+		fmt.Fprintln(deps.Stderr, "sync:", err)
+		return 2
+	}
+
+	// The Playwright per-test producer (SI-292..SI-294;
+	// playwrightproducer.go): the same exception for an elaborated
+	// playwright:<file>:<title path> obligation this job is authoritative for,
+	// run after the go-test producer with the same provenance. It runs
+	// nothing at all unless a selected obligation names an existing file.
+	if err := producePlaywrightEvidence(ctx, root, commit, ciInfo.JobName, deps.Playwright, prov, deps.Stdout); err != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2
 	}
