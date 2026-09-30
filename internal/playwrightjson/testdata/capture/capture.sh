@@ -46,7 +46,7 @@ run_scenario() {
 # Every scenario by default; name scenarios to re-capture only those.
 scenarios=("$@")
 if [ ${#scenarios[@]} -eq 0 ]; then
-	scenarios=(outcomes duplicate setup-fails global-timeout sigint two-projects)
+	scenarios=(outcomes duplicate setup-fails global-timeout sigint two-projects helper-declared)
 fi
 
 for scenario in "${scenarios[@]}"; do

@@ -481,6 +481,33 @@ func TestProducePlaywrightEvidence_InterruptedRun(t *testing.T) {
 	playwrightAssertOutcomes(t, root, stdout, cases)
 }
 
+// TestProducePlaywrightEvidence_HelperDeclaredTest proves a test that a helper
+// module declares is named, and recorded, through the spec file importing the
+// helper (helper-declared.json, a real run): Playwright lists the test in that
+// file's own suite, with the helper as its location, so an obligation naming
+// e2e/tests/helper-declared.spec.ts and the test's title path gets that test's
+// verdict, beside the file's own test, and the run is never operational.
+func TestProducePlaywrightEvidence_HelperDeclaredTest(t *testing.T) {
+	t.Parallel()
+	const file = "playwright:e2e/tests/helper-declared.spec.ts:"
+	cases := []playwrightOutcomeCase{
+		{ac: "ac-1", kind: "behavioral", ref: file + "shared checks for home › renders", verdict: artifact.VerdictPass},
+		{ac: "ac-2", kind: "behavioral", ref: file + "local › passes", verdict: artifact.VerdictPass},
+	}
+	root := t.TempDir()
+	playwrightSpecFiles(t, root, "helper-declared.spec.ts")
+	playwrightWriteCases(t, root, cases)
+	runner := &playwrightFakeRunner{report: playwrightReportFixture(t, "helper-declared", root)}
+	stdout, err := playwrightProduce(t, root, runner)
+	if err != nil {
+		t.Fatalf("playwrightProduceEvidence: %v", err)
+	}
+	if want := []playwrightRunCall{{root: root, specs: []string{"helper-declared.spec.ts"}}}; !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("runner calls = %+v, want %+v", runner.calls, want)
+	}
+	playwrightAssertOutcomes(t, root, stdout, cases)
+}
+
 // TestProducePlaywrightEvidence_DuplicateElsewhereIsNotOperational proves the
 // operational duplicate is only the NAMED title path shared in the named
 // file: a duplicate of another title path in that file ("outcomes › fails",

@@ -220,6 +220,17 @@ func TestDecode_CapturedReports(t *testing.T) {
 				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, "beta"},
 			},
 		}},
+		// A helper module the spec file imports (define-shared.ts) declares
+		// a describe and a test: the reporter names the helper as that
+		// spec's file but lists it under the importing file's own suite, the
+		// unit Playwright's title path and duplicate check work in, so the
+		// test is that file's, and the helper is no file of the run.
+		{name: "helper-declared", files: map[string][]want{
+			"helper-declared.spec.ts": {
+				{"local › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"shared checks for home › renders", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+			},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -413,9 +424,9 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 				arr(t, other, "suites")[0].(map[string]any)["specs"] = []any{}
 			})
 		}, "stats count"},
-		{"a spec attributed to another file", func(t *testing.T) []byte {
-			return mutated(t, "outcomes", func(r map[string]any) { firstSpec(t, r)["file"] = "outcomes.spec.ts" })
-		}, "names file"},
+		{"a spec with no file", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(firstSpec(t, r), "file") })
+		}, `spec "passes" has no file`},
 		{"a file suite listed twice", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) {
 				r["suites"] = append(arr(t, r, "suites"), fileSuite(t, r, "other.spec.ts"))

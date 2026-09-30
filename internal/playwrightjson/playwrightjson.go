@@ -12,6 +12,13 @@
 // fields the reporter writes (an annotation's location). A report that names
 // any other Playwright version is refused.
 //
+// Each test belongs to the file suite that lists it (the test file the run
+// loaded), even when a helper module that file imports declared it: the
+// reporter takes a spec's own "file" from the test's direct caller, so such a
+// spec names the helper while its file suite names the test file
+// (JSONReporter._mergeSuites groups by the file suite). A spec's file is
+// required but never read for attribution.
+//
 // Decoding posture: strict, as CLAUDE.md requires of all JSON. Every object
 // whose fields the pinned reporter itself fixes is decoded with
 // DisallowUnknownFields: the report, its stats, each project, file and
@@ -112,6 +119,11 @@ type File struct {
 	// report names it.
 	Path string
 	// Tests are the file's tests in report order: one per spec per project.
+	// A test that a helper module this file imports declares is this file's
+	// test, as Playwright attributes it: the report lists it in this file's
+	// suite, naming the helper only as the spec's own location (its "file"),
+	// and Playwright's own title path and duplicate-title check work per file
+	// suite.
 	Tests []Test
 }
 
@@ -274,9 +286,10 @@ type attachmentJSON struct {
 // account of a run: empty, truncated, or malformed JSON; anything after the
 // report; an unknown field where the schema is fixed; an unknown attempt
 // status, test outcome, or expected status; a missing verdict field; another
-// Playwright version; a relative rootDir; attempts out of retry order; a spec
-// attributed to another file than its file suite; a file listed twice; or
-// stats whose counts disagree with the tests the report carries.
+// Playwright version; a relative rootDir; attempts out of retry order; a file
+// listed twice; or stats whose counts disagree with the tests the report
+// carries. A spec whose file differs from its file suite's is not refused: it
+// is a test a helper module declared, and it is the file suite's test.
 func Decode(r io.Reader) (Report, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -436,8 +449,11 @@ func collectTests(f *File, suite suiteJSON, titles []string, counts map[string]i
 		if sp.Tests == nil {
 			return fmt.Errorf("spec %q has no tests", *sp.Title)
 		}
-		if sp.File == nil || *sp.File != f.Path {
-			return fmt.Errorf("spec %q names file %v, not its file suite's %q", *sp.Title, derefOr(sp.File, "none"), f.Path)
+		// A spec's file is where its test was declared, which is a helper
+		// module when the file suite's file imports one that declares tests;
+		// the test is still the file suite's (see File.Tests).
+		if sp.File == nil {
+			return fmt.Errorf("spec %q has no file", *sp.Title)
 		}
 		titlePath := append(append([]string{}, titles...), *sp.Title)
 		for _, tj := range *sp.Tests {
@@ -496,11 +512,4 @@ func decodeTest(tj testJSON, titlePath []string) (Test, error) {
 		tc.Attempts = append(tc.Attempts, Attempt{Status: *rj.Status, Retry: *rj.Retry})
 	}
 	return tc, nil
-}
-
-func derefOr(s *string, fallback string) string {
-	if s == nil {
-		return fallback
-	}
-	return fmt.Sprintf("%q", *s)
 }
