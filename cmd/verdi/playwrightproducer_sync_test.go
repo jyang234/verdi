@@ -21,7 +21,7 @@ import (
 // other.spec.ts, ac-4 a lint-job test in outcomes.spec.ts, and ac-5 a verify
 // test in a file that does not exist. jobName is the CI job the fake forge
 // reports.
-func playwrightSyncStore(t *testing.T, jobName string, withPlaywright bool) (string, syncDeps, *fakeNamedGoTestRunner, *fakePlaywrightRunner) {
+func playwrightSyncStore(t *testing.T, jobName string, withPlaywright bool) (string, syncDeps, *fakeNamedGoTestRunner, *playwrightFakeRunner) {
 	t.Helper()
 	root, deps := buildProduceDeps(t)
 	f := fake.New()
@@ -35,7 +35,7 @@ func playwrightSyncStore(t *testing.T, jobName string, withPlaywright bool) (str
 		"./pkg/a": testGoTestJSON("pkg/a", map[string]string{"TestA": gotestjson.ActionPass, "TestB": gotestjson.ActionFail}),
 	}}
 	deps.NamedGoTest = goTest
-	playwright := &fakePlaywrightRunner{}
+	playwright := &playwrightFakeRunner{}
 	if withPlaywright {
 		playwrightSpecFiles(t, root, "other.spec.ts", "outcomes.spec.ts")
 		writeTestProducerObligation(t, root, "story-w", "ac-3", "behavioral", "playwright:e2e/tests/other.spec.ts:outcomes › passes", "verify")

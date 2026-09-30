@@ -217,7 +217,7 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	}
 	runner := upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 
-	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, NamedGoTest: realNamedGoTestRunner{}, Playwright: realPlaywrightRunner{Log: stderr}, Stdout: stdout, Stderr: stderr}
+	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, NamedGoTest: realNamedGoTestRunner{}, Playwright: playwrightRealRunner{Log: stderr}, Stdout: stdout, Stderr: stderr}
 	return runSync(ctx, root, ref, commit, orRegen, produce, forceLocal, deps)
 }
 
@@ -463,7 +463,7 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 	// playwright:<file>:<title path> obligation this job is authoritative for,
 	// run after the go-test producer with the same provenance. It runs
 	// nothing at all unless a selected obligation names an existing file.
-	if err := producePlaywrightEvidence(ctx, root, commit, ciInfo.JobName, deps.Playwright, prov, deps.Stdout); err != nil {
+	if err := playwrightProduceEvidence(ctx, root, commit, ciInfo.JobName, deps.Playwright, prov, deps.Stdout); err != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2
 	}

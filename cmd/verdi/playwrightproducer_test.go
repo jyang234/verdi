@@ -133,15 +133,15 @@ type playwrightRunCall struct {
 	specs []string
 }
 
-// fakePlaywrightRunner writes report (when non-nil) where the producer asked,
+// playwrightFakeRunner writes report (when non-nil) where the producer asked,
 // or returns err, recording every call.
-type fakePlaywrightRunner struct {
+type playwrightFakeRunner struct {
 	report []byte
 	err    error
 	calls  []playwrightRunCall
 }
 
-func (f *fakePlaywrightRunner) RunPlaywright(ctx context.Context, root string, specs []string, reportPath string) error {
+func (f *playwrightFakeRunner) RunPlaywright(ctx context.Context, root string, specs []string, reportPath string) error {
 	f.calls = append(f.calls, playwrightRunCall{root: root, specs: append([]string(nil), specs...)})
 	if f.err != nil {
 		return f.err
@@ -157,7 +157,7 @@ func (f *fakePlaywrightRunner) RunPlaywright(ctx context.Context, root string, s
 func playwrightProduce(t *testing.T, root string, runner playwrightRunner) (string, error) {
 	t.Helper()
 	var stdout bytes.Buffer
-	err := producePlaywrightEvidence(context.Background(), root, playwrightTestCommit, "verify", runner, playwrightTestProv(), &stdout)
+	err := playwrightProduceEvidence(context.Background(), root, playwrightTestCommit, "verify", runner, playwrightTestProv(), &stdout)
 	return stdout.String(), err
 }
 
@@ -217,21 +217,21 @@ func TestParsePlaywrightProducerRef(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parsePlaywrightProducerRef(c.ref)
+			got, err := playwrightParseProducerRef(c.ref)
 			if c.wantErr != "" {
 				if err == nil {
-					t.Fatalf("parsePlaywrightProducerRef(%q) = %+v, want a refusal containing %q", c.ref, got, c.wantErr)
+					t.Fatalf("playwrightParseProducerRef(%q) = %+v, want a refusal containing %q", c.ref, got, c.wantErr)
 				}
 				if !strings.Contains(err.Error(), c.wantErr) {
-					t.Fatalf("parsePlaywrightProducerRef(%q) err = %q, want it to contain %q", c.ref, err, c.wantErr)
+					t.Fatalf("playwrightParseProducerRef(%q) err = %q, want it to contain %q", c.ref, err, c.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parsePlaywrightProducerRef(%q) = %v, want it accepted", c.ref, err)
+				t.Fatalf("playwrightParseProducerRef(%q) = %v, want it accepted", c.ref, err)
 			}
 			if got.File != c.wantFile || got.TitlePath != c.wantTitle {
-				t.Errorf("parsePlaywrightProducerRef(%q) = %+v, want file %q title path %q", c.ref, got, c.wantFile, c.wantTitle)
+				t.Errorf("playwrightParseProducerRef(%q) = %+v, want file %q title path %q", c.ref, got, c.wantFile, c.wantTitle)
 			}
 		})
 	}
@@ -282,7 +282,7 @@ func TestPlaywrightProducerSelection(t *testing.T) {
 				t.Fatal(err)
 			}
 			jobName := c.job
-			selected, discl := selectPlaywrightObligations(candidates, jobName)
+			selected, discl := playwrightSelectObligations(candidates, jobName)
 			if c.selected != (len(selected) == 1) || len(selected) > 1 {
 				t.Fatalf("selected = %+v, want selected=%v", selected, c.selected)
 			}
@@ -359,7 +359,7 @@ func playwrightAssertOutcomes(t *testing.T, root, stdout string, cases []playwri
 		if string(rec.Kind) != c.kind || rec.Producer != c.ref || rec.Provenance != playwrightTestProv() || rec.Schema != "verdi.evidence/v1" {
 			t.Errorf("%s: record %+v, want kind %s, producer %q, and the run's provenance", c.ac, rec, c.kind, c.ref)
 		}
-		parsed, err := parsePlaywrightProducerRef(c.ref)
+		parsed, err := playwrightParseProducerRef(c.ref)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -445,11 +445,11 @@ func TestProducePlaywrightEvidence_Outcomes(t *testing.T) {
 	root := t.TempDir()
 	playwrightSpecFiles(t, root, "outcomes.spec.ts", "other.spec.ts")
 	playwrightWriteCases(t, root, cases)
-	runner := &fakePlaywrightRunner{report: playwrightReportFixture(t, "outcomes", root)}
+	runner := &playwrightFakeRunner{report: playwrightReportFixture(t, "outcomes", root)}
 
 	stdout, err := playwrightProduce(t, root, runner)
 	if err != nil {
-		t.Fatalf("producePlaywrightEvidence: %v", err)
+		t.Fatalf("playwrightProduceEvidence: %v", err)
 	}
 	want := []playwrightRunCall{{root: root, specs: []string{"other.spec.ts", "outcomes.spec.ts"}}}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -474,9 +474,9 @@ func TestProducePlaywrightEvidence_InterruptedRun(t *testing.T) {
 	root := t.TempDir()
 	playwrightSpecFiles(t, root, "sigint.spec.ts")
 	playwrightWriteCases(t, root, cases)
-	stdout, err := playwrightProduce(t, root, &fakePlaywrightRunner{report: playwrightReportFixture(t, "sigint", root)})
+	stdout, err := playwrightProduce(t, root, &playwrightFakeRunner{report: playwrightReportFixture(t, "sigint", root)})
 	if err != nil {
-		t.Fatalf("producePlaywrightEvidence: %v", err)
+		t.Fatalf("playwrightProduceEvidence: %v", err)
 	}
 	playwrightAssertOutcomes(t, root, stdout, cases)
 }
@@ -511,9 +511,9 @@ func TestProducePlaywrightEvidence_DuplicateElsewhereIsNotOperational(t *testing
 		stats := r["stats"].(map[string]any)
 		stats["unexpected"] = stats["unexpected"].(int) + 1
 	})
-	stdout, err := playwrightProduce(t, root, &fakePlaywrightRunner{report: report})
+	stdout, err := playwrightProduce(t, root, &playwrightFakeRunner{report: report})
 	if err != nil {
-		t.Fatalf("producePlaywrightEvidence: %v", err)
+		t.Fatalf("playwrightProduceEvidence: %v", err)
 	}
 	playwrightAssertOutcomes(t, root, stdout, cases)
 }
@@ -567,35 +567,35 @@ func TestProducePlaywrightEvidence_OperationalErrorsWriteNothing(t *testing.T) {
 		wantErr string
 	}{
 		{"the runner fails", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{err: errors.New("make e2e-setup: exit status 2")}
+			return &playwrightFakeRunner{err: errors.New("make e2e-setup: exit status 2")}
 		}, "make e2e-setup: exit status 2"},
 		{"no report", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{}
+			return &playwrightFakeRunner{}
 		}, "wrote no report"},
 		{"a truncated report", both, func(t *testing.T, root string) playwrightRunner {
 			full := playwrightReportFixture(t, "outcomes", root)
-			return &fakePlaywrightRunner{report: full[:len(full)/2]}
+			return &playwrightFakeRunner{report: full[:len(full)/2]}
 		}, "unexpected EOF"},
 		{"an empty report", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: []byte{}}
+			return &playwrightFakeRunner{report: []byte{}}
 		}, "empty"},
 		{"a malformed report", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: []byte("Error: Process from config.webServer was not able to start.\n")}
+			return &playwrightFakeRunner{report: []byte("Error: Process from config.webServer was not able to start.\n")}
 		}, "invalid character"},
 		{"a failed global setup", []string{otherPasses}, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightReportFixture(t, "setup-fails", root)}
+			return &playwrightFakeRunner{report: playwrightReportFixture(t, "setup-fails", root)}
 		}, "capture fixture: global setup failed"},
 		{"a global timeout", []string{"playwright:e2e/tests/global-timeout.spec.ts:global timeout › passes before the stop"}, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightReportFixture(t, "global-timeout", root)}
+			return &playwrightFakeRunner{report: playwrightReportFixture(t, "global-timeout", root)}
 		}, "Timed out waiting 3s for the test suite to run"},
 		{"Playwright refuses a duplicate title", []string{"playwright:e2e/tests/duplicate.spec.ts:dup › same title"}, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightReportFixture(t, "duplicate", root)}
+			return &playwrightFakeRunner{report: playwrightReportFixture(t, "duplicate", root)}
 		}, `duplicate test title "dup › same title"`},
 		{"two tests share the named title path", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) { playwrightDuplicateOtherSpec(t, r) })}
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) { playwrightDuplicateOtherSpec(t, r) })}
 		}, `2 tests in e2e/tests/other.spec.ts share the title path "outcomes › passes"`},
 		{"a title containing ' › ' collides with a describe", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
 				for _, s := range r["suites"].([]any) {
 					suite := s.(map[string]any)
 					if suite["file"] != "other.spec.ts" {
@@ -615,25 +615,25 @@ func TestProducePlaywrightEvidence_OperationalErrorsWriteNothing(t *testing.T) {
 			})}
 		}, `2 tests in e2e/tests/other.spec.ts share the title path "outcomes › passes"`},
 		{"two projects", []string{otherPasses}, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightReportFixture(t, "two-projects", root)}
+			return &playwrightFakeRunner{report: playwrightReportFixture(t, "two-projects", root)}
 		}, "2 projects"},
 		{"another rootDir", both, func(t *testing.T, root string) playwrightRunner {
 			raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "playwrightjson", "testdata", "reports", "outcomes.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			return &fakePlaywrightRunner{report: raw}
+			return &playwrightFakeRunner{report: raw}
 		}, "is not the harness's test directory"},
 		{"a file the producer did not name", []string{otherPasses}, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightReportFixture(t, "outcomes", root)}
+			return &playwrightFakeRunner{report: playwrightReportFixture(t, "outcomes", root)}
 		}, "outcomes.spec.ts, which the producer did not name"},
 		{"retries", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
 				r["config"].(map[string]any)["projects"].([]any)[0].(map[string]any)["retries"] = 1
 			})}
 		}, "retries 1"},
 		{"workers", both, func(t *testing.T, root string) playwrightRunner {
-			return &fakePlaywrightRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
+			return &playwrightFakeRunner{report: playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) {
 				r["config"].(map[string]any)["workers"] = 2
 			})}
 		}, "2 workers"},
@@ -661,7 +661,7 @@ func TestProducePlaywrightEvidence_OperationalErrorsWriteNothing(t *testing.T) {
 
 			_, err := playwrightProduce(t, root, c.runner(t, root))
 			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("producePlaywrightEvidence err = %v, want an operational error containing %q", err, c.wantErr)
+				t.Fatalf("playwrightProduceEvidence err = %v, want an operational error containing %q", err, c.wantErr)
 			}
 			if after := snapshotDerived(t, root); !reflect.DeepEqual(after, before) {
 				t.Errorf("an operational error changed the derived tree:\nbefore %v\nafter  %v", before, after)
@@ -694,7 +694,7 @@ func TestProducePlaywrightEvidence_RerunWithdrawsUnrecorded(t *testing.T) {
 	if _, err := writeManagedEvidence(root, playwrightTestCommit, nil, map[string][]artifact.Evidence{"spec/story-p": unmanaged}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := playwrightProduce(t, root, &fakePlaywrightRunner{report: playwrightReportFixture(t, "outcomes", root)}); err != nil {
+	if _, err := playwrightProduce(t, root, &playwrightFakeRunner{report: playwrightReportFixture(t, "outcomes", root)}); err != nil {
 		t.Fatalf("attempt 1: %v", err)
 	}
 	if got := len(readVerdicts(t, root, "spec/story-p", playwrightTestCommit)); got != 5 {
@@ -706,7 +706,7 @@ func TestProducePlaywrightEvidence_RerunWithdrawsUnrecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) { playwrightKeepFiles(t, r, "other.spec.ts") })
-	runner := &fakePlaywrightRunner{report: report}
+	runner := &playwrightFakeRunner{report: report}
 	stdout, err := playwrightProduce(t, root, runner)
 	if err != nil {
 		t.Fatalf("attempt 2: %v", err)
@@ -762,16 +762,16 @@ func TestProducePlaywrightEvidence_NoRunWithoutPresentFiles(t *testing.T) {
 			root := t.TempDir()
 			playwrightSpecFiles(t, root, "other.spec.ts")
 			writeTestProducerObligation(t, root, "story-p", "ac-1", "behavioral", c.ref, c.job)
-			runner := &fakePlaywrightRunner{err: errors.New("must not run")}
+			runner := &playwrightFakeRunner{err: errors.New("must not run")}
 			stdout, err := playwrightProduce(t, root, runner)
 			if err != nil {
-				t.Fatalf("producePlaywrightEvidence: %v", err)
+				t.Fatalf("playwrightProduceEvidence: %v", err)
 			}
 			if len(runner.calls) != 0 {
 				t.Errorf("runner calls = %+v, want none", runner.calls)
 			}
 			if _, err := playwrightProduce(t, root, nil); err != nil {
-				t.Errorf("producePlaywrightEvidence(nil runner) = %v, want nil", err)
+				t.Errorf("playwrightProduceEvidence(nil runner) = %v, want nil", err)
 			}
 			lines := 0
 			for _, l := range strings.Split(stdout, "\n") {
@@ -804,9 +804,9 @@ func TestProducePlaywrightEvidence_MatchedByEvidence(t *testing.T) {
 	}
 	playwrightWriteCases(t, root, cases)
 	report := playwrightMutatedReport(t, "outcomes", root, func(r map[string]any) { playwrightKeepFiles(t, r, "outcomes.spec.ts") })
-	stdout, err := playwrightProduce(t, root, &fakePlaywrightRunner{report: report})
+	stdout, err := playwrightProduce(t, root, &playwrightFakeRunner{report: report})
 	if err != nil {
-		t.Fatalf("producePlaywrightEvidence: %v", err)
+		t.Fatalf("playwrightProduceEvidence: %v", err)
 	}
 	playwrightAssertOutcomes(t, root, stdout, cases)
 

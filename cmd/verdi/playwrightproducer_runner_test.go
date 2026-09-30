@@ -65,7 +65,7 @@ func playwrightToolLog(t *testing.T, logs, tool string) []string {
 	return lines
 }
 
-// TestRealPlaywrightRunner_Invocation pins the real runner's two commands
+// TestPlaywrightProducerRealRunner_Invocation pins the real runner's two commands
 // through the fake-tool seam: `make e2e-setup` at the store root, then, in
 // e2e/, exactly `npx playwright test --workers=1 --retries=0 --reporter=json
 // --trace=off --output=<beside the report>` with no positional argument —
@@ -76,7 +76,7 @@ func playwrightToolLog(t *testing.T, logs, tool string) []string {
 // inherited V1_ACCEPTANCE (which adds the v1-acceptance project) is removed,
 // an inherited VERDI_E2E_SPECS is replaced, and the tools' output goes to the
 // runner's log. A failing test's nonzero Playwright exit is not an error.
-func TestRealPlaywrightRunner_Invocation(t *testing.T) {
+func TestPlaywrightProducerRealRunner_Invocation(t *testing.T) {
 	logs := playwrightFakeTools(t, "0", "1")
 	t.Setenv("V1_ACCEPTANCE", "1")
 	t.Setenv("VERDI_E2E_SPECS", "stale.spec.ts")
@@ -89,7 +89,7 @@ func TestRealPlaywrightRunner_Invocation(t *testing.T) {
 	reportPath := filepath.Join(work, "report.json")
 	var log bytes.Buffer
 
-	if err := (realPlaywrightRunner{Log: &log}).RunPlaywright(context.Background(), root, []string{"a.spec.ts", "b.spec.ts"}, reportPath); err != nil {
+	if err := (playwrightRealRunner{Log: &log}).RunPlaywright(context.Background(), root, []string{"a.spec.ts", "b.spec.ts"}, reportPath); err != nil {
 		t.Fatalf("RunPlaywright: %v", err)
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
@@ -116,10 +116,10 @@ func TestRealPlaywrightRunner_Invocation(t *testing.T) {
 	}
 }
 
-// TestRealPlaywrightRunner_Errors proves the runner's error surface: a failed
+// TestPlaywrightProducerRealRunner_Errors proves the runner's error surface: a failed
 // install, a missing make or npx, and a context cancelled before the run are
 // errors naming why, and a failed install never runs Playwright.
-func TestRealPlaywrightRunner_Errors(t *testing.T) {
+func TestPlaywrightProducerRealRunner_Errors(t *testing.T) {
 	cancelled := func() context.Context {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -146,7 +146,7 @@ func TestRealPlaywrightRunner_Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 			start := time.Now()
-			err := (realPlaywrightRunner{}).RunPlaywright(c.ctx(), root, []string{"a.spec.ts"}, filepath.Join(t.TempDir(), "report.json"))
+			err := (playwrightRealRunner{}).RunPlaywright(c.ctx(), root, []string{"a.spec.ts"}, filepath.Join(t.TempDir(), "report.json"))
 			if time.Since(start) > 20*time.Second {
 				t.Errorf("RunPlaywright took %v", time.Since(start))
 			}

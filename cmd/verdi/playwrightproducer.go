@@ -78,7 +78,7 @@ func (r playwrightProducerRef) FileName() string {
 	return strings.TrimPrefix(r.File, playwrightTestsDir)
 }
 
-// parsePlaywrightProducerRef strictly parses a producer ref against SI-292's
+// playwrightParseProducerRef strictly parses a producer ref against SI-292's
 // grammar `playwright:<file>:<title path>`, returning why a ref does not
 // match. The file contains no ":", so the ref splits at the FIRST ":" after
 // the prefix and the title path keeps every later one. The file is
@@ -86,7 +86,7 @@ func (r playwrightProducerRef) FileName() string {
 // title path is valid UTF-8 and non-empty, begins and ends with no whitespace
 // (Unicode White_Space), and holds no line break: CR, LF, U+0085, U+2028, or
 // U+2029 (SI-303).
-func parsePlaywrightProducerRef(ref string) (playwrightProducerRef, error) {
+func playwrightParseProducerRef(ref string) (playwrightProducerRef, error) {
 	rest, ok := strings.CutPrefix(ref, playwrightProducerScheme)
 	if !ok {
 		return playwrightProducerRef{}, fmt.Errorf("the scheme is not %q", playwrightProducerScheme)
@@ -106,14 +106,14 @@ func parsePlaywrightProducerRef(ref string) (playwrightProducerRef, error) {
 	if !playwrightSpecNameRE.MatchString(name) {
 		return playwrightProducerRef{}, fmt.Errorf("the file name %q is not a letter or digit followed by letters, digits, '.', '_', or '-' (the harness's spec-file selector)", name+".spec.ts")
 	}
-	if err := checkPlaywrightTitlePath(title); err != nil {
+	if err := playwrightCheckTitlePath(title); err != nil {
 		return playwrightProducerRef{}, err
 	}
 	return playwrightProducerRef{File: file, TitlePath: title}, nil
 }
 
-// checkPlaywrightTitlePath applies the title path's own rules.
-func checkPlaywrightTitlePath(title string) error {
+// playwrightCheckTitlePath applies the title path's own rules.
+func playwrightCheckTitlePath(title string) error {
 	if title == "" {
 		return errors.New("the title path is empty")
 	}
@@ -134,9 +134,9 @@ func checkPlaywrightTitlePath(title string) error {
 
 // --- Selection (SI-293) ----------------------------------------------------------
 
-// selectedPlaywrightObligation is one candidate this CI job is authoritative
+// playwrightSelectedObligation is one candidate this CI job is authoritative
 // for, with its producer ref parsed.
-type selectedPlaywrightObligation struct {
+type playwrightSelectedObligation struct {
 	testProducerCandidate
 	playwrightProducerRef
 }
@@ -161,15 +161,15 @@ func playwrightProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure
 	return disclosure.New(playwrightProducerRuntimeKindSource, c.ObligationID, text)
 }
 
-// selectPlaywrightObligations narrows candidates to this CI job's own
+// playwrightSelectObligations narrows candidates to this CI job's own
 // Playwright obligations: authoritative_source.ref == jobName (SI-229; an
 // empty jobName, outside a detected CI job, selects nothing) and a producer
 // ref starting "playwright:". Any other ref is the go-test producer's and is
 // skipped silently here. A runtime-kind obligation and a ref that fails the
 // grammar are each disclosed on their own obligation and excluded. The result
 // is sorted (file, title path, spec, criterion).
-func selectPlaywrightObligations(candidates []testProducerCandidate, jobName string) ([]selectedPlaywrightObligation, []disclosure.Disclosure) {
-	var selected []selectedPlaywrightObligation
+func playwrightSelectObligations(candidates []testProducerCandidate, jobName string) ([]playwrightSelectedObligation, []disclosure.Disclosure) {
+	var selected []playwrightSelectedObligation
 	var discl []disclosure.Disclosure
 	for _, c := range candidates {
 		if jobName == "" || c.JobRef != jobName || !strings.HasPrefix(c.ProducerRef, playwrightProducerScheme) {
@@ -179,12 +179,12 @@ func selectPlaywrightObligations(candidates []testProducerCandidate, jobName str
 			discl = append(discl, playwrightProducerRuntimeKindDisclosure(c))
 			continue
 		}
-		parsed, err := parsePlaywrightProducerRef(c.ProducerRef)
+		parsed, err := playwrightParseProducerRef(c.ProducerRef)
 		if err != nil {
 			discl = append(discl, playwrightProducerMalformedRefDisclosure(c, err))
 			continue
 		}
-		selected = append(selected, selectedPlaywrightObligation{testProducerCandidate: c, playwrightProducerRef: parsed})
+		selected = append(selected, playwrightSelectedObligation{testProducerCandidate: c, playwrightProducerRef: parsed})
 	}
 	sort.Slice(selected, func(i, j int) bool {
 		a, b := selected[i], selected[j]
@@ -216,9 +216,9 @@ type playwrightRunner interface {
 	RunPlaywright(ctx context.Context, root string, specs []string, reportPath string) error
 }
 
-// realPlaywrightRunner runs the real harness. Log receives both commands'
+// playwrightRealRunner runs the real harness. Log receives both commands'
 // output (nil discards it).
-type realPlaywrightRunner struct {
+type playwrightRealRunner struct {
 	Log io.Writer
 }
 
@@ -261,7 +261,7 @@ func playwrightRunEnv(parent []string, dir string, specs []string, reportPath st
 // RunPlaywright installs the harness's packages and browser (`make
 // e2e-setup`, the e2e shards' own prerequisite, hard-failing without Node),
 // then runs playwrightRunArgs in root/e2e with playwrightRunEnv.
-func (r realPlaywrightRunner) RunPlaywright(ctx context.Context, root string, specs []string, reportPath string) error {
+func (r playwrightRealRunner) RunPlaywright(ctx context.Context, root string, specs []string, reportPath string) error {
 	log := r.Log
 	if log == nil {
 		log = io.Discard
@@ -296,10 +296,10 @@ func (r realPlaywrightRunner) RunPlaywright(ctx context.Context, root string, sp
 	return nil
 }
 
-// executePlaywrightRun runs specs once through runner and returns the strict
+// playwrightExecuteRun runs specs once through runner and returns the strict
 // reading of the report it wrote, after checking that the report is the
-// account of that run (checkPlaywrightRun). Every failure is operational.
-func executePlaywrightRun(ctx context.Context, root string, runner playwrightRunner, specs []string) (playwrightjson.Report, error) {
+// account of that run (playwrightCheckRun). Every failure is operational.
+func playwrightExecuteRun(ctx context.Context, root string, runner playwrightRunner, specs []string) (playwrightjson.Report, error) {
 	work, err := os.MkdirTemp("", "verdi-playwright-*")
 	if err != nil {
 		return playwrightjson.Report{}, fmt.Errorf("playwright producer: %w", err)
@@ -321,7 +321,7 @@ func executePlaywrightRun(ctx context.Context, root string, runner playwrightRun
 	if err != nil {
 		return playwrightjson.Report{}, fmt.Errorf("playwright producer: %w", err)
 	}
-	if err := checkPlaywrightRun(root, report, specs); err != nil {
+	if err := playwrightCheckRun(root, report, specs); err != nil {
 		return playwrightjson.Report{}, fmt.Errorf("playwright producer: %w", err)
 	}
 	return report, nil
@@ -330,7 +330,7 @@ func executePlaywrightRun(ctx context.Context, root string, runner playwrightRun
 // playwrightANSIRE matches the color escapes Playwright puts in messages.
 var playwrightANSIRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
-// checkPlaywrightRun refuses a report that is not the account of the run the
+// playwrightCheckRun refuses a report that is not the account of the run the
 // producer asked for: one the run reported an error of its own in; one with
 // other than exactly one project (a test appears once per project, and the
 // pinned reporter writes each copy as its own spec with the same file and
@@ -338,7 +338,7 @@ var playwrightANSIRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 // was not one worker, no retries, and one repeat; one whose files are not
 // relative to root's e2e/tests/; and one that covers a file the producer did
 // not name.
-func checkPlaywrightRun(root string, report playwrightjson.Report, specs []string) error {
+func playwrightCheckRun(root string, report playwrightjson.Report, specs []string) error {
 	if len(report.Errors) > 0 {
 		return fmt.Errorf("the run reported %d error(s) of its own, first: %s", len(report.Errors), strings.TrimSpace(playwrightANSIRE.ReplaceAllString(report.Errors[0], "")))
 	}
@@ -392,7 +392,7 @@ func playwrightSameDir(a, b string) bool {
 // disclosure says so (SI-238).
 const playwrightProducerAbsentSource = "sync:playwright-producer-absent"
 
-func playwrightAbsentDisclosure(s selectedPlaywrightObligation, why string) disclosure.Disclosure {
+func playwrightAbsentDisclosure(s playwrightSelectedObligation, why string) disclosure.Disclosure {
 	text := fmt.Sprintf("named Playwright test %q in %s %s; no evidence record was emitted for it", s.TitlePath, s.File, why)
 	return disclosure.New(playwrightProducerAbsentSource, s.ObligationID, text)
 }
@@ -443,15 +443,15 @@ func playwrightVerdict(attempts []playwrightjson.Attempt) (verdict artifact.Evid
 // playwrightAbsence is one selected obligation the run recorded nothing for,
 // with the disclosure that says why.
 type playwrightAbsence struct {
-	obligation selectedPlaywrightObligation
+	obligation playwrightSelectedObligation
 	disclosed  disclosure.Disclosure
 }
 
-// buildPlaywrightRecords maps each selected obligation to its record, grouped
+// playwrightBuildRecords maps each selected obligation to its record, grouped
 // by owning spec ref, or to an absence. present says which named files exist;
 // report is the run of those files. Two tests in a named file sharing a named
 // title path is an operational error, returned before anything is built.
-func buildPlaywrightRecords(selected []selectedPlaywrightObligation, present map[string]bool, report playwrightjson.Report, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []playwrightAbsence, error) {
+func playwrightBuildRecords(selected []playwrightSelectedObligation, present map[string]bool, report playwrightjson.Report, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, []playwrightAbsence, error) {
 	tests := map[string][]playwrightjson.Test{} // keyed by file name + "\x00" + title path
 	for _, f := range report.Files {
 		for _, tc := range f.Tests {
@@ -511,7 +511,7 @@ func buildPlaywrightRecords(selected []selectedPlaywrightObligation, present map
 
 // --- Orchestration -------------------------------------------------------------------
 
-// producePlaywrightEvidence is `sync --produce`'s Playwright producer (see
+// playwrightProduceEvidence is `sync --produce`'s Playwright producer (see
 // this file's package doc), called from runProduce after
 // produceGoTestEvidence with the same provenance, commit, and job name. With
 // no selected obligation naming an existing file it runs nothing at all (no
@@ -525,12 +525,12 @@ func buildPlaywrightRecords(selected []selectedPlaywrightObligation, present map
 // its own spec, recorded or not; a selected producer this run did not record
 // loses any earlier record, and its disclosure says so. Nothing is written
 // unless the run and its report were trusted.
-func producePlaywrightEvidence(ctx context.Context, root, commit, jobName string, runner playwrightRunner, prov artifact.EvidenceProvenance, stdout io.Writer) error {
+func playwrightProduceEvidence(ctx context.Context, root, commit, jobName string, runner playwrightRunner, prov artifact.EvidenceProvenance, stdout io.Writer) error {
 	candidates, _, err := discoverTestProducerObligations(root)
 	if err != nil {
 		return err
 	}
-	selected, discl := selectPlaywrightObligations(candidates, jobName)
+	selected, discl := playwrightSelectObligations(candidates, jobName)
 
 	if len(selected) > 0 {
 		present := map[string]bool{}
@@ -555,11 +555,11 @@ func producePlaywrightEvidence(ctx context.Context, root, commit, jobName string
 			if runner == nil {
 				return errors.New("playwright producer: no Playwright runner is configured")
 			}
-			if report, err = executePlaywrightRun(ctx, root, runner, specs); err != nil {
+			if report, err = playwrightExecuteRun(ctx, root, runner, specs); err != nil {
 				return err
 			}
 		}
-		bySpec, absent, err := buildPlaywrightRecords(selected, present, report, prov)
+		bySpec, absent, err := playwrightBuildRecords(selected, present, report, prov)
 		if err != nil {
 			return err
 		}
