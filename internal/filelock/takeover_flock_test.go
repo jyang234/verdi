@@ -712,6 +712,62 @@ func TestTakeover_ReChecksUnderTheFlock(t *testing.T) {
 	}
 }
 
+// TestTakeover_ReChecksOnlyOnceItHoldsTheFlock pins that the re-check is
+// made under the flock, not before it (SI-302), for each kind of stale
+// body. TestTakeover_ReChecksUnderTheFlock changes the lock before the
+// flock is requested, which a re-check made before the flock also sees;
+// here another detector finishes a whole takeover of the judged file —
+// unlinks it and creates its own lock — in the instant before this
+// detector's flock is granted (the lockFlock seam, wrapped). Only a
+// re-check made under the flock finds the path naming that new lock: this
+// detector then answers held, naming the other, and leaves its lock in
+// place. A re-check made before the flock would pass, and the detector
+// would unlink the other's fresh lock — two holders.
+func TestTakeover_ReChecksOnlyOnceItHoldsTheFlock(t *testing.T) {
+	self := os.Getpid()
+	selfStart := secondsAgo(time.Hour)
+	other := Info{PID: self, Start: selfStart.Unix()}
+	for _, body := range staleBodies {
+		t.Run(body.name, func(t *testing.T) {
+			fakeProcessStarts(t, map[int]time.Time{self: selfStart})
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			body.seed(t, path)
+			var created os.FileInfo
+			orig := lockFlock
+			lockFlock = func(f *os.File) error {
+				if created == nil {
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+					writeLockInfo(t, path, other)
+					var err error
+					if created, err = os.Lstat(path); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return orig(f)
+			}
+			t.Cleanup(func() { lockFlock = orig })
+
+			f, err := Acquire(path)
+			if err == nil {
+				t.Cleanup(func() { _ = Release(f, path) })
+				t.Fatal("Acquire took the lock over: the detector unlinked the lock another detector had just created")
+			}
+			if created == nil {
+				t.Fatalf("Acquire = %v before the detector ever requested the takeover flock", err)
+			}
+			var held *ErrHeld
+			if !errors.As(err, &held) || held.Info != other {
+				t.Fatalf("Acquire = %v, want *ErrHeld naming the other detector %+v", err, other)
+			}
+			if after, lerr := os.Lstat(path); lerr != nil || !os.SameFile(after, created) {
+				t.Fatalf("the other detector's lock was replaced or removed (%v)", lerr)
+			}
+		})
+	}
+}
+
 // TestTakeOverStale_Direct drives takeOverStale itself over each lock it can
 // find, including its operational failures: it removes only a stale lock,
 // answers nil (re-evaluate) for every other — a symlink at the lock path
