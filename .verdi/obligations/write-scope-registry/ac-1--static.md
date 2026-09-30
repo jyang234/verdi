@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: static
 quality:
   state: elaborated
-  claim: "Every registry declaration validates in the closed grammar; every exported internal/gitx function appears in the mutating-or-read-only list and every listed name exists; every CLI verb, workbench action, and MCP tool that statically reaches a mutating gitx function is named by exactly one declaration; and no declaration names a verb that reaches none."
+  claim: "Every registry declaration validates in the closed grammar; every exported internal/gitx function, and every function outside gitx that writes under a git directory, appears in the mutating-or-read-only list and every listed name exists; every CLI verb, workbench action, and MCP tool that statically reaches a mutating gitx function is named by exactly one declaration; no declaration names a verb that reaches none; and the awaiting-fix list is reported with its count."
   falsifier: "A declaration with an unknown value; an exported gitx function missing from the list or a stale name in it; a verb that reaches a mutating gitx function with no declaration; or a declaration naming a verb that reaches none."
   scope: "internal/writescope, internal/gitx, and every entry point in the CLI-verb, MCP-tool, and workbench inventories, at the candidate commit."
   producer: { kind: test, ref: "go-test:internal/writescope:TestRegistry_CoversEveryMutatingVerb" }
@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/writescope:TestRegistry_CoversEveryMutatingVerb in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/write-scope-registry" }
-frozen: { at: 2026-09-30, commit: c8c5fda8a63bdf60050365506061c5dd669dc926 }
+frozen: { at: 2026-09-30, commit: 768402596a8503887ef7094e8f3b2f099a56a92d }
 ---
 # Every mutating verb is declared, and gitx is fully classified
 
