@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -505,6 +506,67 @@ func TestTakeover_TwoDetectorsOfOneJudgedFile(t *testing.T) {
 				t.Fatalf("second detector = %v, want *ErrHeld with a zero Info (another detector holds the takeover flock)", err2)
 			}
 			assertOneIntactHolder(t, path, winner, r1, acquireResult{f2, err2})
+		})
+	}
+}
+
+// takeoverStepNames names each takeoverStep in a test failure.
+var takeoverStepNames = map[takeoverStep]string{
+	takeoverJudged:    "takeoverJudged",
+	takeoverRechecked: "takeoverRechecked",
+	takeoverUnlinked:  "takeoverUnlinked",
+}
+
+// TestTakeover_UnlinksUnderTheFlock pins that a detector unlinks the file
+// it judged while it still holds the takeover flock on it (SI-302), for
+// each kind of stale body: a second handle on the judged file, opened
+// before the takeover, is refused the flock (EWOULDBLOCK) once the re-check
+// has passed and again once the path is unlinked, and takes it once the
+// takeover is over. A detector that dropped the flock — or closed its
+// handle — before unlinking would let another detector that judged the
+// same file take the flock, pass its own re-check (the path still names
+// that file), and unlink the lock this one then creates: two holders.
+func TestTakeover_UnlinksUnderTheFlock(t *testing.T) {
+	self := os.Getpid()
+	selfStart := secondsAgo(time.Hour)
+	for _, body := range staleBodies {
+		t.Run(body.name, func(t *testing.T) {
+			fakeProcessStarts(t, map[int]time.Time{self: selfStart})
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			body.seed(t, path)
+			second, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = second.Close() })
+
+			var steps []takeoverStep
+			orig := takeoverHook
+			takeoverHook = func(s takeoverStep) {
+				steps = append(steps, s)
+				if s == takeoverJudged {
+					return
+				}
+				if err := lockFlock(second); !errors.Is(err, syscall.EWOULDBLOCK) {
+					t.Errorf("at %s a second handle on the judged file got lockFlock = %v, want EWOULDBLOCK: the detector no longer holds the takeover flock", takeoverStepNames[s], err)
+				}
+				if _, err := os.Lstat(path); s == takeoverUnlinked && !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("at %s the judged path is still there (%v), want it unlinked", takeoverStepNames[s], err)
+				}
+			}
+			t.Cleanup(func() { takeoverHook = orig })
+
+			f, err := Acquire(path)
+			if err != nil {
+				t.Fatalf("Acquire = %v, want the stale lock taken over", err)
+			}
+			t.Cleanup(func() { _ = Release(f, path) })
+			if want := []takeoverStep{takeoverJudged, takeoverRechecked, takeoverUnlinked}; !slices.Equal(steps, want) {
+				t.Fatalf("the detector passed steps %v, want %v", steps, want)
+			}
+			if err := lockFlock(second); err != nil {
+				t.Fatalf("after the takeover a second handle on the judged file got lockFlock = %v, want the flock: the detector kept it", err)
+			}
 		})
 	}
 }

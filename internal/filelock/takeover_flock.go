@@ -35,7 +35,11 @@ import (
 //     lock, which this detector must not touch), that the body re-read
 //     through the handle is byte-identical to the one judged, and that the
 //     judged body is still stale (a young mtime means a writer is at work);
-//  4. only then unlinks the path. Closing the handle drops the flock.
+//  4. only then unlinks the path, still holding the flock, and closes the
+//     handle, which drops it. Dropping the flock before the unlink would let
+//     another detector that judged the same file take it, pass its own
+//     re-check (the path still names that file), and unlink the lock this
+//     detector goes on to create.
 //
 // Only a flock holder unlinks a judged file, and only one process can hold
 // the flock on it, so only one detector removes it; a detector that takes
@@ -101,6 +105,7 @@ func takeOverStale(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("unlinking it: %w", err)
 	}
+	takeoverHook(takeoverUnlinked)
 	return nil
 }
 
@@ -188,7 +193,7 @@ var lockFlock = func(f *os.File) error {
 	return ferr
 }
 
-// takeoverStep names the two points of takeOverStale a test can stop a
+// takeoverStep names the points of takeOverStale a test can stop a
 // detector at through takeoverHook.
 type takeoverStep int
 
@@ -199,6 +204,9 @@ const (
 	// takeoverRechecked: the re-check under the flock passed; the path is
 	// not unlinked yet.
 	takeoverRechecked
+	// takeoverUnlinked: the path is unlinked; the handle, and with it the
+	// flock, is not closed yet.
+	takeoverUnlinked
 )
 
 // takeoverHook is called as a detector passes each takeoverStep. A no-op in
