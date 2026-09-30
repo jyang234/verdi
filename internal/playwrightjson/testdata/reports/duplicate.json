@@ -1,0 +1,90 @@
+{
+  "config": {
+    "argv": [
+      "node",
+      "/verdi/e2e/node_modules/.bin/playwright",
+      "test",
+      "-c",
+      "/verdi/internal/playwrightjson/testdata/capture/duplicate.config.ts",
+      "--workers=1",
+      "--retries=0",
+      "--reporter=json",
+      "--output=/capture-tmp/output-duplicate"
+    ],
+    "configFile": "/verdi/internal/playwrightjson/testdata/capture/duplicate.config.ts",
+    "rootDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/capture-tmp/output-duplicate",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "/[\\\\/]duplicate\\.spec\\.ts$/"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [],
+  "errors": [
+    {
+      "message": "Error: duplicate test title \"dup › same title\", first declared in duplicate.spec.ts:8",
+      "location": {
+        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/duplicate.spec.ts",
+        "line": 12,
+        "column": 7
+      },
+      "snippet": "\u001b[90m   at \u001b[39mduplicate.spec.ts:12\n\n  10 |\n  11 | test.describe(\"dup\", () => {\n> 12 |   test(\"same title\", () => {});\n     |       ^\n  13 | });\n  14 |\n  15 | test.describe(\"a › b\", () => {"
+    },
+    {
+      "message": "Error: duplicate test title \"a › b › c\", first declared in duplicate.spec.ts:16",
+      "location": {
+        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/duplicate.spec.ts",
+        "line": 21,
+        "column": 9
+      },
+      "snippet": "\u001b[90m   at \u001b[39mduplicate.spec.ts:21\n\n  19 | test.describe(\"a\", () => {\n  20 |   test.describe(\"b\", () => {\n> 21 |     test(\"c\", () => {});\n     |         ^\n  22 |   });\n  23 | });\n  24 |"
+    }
+  ],
+  "stats": {
+    "startTime": "2026-09-30T13:43:59.338Z",
+    "duration": 21.137,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

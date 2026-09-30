@@ -1,0 +1,1000 @@
+{
+  "config": {
+    "argv": [
+      "node",
+      "/verdi/e2e/node_modules/.bin/playwright",
+      "test",
+      "-c",
+      "/verdi/internal/playwrightjson/testdata/capture/outcomes.config.ts",
+      "--workers=1",
+      "--retries=0",
+      "--reporter=json",
+      "--output=/capture-tmp/output-outcomes"
+    ],
+    "configFile": "/verdi/internal/playwrightjson/testdata/capture/outcomes.config.ts",
+    "rootDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/capture-tmp/output-outcomes",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "/[\\\\/]outcomes\\.spec\\.ts$/",
+          "/[\\\\/]other\\.spec\\.ts$/"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "other.spec.ts",
+      "file": "other.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "outcomes",
+          "file": "other.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "passes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:55.976Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "98764eda91c59918fa8a-16edc0ca7453f91b8b5d",
+              "file": "other.spec.ts",
+              "line": 7,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "outcomes.spec.ts",
+      "file": "outcomes.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "passes at the top level",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-30T13:43:56.001Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bac7195f1102b9e735ec-8c8fe942d6bf75fae4c5",
+          "file": "outcomes.spec.ts",
+          "line": 7,
+          "column": 5
+        }
+      ],
+      "suites": [
+        {
+          "title": "outcomes",
+          "file": "outcomes.spec.ts",
+          "line": 11,
+          "column": 6,
+          "specs": [
+            {
+              "title": "passes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:56.008Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-d5aa92d77bbc2e6959c4",
+              "file": "outcomes.spec.ts",
+              "line": 12,
+              "column": 7
+            },
+            {
+              "title": "fails",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 2,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:17:15",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 15,
+                          "line": 17
+                        },
+                        "snippet": "  15 |\n  16 |   test(\"fails\", () => {\n> 17 |     expect(1).toBe(2);\n     |               ^\n  18 |   });\n  19 |\n  20 |   test(\"times out\", async () => {"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 15,
+                            "line": 17
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  15 |\n  16 |   test(\"fails\", () => {\n> 17 |     expect(1).toBe(2);\n     |               ^\n  18 |   });\n  19 |\n  20 |   test(\"times out\", async () => {\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:17:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:56.014Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-outcomes-fails/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 15,
+                        "line": 17
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-42a106edd2be3b8abbce",
+              "file": "outcomes.spec.ts",
+              "line": 16,
+              "column": 7
+            },
+            {
+              "title": "times out",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 500,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "timedOut",
+                      "duration": 502,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 500ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 500ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 500ms exceeded.\u001b[39m"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:56.305Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-outcomes-times-out/error-context.md"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-06eeae411dbdbea98deb",
+              "file": "outcomes.spec.ts",
+              "line": 20,
+              "column": 7
+            },
+            {
+              "title": "is skipped declaratively",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "line": 25,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.278Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "line": 25,
+                            "column": 8
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-1caf3d30b02c8336e2c1",
+              "file": "outcomes.spec.ts",
+              "line": 25,
+              "column": 8
+            },
+            {
+              "title": "skips itself at run time",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "description": "skipped at run time",
+                      "location": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "line": 28,
+                        "column": 10
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "skipped",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.278Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "description": "skipped at run time",
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "line": 28,
+                            "column": 10
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-b660f216d1cb9a4ae90e",
+              "file": "outcomes.spec.ts",
+              "line": 27,
+              "column": 7
+            }
+          ],
+          "suites": [
+            {
+              "title": "nested describe",
+              "file": "outcomes.spec.ts",
+              "line": 31,
+              "column": 8,
+              "specs": [
+                {
+                  "title": "passes in a nested describe",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "",
+                      "projectName": "",
+                      "results": [
+                        {
+                          "workerIndex": 2,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 0,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-09-30T13:43:57.301Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "bac7195f1102b9e735ec-f1a219a948feb787c0ce",
+                  "file": "outcomes.spec.ts",
+                  "line": 32,
+                  "column": 9
+                }
+              ]
+            },
+            {
+              "title": "",
+              "file": "outcomes.spec.ts",
+              "line": 35,
+              "column": 8,
+              "specs": [
+                {
+                  "title": "passes inside an anonymous describe",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "",
+                      "projectName": "",
+                      "results": [
+                        {
+                          "workerIndex": 2,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 0,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-09-30T13:43:57.318Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "bac7195f1102b9e735ec-7adeea82a66f29fdfd6a",
+                  "file": "outcomes.spec.ts",
+                  "line": 36,
+                  "column": 9
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "titles: a colon in the describe",
+          "file": "outcomes.spec.ts",
+          "line": 40,
+          "column": 6,
+          "specs": [
+            {
+              "title": "case: a colon in the title",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.324Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-dc60864b79f4d0216f2c",
+              "file": "outcomes.spec.ts",
+              "line": 41,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "serial group",
+          "file": "outcomes.spec.ts",
+          "line": 44,
+          "column": 6,
+          "specs": [
+            {
+              "title": "first fails",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 3,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:48:15",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 15,
+                          "line": 48
+                        },
+                        "snippet": "  46 |\n  47 |   test(\"first fails\", () => {\n> 48 |     expect(1).toBe(2);\n     |               ^\n  49 |   });\n  50 |\n  51 |   test(\"second is skipped after the failure\", () => {});"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 15,
+                            "line": 48
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  46 |\n  47 |   test(\"first fails\", () => {\n> 48 |     expect(1).toBe(2);\n     |               ^\n  49 |   });\n  50 |\n  51 |   test(\"second is skipped after the failure\", () => {});\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:48:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.332Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-serial-group-first-fails/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 15,
+                        "line": 48
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-f6bea84ef5cf8285d464",
+              "file": "outcomes.spec.ts",
+              "line": 47,
+              "column": 7
+            },
+            {
+              "title": "second is skipped after the failure",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.357Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-51e58d0e34032ad3a996",
+              "file": "outcomes.spec.ts",
+              "line": 51,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "retried once",
+          "file": "outcomes.spec.ts",
+          "line": 56,
+          "column": 6,
+          "specs": [
+            {
+              "title": "fails first then passes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 5,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:60:31",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 31,
+                          "line": 60
+                        },
+                        "snippet": "  58 |\n  59 |   test(\"fails first then passes\", () => {\n> 60 |     expect(test.info().retry).toBe(1);\n     |                               ^\n  61 |   });\n  62 |\n  63 |   test(\"fails on every attempt\", () => {"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 31,
+                            "line": 60
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\n\n  58 |\n  59 |   test(\"fails first then passes\", () => {\n> 60 |     expect(test.info().retry).toBe(1);\n     |                               ^\n  61 |   });\n  62 |\n  63 |   test(\"fails on every attempt\", () => {\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:60:31"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.640Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-retried-once-fails-first-then-passes/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 31,
+                        "line": 60
+                      }
+                    },
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-09-30T13:43:57.947Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "flaky"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-83c04ffd141d8d3055a8",
+              "file": "outcomes.spec.ts",
+              "line": 59,
+              "column": 7
+            },
+            {
+              "title": "fails on every attempt",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 2,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:64:15",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 15,
+                          "line": 64
+                        },
+                        "snippet": "  62 |\n  63 |   test(\"fails on every attempt\", () => {\n> 64 |     expect(1).toBe(2);\n     |               ^\n  65 |   });\n  66 | });\n  67 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 15,
+                            "line": 64
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  62 |\n  63 |   test(\"fails on every attempt\", () => {\n> 64 |     expect(1).toBe(2);\n     |               ^\n  65 |   });\n  66 | });\n  67 |\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:64:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:57.968Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-retried-once-fails-on-every-attempt/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 15,
+                        "line": 64
+                      }
+                    },
+                    {
+                      "workerIndex": 5,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 4,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:64:15",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 15,
+                          "line": 64
+                        },
+                        "snippet": "  62 |\n  63 |   test(\"fails on every attempt\", () => {\n> 64 |     expect(1).toBe(2);\n     |               ^\n  65 |   });\n  66 | });\n  67 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 15,
+                            "line": 64
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  62 |\n  63 |   test(\"fails on every attempt\", () => {\n> 64 |     expect(1).toBe(2);\n     |               ^\n  65 |   });\n  66 | });\n  67 |\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:64:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-09-30T13:43:58.256Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-retried-once-fails-on-every-attempt-retry1/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 15,
+                        "line": 64
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-034ec66af336f7ae0013",
+              "file": "outcomes.spec.ts",
+              "line": 63,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "expected failures",
+          "file": "outcomes.spec.ts",
+          "line": 68,
+          "column": 6,
+          "specs": [
+            {
+              "title": "fails as test.fail() expects",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "fail",
+                      "location": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "line": 70,
+                        "column": 10
+                      }
+                    }
+                  ],
+                  "expectedStatus": "failed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 6,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 4,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:71:15",
+                        "location": {
+                          "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                          "column": 15,
+                          "line": 71
+                        },
+                        "snippet": "  69 |   test(\"fails as test.fail() expects\", () => {\n  70 |     test.fail();\n> 71 |     expect(1).toBe(2);\n     |               ^\n  72 |   });\n  73 |\n  74 |   test(\"passes despite test.fail()\", () => {"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "column": 15,
+                            "line": 71
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  69 |   test(\"fails as test.fail() expects\", () => {\n  70 |     test.fail();\n> 71 |     expect(1).toBe(2);\n     |               ^\n  72 |   });\n  73 |\n  74 |   test(\"passes despite test.fail()\", () => {\n    at /verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts:71:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:58.559Z",
+                      "annotations": [
+                        {
+                          "type": "fail",
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "line": 70,
+                            "column": 10
+                          }
+                        }
+                      ],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/capture-tmp/output-outcomes/outcomes-expected-failures-fails-as-test-fail-expects/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "column": 15,
+                        "line": 71
+                      }
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-9b9cdb697c62fb5bb719",
+              "file": "outcomes.spec.ts",
+              "line": 69,
+              "column": 7
+            },
+            {
+              "title": "passes despite test.fail()",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "fail",
+                      "location": {
+                        "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                        "line": 75,
+                        "column": 10
+                      }
+                    }
+                  ],
+                  "expectedStatus": "failed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 6,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T13:43:58.583Z",
+                      "annotations": [
+                        {
+                          "type": "fail",
+                          "location": {
+                            "file": "/verdi/internal/playwrightjson/testdata/capture/specs/outcomes.spec.ts",
+                            "line": 75,
+                            "column": 10
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "bac7195f1102b9e735ec-2f4c1b0c62d0d74fdd5d",
+              "file": "outcomes.spec.ts",
+              "line": 74,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-30T13:43:55.693Z",
+    "duration": 2910.357,
+    "expected": 7,
+    "skipped": 3,
+    "unexpected": 5,
+    "flaky": 1
+  }
+}
