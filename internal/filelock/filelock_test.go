@@ -1060,6 +1060,32 @@ func TestLease_ConcurrentLeasesAndReleaseAreRaceClean(t *testing.T) {
 	}
 }
 
+// TestErrHeld_Error pins the held answer's message: a lock whose body
+// names its holder says which pid holds it and the start it recorded; a
+// zero Info — a holder that has not flushed its body yet, or another
+// detector holding a stale lock's takeover flock (SI-302) — says the holder
+// has not recorded itself yet, never "pid 0" or the Unix epoch.
+func TestErrHeld_Error(t *testing.T) {
+	const start = 1700000000
+	cases := []struct {
+		name string
+		info Info
+		want string
+	}{
+		{"a recorded holder", Info{PID: 4242, Start: start},
+			"filelock: lock held by live pid 4242 (recorded start " + time.Unix(start, 0).Format(time.RFC3339) + ")"},
+		{"a zero Info", Info{},
+			"filelock: lock held, but its holder has not recorded itself in it yet (the lock is being created or taken over)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (&ErrHeld{Info: tc.info}).Error(); got != tc.want {
+				t.Fatalf("ErrHeld{%+v}.Error() = %q, want %q", tc.info, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestTakeoverFailed pins acquire's answer when takeOverStale did not leave
 // the lock to re-evaluate: its *ErrHeld (another detector is taking the
 // lock over) passes through as that very value, and any other failure is an

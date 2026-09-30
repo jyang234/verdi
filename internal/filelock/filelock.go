@@ -51,15 +51,23 @@ type Info struct {
 
 // ErrHeld means the lock is held by a live process: the caller should
 // proxy (dial the socket) or reuse the winner's result rather than
-// proceeding as if it owned the resource.
+// proceeding as if it owned the resource. Info is zero when no holder has
+// recorded itself in the lock yet: a young empty or partial body (its
+// creator is mid-flush), or a stale lock another detector holds the
+// takeover flock on (SI-302, takeOverStale).
 type ErrHeld struct {
 	Info Info
 }
 
 // Error names the holder's pid and the start its lock body records — the
 // holder's process start for an SI-300 lock, the creation time for an
-// older or fallback one (Info.Start), so it says "recorded start".
+// older or fallback one (Info.Start), so it says "recorded start". For a
+// zero Info it says the holder has not recorded itself yet, rather than
+// naming pid 0 and the Unix epoch.
 func (e *ErrHeld) Error() string {
+	if e.Info == (Info{}) {
+		return "filelock: lock held, but its holder has not recorded itself in it yet (the lock is being created or taken over)"
+	}
 	return fmt.Sprintf("filelock: lock held by live pid %d (recorded start %s)", e.Info.PID, time.Unix(e.Info.Start, 0).Format(time.RFC3339))
 }
 
