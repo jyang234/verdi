@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/specalign:TestStrictLintExclusionsCounted in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/strict-lint-gate" }
-frozen: { at: 2026-09-30, commit: ea39fa567bf47e4e5c092764aad630b9fd1b00f0 }
+frozen: { at: 2026-09-30, commit: 9643a79dd1a137f2f9b5cf09d1f905ea997d0a7c }
 ---
 # Exclusions are named, reasoned, and counted
 
