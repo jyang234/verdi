@@ -47,15 +47,19 @@ import (
 // from scratch, reading the new holder's live lock.
 //
 // Holders do not take the flock themselves. The race BL-108 names is
-// between detectors, and detectors serialize on the inode they judged. A
-// holder's lock is judged stale only when its holder is dead (its pid gone,
-// or reused by another process), and a dead holder's flocks are dropped by
-// the kernel anyway; a holder flock would only guard a live holder whose
-// lock a detector has misjudged stale (BL-109's clock step, or SI-300's
-// disclosed fallback), which already means two writers, and would add a
-// second liveness authority beside 01 §D3's pid-and-start rule. Nor does
-// Release take it: its path-identity check (Release, filelock.go) can race
-// only such a misjudging detector, or an older binary's by-name takeover.
+// between detectors, and detectors serialize on the inode they judged. For
+// a dead holder — the case 01 §D3 makes eligible for takeover — a holder
+// flock would change nothing, since the kernel drops a dead process's
+// flocks. It would matter only for a live holder a detector misjudges stale
+// (BL-109's clock step, SI-300's disclosed fallback, or a creator stalled
+// past lockMidFlushWindow), whose takeover it would refuse. But 01 §D3's
+// pid-and-start rule is this lock's liveness authority, and refusing on a
+// holder flock would make the flock a second one — a decision for the
+// ledger, not for this takeover: BL-111 records a holder-side flock as a
+// defence-in-depth candidate. Until then a misjudged live holder can still
+// be taken over, exactly as before SI-302. Nor does Release take the flock:
+// its path-identity check (Release, filelock.go) can race only such a
+// misjudging detector, or an older binary's by-name takeover.
 //
 // It returns nil when the caller must re-evaluate from scratch — the path
 // is gone, names another file, holds another body, is no longer stale, or
