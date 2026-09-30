@@ -22,6 +22,7 @@
 package filelock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,9 +43,9 @@ import (
 type Info struct {
 	PID int `json:"pid"`
 	// Start is the unix seconds the holder process started, per
-	// `ps -o lstart=` (SI-300, ownProcessStart); locks written before
-	// SI-300, and locks whose holder could not read its own start at
-	// acquisition, carry their creation time instead.
+	// `ps -o lstart=` read in UTC (SI-300, ownProcessStart); locks written
+	// before SI-300, and locks whose holder could not read its own start
+	// at acquisition, carry their creation time instead.
 	Start int64 `json:"start"`
 }
 
@@ -78,24 +79,33 @@ func strictUnmarshal(raw []byte, dst any) error {
 // (per `ps -o lstart=`) may drift from the lock's recorded start before
 // it is treated as a DIFFERENT process that happens to have reused the
 // pid, rather than the lock's genuine holder. Since SI-300 the recorded
-// start is the holder's own `ps -o lstart=` reading (ownProcessStart), so
-// a genuine SI-300 holder agrees to the second however long it ran before
-// acquiring. The tolerance keeps its pre-SI-300 value for the locks that
-// still record their creation time — those written by an older binary,
-// and those whose holder could not read its own start (ownProcessStart's
-// fallback) — which are judged exactly as before: live only if created
-// within this long of their holder's process start. A true pid-reuse
+// start is the holder's own `ps -o lstart=` reading (ownProcessStart),
+// taken in the probe's zone and locale whatever the two processes' own
+// environments (psEnvOverride), so a genuine SI-300 holder agrees with the
+// probe however long it ran before acquiring: both are ps's whole-second
+// reading of one kernel record of that process's start. (A platform that
+// derives lstart from its boot time, as Linux does, moves every reading
+// when the wall clock is stepped between the two; the tolerance absorbs
+// such a step up to its bound.) The tolerance keeps its pre-SI-300 value
+// for the locks that still record their creation time — those written by
+// an older binary, and those whose holder could not read its own start
+// (ownProcessStart's fallback) — which are judged by the same rule as
+// before: live only if created within this long of their holder's process
+// start (a start now read alike in every environment, so a prober in a
+// skewed zone or locale no longer misreads them). A true pid-reuse
 // collision is expected to differ by much more than this in practice (a
 // different, unrelated process started at an unrelated time).
 const lockStartTolerance = 5 * time.Minute
 
 // ownProcessStart is the start Acquire records (SI-300, 01 §D3): this
 // process's own OS start time, read through psLstart on os.Getpid() — the
-// same source, parsing, and whole-second resolution probe reads a holder's
-// start through — so both sides of the liveness comparison come from one
-// clock. It is read afresh on every call, never cached, so it always
-// reflects the current psLstart (test seams included); the process start
-// cannot change, so every reading agrees.
+// same source, environment, parsing, and whole-second resolution probe
+// reads a holder's start through — so both sides of the liveness
+// comparison read one clock whatever TZ or locale either process runs
+// under (psLstart's environment override). It is read afresh on every
+// call, never cached, so it always reflects the current psLstart (test
+// seams included); the process start cannot change, so every reading
+// agrees.
 //
 // Disclosed fallback: when the process's own start cannot be read (ps
 // unavailable, failing, or unparseable), it returns the current time — the
@@ -112,12 +122,39 @@ func ownProcessStart() int64 {
 	return time.Now().Unix()
 }
 
-// psLstart execs `ps -o lstart= -p <pid>` and parses its stdout as the
-// named process's actual start time — the cross-check I-12 asks for.
-// Overridable in tests (both to avoid a real ps dependency in some paths
-// and to exercise the "ps output unparseable" fallback deterministically).
+// psLstart reads the named process's actual start time from
+// `ps -o lstart= -p <pid>` — the cross-check I-12 asks for (readLstart has
+// the environment). Overridable in tests (both to avoid a real ps
+// dependency in some paths and to exercise the "ps output unparseable"
+// fallback deterministically).
 var psLstart = func(pid int) (time.Time, error) {
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	return readLstart(context.Background(), pid)
+}
+
+// psEnvOverride is appended to every `ps -o lstart=` exec's environment,
+// where it wins over the inherited values (exec.Cmd keeps the last value
+// of a repeated key): TZ=UTC0 makes ps print the start in UTC whatever
+// zone this process runs in — including a POSIX TZ rule string such as
+// JST-9, which ps honours but Go's time.Local does not — and LC_ALL=C
+// makes it print the English day and month names lstartLayouts parse.
+// parseLstart reads the output in time.UTC to match, so a recording holder
+// and a probing process read one clock whatever their own environments
+// (SI-300 as amended, FL-R1).
+func psEnvOverride() []string { return []string{"TZ=UTC0", "LC_ALL=C"} }
+
+// lstartCommand builds the `ps -o lstart= -p <pid>` exec readLstart runs
+// under ctx. A var only so a test can substitute a command that checks its
+// environment.
+var lstartCommand = func(ctx context.Context, pid int) *exec.Cmd {
+	return exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+}
+
+// readLstart runs lstartCommand for pid under ctx with psEnvOverride and
+// parses its stdout as the process's start.
+func readLstart(ctx context.Context, pid int) (time.Time, error) {
+	cmd := lstartCommand(ctx, pid)
+	cmd.Env = append(os.Environ(), psEnvOverride()...)
+	out, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("filelock: ps -o lstart= -p %d: %w", pid, err)
 	}
@@ -133,9 +170,12 @@ var lstartLayouts = []string{
 	"Mon Jan 2 15:04:05 2006",
 }
 
+// parseLstart reads s, ps's lstart output under psEnvOverride, as a UTC
+// time — never time.Local, which differs between processes (and ignores a
+// POSIX TZ rule string ps honours).
 func parseLstart(s string) (time.Time, error) {
 	for _, layout := range lstartLayouts {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
 			return t, nil
 		}
 	}

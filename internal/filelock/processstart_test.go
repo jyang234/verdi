@@ -384,15 +384,15 @@ const holderHelperEnv = "VERDI_FILELOCK_TEST_HOLDER_LOCK"
 // its creation time can never equal `ps -o lstart=` for the child.
 const holderHelperDelay = 1500 * time.Millisecond
 
-// TestHelperLockHolder is not a test on its own: it is the child process
-// TestAcquire_RealHolderRecordsItsOSProcessStart re-executes this test
-// binary as. In that child it waits holderHelperDelay, acquires the lock
-// named by holderHelperEnv, reports "acquired", holds the lock until its
-// stdin closes, then releases it and exits.
+// TestHelperLockHolder is not a test on its own: it is the holder child
+// process startHolderChild re-executes this test binary as. In that child
+// it waits holderHelperDelay, acquires the lock named by holderHelperEnv,
+// reports "acquired", holds the lock until its stdin closes, then releases
+// it and exits.
 func TestHelperLockHolder(t *testing.T) {
 	path := os.Getenv(holderHelperEnv)
 	if path == "" {
-		t.Skip("helper child process only; driven by TestAcquire_RealHolderRecordsItsOSProcessStart")
+		t.Skip("helper child process only; driven by startHolderChild")
 	}
 	time.Sleep(holderHelperDelay)
 	f, err := Acquire(path)
@@ -409,20 +409,19 @@ func TestHelperLockHolder(t *testing.T) {
 	os.Exit(0)
 }
 
-// TestAcquire_RealHolderRecordsItsOSProcessStart is the seam-free,
-// cross-process witness of SI-300: a real child process acquires a lock
-// holderHelperDelay after it started, and this process — a different
-// prober running the real `ps -o lstart=` on the child's pid — finds the
-// recorded start EQUAL to that OS process start (one source, one
-// resolution), judges the child the live holder, and gets ErrHeld from its
-// own Acquire. A lock recording its creation time fails the equality.
-func TestAcquire_RealHolderRecordsItsOSProcessStart(t *testing.T) {
-	if _, err := psLstart(os.Getpid()); err != nil {
-		t.Skipf("ps -o lstart= unavailable/unparseable on this platform: %v", err)
+// startHolderChild re-executes this test binary as TestHelperLockHolder
+// with env (the parent's environment when nil) plus the helper's lock
+// path, waits until the child reports it acquired path, and returns the
+// child's pid and a stop func. stop closes the child's stdin — the child
+// then releases the lock and exits — and returns the child's exit error.
+// A child whose stop was never called is killed when t ends.
+func startHolderChild(t *testing.T, path string, env []string) (int, func() error) {
+	t.Helper()
+	if env == nil {
+		env = os.Environ()
 	}
-	path := filepath.Join(t.TempDir(), "writer.lock")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperLockHolder$", "-test.count=1")
-	cmd.Env = append(os.Environ(), holderHelperEnv+"="+path)
+	cmd.Env = append(env[:len(env):len(env)], holderHelperEnv+"="+path)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +433,6 @@ func TestAcquire_RealHolderRecordsItsOSProcessStart(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting the holder child: %v", err)
 	}
-	child := cmd.Process.Pid
 
 	// The reader drains the child's stdout to EOF and only then signals
 	// drained, so Wait (which closes the pipe) never races a pending read.
@@ -479,6 +477,22 @@ func TestAcquire_RealHolderRecordsItsOSProcessStart(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("holder child never reported acquiring the lock")
 	}
+	return cmd.Process.Pid, stop
+}
+
+// TestAcquire_RealHolderRecordsItsOSProcessStart is the seam-free,
+// cross-process witness of SI-300: a real child process acquires a lock
+// holderHelperDelay after it started, and this process — a different
+// prober running the real `ps -o lstart=` on the child's pid — finds the
+// recorded start EQUAL to that OS process start (one source, one
+// resolution), judges the child the live holder, and gets ErrHeld from its
+// own Acquire. A lock recording its creation time fails the equality.
+func TestAcquire_RealHolderRecordsItsOSProcessStart(t *testing.T) {
+	if _, err := psLstart(os.Getpid()); err != nil {
+		t.Skipf("ps -o lstart= unavailable/unparseable on this platform: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	child, stop := startHolderChild(t, path, nil)
 
 	info := readLockBody(t, path)
 	osStart, err := psLstart(child)
