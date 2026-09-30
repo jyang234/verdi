@@ -92,7 +92,7 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 	writeGlanceSection(&body, root, entries, indexErr, home.Model)
 
 	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
-	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil, home.Model)
+	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil, home.Model, home.Clock())
 
 	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
 	// conflict) — a surviving affordance of the old home page, still read

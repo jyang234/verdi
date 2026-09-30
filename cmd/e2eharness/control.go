@@ -35,6 +35,14 @@ package main
 //     store no longer shows once earlier suites have written to it
 //     (R-RR1-23) — see readinesspilotfixture.go. main.go stops it with
 //     the harness.
+//   - GET  /index-dates-fixture returns the base URL of a separate `verdi
+//     serve` subprocess (the binary built from this tree) over an
+//     ISOLATED dated store whose entries sit on both sides of a fixed
+//     clock, started with VERDI_NOW set to it (spec/index-data ac-3;
+//     SI-296) — the served index page carries each entry's last-change
+//     date and quiet mark (SI-297's carriers) and the fixed clock is
+//     disclosed; see indexdates.go for the entries and their dates.
+//     main.go stops it (and removes its store) with the harness.
 //   - GET  /objsupersede-fixture returns JSON describing EIGHT isolated
 //     stores, one per closed-spec object supersession scenario (design
 //     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
@@ -81,6 +89,7 @@ type controlServer struct {
 	specImport         *specImportFixture
 	readinessPilot     *readinessPilotFixture
 	objSupersede       *objSupersedeFixture
+	indexDates         *indexDatesFixture
 }
 
 // newControlServer wires the fixtures. openMRFeedURL is this server's own
@@ -97,6 +106,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		specImport:         newSpecImportFixture(moduleRoot),
 		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
 		objSupersede:       newObjSupersedeFixture(moduleRoot),
+		indexDates:         newIndexDatesFixture(moduleRoot),
 	}
 }
 
@@ -138,6 +148,11 @@ func (c *controlServer) handler() http.Handler {
 	// 2026-09-24-closed-spec-object-supersession-design.md §8 needs, which
 	// no shared-store spec models.
 	mux.HandleFunc("/objsupersede-fixture", c.objSupersede.handler)
+	// The isolated dated store (indexdates.go): the shipped binary's own
+	// `verdi serve` under a fixed VERDI_NOW, over entries dated either side
+	// of it — the served index page is the one source of every age and
+	// quiet mark (spec/index-data ac-3; SI-296, SI-297).
+	mux.HandleFunc("/index-dates-fixture", c.indexDates.handler)
 	return mux
 }
 

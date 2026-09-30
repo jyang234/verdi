@@ -31,9 +31,13 @@ const (
 // every class: feature/story entry's StatusGroup and SpecStatus route
 // through it — internal/specstate, "the ONE place every later consumer...
 // routes lifecycle decisions through" — rather than trusting a persisted
-// `status:` field alone. Component-class entries are untouched (they keep
-// mapStatusGroup's raw-field read; see status.go). Both the default-branch
-// walk and the design-branch walk each collect their OWN feature/story
+// `status:` field alone. Component-class entries keep mapStatusGroup's
+// raw-field read for StatusGroup/SpecStatus (status.go — display-only,
+// never git-derived), but (spec/index-data ac-1) every default-branch
+// entry, component or feature/story alike, joins the SAME batched
+// candidate set purely to obtain its resolved Baseline (the commit where
+// its current bytes landed) — never a second per-class walk. Both the
+// default-branch walk and the design-branch walk each collect their OWN
 // candidates and resolve them in a SINGLE ResolveMany batch call apiece —
 // never one Resolve call per entry (Step 1's own "a 50-spec fake records
 // ONE default-corpus scan, not 50").
@@ -60,28 +64,41 @@ func ComputeIndex(ctx context.Context, root string, deps GitRunner, resolver Sta
 	return entries, nil
 }
 
-// pendingDefaultEntry is a class: feature/story default-branch entry whose
-// StatusGroup/SpecStatus/Disclosed await the walk's single batched
-// resolver.ResolveMany call (Task 6a) — index-paired with the parallel
-// candidates slice computeDefaultBranchEntries builds alongside it.
+// pendingDefaultEntry is a default-branch entry — component or
+// feature/story alike (spec/index-data ac-1) — whose Date (from the
+// resolver's Baseline) awaits the walk's single batched
+// resolver.ResolveMany call; a feature/story entry's StatusGroup/
+// SpecStatus/Disclosed await the same call (Task 6a), while a component
+// entry's StatusGroup/SpecStatus are already known at collection time
+// (mapStatusGroup, status.go — component status is display-only, never
+// git-derived) and carried here unevaluated so the single post-resolve
+// loop below can still build every Entry uniformly. Index-paired with the
+// parallel candidates slice computeDefaultBranchEntries builds alongside
+// it.
 type pendingDefaultEntry struct {
-	ref  string
-	zone Zone
+	ref       string
+	zone      Zone
+	class     artifact.SpecClass
+	rawStatus artifact.Status // meaningful only when class == artifact.ClassComponent
 }
 
 // computeDefaultBranchEntries walks the default branch's own tree (dc-4) —
 // never the working tree (co-1) — under .verdi/specs/active/ and
 // .verdi/specs/archive/, reading each spec.md's frontmatter through the
 // same internal/artifact strict-decode seam every other spec read in this
-// store uses. A component-class entry's StatusGroup still comes from its
-// own raw frontmatter status (mapStatusGroup, status.go — component status
-// is display-only, persisted, never git-derived). Every OTHER class
-// (feature/story) instead becomes a pendingDefaultEntry, collected into ONE
+// store uses. Every entry becomes a pendingDefaultEntry, collected into ONE
 // specstate.Candidate batch and resolved through resolver.ResolveMany in a
-// SINGLE call once the walk finishes (Task 6a) — never one Resolve call per
-// spec — so effectiveStatusGroup can assign its StatusGroup/SpecStatus from
-// the git-derived Result rather than a persisted `status:` field a
-// statusless scaffold would otherwise omit entirely.
+// SINGLE call once the walk finishes (Task 6a; spec/index-data ac-1/co-1) —
+// never one Resolve call per spec, and never a second batch per class. A
+// component-class entry's StatusGroup/SpecStatus still come from its own
+// raw frontmatter status (mapStatusGroup, status.go — display-only,
+// persisted, never git-derived); every OTHER class (feature/story) instead
+// gets them from the resolved Result via effectiveStatusGroup, so a
+// statusless scaffold still renders a legible value. Either way, Date is
+// the committer date of the SAME resolved Result's landing commit
+// (landingDate, lastchange.go) — the one piece every default-branch entry
+// needs from this batch regardless of class — with every landing commit of
+// the walk read in one port call.
 func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
 	// defaultBranch is the ref name the shared resolver selected (port.go's
 	// DefaultBranch contract: e.g. "origin/main", or a local name under the
@@ -130,28 +147,16 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 				return nil, fmt.Errorf("%s at %s: %w", p, defaultBranch, err)
 			}
 
-			ref := "spec/" + name
-			if spec.Class == artifact.ClassComponent {
-				group, err := mapStatusGroup(spec.Status)
-				if err != nil {
-					return nil, fmt.Errorf("%s at %s: %w", p, defaultBranch, err)
-				}
-				entries = append(entries, Entry{
-					Ref:         ref,
-					Source:      SourceDefault,
-					StatusGroup: group,
-					SpecStatus:  string(spec.Status),
-					// Zone is WHERE this iteration of the two-zone loop above
-					// found the entry (spec/home-status-glance dc-2) — zone
-					// and specsActiveZone/specsArchiveZone share the exact
-					// "active"/"archive" string values by construction, so
-					// this is a direct cast, never a second vocabulary.
-					Zone: Zone(zone),
-				})
-				continue
-			}
-
-			pending = append(pending, pendingDefaultEntry{ref: ref, zone: Zone(zone)})
+			// Every default-branch entry — component or feature/story alike
+			// — joins the SAME single batched candidate set (spec/index-data
+			// co-1: one computation per render, the default-branch walk
+			// never repeated): a component's StatusGroup/SpecStatus stay
+			// display-only (mapStatusGroup below, from rawStatus, never
+			// git-derived), but its Date still comes from the resolver's
+			// Baseline exactly like a feature/story entry's does, so ac-1's
+			// "each default-branch entry carries [a last-change date]" holds
+			// for every class without a second, ad hoc git walk per entry.
+			pending = append(pending, pendingDefaultEntry{ref: "spec/" + name, zone: Zone(zone), class: spec.Class, rawStatus: spec.Status})
 			candidates = append(candidates, specstate.Candidate{Path: p, Content: content})
 		}
 	}
@@ -164,15 +169,37 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 		if len(results) != len(pending) {
 			return nil, fmt.Errorf("refindex: resolver returned %d results for %d candidates", len(results), len(pending))
 		}
+		// Every landing commit this walk dates, read in ONE port call
+		// (co-1; lastchange.go) — an entry with none is disclosed instead.
+		landings := make([]string, 0, len(results))
+		for _, r := range results {
+			landings = append(landings, landingCommit(r))
+		}
+		dates := readDateBatch(ctx, deps, root, landings)
 		for i, pe := range pending {
-			group, disclosed := effectiveStatusGroup(pe.ref, results[i])
+			var group StatusGroup
+			var specStatus string
+			var disclosed *disclosure.Disclosure
+			if pe.class == artifact.ClassComponent {
+				group, err = mapStatusGroup(pe.rawStatus)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", pe.ref, err)
+				}
+				specStatus = string(pe.rawStatus)
+			} else {
+				group, disclosed = effectiveStatusGroup(pe.ref, results[i])
+				specStatus = string(results[i].ArtifactStatus())
+			}
+			date, dateDisclosed := landingDate(pe.ref, results[i], dates)
 			entries = append(entries, Entry{
-				Ref:         pe.ref,
-				Source:      SourceDefault,
-				StatusGroup: group,
-				SpecStatus:  string(results[i].ArtifactStatus()),
-				Disclosed:   disclosed,
-				Zone:        pe.zone,
+				Ref:           pe.ref,
+				Source:        SourceDefault,
+				StatusGroup:   group,
+				SpecStatus:    specStatus,
+				Disclosed:     disclosed,
+				Zone:          pe.zone,
+				Date:          date,
+				DateDisclosed: dateDisclosed,
 			})
 		}
 	}
@@ -203,8 +230,9 @@ func specNameFromPath(path, prefix string) (name string, ok bool) {
 // batched resolver.ResolveMany call, index-paired with the parallel
 // candidates slice computeDesignBranchEntries builds alongside it.
 type pendingDesignEntry struct {
-	ref    string
-	source Source
+	ref      string
+	source   Source
+	revision string
 }
 
 // computeDesignBranchEntries enumerates every UNMERGED design branch's
@@ -239,6 +267,11 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 	sort.Strings(names)
 
 	var entries []Entry
+	// tips is index-paired with entries: the revision whose committer date
+	// is that entry's last change (dc-1: a design-branch entry's age is its
+	// branch tip), every one read in ONE port call once the walk finishes
+	// (co-1; lastchange.go).
+	var tips []string
 	var pending []pendingDesignEntry
 	var candidates []specstate.Candidate
 	for _, name := range names {
@@ -298,6 +331,11 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				// content that was never there to read.
 				Zone: ZoneActive,
 			})
+			// A degraded entry still has a real branch tip — dc-1's "a
+			// design-branch entry's age is its branch tip" holds even when
+			// no spec.md was ever committed there, so it is dated,
+			// unconditionally, exactly like StatusGroup/Zone above.
+			tips = append(tips, revision)
 			continue
 		}
 
@@ -317,7 +355,7 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 		if err != nil {
 			return nil, err
 		}
-		pending = append(pending, pendingDesignEntry{ref: ref, source: src})
+		pending = append(pending, pendingDesignEntry{ref: ref, source: src, revision: revision})
 		candidates = append(candidates, candidate)
 	}
 
@@ -350,9 +388,14 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				// under the active zone for a design-branch entry.
 				Zone: ZoneActive,
 			})
+			tips = append(tips, pe.revision)
 		}
 	}
 
+	dates := readDateBatch(ctx, deps, root, tips)
+	for i := range entries {
+		entries[i].Date, entries[i].DateDisclosed = dates.dateFor(entries[i].Ref, tips[i])
+	}
 	return entries, nil
 }
 

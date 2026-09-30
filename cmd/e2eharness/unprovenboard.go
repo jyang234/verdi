@@ -41,14 +41,16 @@ import (
 	"time"
 )
 
-// serveInjectionEnvVars are the serve-side injection seams the SHARED
-// harness store uses (main.go's serveCmd.Env): the canned review feed, the
-// control server's open-MR feed URL, and the canned diagram verification
-// report. The unproven-board fixture claims a hermetic, feed-less, no-CI
-// serve, so none of them — nor any CI identity variable (ciEnvVars) — may
-// reach its child, whatever ambient environment spawned the harness or a
-// test.
-var serveInjectionEnvVars = []string{"VERDI_REVIEW_FEED", "VERDI_OPENMR_FEED", "VERDI_DIAGRAM_VERIFICATION"}
+// serveInjectionEnvVars are the serve-side injection seams: the canned
+// review feed, the control server's open-MR feed URL, and the canned
+// diagram verification report the SHARED harness store uses (main.go's
+// serveCmd.Env), plus the fixed workbench clock (VERDI_NOW, SI-296) only
+// the index-dates fixture sets — and sets itself, after stripping any
+// ambient one. The unproven-board fixture claims a hermetic, feed-less,
+// no-CI, wall-clock serve, so none of them — nor any CI identity variable
+// (ciEnvVars) — may reach its child, whatever ambient environment spawned
+// the harness or a test.
+var serveInjectionEnvVars = []string{"VERDI_REVIEW_FEED", "VERDI_OPENMR_FEED", "VERDI_DIAGRAM_VERIFICATION", verdiNowEnvVar}
 
 // hermeticServeEnv is the child's environment: ambient (PATH, HOME, TMPDIR,
 // git identity — what `verdi serve` and its git calls genuinely need) with

@@ -67,7 +67,7 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 						calls = append(calls, "build:"+root+":"+requestPath)
 						return "spec/startup-target", &readinessload.PredecodedRequest{}, nil
 					}),
-					run: func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+					run: func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, _ servedClock, _, _ io.Writer) int {
 						calls = append(calls, "run:"+root+":"+httpAddr)
 						if loader.Root != root || defaultSpec != "spec/startup-target" {
 							t.Fatalf("run loader=%+v defaultSpec=%q, want root %q and the built default spec", loader, defaultSpec, root)
@@ -104,7 +104,7 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 						t.Fatal("readiness builder called without --context-request")
 						return "", nil, nil
 					}),
-					run: func(_ string, gotHTTP string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+					run: func(_ string, gotHTTP string, loader readinessload.Loader, defaultSpec string, _ servedClock, _, _ io.Writer) int {
 						if gotHTTP != tc.wantHTTP || defaultSpec != "" {
 							t.Fatalf("run(http=%q, defaultSpec=%q), want http=%q and no default spec", gotHTTP, defaultSpec, tc.wantHTTP)
 						}
@@ -148,7 +148,10 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 						called = true
 						return "", nil, errors.New("must not run")
 					}),
-					run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { called = true; return 0 },
+					run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int {
+						called = true
+						return 0
+					},
 				}
 				var stdout, stderr bytes.Buffer
 				if code := cmdServeWithDeps(tc.args, &stdout, &stderr, deps); code != 2 {
@@ -187,7 +190,7 @@ func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return root, nil },
 		readiness: builder,
-		run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+		run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int {
 			lock, err := filelock.Acquire(lockPath)
 			if err != nil {
 				t.Fatalf("server could not acquire writer lock after builder returned: %v", err)
@@ -224,7 +227,7 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 		readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 			return "", nil, errors.New("snapshot unavailable")
 		}),
-		run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+		run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int {
 			serverEffects++
 			return 0
 		},
@@ -290,7 +293,7 @@ func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return repo.Dir, nil },
 		readiness: builder,
-		run: func(root, _ string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+		run: func(root, _ string, loader readinessload.Loader, defaultSpec string, _ servedClock, _, _ io.Writer) int {
 			if loader.Root != root || defaultSpec == "" {
 				t.Fatalf("run loader=%+v defaultSpec=%q, want root %q and a non-empty default spec", loader, defaultSpec, root)
 			}
@@ -386,7 +389,7 @@ func TestServeReadinessSurvivesTheRequestFileVanishingAfterStartup(t *testing.T)
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return repo.Dir, nil },
 		readiness: builder,
-		run: func(_, _ string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+		run: func(_, _ string, loader readinessload.Loader, defaultSpec string, _ servedClock, _, _ io.Writer) int {
 			if loader.Opts.ContextRequestPath != requestPath {
 				t.Fatalf("loader ContextRequestPath = %q, want %q — Load's contextFallback vector still names it", loader.Opts.ContextRequestPath, requestPath)
 			}
@@ -612,7 +615,7 @@ func TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest(t *testing.T) {
 			deps := serveCommandDeps{
 				findRoot:  func(string) (string, error) { return repo.Dir, nil },
 				readiness: readinessLoadBuilder{},
-				run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+				run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int {
 					t.Error("serve entered its run with an already-stale --context-request")
 					return 0
 				},
