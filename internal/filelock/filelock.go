@@ -40,8 +40,12 @@ import (
 
 // Info is the lock body: O_CREATE|O_EXCL JSON {pid, start}.
 type Info struct {
-	PID   int   `json:"pid"`
-	Start int64 `json:"start"` // unix seconds the lock was created
+	PID int `json:"pid"`
+	// Start is the unix seconds the holder process started, per
+	// `ps -o lstart=` (SI-300, ownProcessStart); locks written before
+	// SI-300, and locks whose holder could not read its own start at
+	// acquisition, carry their creation time instead.
+	Start int64 `json:"start"`
 }
 
 // ErrHeld means the lock is held by a live process: the caller should
@@ -51,8 +55,11 @@ type ErrHeld struct {
 	Info Info
 }
 
+// Error names the holder's pid and the start its lock body records — the
+// holder's process start for an SI-300 lock, the creation time for an
+// older or fallback one (Info.Start), so it says "recorded start".
 func (e *ErrHeld) Error() string {
-	return fmt.Sprintf("filelock: lock held by live pid %d (started %s)", e.Info.PID, time.Unix(e.Info.Start, 0).Format(time.RFC3339))
+	return fmt.Sprintf("filelock: lock held by live pid %d (recorded start %s)", e.Info.PID, time.Unix(e.Info.Start, 0).Format(time.RFC3339))
 }
 
 // strictUnmarshal decodes raw into dst with DisallowUnknownFields and
@@ -70,12 +77,40 @@ func strictUnmarshal(raw []byte, dst any) error {
 // lockStartTolerance bounds how far a live pid's actual process start time
 // (per `ps -o lstart=`) may drift from the lock's recorded start before
 // it is treated as a DIFFERENT process that happens to have reused the
-// pid, rather than the lock's genuine holder. Generous on purpose: the
-// real holder's own startup work between process start and lock-write can
-// itself take some seconds; a true pid-reuse collision is expected to
-// differ by much more than this in practice (a different, unrelated
-// process started at an unrelated time).
+// pid, rather than the lock's genuine holder. Since SI-300 the recorded
+// start is the holder's own `ps -o lstart=` reading (ownProcessStart), so
+// a genuine SI-300 holder agrees to the second however long it ran before
+// acquiring. The tolerance keeps its pre-SI-300 value for the locks that
+// still record their creation time — those written by an older binary,
+// and those whose holder could not read its own start (ownProcessStart's
+// fallback) — which are judged exactly as before: live only if created
+// within this long of their holder's process start. A true pid-reuse
+// collision is expected to differ by much more than this in practice (a
+// different, unrelated process started at an unrelated time).
 const lockStartTolerance = 5 * time.Minute
+
+// ownProcessStart is the start Acquire records (SI-300, 01 §D3): this
+// process's own OS start time, read through psLstart on os.Getpid() — the
+// same source, parsing, and whole-second resolution probe reads a holder's
+// start through — so both sides of the liveness comparison come from one
+// clock. It is read afresh on every call, never cached, so it always
+// reflects the current psLstart (test seams included); the process start
+// cannot change, so every reading agrees.
+//
+// Disclosed fallback: when the process's own start cannot be read (ps
+// unavailable, failing, or unparseable), it returns the current time — the
+// lock's acquisition time, exactly the value recorded before SI-300 — and
+// acquisition proceeds. Such a lock is judged like a pre-SI-300 one: a
+// prober whose ps also fails keeps it live through probe's kill-probe-only
+// fallback, but a prober whose ps works judges it by the tolerance, so a
+// holder that acquired more than lockStartTolerance after it started stays
+// exposed to BL-101's stale misjudgment in this fallback case only.
+func ownProcessStart() int64 {
+	if st, err := psLstart(os.Getpid()); err == nil {
+		return st.Unix()
+	}
+	return time.Now().Unix()
+}
 
 // psLstart execs `ps -o lstart= -p <pid>` and parses its stdout as the
 // named process's actual start time — the cross-check I-12 asks for.
@@ -351,21 +386,26 @@ func LeaseIfHeldByCurrentProcess(path string) (release func(), held bool, err er
 }
 
 // Acquire implements I-12(a) end to end: create path with O_CREATE|O_EXCL
-// and write {pid,start} JSON on success. If the path already exists,
+// and write {pid,start} JSON on success, start being this process's own OS
+// start time (ownProcessStart, SI-300). If the path already exists,
 // inspect the holder recorded inside — alive (per alive, above) yields
 // ErrHeld (the caller should proxy/reuse rather than proceed);
 // dead/stale removes the lock and retries acquisition, up to a small
 // bound (guards a takeover race between two simultaneous stale
 // detectors: both remove+recreate, only one O_EXCL create wins, the loser
 // retries and finds the winner's fresh live lock).
+//
+// The own start is read once per call, BEFORE the exclusive create, so the
+// ps exec it may cost never widens the window between the create and the
+// body flush that racing readers must treat as mid-flush.
 func Acquire(path string) (*os.File, error) {
-	return acquire(path, 5)
+	return acquire(path, 5, ownProcessStart())
 }
 
-func acquire(path string, retriesLeft int) (*os.File, error) {
+func acquire(path string, retriesLeft int, start int64) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err == nil {
-		info := Info{PID: os.Getpid(), Start: time.Now().Unix()}
+		info := Info{PID: os.Getpid(), Start: start}
 		if encErr := json.NewEncoder(f).Encode(info); encErr != nil {
 			_ = f.Close()
 			_ = os.Remove(path)
@@ -382,7 +422,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 	if rerr != nil {
 		// Lost the race with the remover between our OpenFile and this Read.
 		if errors.Is(rerr, os.ErrNotExist) && retriesLeft > 0 {
-			return acquire(path, retriesLeft-1)
+			return acquire(path, retriesLeft-1, start)
 		}
 		return nil, fmt.Errorf("filelock: lock %s exists but is unreadable: %w", path, rerr)
 	}
@@ -403,7 +443,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 			// Lost the race with a concurrent remover between our read and
 			// this stat — retry acquisition rather than fail hard.
 			if errors.Is(serr, os.ErrNotExist) && retriesLeft > 0 {
-				return acquire(path, retriesLeft-1)
+				return acquire(path, retriesLeft-1, start)
 			}
 			return nil, fmt.Errorf("filelock: lock %s exists but its empty/partial body could not be aged: %w", path, serr)
 		}
@@ -423,7 +463,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body) but could not remove: %w", path, rmErr)
 		}
-		return acquire(path, retriesLeft-1)
+		return acquire(path, retriesLeft-1, start)
 	}
 	if alive(info.PID, info.Start) {
 		return nil, &ErrHeld{Info: info}
@@ -434,7 +474,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 	if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return nil, fmt.Errorf("filelock: stale lock %s (pid %d dead) but could not remove: %w", path, info.PID, rmErr)
 	}
-	return acquire(path, retriesLeft-1)
+	return acquire(path, retriesLeft-1, start)
 }
 
 // Release closes f and removes path — the holder's own clean path. A
