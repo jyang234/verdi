@@ -43,6 +43,16 @@ const (
 	ssQuoteListed    = `".verdi/conflicts/a\"b.md"`
 	ssQuotedEntry    = "is listed git-quoted"
 
+	// RR1: a git-quoted entry that is not a conflict file (not .md) is not
+	// read and is no scan failure; a .md inside a git-quoted directory is
+	// still a conflict file, off a record path.
+	ssQuotedTxtPath      = ".verdi/conflicts/notes-é.txt"
+	ssQuoteTxtPath       = ".verdi/conflicts/a\"b.txt"
+	ssQuotedDirMDPath    = ".verdi/conflicts/sübdir/x.md"
+	ssQuotedDirMDListed  = `".verdi/conflicts/s\303\274bdir/x.md"`
+	ssQuotedDirTxtPath   = ".verdi/conflicts/sübdir/notes.txt"
+	ssQuotedDirTxtListed = `".verdi/conflicts/s\303\274bdir/notes.txt"`
+
 	// SS-R2: the spec scan's own incompleteness, and the "no successor"
 	// wording an incomplete spec scan can still prove; its conflict-scan
 	// analog, the "no resolved conflict" wording an incomplete conflict
@@ -492,6 +502,49 @@ func TestProjector_StorySupersession(t *testing.T) {
 			want:      []ssWant{{"superseded by " + ssV2Path, ssNonASCIIPath}},
 			quotePath: "false",
 		},
+		// RR1 (SI-306 (4): a conflict file is a .md, as artifact.ClassifyPath
+		// and lint read it): a git-quoted entry that is not a conflict file
+		// is neither read nor a scan failure.
+		{
+			name:      "RR1: core.quotePath=true, a non-.md entry at a non-ASCII name is not a conflict file: accepted-pending-build, no conflict-scan disclosure",
+			tree:      map[string]string{ssV1Path: v1, ssQuotedTxtPath: "an attachment, not a record\n"},
+			candidate: ssV1Path,
+			wantState: AcceptedPendingBuild,
+			absent:    []string{ssQuotedEntry, ssScanIncomplete},
+			quotePath: "true",
+		},
+		{
+			name:      "RR1: a non-.md entry at a name holding a double quote is not a conflict file: accepted-pending-build, no conflict-scan disclosure",
+			tree:      map[string]string{ssV1Path: v1, ssQuoteTxtPath: "an attachment, not a record\n"},
+			candidate: ssV1Path,
+			wantState: AcceptedPendingBuild,
+			absent:    []string{ssQuotedEntry, ssScanIncomplete},
+		},
+		{
+			name:      "RR1: core.quotePath=true, a non-.md entry inside a git-quoted directory is not a conflict file: accepted-pending-build",
+			tree:      map[string]string{ssV1Path: v1, ssQuotedDirTxtPath: "an attachment, not a record\n"},
+			candidate: ssV1Path,
+			wantState: AcceptedPendingBuild,
+			absent:    []string{ssQuotedEntry, ssScanIncomplete, ssQuotedDirTxtListed},
+			quotePath: "true",
+		},
+		{
+			name:      "RR1: core.quotePath=true, a malformed .md inside a git-quoted directory is still a conflict file: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssQuotedDirMDPath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssQuotedDirMDListed, ssQuotedEntry}},
+			quotePath: "true",
+		},
+		{
+			name:      "RR1: core.quotePath=true, a well-formed superseded .md inside a git-quoted directory is never credited: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssQuotedDirMDPath: resolved},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssQuotedDirMDListed, ssQuotedEntry}},
+			absent:    []string{ssMissingRecord},
+			quotePath: "true",
+		},
 		// SS-R2: an incomplete spec scan keeps its witness, and the
 		// "no successor" disclosure asserts no negative it cannot prove.
 		{
@@ -669,5 +722,34 @@ func TestConflictPathClassification(t *testing.T) {
 	}
 	if got, want := conflictsDir(), ".verdi/conflicts"; got != want {
 		t.Fatalf("conflictsDir() = %q, want %q", got, want)
+	}
+}
+
+// TestIsQuotedConflictFile pins which git-quoted listing entries name a
+// conflict file under their real names (review RR1): only a .md under the
+// conflicts directory, at any depth; an entry that does not unquote fails
+// closed.
+func TestIsQuotedConflictFile(t *testing.T) {
+	tests := []struct {
+		listed string
+		want   bool
+	}{
+		{ssNonASCIIListed, true},
+		{ssQuoteListed, true},
+		{ssQuotedDirMDListed, true},
+		{`".verdi/conflicts/tab\there.md"`, true},
+		{`".verdi/conflicts/notes-\303\251.txt"`, false},
+		{`".verdi/conflicts/a\"b.txt"`, false},
+		{ssQuotedDirTxtListed, false},
+		{`".verdi/conflicts-\303\251/x.md"`, false},
+		{`".verdi/conflicts/unterminated.md`, true},
+		{`".verdi/conflicts/bad\qescape.md"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.listed, func(t *testing.T) {
+			if got := isQuotedConflictFile(tt.listed); got != tt.want {
+				t.Fatalf("isQuotedConflictFile(%q) = %v, want %v", tt.listed, got, tt.want)
+			}
+		})
 	}
 }

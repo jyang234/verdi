@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -65,6 +66,17 @@ func isGitQuoted(p string) bool {
 	return strings.HasPrefix(p, `"`)
 }
 
+// isQuotedConflictFile reports whether a git-quoted listing entry names a
+// conflict file (isConflictFile) under its real name. Git's C-quoting —
+// octal byte escapes and backslash escapes of a quote, a backslash, or a
+// control character — is Go string-literal syntax, so strconv.Unquote
+// recovers the real name. An entry that does not unquote fails closed: it
+// may be a conflict file, so the scan cannot rule it out (review RR1).
+func isQuotedConflictFile(listed string) bool {
+	name, err := strconv.Unquote(listed)
+	return err != nil || isConflictFile(name)
+}
+
 // isRung3Story reports whether a decoded spec is in SI-290's scope: class
 // story and not a spike.
 func isRung3Story(fm *artifact.SpecFrontmatter) bool {
@@ -76,14 +88,16 @@ func isRung3Story(fm *artifact.SpecFrontmatter) bool {
 // reads the spec zones at, so a corpus, and the cache entry keyed on its
 // commit, always covers exactly that commit's conflict set. Every failure
 // is recorded in conflictFailures under its path — a scan failure, never a
-// skipped file: an entry the plain listing C-quotes cannot be read by its
-// real name, so it is never read and is named as listed (review SS-R1; a
-// NUL-terminated listing would widen lint's git reads beyond what
-// internal/disclosureview's cache-key guard pins); a conflict file that is
-// not at a conflict record path is never read (SI-306 (4a)); and a record
-// that fails strict decode is never credited. A superseded conflict is
-// credited to every spec its challenges links name as a whole spec. An
-// operational read failure is an error.
+// skipped file: a conflict file the plain listing C-quotes cannot be read
+// by its real name, so it is never read and is named as listed (review
+// SS-R1; a NUL-terminated listing would widen lint's git reads beyond what
+// internal/disclosureview's cache-key guard pins), while a quoted entry
+// that is not a conflict file is not read at all, like any other
+// non-conflict entry (review RR1); a conflict file that is not at a
+// conflict record path is never read (SI-306 (4a)); and a record that
+// fails strict decode is never credited. A superseded conflict is credited
+// to every spec its challenges links name as a whole spec. An operational
+// read failure is an error.
 func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *successorCorpus) error {
 	paths, err := p.git.LsTree(ctx, root, rev, conflictsDir())
 	if err != nil {
@@ -92,6 +106,9 @@ func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *
 	sort.Strings(paths)
 	for _, cp := range paths {
 		if isGitQuoted(cp) {
+			if !isQuotedConflictFile(cp) {
+				continue
+			}
 			corpus.conflictFailures[cp] = fmt.Sprintf("default-branch conflicts entry %s is listed git-quoted, so the scan cannot read it by its real name — never read, never credited", cp)
 			continue
 		}
