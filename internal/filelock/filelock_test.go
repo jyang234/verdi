@@ -80,6 +80,140 @@ func TestRelease_Negative(t *testing.T) {
 	})
 }
 
+// TestRelease_LeavesAReplacedLockInPlace pins SI-302's Release rule: a
+// holder removes the lock path only while it still names the holder's own
+// open file. Once the path names another file — another holder's lock
+// (the lock this holder had was taken from it, say by an older binary's
+// by-name takeover), even one with byte-identical contents — Release
+// closes its own handle, returns nil, and leaves that file exactly where it
+// is. When the path cannot be inspected at all, Release says so and still
+// removes nothing.
+func TestRelease_LeavesAReplacedLockInPlace(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace func(t *testing.T, ours []byte) []byte
+	}{
+		{"replaced by another holder's lock", func(t *testing.T, _ []byte) []byte {
+			other, err := json.Marshal(Info{PID: os.Getppid(), Start: time.Now().Add(-time.Hour).Unix()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return other
+		}},
+		{"replaced by a file with identical bytes", func(_ *testing.T, ours []byte) []byte {
+			return ours
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			f, err := Acquire(path)
+			if err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			ours, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			theirs := tc.replace(t, ours)
+			if err := os.WriteFile(path, theirs, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := Release(f, path); err != nil {
+				t.Fatalf("Release after the path was replaced: %v, want nil", err)
+			}
+			after, err := os.Lstat(path)
+			if err != nil {
+				t.Fatalf("Release removed the lock that replaced its own: %v", err)
+			}
+			if !os.SameFile(before, after) {
+				t.Fatal("the replacing lock file is no longer the one on disk after Release")
+			}
+			if got, err := os.ReadFile(path); err != nil || string(got) != string(theirs) {
+				t.Fatalf("replacing lock body after Release = %q, %v, want %q", got, err, theirs)
+			}
+		})
+	}
+
+	t.Run("an uninspectable path is reported and left in place", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: directory permission bits do not restrict access")
+		}
+		sub := filepath.Join(t.TempDir(), "sub")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(sub, "writer.lock")
+		f, err := Acquire(path)
+		if err != nil {
+			t.Fatalf("Acquire: %v", err)
+		}
+		if err := os.Chmod(sub, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+		if _, err := os.Lstat(path); err == nil {
+			t.Skip("this environment does not enforce directory permission bits")
+		}
+
+		if err := Release(f, path); err == nil {
+			t.Fatal("Release with the lock path uninspectable = nil, want an error")
+		}
+		if err := os.Chmod(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("the lock is gone after an uninspectable Release: %v", err)
+		}
+	})
+}
+
+// TestRelease_LeavesAnotherProcessesLockInPlace is the cross-process form of
+// the rule above: this process acquires a lock, the lock is taken from it
+// (removed by name, as a pre-SI-302 detector's takeover does) and a real
+// child process acquires the path. This process's Release must leave the
+// child's lock on disk; the child then releases its own lock cleanly.
+func TestRelease_LeavesAnotherProcessesLockInPlace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	child, stop := startHolderChild(t, path, nil)
+	theirs, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Release(f, path); err != nil {
+		t.Fatalf("Release after another process took the path: %v, want nil", err)
+	}
+	after, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Release removed the child process's lock: %v", err)
+	}
+	if !os.SameFile(theirs, after) {
+		t.Fatal("the child process's lock file is no longer the one on disk after Release")
+	}
+	if got := readLockBody(t, path); got.PID != child {
+		t.Fatalf("lock body after Release names pid %d, want the child's %d", got.PID, child)
+	}
+	if err := stop(); err != nil {
+		t.Fatalf("the child could not release its own lock: %v", err)
+	}
+}
+
 // TestAcquire_HeldByLiveProcess proves a lock recording OUR OWN pid
 // (definitely alive) with a start timestamp within tolerance of the real
 // process start is reported held, not stale — the D3/I-12 "one writer"

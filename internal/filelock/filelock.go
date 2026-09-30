@@ -550,9 +550,19 @@ var (
 	lockStat     = os.Stat
 )
 
-// Release closes f and removes path — the holder's own clean path. A
-// crash leaves the lock behind on disk exactly as I-12 intends: the next
-// acquirer's alive() probe discovers the dead pid and takes over.
+// Release closes f and removes path — the holder's own clean path — but
+// only while path still names f itself (SI-302): the identity is checked
+// while f is still open, so its inode cannot have been reused. When path
+// names another file — the lock was taken from this holder and another
+// process now holds one there (an older binary's by-name takeover, say),
+// even with byte-identical contents — Release leaves that file in place and
+// returns nil, exactly as when path is already gone: this holder's own
+// release is complete. When path cannot be inspected, Release returns an
+// error and removes nothing. Holders take no flock (takeOverStale says
+// why), so the check and the remove are two steps; only a detector that
+// misjudged this live holder stale, or an older binary, can act between
+// them. A crash leaves the lock behind on disk exactly as I-12 intends: the
+// next acquirer's alive() probe discovers the dead pid and takes over.
 // Release is the sole owner release and deregisters exactly the
 // registered handle (deregisterAcquired only removes a registry entry
 // that still names this exact *os.File), before closing it — so no
@@ -572,8 +582,15 @@ var (
 // Releasing a handle with no leases (the common case) never waits.
 func Release(f *os.File, path string) error {
 	deregisterAcquired(path, f)
+	ours, identErr := stillOurRegisteredFile(f, path)
 	if cerr := f.Close(); cerr != nil {
 		return fmt.Errorf("filelock: closing lock %s: %w", path, cerr)
+	}
+	if identErr != nil {
+		return fmt.Errorf("filelock: lock %s left in place: %w", path, identErr)
+	}
+	if !ours {
+		return nil
 	}
 	if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 		return fmt.Errorf("filelock: removing lock %s: %w", path, rerr)
