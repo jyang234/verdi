@@ -227,50 +227,51 @@ Spec classes:
   a tangible business outcome (R4 concept §1). Requires the two spec
   attributes `problem:` and `outcome:` (§Object model) plus an
   `acceptance_criteria:` block whose ACs are strictly outcome-level,
-  implementation-blind, and declare their expected evidence kinds
-  (§Object model) including the outcome-evidence floor — `attestation` at
-  minimum (evidence-model spec). Frontmatter carries an OPTIONAL `story:`
-  **scalar** — an epic/objective tracker ref, not a per-story binding
-  (R4-I-2) — plus optional `constraints:` and `decisions:` objects
-  (§Object model), `context:` (pinned manifest), `impacts: [service...]`,
-  and `declares:` (intended boundaries). It also carries `stubs:` — the
-  acceptance-time scoping record, one entry per intended story:
-  `{ slug: <title-slug>, acceptance_criteria: [<ac-id>...] }`. A stub may
-  instead be a **spike stub** (round 5.4, mirroring the story level's own
-  discriminator): `{ slug, spike: true, resolves: [<oq-id>...] }` — the
-  intended spike named with the open questions it will answer. The grammar
-  fails closed: `resolves` requires `spike: true`; a spike stub declares
-  `resolves` and no `acceptance_criteria`; a plain stub the reverse. One
-  spike may resolve many questions; a question claimed by multiple spike
-  stubs is a norm-level smell, never an error. On a
-  superseding revision, a `supersession:` block is required (R4-I-4):
-  `{ carried: [ids], amended: [{id, note}], amended_advisory: [{id, note}],
-  removed: [{id, note}], added: [ids] }`, classifying every predecessor
-  object exactly once (VL-015). Lifecycle is two-MR as before: the spec
-  gets its **own MR** from a design branch, and *merging that MR is
-  acceptance*. `verdi accept <spec>` performs the mechanical flip as the
-  final action on the design branch — sets `status: accepted-pending-build`
-  and writes the frozen stamp with `commit` = the content-final sha it
-  supersedes — and VL-004 keeps drafts off main. The spec is **never
-  amended** after acceptance: supersession is the only forward path
-  (R4 concept §3b). The feature is **downward-blind**: it is never amended
-  when stories are added, split, or superseded; the authoritative AC→story
-  mapping is only ever the computed inverse of stories' `implements` edges
-  (§Link taxonomy), never a field on the feature itself. **Superseded is a
-  terminal status (round 5, D-12/D-16):** accepting a spec that carries a
-  `supersedes` edge to a predecessor **story** spec (the rung-3 chain)
-  flips that predecessor's `status:` to `superseded` in the same
-  `verdi accept` ritual — a sanctioned, status-only edit (VL-004 gains the
-  accepted-pending-build → superseded transition, performed only by the
-  ritual; VL-010 gains the matching narrow exception alongside the
-  active→archive rename: the diff may touch only the status line). A
-  superseded spec stays in `specs/active/` (its supersession chain is live
-  reading during the build), is excluded from the feature fold's computed
-  AC→story mapping, and is refused by `verdi build start`, which names the
-  successor. A superseded **feature** predecessor's status remains
-  governed by the rung-4 cascade machinery for now — its terminal-state
-  question is carried to round 6 (round 5's D-12 fix pass, deliberately
-  scoped).
+  implementation-blind, and declare their expected evidence kinds (§Object
+  model) including the outcome-evidence floor — `attestation` at minimum
+  (evidence-model spec). Frontmatter carries an OPTIONAL `story:` **scalar**
+  — an epic/objective tracker ref, not a per-story binding (R4-I-2) — plus
+  optional `constraints:` and `decisions:` objects (§Object model),
+  `context:` (pinned manifest), `impacts: [service...]`, and `declares:`
+  (intended boundaries). It also carries `stubs:` — the acceptance-time
+  scoping record, one entry per intended story: `{ slug: <title-slug>,
+  acceptance_criteria: [<ac-id>...] }`. A stub may instead be a **spike
+  stub** (round 5.4, mirroring the story level's own discriminator): `{
+  slug, spike: true, resolves: [<oq-id>...] }` — the intended spike named
+  with the open questions it will answer. The grammar fails closed:
+  `resolves` requires `spike: true`; a spike stub declares `resolves` and no
+  `acceptance_criteria`; a plain stub the reverse. One spike may resolve
+  many questions; a question claimed by multiple spike stubs is a norm-level
+  smell, never an error. On a superseding revision, a `supersession:` block
+  is required (R4-I-4): `{ carried: [ids], amended: [{id, note}],
+  amended_advisory: [{id, note}], removed: [{id, note}], added: [ids] }`,
+  classifying every predecessor object exactly once (VL-015). Lifecycle is
+  two-MR as before: the spec gets its **own MR** from a design branch, and
+  *merging that MR is acceptance*. `verdi accept <spec>` performs the
+  mechanical flip as the final action on the design branch — sets `status:
+  accepted-pending-build` and writes the frozen stamp with `commit` = the
+  content-final sha it supersedes — and VL-004 keeps drafts off main. The
+  spec is **never amended** after acceptance: supersession is the only
+  forward path (R4 concept §3b). The feature is **downward-blind**: it is
+  never amended when stories are added, split, or superseded; the
+  authoritative AC→story mapping is only ever the computed inverse of
+  stories' `implements` edges (§Link taxonomy), never a field on the feature
+  itself. **Superseded is a terminal status (round 5, D-12/D-16):** a
+  predecessor **story** spec (the rung-3 chain) is superseded when the
+  default branch carries both records rung 3 requires — a story spec whose
+  top-level `links:` carry a whole-spec `supersedes` edge to it, and a
+  conflict with `status: superseded` whose `challenges` links name the whole
+  predecessor (evidence-model spec §The amendment ladder). The state is
+  derived from those records under merge-signaled acceptance; nothing is
+  written to the predecessor, whose frozen bytes never change, and either
+  record alone leaves the predecessor disclosed-unproven, never superseded
+  and never silently buildable. A superseded spec stays in `specs/active/`
+  (its supersession chain is live reading during the build), is excluded
+  from the feature fold's computed AC→story mapping, and is refused by
+  `verdi build start`, which names the successor. A superseded **feature**
+  predecessor's status remains governed by the rung-4 cascade machinery for
+  now — its terminal-state question is carried to round 6 (round 5's D-12
+  fix pass, deliberately scoped).
 - **story** (NEW) — the unit of work, and the unit of review. Same status
   lifecycle as feature, frozen at acceptance. Requires the two spec
   attributes `problem:` and `outcome:` (§Object model), exactly one `story:`
