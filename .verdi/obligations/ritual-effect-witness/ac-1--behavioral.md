@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/ritualwitness:TestHarness_SensorsAndVerdicts in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/ritual-effect-witness" }
-frozen: { at: 2026-09-30, commit: 4a5da769127ba8da923e667a43dfe243eb5f85da }
+frozen: { at: 2026-09-30, commit: aa821199345005fb0b0d4267675c3ed094bd7eb4 }
 ---
 # The harness's sensors and verdicts are right
 

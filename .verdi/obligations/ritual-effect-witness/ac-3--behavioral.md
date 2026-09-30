@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:cmd/verdi:TestUAT036_RitualsNeverCarryForeignEntries in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/ritual-effect-witness" }
-frozen: { at: 2026-09-30, commit: 4a5da769127ba8da923e667a43dfe243eb5f85da }
+frozen: { at: 2026-09-30, commit: aa821199345005fb0b0d4267675c3ed094bd7eb4 }
 ---
 # No ritual carries a foreign staged entry, close refuses, and only Commit and push is carried
 

@@ -17,7 +17,7 @@ constraints:
 decisions:
   - { id: dc-1, text: "The harness lives in internal/ritualwitness and reads each ritual's declaration from internal/writescope, so a ritual is checked against exactly what the registry declares. CLI verbs run as the built binary, workbench actions through the running server's handlers, and MCP tools through the MCP server, each with the provider and forge fakes the repository's tests already use and no network.", anchor: dc-1 }
   - { id: dc-2, text: "The fixes follow the owner's decisions of 2026-09-30: design start's --supersedes path, commit-to-design, accept diagram, and constitution propose become scoped commits; constitution propose cuts from the resolved default branch; the board's Commit and push stays carried and declared. Each fix narrows its ritual's declaration in the same change (parent co-1).", anchor: dc-2 }
-  - { id: dc-3, text: "A publication path is each distinct way a ritual commits or publishes (for close: the CI path, --force-local, a feature close, and the failure unwind; for stub instantiation: the CLI and each board action). A path that cannot be run hermetically is reported unproven by name, never skipped silently.", anchor: dc-3 }
+  - { id: dc-3, text: "A publication path is each distinct way a ritual commits or publishes (for close: the CI path, --force-local, a feature close, and the failure unwind; for stub instantiation: the CLI and each board action). Every path runs hermetically (parent co-3); a path the harness cannot drive is a defect in the harness, and the witness fails naming it, never skipping or passing it.", anchor: dc-3 }
 links:
   - { type: implements, ref: "spec/ritual-write-scope-v3#ac-2" }
   - { type: implements, ref: "spec/ritual-write-scope-v3#ac-4" }
@@ -87,5 +87,6 @@ co-1).
 ## dc-3
 
 A publication path is each distinct way a ritual commits or publishes (for close: the CI path, --force-local, a feature
-close, and the failure unwind; for stub instantiation: the CLI and each board action). A path that cannot be run
-hermetically is reported unproven by name, never skipped silently.
+close, and the failure unwind; for stub instantiation: the CLI and each board action). Every path runs hermetically
+(parent co-3); a path the harness cannot drive is a defect in the harness, and the witness fails naming it, never
+skipping or passing it.
