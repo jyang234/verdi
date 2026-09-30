@@ -19,7 +19,7 @@ constraints:
 decisions:
   - { id: dc-1, text: "One declaration plus one witness for the class, not six point fixes: the findings share a cause (no check over what a verb does to the repository), and a per-bug fix leaves the next ritual free to repeat it.", anchor: dc-1 }
   - { id: dc-2, text: "Declared scope is compared against observed effects, not only against the command log: a command log proves what gitx ran, a repository state diff proves what changed, and the file list of each commit the ritual created proves what it recorded; the three together catch a mutation made outside gitx and tell a refused commit from a carried one, because a log records what ran and never what refused to run.", anchor: dc-2 }
-  - { id: dc-3, text: "The index-carry field is a closed four-valued enum (refused, scoped, carried, no_commit), not a boolean: the five governed rituals occupy four states, and a boolean reads a refusal, a scoped commit and no commit as the same false, so deleting a refusal guard would pass co-1's widening check unseen; where more than one state could describe a ritual, the declared value is the first that holds in the ritual's execution order (refused if a guard refuses a foreign entry before any mutation, no_commit if it never creates a commit, scoped if every commit it creates records only its declared paths, whether by a pathspec or by a scratch index, carried otherwise); carried stays in the grammar so the witness can name the defect state, and ac-4 requires that no shipped ritual declares it.", anchor: dc-3 }
+  - { id: dc-3, text: "The index-carry field is a closed four-valued enum (refused, scoped, carried, no_commit), not a boolean: the five governed rituals occupy four states, and a boolean reads a refusal, a scoped commit and no commit as the same false, so deleting a refusal guard would pass co-1's widening check unseen; where more than one state could describe a ritual, the declared value is the first that holds in the ritual's execution order (refused if a guard refuses a foreign entry before any mutation, no_commit if it never creates a commit, scoped if every commit it creates records only its declared paths, whether by a pathspec or by a scratch index, carried otherwise); carried stays in the grammar so the witness can name the defect state, and ac-4 names the one shipped ritual that may declare it (the board's Commit and push, dc-11); no other ritual may.", anchor: dc-3 }
   - { id: dc-4, text: "The registry lives in source as a Go literal in one internal package checked by a gate test, the same shape as the CLI-verb and MCP-tool inventories; it is not a policy payload, because a write scope is fixed product behaviour shipped with the binary and a governance profile an operator adopts must not be able to widen it (co-1), and it is not an amendment to design specs 03 or 04, which say nothing about verb effects, so no ratification precedes the build.", anchor: dc-4 }
   - { id: dc-5, text: "This feature consumes the gitx recorder seam that readiness-recovery's wave 3 landed first (ledger SI-219, under co-4): gitx.Observer and gitx.WithObserver, a consumer-defined one-method observer attached through the context every gitx call already receives, called at every exec site in internal/gitx. What this feature adds is threading an observer through every verb and the universal forbidden-token witness; readiness-recovery's recovery check stays one consumer of the same seam. Every git execution goes through internal/gitx, so the command log is complete: the three read-only git calls made outside it at this revision's base move behind read-only gitx functions, which mutate nothing and so are not new git primitives (co-1).", anchor: dc-5 }
   - { id: dc-6, text: "A verb is every entry point that can mutate a repository: a CLI verb, a workbench action, or an MCP tool, because several rituals are reachable only off the command line (the board's stub, create, revise, Commit and push, and switch actions; spec import through the workbench and MCP; managed worktrees behind the board's branch routes). A verb mutates a git repository when it changes a ref, HEAD, the index, a linked worktree, or a remote; a verb that only writes files in the working tree does not, and neither does a verb whose only git writes are unreferenced objects.", anchor: dc-6 }
@@ -36,11 +36,12 @@ links:
   - { type: depends-on, ref: "spec/readiness-recovery-v2" }
   - { type: supersedes, ref: "spec/ritual-write-scope-v2" }
 supersession:
-  carried: [ac-3, co-1, co-2, co-3, co-4, dc-1, dc-2, dc-3, dc-4]
+  carried: [ac-3, co-1, co-2, co-3, co-4, dc-1, dc-2, dc-4]
   amended:
     - { id: ac-1, note: "the grammar gains ref deletion and linked worktrees, every exported gitx function is classified mutating or read-only, and the static witness fires on reaching a mutating one rather than on any gitx call; census of 2026-09-30 (14 entry groups beyond the spike's five); dc-6, dc-7" }
     - { id: ac-2, note: "the sensor also observes HEAD and the repository's linked worktrees; dc-7" }
     - { id: ac-4, note: "UAT-036's pin extends to design start --supersedes, accept diagram, and constitution propose; the board's Commit and push is the one declared carried ritual; constitution propose joins build start in cutting from the resolved default branch; owner decisions 2026-09-30; dc-11" }
+    - { id: dc-3, note: "the enum is unchanged; its last clause names the board's Commit and push as the one ritual that may declare carried, instead of saying none may (owner decision 2026-09-30; dc-11)" }
     - { id: dc-5, note: "the seam already exists (readiness-recovery wave 3, ledger SI-219); this feature consumes it" }
   amended_advisory: []
   removed: []
@@ -190,7 +191,9 @@ log can explain.
 
 ## dc-3
 
-Grammar by construction, from five real rituals. The precedence rule
+Grammar by construction, from five real rituals. Amended in v3 only in its
+last clause: `carried` was to be declared by no shipped ritual, and now
+exactly one declares it (dc-11). The precedence rule
 answers the case the spike left undefined, a ritual that both guards and
 scopes. `scoped` is defined by the commit's recorded delta, not by the
 presence of a `--` pathspec: stub instantiation builds its commit from a
