@@ -43,7 +43,13 @@ run_scenario() {
 		--reporter=json --output="$tmp/output-$1"
 }
 
-for scenario in outcomes duplicate setup-fails global-timeout sigint; do
+# Every scenario by default; name scenarios to re-capture only those.
+scenarios=("$@")
+if [ ${#scenarios[@]} -eq 0 ]; then
+	scenarios=(outcomes duplicate setup-fails global-timeout sigint two-projects)
+fi
+
+for scenario in "${scenarios[@]}"; do
 	report="$tmp/$scenario.json"
 	set +e
 	if [ "$scenario" = sigint ]; then

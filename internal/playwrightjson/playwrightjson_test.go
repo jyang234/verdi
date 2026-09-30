@@ -134,18 +134,19 @@ func skippedTest(t *testing.T, report map[string]any) map[string]any {
 }
 
 // want is one decoded test: its joined title path, expected status, outcome,
-// and attempt statuses in order.
+// attempt statuses in order, and project ("" for the captures' unnamed one).
 type want struct {
 	title    string
 	expected string
 	outcome  string
 	attempts []string
+	project  string
 }
 
 func summarize(f File) []want {
 	var out []want
 	for _, tc := range f.Tests {
-		w := want{title: tc.JoinedTitlePath(), expected: tc.ExpectedStatus, outcome: tc.Outcome}
+		w := want{title: tc.JoinedTitlePath(), expected: tc.ExpectedStatus, outcome: tc.Outcome, project: tc.ProjectName}
 		for i, a := range tc.Attempts {
 			if a.Retry != i {
 				w.attempts = append(w.attempts, "retry-out-of-order")
@@ -169,47 +170,56 @@ func TestDecode_CapturedReports(t *testing.T) {
 	cases := []struct {
 		name       string
 		files      map[string][]want
+		projects   []string // nil: one unnamed project
 		errorCount int
 		errorHas   string
 	}{
 		{name: "outcomes", files: map[string][]want{
 			"other.spec.ts": {
-				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}},
+				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
 			},
 			"outcomes.spec.ts": {
-				{"passes at the top level", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"outcomes › fails", StatusPassed, OutcomeUnexpected, []string{StatusFailed}},
-				{"outcomes › times out", StatusPassed, OutcomeUnexpected, []string{StatusTimedOut}},
-				{"outcomes › is skipped declaratively", StatusSkipped, OutcomeSkipped, []string{StatusSkipped}},
-				{"outcomes › skips itself at run time", StatusSkipped, OutcomeSkipped, []string{StatusSkipped}},
-				{"outcomes › nested describe › passes in a nested describe", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"outcomes › passes inside an anonymous describe", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"titles: a colon in the describe › case: a colon in the title", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"serial group › first fails", StatusPassed, OutcomeUnexpected, []string{StatusFailed}},
-				{"serial group › second is skipped after the failure", StatusPassed, OutcomeSkipped, []string{StatusSkipped}},
-				{"retried once › fails first then passes", StatusPassed, OutcomeFlaky, []string{StatusFailed, StatusPassed}},
-				{"retried once › fails on every attempt", StatusPassed, OutcomeUnexpected, []string{StatusFailed, StatusFailed}},
-				{"expected failures › fails as test.fail() expects", StatusFailed, OutcomeExpected, []string{StatusFailed}},
-				{"expected failures › passes despite test.fail()", StatusFailed, OutcomeUnexpected, []string{StatusPassed}},
+				{"passes at the top level", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"outcomes › fails", StatusPassed, OutcomeUnexpected, []string{StatusFailed}, ""},
+				{"outcomes › times out", StatusPassed, OutcomeUnexpected, []string{StatusTimedOut}, ""},
+				{"outcomes › is skipped declaratively", StatusSkipped, OutcomeSkipped, []string{StatusSkipped}, ""},
+				{"outcomes › skips itself at run time", StatusSkipped, OutcomeSkipped, []string{StatusSkipped}, ""},
+				{"outcomes › nested describe › passes in a nested describe", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"outcomes › passes inside an anonymous describe", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"titles: a colon in the describe › case: a colon in the title", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"serial group › first fails", StatusPassed, OutcomeUnexpected, []string{StatusFailed}, ""},
+				{"serial group › second is skipped after the failure", StatusPassed, OutcomeSkipped, []string{StatusSkipped}, ""},
+				{"retried once › fails first then passes", StatusPassed, OutcomeFlaky, []string{StatusFailed, StatusPassed}, ""},
+				{"retried once › fails on every attempt", StatusPassed, OutcomeUnexpected, []string{StatusFailed, StatusFailed}, ""},
+				{"expected failures › fails as test.fail() expects", StatusFailed, OutcomeExpected, []string{StatusFailed}, ""},
+				{"expected failures › passes despite test.fail()", StatusFailed, OutcomeUnexpected, []string{StatusPassed}, ""},
 			},
 		}},
 		{name: "sigint", files: map[string][]want{
 			"sigint.spec.ts": {
-				{"interrupted run › passes before the interrupt", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"interrupted run › is running when the run is interrupted", StatusPassed, OutcomeSkipped, []string{StatusInterrupted}},
-				{"interrupted run › never starts", StatusPassed, OutcomeSkipped, nil},
+				{"interrupted run › passes before the interrupt", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"interrupted run › is running when the run is interrupted", StatusPassed, OutcomeSkipped, []string{StatusInterrupted}, ""},
+				{"interrupted run › never starts", StatusPassed, OutcomeSkipped, nil, ""},
 			},
 		}},
 		{name: "global-timeout", errorCount: 2, errorHas: "Timed out waiting 3s for the test suite to run", files: map[string][]want{
 			"global-timeout.spec.ts": {
-				{"global timeout › passes before the stop", StatusPassed, OutcomeExpected, []string{StatusPassed}},
-				{"global timeout › is running when the run stops", StatusPassed, OutcomeSkipped, []string{StatusSkipped}},
-				{"global timeout › never starts", StatusPassed, OutcomeSkipped, nil},
+				{"global timeout › passes before the stop", StatusPassed, OutcomeExpected, []string{StatusPassed}, ""},
+				{"global timeout › is running when the run stops", StatusPassed, OutcomeSkipped, []string{StatusSkipped}, ""},
+				{"global timeout › never starts", StatusPassed, OutcomeSkipped, nil, ""},
 			},
 		}},
 		{name: "duplicate", errorCount: 2, errorHas: `duplicate test title "dup › same title"`, files: map[string][]want{}},
 		{name: "setup-fails", errorCount: 1, errorHas: "capture fixture: global setup failed", files: map[string][]want{}},
+		// Two projects: the reporter writes the one test as two specs with
+		// one file and title path, one per project.
+		{name: "two-projects", projects: []string{"alpha", "beta"}, files: map[string][]want{
+			"other.spec.ts": {
+				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, "alpha"},
+				{"outcomes › passes", StatusPassed, OutcomeExpected, []string{StatusPassed}, "beta"},
+			},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,8 +234,19 @@ func TestDecode_CapturedReports(t *testing.T) {
 			if report.RootDir != "/verdi/internal/playwrightjson/testdata/capture/specs" {
 				t.Errorf("RootDir = %q", report.RootDir)
 			}
-			if report.Workers != 1 || len(report.Projects) != 1 || report.Projects[0].Retries != 0 || report.Projects[0].RepeatEach != 1 {
-				t.Errorf("run shape = workers %d, projects %+v; want one worker and one project with no retries and one repeat", report.Workers, report.Projects)
+			wantProjects := tc.projects
+			if wantProjects == nil {
+				wantProjects = []string{""}
+			}
+			var gotProjects []string
+			for _, p := range report.Projects {
+				gotProjects = append(gotProjects, p.Name)
+				if p.Retries != 0 || p.RepeatEach != 1 {
+					t.Errorf("project %+v, want no retries and one repeat", p)
+				}
+			}
+			if report.Workers != 1 || !reflect.DeepEqual(gotProjects, wantProjects) {
+				t.Errorf("run shape = workers %d, projects %q; want one worker and projects %q", report.Workers, gotProjects, wantProjects)
 			}
 			if len(report.Errors) != tc.errorCount {
 				t.Errorf("Errors = %q, want %d", report.Errors, tc.errorCount)
