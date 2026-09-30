@@ -178,16 +178,17 @@ func (c *successorCorpus) conflictFailureMessages() []string {
 //     decomposition names every successor). A proven supersession is
 //     settled: an unreadable conflict cannot undo it (SI-304).
 //   - Otherwise every present record is disclosed and the state is
-//     Unproven (SI-291): each story successor with no resolved conflict;
-//     each resolved conflict when no story successor exists; each other
-//     link-only successor (a feature or spike naming a story) with today's
-//     missing-block disclosure; when a conflict failed strict decode, the
-//     incomplete conflict scan and every failure (SI-304); and, when a
-//     spec failed strict decode, the incomplete spec scan and every
-//     failure, as resolveOne's fallback would report them (review SS-R2).
-//     An incomplete spec scan cannot prove that no story successor
-//     exists, so a resolved conflict's disclosure then claims only that
-//     no spec the scan could decode names the predecessor.
+//     Unproven (SI-291): each story successor with no resolved conflict
+//     (claiming only what the conflict scan could decode when it is
+//     incomplete); each resolved conflict when no story successor exists;
+//     each other link-only successor (a feature or spike naming a story)
+//     with today's missing-block disclosure; when a conflict failed strict
+//     decode, the incomplete conflict scan and every failure (SI-304);
+//     and, when a spec failed strict decode, the incomplete spec scan and
+//     every failure, as resolveOne's fallback would report them (review
+//     SS-R2). An incomplete spec scan cannot prove that no story successor
+//     exists, so a resolved conflict's disclosure then claims only that no
+//     spec the scan could decode names the predecessor.
 func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Baseline) (Result, bool) {
 	var stories []string
 	var disclosures []string
@@ -208,16 +209,13 @@ func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Bas
 		return Result{State: Superseded, Relation: RelationExact, Baseline: baseline, Disclosures: disclosures}, true
 	}
 
+	conflictScanComplete := len(c.conflictFailures) == 0
 	for _, succ := range c.linkOnlySupersessorsFor(candidatePath, name) {
 		if !c.rung3Stories[succ] {
 			disclosures = append(disclosures, linkOnlyDisclosure(candidatePath, succ))
 			continue
 		}
-		disclosures = append(disclosures, fmt.Sprintf(
-			// vocab:identity — machinery diagnostic naming the frontmatter link type, the conflict status field, and the lifecycle states involved
-			"specstate: %s is named as a predecessor by the story %s via a whole-spec links: supersedes edge, but no conflict with status: superseded challenges the whole spec on the default branch — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
-			candidatePath, succ,
-		))
+		disclosures = append(disclosures, missingResolvedConflictDisclosure(candidatePath, succ, conflictScanComplete))
 	}
 	specFailures := c.failuresExcluding(candidatePath)
 	if len(stories) == 0 {
@@ -241,6 +239,26 @@ func (c *successorCorpus) storyVerdict(candidatePath, name string, baseline *Bas
 		disclosures = append(disclosures, specFailures...)
 	}
 	return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, true
+}
+
+// missingResolvedConflictDisclosure names a story successor whose
+// whole-spec supersedes edge names candidatePath when no superseded
+// conflict challenges the whole spec. With a complete conflict scan the
+// negative is proven; with an incomplete one it covers only the conflicts
+// the scan could decode, and says so (SS-R2's conflict-scan analog).
+func missingResolvedConflictDisclosure(candidatePath, succ string, conflictScanComplete bool) string {
+	if conflictScanComplete {
+		return fmt.Sprintf(
+			// vocab:identity — machinery diagnostic naming the frontmatter link type, the conflict status field, and the lifecycle states involved
+			"specstate: %s is named as a predecessor by the story %s via a whole-spec links: supersedes edge, but no conflict with status: superseded challenges the whole spec on the default branch — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
+			candidatePath, succ,
+		)
+	}
+	return fmt.Sprintf(
+		// vocab:identity — machinery diagnostic naming the frontmatter link type, the conflict status field, and the lifecycle states involved
+		"specstate: %s is named as a predecessor by the story %s via a whole-spec links: supersedes edge, but no conflict the default-branch scan could decode has status: superseded and challenges the whole spec, and that scan is incomplete, so a resolved conflict among the entries it could not decode is not ruled out — story supersession needs both rung-3 records; reported unproven with this disclosure, never silently accepted-pending-build",
+		candidatePath, succ,
+	)
 }
 
 // missingSuccessorDisclosure names a superseded conflict that challenges

@@ -44,7 +44,10 @@ const (
 	ssQuotedEntry    = "is listed git-quoted"
 
 	// SS-R2: the spec scan's own incompleteness, and the "no successor"
-	// wording an incomplete spec scan can still prove.
+	// wording an incomplete spec scan can still prove; its conflict-scan
+	// analog, the "no resolved conflict" wording an incomplete conflict
+	// scan can still prove.
+	ssMissingRecordHedged  = "no conflict the default-branch scan could decode has status: superseded and challenges the whole spec"
 	ssSpecScanIncomplete   = "the default-branch active-spec scan is incomplete"
 	ssMissingSuccessHedged = "no story spec the default-branch scan could decode names it via a whole-spec links: supersedes edge"
 
@@ -321,7 +324,16 @@ func TestProjector_StorySupersession(t *testing.T) {
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssConflictPath: ssConflict("ss-story-wrong", "open", "", "spec/ss-story"), ssGarbledPath: garbled},
 			candidate: ssV1Path,
 			wantState: Unproven,
-			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssScanIncomplete}, {ssGarbledPath, "failed to decode"}},
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssScanIncomplete}, {ssGarbledPath, "failed to decode"}},
+			absent:    []string{ssMissingRecord},
+		},
+		{
+			name:      "SI-304: v2's edge, an unreadable conflict, and no readable superseded conflict: the missing-record disclosure claims only what the scan could decode",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssGarbledPath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssGarbledPath, "failed to decode"}},
+			absent:    []string{ssMissingRecord},
 		},
 		{
 			name:      "SI-304: a feature is unaffected by an unreadable conflict",
@@ -444,7 +456,8 @@ func TestProjector_StorySupersession(t *testing.T) {
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssQuotePath: ssConflict("ss-story-quote", "superseded", "", "spec/ss-story")},
 			candidate: ssV1Path,
 			wantState: Unproven,
-			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssQuoteListed, ssQuotedEntry}},
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssQuoteListed, ssQuotedEntry}},
+			absent:    []string{ssMissingRecord},
 		},
 		{
 			name:      "SS-R1: core.quotePath=true, a malformed conflict at a non-ASCII name: unproven, naming the quoted entry",
@@ -459,7 +472,8 @@ func TestProjector_StorySupersession(t *testing.T) {
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNonASCIIPath: ssConflict("ss-story-resume", "superseded", "", "spec/ss-story")},
 			candidate: ssV1Path,
 			wantState: Unproven,
-			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssNonASCIIListed, ssQuotedEntry}},
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssNonASCIIListed, ssQuotedEntry}},
+			absent:    []string{ssMissingRecord},
 			quotePath: "true",
 		},
 		{
@@ -498,6 +512,7 @@ func TestProjector_StorySupersession(t *testing.T) {
 			candidate: ssV1Path,
 			wantState: Unproven,
 			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssSpecScanIncomplete}, {ssBrokenSpecPath, "failed to decode"}},
+			absent:    []string{ssMissingRecordHedged},
 		},
 		{
 			name:      "SS-R2: an unreadable conflict and a spec failing strict decode: unproven, naming both incomplete scans",
@@ -529,7 +544,8 @@ func TestProjector_StorySupersession(t *testing.T) {
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNestedPath: resolved},
 			candidate: ssV1Path,
 			wantState: Unproven,
-			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssNestedPath, ssNotRecord}},
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssNestedPath, ssNotRecord}},
+			absent:    []string{ssMissingRecord},
 		},
 		{
 			name:      "SS-R3: a malformed empty-named conflict file: unproven, naming it",
@@ -543,7 +559,8 @@ func TestProjector_StorySupersession(t *testing.T) {
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssEmptyNamePath: resolved},
 			candidate: ssV1Path,
 			wantState: Unproven,
-			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssEmptyNamePath, ssNotRecord}},
+			want:      []ssWant{{ssV2Path, ssMissingRecordHedged}, {ssV1Path, ssScanIncomplete}, {ssEmptyNamePath, ssNotRecord}},
+			absent:    []string{ssMissingRecord},
 		},
 	}
 
