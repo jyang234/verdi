@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:cmd/verdi:TestBranchCuts_FromResolvedDefaultBranch in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/ritual-effect-witness" }
-frozen: { at: 2026-09-30, commit: aa821199345005fb0b0d4267675c3ed094bd7eb4 }
+frozen: { at: 2026-09-30, commit: c12decb8b693986700b71d6777b9eeae3d2d4710 }
 ---
 # Branch cuts come from the resolved default branch and check collisions there
 
