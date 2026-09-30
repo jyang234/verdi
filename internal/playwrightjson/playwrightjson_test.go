@@ -395,6 +395,15 @@ func TestDecode_RejectsBrokenReports(t *testing.T) {
 		{"no stats", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { delete(r, "stats") })
 		}, "has no stats"},
+		{"no suites", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(r, "suites") })
+		}, "has no suites"},
+		{"no run errors list", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(r, "errors") })
+		}, "has no errors"},
+		{"no config", func(t *testing.T) []byte {
+			return mutated(t, "outcomes", func(r map[string]any) { delete(r, "config") })
+		}, "has no config"},
 		{"stats that disagree with the tests", func(t *testing.T) []byte {
 			return mutated(t, "outcomes", func(r map[string]any) { obj(t, r, "stats")["expected"] = 99 })
 		}, "stats count"},

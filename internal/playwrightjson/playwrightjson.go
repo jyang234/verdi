@@ -19,10 +19,11 @@
 // test step, source location, and each formatted attempt error
 // ({message, location}). Anything after the report is refused, and so is an
 // unknown attempt status, test outcome, or expected status. The verdict
-// fields must be present, not merely zero: a suite's title, file and specs, a
-// spec's title and tests, a test's projectName, expectedStatus, status and
-// results, an attempt's status and retry, and the config's version, rootDir,
-// workers and projects.
+// fields must be present, not merely zero: the report's config, suites,
+// errors, and stats; a suite's title, file and specs; a spec's title, file,
+// and tests; a test's projectName, expectedStatus, status and results; an
+// attempt's status and retry; and the config's version, rootDir, workers and
+// projects.
 //
 // Three kinds of field stay open, each decoded only as JSON and never read
 // for a verdict:
@@ -152,10 +153,10 @@ func JoinTitlePath(parts []string) string { return strings.Join(parts, TitlePath
 // --- the wire shapes (1.61.1's JSONReporter) ---------------------------------
 
 type reportJSON struct {
-	Config json.RawMessage   `json:"config"`
-	Suites []suiteJSON       `json:"suites"`
-	Errors []json.RawMessage `json:"errors"`
-	Stats  *statsJSON        `json:"stats"`
+	Config json.RawMessage    `json:"config"`
+	Suites *[]suiteJSON       `json:"suites"`
+	Errors *[]json.RawMessage `json:"errors"`
+	Stats  *statsJSON         `json:"stats"`
 }
 
 type statsJSON struct {
@@ -288,12 +289,22 @@ func Decode(r io.Reader) (Report, error) {
 	if err := strictDecode(raw, &wire); err != nil {
 		return Report{}, fmt.Errorf("playwrightjson: %w", err)
 	}
+	switch {
+	case wire.Config == nil:
+		return Report{}, errors.New("playwrightjson: the report has no config")
+	case wire.Suites == nil:
+		return Report{}, errors.New("playwrightjson: the report has no suites")
+	case wire.Errors == nil:
+		return Report{}, errors.New("playwrightjson: the report has no errors list")
+	case wire.Stats == nil:
+		return Report{}, errors.New("playwrightjson: the report has no stats")
+	}
 
 	report, err := decodeConfig(wire.Config)
 	if err != nil {
 		return Report{}, fmt.Errorf("playwrightjson: %w", err)
 	}
-	for i, e := range wire.Errors {
+	for i, e := range *wire.Errors {
 		msg, err := errorMessage(e)
 		if err != nil {
 			return Report{}, fmt.Errorf("playwrightjson: run error %d: %w", i, err)
@@ -303,7 +314,7 @@ func Decode(r io.Reader) (Report, error) {
 
 	counts := map[string]int{}
 	seen := map[string]bool{}
-	for i, s := range wire.Suites {
+	for i, s := range *wire.Suites {
 		f, err := decodeFile(s, counts)
 		if err != nil {
 			return Report{}, fmt.Errorf("playwrightjson: file suite %d: %w", i, err)
@@ -315,9 +326,6 @@ func Decode(r io.Reader) (Report, error) {
 		report.Files = append(report.Files, f)
 	}
 
-	if wire.Stats == nil {
-		return Report{}, errors.New("playwrightjson: the report has no stats")
-	}
 	st := wire.Stats
 	if st.Expected != counts[OutcomeExpected] || st.Unexpected != counts[OutcomeUnexpected] || st.Flaky != counts[OutcomeFlaky] || st.Skipped != counts[OutcomeSkipped] {
 		return Report{}, fmt.Errorf("playwrightjson: stats count %d expected, %d unexpected, %d flaky, %d skipped, but the report carries %d, %d, %d, %d",
