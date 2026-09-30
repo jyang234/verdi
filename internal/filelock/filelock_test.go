@@ -1062,9 +1062,12 @@ func TestLease_ConcurrentLeasesAndReleaseAreRaceClean(t *testing.T) {
 
 // TestErrHeld_Error pins the held answer's message: a lock whose body
 // names its holder says which pid holds it and the start it recorded; a
-// zero Info — a holder that has not flushed its body yet, or another
-// detector holding a stale lock's takeover flock (SI-302) — says the holder
-// has not recorded itself yet, never "pid 0" or the Unix epoch.
+// zero Info — a body still being written, or a stale lock whose takeover
+// flock another process holds (SI-302) — says only what was observed: the
+// holder is not known yet, and why. It never names "pid 0" or the Unix
+// epoch, and never claims the holder has not recorded itself: under
+// EWOULDBLOCK another detector may already have taken the lock over and
+// recorded itself while a third holds the old file's flock.
 func TestErrHeld_Error(t *testing.T) {
 	const start = 1700000000
 	cases := []struct {
@@ -1075,7 +1078,7 @@ func TestErrHeld_Error(t *testing.T) {
 		{"a recorded holder", Info{PID: 4242, Start: start},
 			"filelock: lock held by live pid 4242 (recorded start " + time.Unix(start, 0).Format(time.RFC3339) + ")"},
 		{"a zero Info", Info{},
-			"filelock: lock held, but its holder has not recorded itself in it yet (the lock is being created or taken over)"},
+			"filelock: lock held, but the holder is not known yet: its body is still being written, or another process holds its takeover flock"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
