@@ -81,6 +81,85 @@ func TestGitOutput(t *testing.T) {
 	}
 }
 
+// TestCommitAt proves commitAt's pinned date wins over
+// deterministicGitEnv's own default — the "dated provisioning" seam
+// spec/index-data ac-3 needs so a fixture branch's commit lands at a KNOWN
+// date distinct from every other commit's shared default.
+func TestCommitAt(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+	dir := t.TempDir()
+	if err := runGit(t.Context(), dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	const date = "1701388800 +0000" // 2023-12-01T00:00:00Z
+	if err := commitAt(t.Context(), dir, date, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "dated commit"); err != nil {
+		t.Fatalf("commitAt: %v", err)
+	}
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--format=%at|%ct").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	const want = "1701388800|1701388800"
+	if got != want {
+		t.Fatalf("commit author|committer epoch = %q, want %q (commitAt's own date, not deterministicGitEnv's default)", got, want)
+	}
+}
+
+// TestCommitAt_WrapsFailure is commitAt's negative path: a failing git
+// invocation still surfaces as a real error.
+func TestCommitAt_WrapsFailure(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+	if err := commitAt(t.Context(), dir, "1701388800 +0000", "commit", "--allow-empty", "-m", "x"); err == nil {
+		t.Fatal("commitAt in a nonexistent dir: want an error, got nil")
+	}
+}
+
+// TestMergeGitEnv proves an override replaces a same-keyed base entry
+// exactly once (never a duplicate envp entry whose winner would be
+// platform-dependent) and passes an unrelated base entry through
+// unchanged.
+func TestMergeGitEnv(t *testing.T) {
+	base := []string{"GIT_AUTHOR_DATE=1704067200 +0000", "PATH=/usr/bin"}
+	overrides := []string{"GIT_AUTHOR_DATE=1701388800 +0000"}
+	got := mergeGitEnv(base, overrides)
+
+	seen := map[string]string{}
+	for _, kv := range got {
+		k := gitEnvKey(kv)
+		if _, dup := seen[k]; dup {
+			t.Fatalf("mergeGitEnv result %v carries key %q twice", got, k)
+		}
+		seen[k] = kv
+	}
+	if seen["GIT_AUTHOR_DATE"] != "GIT_AUTHOR_DATE=1701388800 +0000" {
+		t.Fatalf("GIT_AUTHOR_DATE = %q, want the override", seen["GIT_AUTHOR_DATE"])
+	}
+	if seen["PATH"] != "PATH=/usr/bin" {
+		t.Fatalf("PATH = %q, want the untouched base entry", seen["PATH"])
+	}
+}
+
+// TestMergeGitEnv_NoOverrides is the negative path: an empty overrides
+// slice returns base untouched.
+func TestMergeGitEnv_NoOverrides(t *testing.T) {
+	base := []string{"A=1", "B=2"}
+	got := mergeGitEnv(base, nil)
+	if len(got) != len(base) {
+		t.Fatalf("mergeGitEnv(base, nil) = %v, want base unchanged %v", got, base)
+	}
+	for i := range base {
+		if got[i] != base[i] {
+			t.Fatalf("mergeGitEnv(base, nil)[%d] = %q, want %q", i, got[i], base[i])
+		}
+	}
+}
+
 // TestGitSeamObservesCanceledContext is the witness for the claim main.go's
 // signal handling makes — that an interrupt's ctx cancellation reaches every
 // exec call below it. Each of the three git entry points is handed an

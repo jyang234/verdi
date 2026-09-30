@@ -50,6 +50,17 @@ import (
 // text) so two calls against the same checkout state enumerate
 // identically.
 func Current(ctx context.Context, root string, extras ...disclosure.Disclosure) ([]disclosure.Disclosure, error) {
+	lintItems, err := lintDisclosures(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return withExtras(lintItems, extras), nil
+}
+
+// lintDisclosures is Current's lint half: one full lint run under
+// BuildContext, keeping only the disclosure-severity findings. It is the
+// part Cache memoizes; the process extras are never part of it.
+func lintDisclosures(ctx context.Context, root string) ([]disclosure.Disclosure, error) {
 	lctx := lint.BuildContext(ctx, root)
 	findings, err := lint.NewEngine().Run(ctx, root, lctx, lint.Options{})
 	if err != nil {
@@ -62,6 +73,15 @@ func Current(ctx context.Context, root string, extras ...disclosure.Disclosure) 
 			items = append(items, f.Disclosure())
 		}
 	}
+	return items, nil
+}
+
+// withExtras returns a new slice holding lintItems then extras, in
+// Current's deterministic order. It never writes to lintItems, so a
+// memoized lint half is safe to pass in.
+func withExtras(lintItems, extras []disclosure.Disclosure) []disclosure.Disclosure {
+	items := make([]disclosure.Disclosure, 0, len(lintItems)+len(extras))
+	items = append(items, lintItems...)
 	items = append(items, extras...)
 
 	sort.Slice(items, func(i, j int) bool {
@@ -70,7 +90,7 @@ func Current(ctx context.Context, root string, extras ...disclosure.Disclosure) 
 		}
 		return items[i].Text < items[j].Text
 	})
-	return items, nil
+	return items
 }
 
 // viewTemplate is the one item/empty-state markup both editions render

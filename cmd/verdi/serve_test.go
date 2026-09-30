@@ -43,7 +43,7 @@ func TestServeStartupRequestLine(t *testing.T) {
 	t.Run("a supplied request names its target exactly once, before the run", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		atRun := ""
-		deps := newDeps(t, "spec/startup-target", func(_, _ string, _ readinessload.Loader, _ string, _, _ io.Writer) int {
+		deps := newDeps(t, "spec/startup-target", func(_, _ string, _ readinessload.Loader, _ string, _ servedClock, _, _ io.Writer) int {
 			atRun = stdout.String()
 			return 0
 		})
@@ -69,7 +69,7 @@ func TestServeStartupRequestLine(t *testing.T) {
 	// pinned bytes.
 	t.Run("an unprefixed ref reaches stdout with exactly one prefix", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		deps := newDeps(t, "startup-target", func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { return 0 })
+		deps := newDeps(t, "startup-target", func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int { return 0 })
 		if code := cmdServeWithDeps([]string{"--context-request", "request.json"}, &stdout, &stderr, deps); code != 0 {
 			t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
 		}
@@ -89,7 +89,7 @@ func TestServeStartupRequestLine(t *testing.T) {
 				t.Fatal("readiness builder called without --context-request")
 				return "", nil, nil
 			}),
-			run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { return 0 },
+			run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int { return 0 },
 		}
 		if code := cmdServeWithDeps(nil, &stdout, &stderr, deps); code != 0 {
 			t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
@@ -106,7 +106,7 @@ func TestServeStartupRequestLine(t *testing.T) {
 			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 				return "", nil, errors.New("warm-up refused")
 			}),
-			run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+			run: func(string, string, readinessload.Loader, string, servedClock, io.Writer, io.Writer) int {
 				t.Fatal("run entered after a failed warm-up")
 				return 0
 			},
