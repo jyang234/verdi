@@ -69,10 +69,14 @@ func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) ht
 // keeping the landing page reachable even for a half-initialised store
 // (dc-5: the home page is never itself a dead end).
 //
-// The directory is computed through the ref-index seam — ONE call per
-// render (dc-2); this renderer enumerates no git refs of its own and holds
-// no second copy of the grouping rules. The in-review consultation (dc-4)
-// is per-render, bounded, and non-blocking: its failure is disclosed while
+// The directory is computed only through the ref-index seam — ONE call
+// per render (dc-2). This renderer's own code enumerates no git refs and
+// holds no second copy of the grouping rules. The disclosures count comes
+// from the disclosure seam's cached enumeration (countDisclosures →
+// disclosureview.Count; SI-295), whose lint context and cache key read
+// refs as that seam's own reads (SI-301), as the in-review consultation's
+// forge reads are its own. The in-review consultation (dc-4) is
+// per-render, bounded, and non-blocking: its failure is disclosed while
 // the refs-computed directory still renders fully.
 func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclosure.Disclosure) ([]byte, error) {
 	var body bytes.Buffer
