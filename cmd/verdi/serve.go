@@ -20,8 +20,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jyang234/verdi/internal/buildinfo"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
@@ -75,8 +77,10 @@ func parseServeOptions(args []string) (serveOptions, error) {
 // serveRunner is threaded the fully-resolved readiness loader and default
 // spec (spec/readiness-recovery Task 3 exit obligation: no package-level
 // hand-off) alongside the server's other startup facts — never a single
-// startup-frozen snapshot (ac-2's per-request derivation).
-type serveRunner func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, stdout, stderr io.Writer) int
+// startup-frozen snapshot (ac-2's per-request derivation) — including the
+// workbench clock cmdServeWithDeps resolved from VERDI_NOW before any
+// effect (SI-296).
+type serveRunner func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, clock servedClock, stdout, stderr io.Writer) int
 
 // readinessWarmBuilder is the serve command's one startup warm-up
 // boundary: it runs the real judge once (JudgeRun) over a supplied
@@ -97,6 +101,10 @@ type serveCommandDeps struct {
 	findRoot  func(string) (string, error)
 	readiness readinessWarmBuilder
 	run       serveRunner
+	// getenv reads VERDI_NOW (SI-296). nil means os.Getenv — the
+	// production read — so a caller that sets nothing still gets the real
+	// environment, never a silently-unset clock.
+	getenv func(string) string
 }
 
 // cmdServe is `verdi serve`'s real entry point, invoked by dispatch.go.
@@ -105,6 +113,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		findRoot:  store.FindRoot,
 		readiness: readinessLoadBuilder{},
 		run:       runServe,
+		getenv:    os.Getenv,
 	})
 }
 
@@ -178,6 +187,20 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 		fmt.Fprintln(stderr, "serve:", err)
 		return 2
 	}
+	// SI-296: the workbench clock, resolved from VERDI_NOW here — before
+	// the --context-request warm-up (which launches the judge, takes a
+	// transient writer lock, and writes .verdi/data) and before every
+	// other effect — so a malformed value refuses the start (exit 2) with
+	// nothing launched, locked, or written. The run receives the result.
+	getenv := deps.getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	clock, err := workbenchClock(getenv(fixedClockEnv))
+	if err != nil {
+		fmt.Fprintln(stderr, "serve:", err)
+		return 2
+	}
 	if deps.findRoot == nil {
 		fmt.Fprintln(stderr, "serve: store root resolver is nil")
 		return 2
@@ -230,12 +253,14 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 		fmt.Fprintln(stderr, "serve: server runner is nil")
 		return 2
 	}
-	return deps.run(root, options.httpAddr, loader, defaultSpec, stdout, stderr)
+	return deps.run(root, options.httpAddr, loader, defaultSpec, clock, stdout, stderr)
 }
 
 // runServe contains the existing single-writer runtime. It is entered only
-// after any requested readiness warm-up has fully completed.
-func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readinessDefaultSpec string, stdout, stderr io.Writer) int {
+// after any requested readiness warm-up has fully completed, with the
+// workbench clock cmdServeWithDeps already resolved from VERDI_NOW
+// (SI-296) — runServe never reads that variable itself.
+func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readinessDefaultSpec string, clock servedClock, stdout, stderr io.Writer) int {
 	dataDir := filepath.Join(root, ".verdi", "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		fmt.Fprintln(stderr, "serve:", err)
@@ -329,6 +354,11 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 		// disclosed context holds either way.
 		deps.Disclosures = append(deps.Disclosures, reviewUnavailableDisclosure(configuredKind))
 	}
+	if clock.disclosure != nil {
+		// SI-296: a fixed clock is process context the served pages
+		// disclose, beside the review-unavailable one above.
+		deps.Disclosures = append(deps.Disclosures, *clock.disclosure)
+	}
 
 	// The directory home's in-review consultation (spec/directory-home
 	// dc-4), wired in the same precedence order as the review feed above:
@@ -338,7 +368,9 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	// renders as its "MR status unavailable" notice (I-1(b)). With none of
 	// the three, no forge is configured and the chips are silently,
 	// legitimately absent (home.OpenMRs nil).
-	home := workbench.HomeDeps{}
+	// The index's clock (SI-296): VERDI_NOW's fixed instant when set; nil
+	// otherwise, which HomeDeps resolves to the wall clock at render time.
+	home := workbench.HomeDeps{Clock: clock.now}
 	switch {
 	case forgePort != nil:
 		home.OpenMRs = newForgeOpenMRs(forgePort, root)
@@ -417,4 +449,55 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	// the signal handler above, a clean shutdown rather than a failure.
 	_ = srv.Serve(context.Background(), ln)
 	return 0
+}
+
+// fixedClockEnv names the one variable that fixes the workbench's clock
+// (SI-296, spec/index-data ac-2/ac-3): the e2e harness runs this shipped
+// binary, so an in-process clock cannot reach the pages it serves, and the
+// harness sets this instead — the same env-seam posture as
+// VERDI_REVIEW_FEED and VERDI_OPENMR_FEED. Unset (or empty, as those seams
+// treat it) means the wall clock, read at render time.
+const fixedClockEnv = "VERDI_NOW"
+
+// fixedClockSource is the process disclosure's source id: a fixed clock
+// fakes every age and quiet mark the served pages compute, so it is never
+// applied silently.
+const fixedClockSource = "serve:fixed-clock"
+
+// servedClock is VERDI_NOW's resolved setting (SI-296), resolved by
+// cmdServeWithDeps before any effect and carried into the run. The zero
+// value is "not fixed": a nil now (workbench.HomeDeps' own default, the
+// wall clock read at render time) and nothing disclosed.
+type servedClock struct {
+	// now always answers the fixed instant; nil when VERDI_NOW is unset.
+	now func() time.Time
+	// disclosure is the fixed clock's process disclosure; nil exactly when
+	// now is nil.
+	disclosure *disclosure.Disclosure
+}
+
+// workbenchClock resolves VERDI_NOW's raw value (SI-296). "" means the
+// zero servedClock. Otherwise raw is parsed with Go's time.RFC3339 layout
+// ("2006-01-02T15:04:05Z07:00"): a date, an upper-case T, a time, and a
+// required offset ("Z" or ±hh:mm), with no surrounding space. That layout
+// is not a strict RFC 3339 grammar — it also accepts a comma decimal
+// separator ("12:00:00,5Z") and an out-of-range offset such as "+24:00",
+// and it refuses a lower-case t or z and the leap second :60 — and
+// TestWorkbenchClock pins each of those, so any change is deliberate. A
+// parsed value yields a clock that always answers that instant and the
+// process disclosure naming it; anything else is an error naming the
+// variable, on which serve refuses to start (an operational error, exit 2).
+func workbenchClock(raw string) (servedClock, error) {
+	if raw == "" {
+		return servedClock{}, nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return servedClock{}, fmt.Errorf("%s=%q is not an instant in Go's time.RFC3339 layout: %w", fixedClockEnv, raw, err)
+	}
+	d := disclosure.New(fixedClockSource, "", fmt.Sprintf(
+		"the workbench clock is fixed at %s by %s: every last-change age and quiet mark the served pages compute is decided against that instant, not the wall clock",
+		at.Format(time.RFC3339Nano), fixedClockEnv,
+	))
+	return servedClock{now: func() time.Time { return at }, disclosure: &d}, nil
 }

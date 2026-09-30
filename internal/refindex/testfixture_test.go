@@ -61,6 +61,70 @@ func writeAndCommit(t *testing.T, dir string, files map[string]string, message s
 	return strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
 }
 
+// writeAndCommitAt is writeAndCommit with the commit's author/committer
+// date pinned to date (git's "<unix-seconds> <tz-offset>" form, matching
+// fixturegit's own fixedDate convention) instead of the ambient
+// environment's wall clock — the known, DIFFERENT commit dates
+// TestComputeIndex_LastChangeDatesFixturegit needs on top of a
+// fixturegit-built base repo (spec/index-data ac-1's behavioral
+// obligation), laid on exactly like this file's other follow-on commits
+// (e.g. TestComputeIndex_OneEntryPerSpecOrDraft_MergedBranchExcluded).
+func writeAndCommitAt(t *testing.T, dir, date string, files map[string]string, message string) string {
+	t.Helper()
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", path, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	runGit(t, dir, "add", "-A")
+	runGitWithEnv(t, dir, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "--quiet", "--no-verify", "-m", message)
+	return strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+}
+
+// runGitWithEnv is runGit plus explicit environment overrides, applied with
+// overridden keys removed from the base environment FIRST — never relying
+// on exec.Cmd's platform-dependent duplicate-key handling (the same care
+// internal/fixturegit's own mergeEnv takes; this package cannot import that
+// helper, since fixturegit is a test-only package importing *testing.T, and
+// this file is itself a _test.go file).
+func runGitWithEnv(t *testing.T, dir string, extraEnv []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = mergeTestEnv(os.Environ(), extraEnv)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v (dir %s): %v\n%s", args, dir, err, out)
+	}
+}
+
+// mergeTestEnv returns base with every key present in overrides removed
+// first, so the override is unambiguous.
+func mergeTestEnv(base, overrides []string) []string {
+	overrideKeys := make(map[string]bool, len(overrides))
+	for _, kv := range overrides {
+		overrideKeys[testEnvKey(kv)] = true
+	}
+	merged := make([]string, 0, len(base)+len(overrides))
+	for _, kv := range base {
+		if !overrideKeys[testEnvKey(kv)] {
+			merged = append(merged, kv)
+		}
+	}
+	return append(merged, overrides...)
+}
+
+func testEnvKey(kv string) string {
+	if i := strings.IndexByte(kv, '='); i >= 0 {
+		return kv[:i]
+	}
+	return kv
+}
+
 // setDefaultBranchSymref points refs/remotes/origin/HEAD at
 // refs/remotes/origin/<branch> directly — a real symbolic ref,
 // hermetically constructed with no remote, clone, or fetch at all (a

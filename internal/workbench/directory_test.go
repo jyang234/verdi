@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/refindex"
@@ -41,6 +42,20 @@ func (f fakeHomeGit) ListTree(ctx context.Context, dir, ref, path string) ([]str
 func (f fakeHomeGit) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error) {
 	return false, f.err
 }
+func (f fakeHomeGit) CommitDates(ctx context.Context, dir string, revs []string) (map[string]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	dates := make(map[string]string, len(revs))
+	for _, rev := range revs {
+		dates[rev] = fakeHomeGitDate
+	}
+	return dates, nil
+}
+
+// fakeHomeGitDate is the canned committer date fakeHomeGit answers for
+// every rev (B1-R6: never an empty answer standing in for a date).
+const fakeHomeGitDate = "2024-01-01T00:00:00+00:00"
 
 // fakeOpenMRs is the hermetic OpenMRLister double (co-2).
 type fakeOpenMRs struct {
@@ -517,5 +532,39 @@ func TestConsultOpenMRs_Table(t *testing.T) {
 				t.Fatalf("inReview = %v, want %s", inReview, tt.wantBranch)
 			}
 		})
+	}
+}
+
+// TestHomeDeps_Resolve_ClockDefaultsToWallClock proves HomeDeps.resolve's
+// "nil means the wall clock read at render time" contract (spec/index-data
+// ac-2): a zero-value HomeDeps gets a non-nil Clock whose calls track the
+// real wall clock — not a value frozen at resolve()-time — so a server
+// constructed once (resolve() runs at handler construction, index.go's
+// indexHandler) still reads a fresh "now" on every later call.
+func TestHomeDeps_Resolve_ClockDefaultsToWallClock(t *testing.T) {
+	root := t.TempDir()
+	resolved := HomeDeps{}.resolve(root)
+	if resolved.Clock == nil {
+		t.Fatal("resolve() left Clock nil, want the production wall-clock default")
+	}
+	before := time.Now()
+	time.Sleep(time.Millisecond)
+	got := resolved.Clock()
+	time.Sleep(time.Millisecond)
+	after := time.Now()
+	if got.Before(before) || got.After(after) {
+		t.Fatalf("Clock() = %v, want a value between %v and %v (the real wall clock, not a frozen snapshot)", got, before, after)
+	}
+}
+
+// TestHomeDeps_Resolve_ClockPreservesInjectedFunc proves resolve() never
+// overwrites a caller-supplied Clock — the seam tests and the e2e harness
+// rely on to fix "now" (ac-2's "tests ... set it").
+func TestHomeDeps_Resolve_ClockPreservesInjectedFunc(t *testing.T) {
+	root := t.TempDir()
+	fixed := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	resolved := HomeDeps{Clock: func() time.Time { return fixed }}.resolve(root)
+	if got := resolved.Clock(); !got.Equal(fixed) {
+		t.Fatalf("Clock() = %v, want the injected fixed time %v (resolve() must not overwrite it)", got, fixed)
 	}
 }
