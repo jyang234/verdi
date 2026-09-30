@@ -63,6 +63,103 @@ func TestPSLstart_RunsPSInUTCAndTheCLocale(t *testing.T) {
 	})
 }
 
+// hangPS makes every `ps -o lstart=` exec run argv instead — a command that
+// does not answer for 30 seconds — and shrinks psTimeout and psWaitDelay so
+// the bound shows quickly. The originals are restored when t ends.
+func hangPS(t *testing.T, argv []string) {
+	t.Helper()
+	origCmd, origTimeout, origWaitDelay := lstartCommand, psTimeout, psWaitDelay
+	lstartCommand = func(ctx context.Context, _ int) *exec.Cmd {
+		return exec.CommandContext(ctx, argv[0], argv[1:]...)
+	}
+	psTimeout, psWaitDelay = 200*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { lstartCommand, psTimeout, psWaitDelay = origCmd, origTimeout, origWaitDelay })
+}
+
+// TestPSLstart_HangIsBounded pins the bound on the ps exec (SI-300 as
+// amended): a ps that does not answer is killed at psTimeout, and its
+// output pipe is closed psWaitDelay later even while a child of it still
+// holds the pipe open, so an uncontended Acquire and every probe return
+// promptly instead of waiting on ps. On expiry the recording side records
+// the acquisition time (ownProcessStart's fallback) and the probing side is
+// undecided: alive, Peek, and Acquire keep a live holder held through the
+// kill-probe-only fallback, and Inspect reports LockUndecidable naming the
+// bound.
+func TestPSLstart_HangIsBounded(t *testing.T) {
+	// The stand-in hangs 30s; a read without the timeout, or without the
+	// wait delay while a child holds the pipe, overruns this bound.
+	const bound = 10 * time.Second
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"ps does not answer", []string{"sleep", "30"}},
+		{"ps does not answer and its child holds the output open", []string{"sh", "-c", "sleep 30; :"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hangPS(t, tc.argv)
+			timed := func(t *testing.T, what string, f func()) {
+				t.Helper()
+				began := time.Now()
+				f()
+				if took := time.Since(began); took > bound {
+					t.Fatalf("%s took %s with ps hung, want at most %s", what, took, bound)
+				}
+			}
+
+			t.Run("recording side falls back to the acquisition time", func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "writer.lock")
+				var f *os.File
+				var err error
+				before := time.Now().Unix()
+				timed(t, "an uncontended Acquire", func() { f, err = Acquire(path) })
+				after := time.Now().Unix()
+				if err != nil {
+					t.Fatalf("Acquire with ps hung: %v, want the lock acquired", err)
+				}
+				t.Cleanup(func() { _ = Release(f, path) })
+				if info := readLockBody(t, path); info.PID != os.Getpid() || info.Start < before || info.Start > after {
+					t.Fatalf("lock body = %+v, want {PID:%d Start in [%d, %d]} (the acquisition time)", info, os.Getpid(), before, after)
+				}
+			})
+
+			t.Run("probing side is undecided and keeps the live holder held", func(t *testing.T) {
+				holder := startSleeper(t)
+				path := filepath.Join(t.TempDir(), "writer.lock")
+				body := Info{PID: holder, Start: time.Now().Add(-time.Hour).Unix()}
+				writeLockInfo(t, path, body)
+
+				var isAlive, decided bool
+				var reason string
+				timed(t, "probe", func() { isAlive, decided, reason = probe(holder, body.Start) })
+				if decided || !isAlive || !strings.Contains(reason, "no answer within") {
+					t.Fatalf("probe = alive %t, decided %t, reason %q; want alive, undecided, naming the bound", isAlive, decided, reason)
+				}
+				var insp Inspection
+				var err error
+				timed(t, "Inspect", func() { insp, err = Inspect(path) })
+				if err != nil || insp.Status != LockUndecidable || !strings.Contains(insp.Reason, "no answer within") {
+					t.Fatalf("Inspect = %+v, %v; want %s naming the bound", insp, err, LockUndecidable)
+				}
+				var held bool
+				timed(t, "Peek", func() { _, held, err = Peek(path) })
+				if err != nil || !held {
+					t.Fatalf("Peek = held %t, %v; want held (kill-probe-only fallback)", held, err)
+				}
+				var taken *os.File
+				timed(t, "a contending Acquire", func() { taken, err = Acquire(path) })
+				if err == nil {
+					_ = Release(taken, path)
+					t.Fatal("Acquire with ps hung took the live holder's lock over, want *ErrHeld")
+				}
+				if !errors.As(err, new(*ErrHeld)) {
+					t.Fatalf("Acquire with ps hung = %v, want *ErrHeld", err)
+				}
+			})
+		})
+	}
+}
+
 // proberHelperEnv names the lock path a re-executed test binary probes when
 // it runs as TestHelperLockProber's child process.
 const proberHelperEnv = "VERDI_FILELOCK_TEST_PROBER_LOCK"

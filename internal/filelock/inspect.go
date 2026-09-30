@@ -36,11 +36,11 @@ type Inspection struct {
 // no pid to name — LockHeld, the Task 2 Interfaces block's own reading,
 // is the coherent one, and this is now the sole authority for it); an
 // old empty body is LockStale with reason "empty lock body older than
-// 2s"; a live pid whose start time cannot be cross-checked (ps
-// unparseable) is LockUndecidable with the ps error as reason — never
-// reported stale. Peek's own behavior and tests are unchanged: Peek
-// still calls alive, which keeps its documented kill-probe-only
-// fallback.
+// 2s"; a live pid whose start time cannot be cross-checked (ps failing,
+// timed out, or unparseable) is LockUndecidable with the ps error as
+// reason — never reported stale. Peek's own behavior and tests are
+// unchanged: Peek still calls alive, which keeps its documented
+// kill-probe-only fallback.
 func Inspect(path string) (Inspection, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

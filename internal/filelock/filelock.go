@@ -108,13 +108,14 @@ const lockStartTolerance = 5 * time.Minute
 // agrees.
 //
 // Disclosed fallback: when the process's own start cannot be read (ps
-// unavailable, failing, or unparseable), it returns the current time — the
-// lock's acquisition time, exactly the value recorded before SI-300 — and
-// acquisition proceeds. Such a lock is judged like a pre-SI-300 one: a
-// prober whose ps also fails keeps it live through probe's kill-probe-only
-// fallback, but a prober whose ps works judges it by the tolerance, so a
-// holder that acquired more than lockStartTolerance after it started stays
-// exposed to BL-101's stale misjudgment in this fallback case only.
+// unavailable, failing, unparseable, or not answering within psTimeout),
+// it returns the current time — the lock's acquisition time, exactly the
+// value recorded before SI-300 — and acquisition proceeds. Such a lock is
+// judged like a pre-SI-300 one: a prober whose ps also fails keeps it live
+// through probe's kill-probe-only fallback, but a prober whose ps works
+// judges it by the tolerance, so a holder that acquired more than
+// lockStartTolerance after it started stays exposed to BL-101's stale
+// misjudgment in this fallback case only.
 func ownProcessStart() int64 {
 	if st, err := psLstart(os.Getpid()); err == nil {
 		return st.Unix()
@@ -123,12 +124,14 @@ func ownProcessStart() int64 {
 }
 
 // psLstart reads the named process's actual start time from
-// `ps -o lstart= -p <pid>` — the cross-check I-12 asks for (readLstart has
-// the environment). Overridable in tests (both to avoid a real ps
-// dependency in some paths and to exercise the "ps output unparseable"
-// fallback deterministically).
+// `ps -o lstart= -p <pid>` — the cross-check I-12 asks for — bounded by
+// psTimeout (readLstart has the environment). Overridable in tests (both
+// to avoid a real ps dependency in some paths and to exercise the "ps
+// output unparseable" fallback deterministically).
 var psLstart = func(pid int) (time.Time, error) {
-	return readLstart(context.Background(), pid)
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout)
+	defer cancel()
+	return readLstart(ctx, pid)
 }
 
 // psEnvOverride is appended to every `ps -o lstart=` exec's environment,
@@ -144,18 +147,35 @@ func psEnvOverride() []string { return []string{"TZ=UTC0", "LC_ALL=C"} }
 
 // lstartCommand builds the `ps -o lstart= -p <pid>` exec readLstart runs
 // under ctx. A var only so a test can substitute a command that checks its
-// environment.
+// environment or does not answer (the psTimeout bound).
 var lstartCommand = func(ctx context.Context, pid int) *exec.Cmd {
 	return exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 }
 
+// psTimeout bounds one `ps -o lstart=` exec: past it the exec is killed and
+// the read fails, which is ownProcessStart's acquisition-time fallback on
+// the recording side and probe's undecided (kill-probe-only) answer on the
+// probing side. psWaitDelay then bounds how long the exec's output pipe may
+// stay open after the kill (a ps wrapper whose own child still holds it),
+// so a read returns within psTimeout+psWaitDelay once the killed process
+// has exited. Vars only so tests can shrink them.
+var (
+	psTimeout   = 5 * time.Second
+	psWaitDelay = time.Second
+)
+
 // readLstart runs lstartCommand for pid under ctx with psEnvOverride and
-// parses its stdout as the process's start.
+// parses its stdout as the process's start. A read cut off by ctx says so,
+// naming the bound it did not answer within.
 func readLstart(ctx context.Context, pid int) (time.Time, error) {
 	cmd := lstartCommand(ctx, pid)
 	cmd.Env = append(os.Environ(), psEnvOverride()...)
+	cmd.WaitDelay = psWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return time.Time{}, fmt.Errorf("filelock: ps -o lstart= -p %d: no answer within %s: %w", pid, psTimeout, ctxErr)
+		}
 		return time.Time{}, fmt.Errorf("filelock: ps -o lstart= -p %d: %w", pid, err)
 	}
 	return parseLstart(strings.TrimSpace(string(out)))
@@ -186,9 +206,9 @@ func parseLstart(s string) (time.Time, error) {
 // SAME process that wrote recordedStart, closing S4's documented
 // PID-reuse gap. It delegates to probe and keeps probe's documented
 // kill-probe-only fallback: when probe cannot decide (the ps cross-check
-// failed or its output was unparseable), alive reports true rather than
-// guessing stale (the narrow, disclosed limitation S4 and PLAN.md's
-// ledger both name). Inspect (inspect.go, R-RR3-6) calls probe directly
+// failed, timed out, or its output was unparseable), alive reports true
+// rather than guessing stale (the narrow, disclosed limitation S4 and
+// PLAN.md's ledger both name). Inspect (inspect.go, R-RR3-6) calls probe directly
 // so it can report that same undecided case as LockUndecidable instead —
 // this function's own contract, and Peek's built on it, are unchanged.
 func alive(pid int, recordedStart int64) bool {
@@ -204,12 +224,12 @@ func alive(pid int, recordedStart int64) bool {
 // only) first, then, for a live pid, a cross-check of its actual start
 // time against recordedStart within lockStartTolerance. decided is false
 // in exactly one case — the ps cross-check itself could not be completed
-// (its output could not be obtained or parsed) — with reason carrying the
-// ps error text; every other outcome (pid absent/not signalable, pid
-// alive and start time within tolerance, pid alive but start time
-// drifted far enough that a different process must have reused it) is
-// decided, with reason set only for the not-alive decided cases (empty
-// for a decided-alive result).
+// (its output could not be obtained within psTimeout, or not parsed) —
+// with reason carrying the ps error text; every other outcome (pid
+// absent/not signalable, pid alive and start time within tolerance, pid
+// alive but start time drifted far enough that a different process must
+// have reused it) is decided, with reason set only for the not-alive
+// decided cases (empty for a decided-alive result).
 func probe(pid int, recordedStart int64) (isAlive, decided bool, reason string) {
 	if pid <= 0 {
 		return false, true, fmt.Sprintf("pid %d is not a valid process id", pid)
