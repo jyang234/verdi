@@ -244,6 +244,10 @@ func TestProbe_ProcessStartDrift(t *testing.T) {
 	}{
 		{"SI-300 lock: recorded start is the holder's process start", self, selfStart, true},
 		{"older-binary lock created seconds after process start", self, selfStart.Add(3 * time.Second), true},
+		// Literal durations: the pre-SI-300 judgement of an older binary's
+		// lock depends on the tolerance staying exactly five minutes.
+		{"older-binary lock created 4m59s after process start is live, as before", self, selfStart.Add(4*time.Minute + 59*time.Second), true},
+		{"older-binary lock created 5m1s after process start is stale, as before", self, selfStart.Add(5*time.Minute + time.Second), false},
 		{"older-binary lock created at exactly the tolerance", self, selfStart.Add(lockStartTolerance), true},
 		{"older-binary lock created past the tolerance is judged as before", self, selfStart.Add(lockStartTolerance + time.Second), false},
 		{"recorded start precedes the process start by exactly the tolerance", self, selfStart.Add(-lockStartTolerance), true},
@@ -266,6 +270,59 @@ func TestProbe_ProcessStartDrift(t *testing.T) {
 			}
 			if got := alive(tc.pid, tc.recorded.Unix()); got != tc.want {
 				t.Fatalf("alive = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAcquireAndPeek_JudgeTheRecordedHolderNotTheCaller pins which side of
+// the comparison Acquire and Peek probe: the pid the lock body records,
+// against that pid's own OS start — never the calling process's pid or
+// start. The acquirer's own start (two hours ago) differs from the live
+// child holder's (thirty minutes ago), so probing the wrong pid flips
+// every row.
+func TestAcquireAndPeek_JudgeTheRecordedHolderNotTheCaller(t *testing.T) {
+	self := os.Getpid()
+	child := startSleeper(t)
+	selfStart := secondsAgo(2 * time.Hour)
+	childStart := secondsAgo(30 * time.Minute)
+	fakeProcessStarts(t, map[int]time.Time{self: selfStart, child: childStart})
+
+	cases := []struct {
+		name string
+		body Info
+		held bool
+	}{
+		{"a live other holder recording its own start is held", Info{PID: child, Start: childStart.Unix()}, true},
+		{"a live other pid recording the caller's start is a reused pid", Info{PID: child, Start: selfStart.Unix()}, false},
+		{"a dead holder recording the caller's own start is stale", Info{PID: reapedPID(t), Start: selfStart.Unix()}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "writer.lock")
+			writeLockInfo(t, path, tc.body)
+
+			if _, held, err := Peek(path); err != nil || held != tc.held {
+				t.Fatalf("Peek = held %t, %v, want held %t, nil", held, err, tc.held)
+			}
+			f, err := Acquire(path)
+			if tc.held {
+				if err == nil {
+					_ = Release(f, path)
+					t.Fatal("Acquire took a live holder's lock over, want *ErrHeld")
+				}
+				var held *ErrHeld
+				if !errors.As(err, &held) || held.Info != tc.body {
+					t.Fatalf("Acquire = %v, want *ErrHeld naming %+v", err, tc.body)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Acquire over a stale lock: %v, want a takeover", err)
+			}
+			t.Cleanup(func() { _ = Release(f, path) })
+			if got := readLockBody(t, path); got != (Info{PID: self, Start: selfStart.Unix()}) {
+				t.Fatalf("lock body after takeover = %+v, want {PID:%d Start:%d}", got, self, selfStart.Unix())
 			}
 		})
 	}
