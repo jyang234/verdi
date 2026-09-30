@@ -22,14 +22,11 @@ import (
 // git (internal/fixturegit-backed integration tests separately prove the
 // real adapter end to end). RevParse resolves the default branch to the
 // commit the successor-corpus cache keys on (see successors).
-// LsTreeEntries is the NUL-terminated listing the conflict scan reads
-// (storysupersession.go), so no file name is C-quoted out of reach.
 type gitReader interface {
 	Show(ctx context.Context, dir, commit, path string) ([]byte, error)
 	BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool, err error)
 	FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (commit string, found bool, err error)
 	LsTree(ctx context.Context, dir, ref, path string) ([]string, error)
-	LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error)
 	RevParse(ctx context.Context, dir, rev string) (string, error)
 }
 
@@ -50,10 +47,6 @@ func (realGitReader) FirstParentBlobLanding(ctx context.Context, dir, ref, path,
 
 func (realGitReader) LsTree(ctx context.Context, dir, ref, path string) ([]string, error) {
 	return gitx.LsTree(ctx, dir, ref, path)
-}
-
-func (realGitReader) LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error) {
-	return gitx.LsTreeEntries(ctx, dir, ref)
 }
 
 func (realGitReader) RevParse(ctx context.Context, dir, rev string) (string, error) {

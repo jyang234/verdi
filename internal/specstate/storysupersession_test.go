@@ -32,11 +32,16 @@ const (
 	ssScanIncomplete = "the default-branch conflict scan is incomplete"
 	ssOldLinkOnly    = "carries no validatable supersession: block"
 
-	// SS-R1: conflict file names a plain `git ls-tree` C-quotes (a
-	// non-ASCII byte, a double quote), which the scan must read by their
-	// real names.
-	ssNonASCIIPath = ".verdi/conflicts/résumé.md"
-	ssQuotePath    = ".verdi/conflicts/a\"b.md"
+	// SS-R1: conflict file names a plain `git ls-tree` C-quotes, and the
+	// entries as it lists them. A name holding a double quote is quoted
+	// under every configuration; a non-ASCII name only under
+	// core.quotePath (git's default), so every row using it pins that
+	// setting.
+	ssNonASCIIPath   = ".verdi/conflicts/résumé.md"
+	ssQuotePath      = ".verdi/conflicts/a\"b.md"
+	ssNonASCIIListed = `".verdi/conflicts/r\303\251sum\303\251.md"`
+	ssQuoteListed    = `".verdi/conflicts/a\"b.md"`
+	ssQuotedEntry    = "is listed git-quoted"
 
 	// SS-R2: the spec scan's own incompleteness, and the "no successor"
 	// wording an incomplete spec scan can still prove.
@@ -123,6 +128,16 @@ func ssLand(t *testing.T, tree map[string]string) *fixturegit.Repo {
 	return repo
 }
 
+// ssPinGitConfig pins one git configuration value for every git command
+// the test runs (GIT_CONFIG_COUNT, git 2.31 and later), whatever the host's
+// own configuration says.
+func ssPinGitConfig(t *testing.T, key, value string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", key)
+	t.Setenv("GIT_CONFIG_VALUE_0", value)
+}
+
 // ssWant is one expected disclosure: every substring must appear in it.
 type ssWant []string
 
@@ -179,6 +194,7 @@ func TestProjector_StorySupersession(t *testing.T) {
 		wantState State
 		want      []ssWant
 		absent    []string // no disclosure may contain any of these
+		quotePath string   // when set, pins core.quotePath for the row's git commands
 	}{
 		// Case 1.
 		{
@@ -413,35 +429,54 @@ func TestProjector_StorySupersession(t *testing.T) {
 			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {".verdi/conflicts/nested/x.md", ssNotRecord}},
 			absent:    []string{"notes.txt", "conflicts-extra", "specs/active/x/notes.md"},
 		},
-		// SS-R1: a conflict at a name plain `git ls-tree` C-quotes is read
-		// by its real name.
+		// SS-R1: an entry a plain `git ls-tree` lists C-quoted cannot be
+		// read by its real name, so it is a scan failure naming it as
+		// listed — never read, never credited, never silently skipped.
 		{
-			name:      "SS-R1: a malformed conflict at a non-ASCII name: unproven, naming it",
+			name:      "SS-R1: a malformed conflict at a name holding a double quote: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssQuotePath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssQuoteListed, ssQuotedEntry}},
+		},
+		{
+			name:      "SS-R1: a superseded conflict at a name holding a double quote is never credited: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssQuotePath: ssConflict("ss-story-quote", "superseded", "", "spec/ss-story")},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssQuoteListed, ssQuotedEntry}},
+		},
+		{
+			name:      "SS-R1: core.quotePath=true, a malformed conflict at a non-ASCII name: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssNonASCIIPath: garbled},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssNonASCIIListed, ssQuotedEntry}},
+			quotePath: "true",
+		},
+		{
+			name:      "SS-R1: core.quotePath=true, a superseded conflict at a non-ASCII name is never credited: unproven, naming the quoted entry",
+			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNonASCIIPath: ssConflict("ss-story-resume", "superseded", "", "spec/ss-story")},
+			candidate: ssV1Path,
+			wantState: Unproven,
+			want:      []ssWant{{ssV2Path, ssMissingRecord}, {ssV1Path, ssScanIncomplete}, {ssNonASCIIListed, ssQuotedEntry}},
+			quotePath: "true",
+		},
+		{
+			name:      "SS-R1: core.quotePath=false lists a non-ASCII name as written: a malformed conflict there is unproven, naming it",
 			tree:      map[string]string{ssV1Path: v1, ssNonASCIIPath: garbled},
 			candidate: ssV1Path,
 			wantState: Unproven,
 			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssNonASCIIPath, "failed to decode"}},
+			quotePath: "false",
 		},
 		{
-			name:      "SS-R1: a malformed conflict at a name holding a double quote: unproven, naming it",
-			tree:      map[string]string{ssV1Path: v1, ssQuotePath: garbled},
-			candidate: ssV1Path,
-			wantState: Unproven,
-			want:      []ssWant{{ssV1Path, ssScanIncomplete}, {ssQuotePath, "failed to decode"}},
-		},
-		{
-			name:      "SS-R1: a superseded conflict at a non-ASCII name plus v2's edge: superseded, naming it",
+			name:      "SS-R1: core.quotePath=false lists a non-ASCII name as written: a superseded conflict there plus v2's edge supersedes",
 			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssNonASCIIPath: ssConflict("ss-story-resume", "superseded", "", "spec/ss-story")},
 			candidate: ssV1Path,
 			wantState: Superseded,
 			want:      []ssWant{{"superseded by " + ssV2Path, ssNonASCIIPath}},
-		},
-		{
-			name:      "SS-R1: a superseded conflict at a name holding a double quote plus v2's edge: superseded, naming it",
-			tree:      map[string]string{ssV1Path: v1, ssV2Path: v2, ssQuotePath: ssConflict("ss-story-quote", "superseded", "", "spec/ss-story")},
-			candidate: ssV1Path,
-			wantState: Superseded,
-			want:      []ssWant{{"superseded by " + ssV2Path, ssQuotePath}},
+			quotePath: "false",
 		},
 		// SS-R2: an incomplete spec scan keeps its witness, and the
 		// "no successor" disclosure asserts no negative it cannot prove.
@@ -514,6 +549,9 @@ func TestProjector_StorySupersession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.quotePath != "" {
+				ssPinGitConfig(t, "core.quotePath", tt.quotePath)
+			}
 			repo := ssLand(t, tt.tree)
 			result, err := newProjector(realGitReader{}).Resolve(context.Background(), repo.Dir, Candidate{Path: tt.candidate, Content: []byte(tt.tree[tt.candidate])})
 			if err != nil {
@@ -567,34 +605,43 @@ func TestProjector_StorySupersession_BatchAgreesWithSingle(t *testing.T) {
 	}
 }
 
-// TestConflictPathClassification pins which default-branch paths the
-// conflict scan treats as conflict files (artifact.ClassifyPath's reading)
-// and which of those sit at a conflict record path (store.ConflictPath); a
-// conflict file off a record path is a scan failure (SI-306 (4a)).
+// TestConflictPathClassification pins which listed default-branch paths
+// the conflict scan cannot read by their real names (git-quoted), which it
+// treats as conflict files (artifact.ClassifyPath's reading), and which of
+// those sit at a conflict record path (store.ConflictPath); a quoted entry
+// and a conflict file off a record path are scan failures (review SS-R1;
+// SI-306 (4a)).
 func TestConflictPathClassification(t *testing.T) {
 	tests := []struct {
 		path       string
+		wantQuoted bool
 		wantFile   bool
 		wantRecord bool
 	}{
-		{".verdi/conflicts/ss-story-wrong.md", true, true},
-		{ssNonASCIIPath, true, true},
-		{ssQuotePath, true, true},
-		{".verdi/conflicts/a b.md", true, true},
-		{ssNestedPath, true, false},
-		{".verdi/conflicts/a/b/c.md", true, false},
-		{ssEmptyNamePath, true, false},
-		{".verdi/conflicts/notes.txt", false, false},
-		{".verdi/conflicts/x.md.bak", false, false},
-		{".verdi/conflicts", false, false},
-		{".verdi/conflicts-extra/y.md", false, false},
-		{".verdi/specs/active/x/spec.md", false, false},
-		{"sub/.verdi/conflicts/x.md", false, false},
-		{"conflicts/x.md", false, false},
-		{"", false, false},
+		{".verdi/conflicts/ss-story-wrong.md", false, true, true},
+		{ssNonASCIIPath, false, true, true},
+		{ssQuotePath, false, true, true},
+		{".verdi/conflicts/a b.md", false, true, true},
+		{ssNonASCIIListed, true, false, false},
+		{ssQuoteListed, true, false, false},
+		{`".verdi/conflicts/tab\there.md"`, true, false, false},
+		{ssNestedPath, false, true, false},
+		{".verdi/conflicts/a/b/c.md", false, true, false},
+		{ssEmptyNamePath, false, true, false},
+		{".verdi/conflicts/notes.txt", false, false, false},
+		{".verdi/conflicts/x.md.bak", false, false, false},
+		{".verdi/conflicts", false, false, false},
+		{".verdi/conflicts-extra/y.md", false, false, false},
+		{".verdi/specs/active/x/spec.md", false, false, false},
+		{"sub/.verdi/conflicts/x.md", false, false, false},
+		{"conflicts/x.md", false, false, false},
+		{"", false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
+			if got := isGitQuoted(tt.path); got != tt.wantQuoted {
+				t.Fatalf("isGitQuoted(%q) = %v, want %v", tt.path, got, tt.wantQuoted)
+			}
 			if got := isConflictFile(tt.path); got != tt.wantFile {
 				t.Fatalf("isConflictFile(%q) = %v, want %v", tt.path, got, tt.wantFile)
 			}
