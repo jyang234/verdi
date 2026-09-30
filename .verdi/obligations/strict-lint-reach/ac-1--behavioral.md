@@ -16,7 +16,7 @@ quality:
     rule: "Rerun go-test:internal/lintratchet:TestRetroWitness_ReadinessLoaderGlobals in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/strict-lint-reach" }
-frozen: { at: 2026-09-30, commit: cf11d8d0db34df1f9aaee626fca389312fb94343 }
+frozen: { at: 2026-09-30, commit: 39479c741cf3041646cb743f3dce70a4cd437884 }
 ---
 # The strict target reports the readiness loader globals before their removal and not after
 
