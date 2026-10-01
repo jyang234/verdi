@@ -312,16 +312,12 @@ func terminalStatusBadge(status string) string {
 // renderBoardRegion renders the posture header, four-area shell,
 // placards, canvas, and side rail — the one projection region the page,
 // the fragment, the snapshot, and every mutation response share.
+//
+// The posture header renders from the top bar's facts, built from p and
+// asd (specBarFacts, a pure function — the snapshot builds the same facts
+// for its posture fragment and revision).
 func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
 	bar := specBarFacts(p, asd)
-	return renderBoardRegionWith(p, git, asd, &bar)
-}
-
-// renderBoardRegionWith is renderBoardRegion over the top bar's facts
-// already built from p and asd (specBarFacts), which the posture header
-// renders from — so the snapshot builds them once for its region, its
-// posture fragment, and its revision token.
-func renderBoardRegionWith(p *BoardProjection, git *boardGitState, asd *asdView, bar *barFacts) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
@@ -366,7 +362,7 @@ func renderBoardRegionWith(p *BoardProjection, git *boardGitState, asd *asdView,
 		b.WriteString(`</div>`)
 	}
 
-	writeASDPosture(&b, bar)
+	writeASDPosture(&b, &bar)
 	writeASDShell(&b, asd)
 	// .asd-main wraps the board half (case file + canvas + rail) so the
 	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside

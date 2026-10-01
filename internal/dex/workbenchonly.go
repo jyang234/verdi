@@ -74,7 +74,7 @@ func stripWorkbenchOnly(css []byte) ([]byte, error) {
 		}
 	}
 	if open != 0 {
-		return nil, fmt.Errorf("dex: style.css line %d: workbench-only block is never closed", open)
+		return nil, fmt.Errorf("dex: style.css line %d: workbench-only block has no end marker", open)
 	}
 	return out.Bytes(), nil
 }

@@ -755,13 +755,13 @@ func (s *boardSpecServer) loadSnapshot(ctx context.Context, name string) (*asdSn
 
 // newASDSnapshot is the one snapshot of a loaded wall — the /snapshot
 // route's, the mutation response's, and the one whose revision the page
-// embeds: the top bar's facts built once (specBarFacts), the region and
-// the posture fragment rendered from them, and the revision over all of
-// it.
+// embeds: the region, the top bar's facts (specBarFacts, the same pure
+// function of p and asd the region's posture header renders from), the
+// posture fragment rendered from them, and the revision over all of it.
 func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSnapshot {
 	bar := specBarFacts(p, asd)
 	snap := &asdSnapshot{
-		HTML:        renderBoardRegionWith(p, git, asd, &bar),
+		HTML:        renderBoardRegion(p, git, asd),
 		Posture:     asdPostureHTML(&bar),
 		BaseDigest:  asd.BaseDigest,
 		BaseSpecB64: asd.BaseSpecB64,
