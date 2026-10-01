@@ -29,8 +29,8 @@
 # I-14's CI-context lint baselines against a real GITHUB_BASE_REF), split
 # across nine parallel gate jobs so the wall clock is the slowest job, not
 # the sum:
-#   static      build, fmt-check, vet, lint, lint-store, lint-showcase,
-#               showcase-coverage, then the self-lint;
+#   static      build, fmt-check, vet, lint, lint-strict, lint-store,
+#               lint-showcase, showcase-coverage, then the self-lint;
 #   test-cmd    the cmd/verdi test shard;
 #   test-cross  the cross-binary test shard (always fresh, ADJ-68);
 #   test-slow   the slowest other packages' tests (the Makefile's
@@ -128,6 +128,7 @@ jobs:
       - run: make fmt-check
       - run: make vet
       - run: make lint
+      - run: make lint-strict
       - run: make lint-store
       - run: make lint-showcase
       - run: make showcase-coverage

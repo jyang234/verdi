@@ -424,8 +424,10 @@ func TestCloseDispatchChecksOutExactCommitDetached(t *testing.T) {
 //     `continue-on-error:`, so GitHub runs it only once every gate job of the
 //     same run has succeeded;
 //   - inside `verify`, the verdict call over every gate job's result, then
-//     Node set up exactly as the e2e gate jobs set it up and the binary
-//     build (SI-293: the Playwright producer needs Node), then `verdi sync
+//     Node set up exactly as the e2e gate jobs set it up (SI-293: the
+//     Playwright producer needs Node), the static job's golangci-lint cache
+//     and install steps copied exactly (SI-309: the strict lint gate's named
+//     tests need the pinned binary), and the binary build, then `verdi sync
 //     --produce`, then the upload of "verdi-evidence" from
 //     .verdi/data/derived/ each run once, in that order.
 //

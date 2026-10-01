@@ -23,9 +23,10 @@
 //   - `verify` job declares any key but needs/runs-on/steps, needs anything
 //     but exactly the gate jobs, or runs anything but, in order: checkout,
 //     setup-go, the verdict call over every gate job's result, Node set up
-//     exactly as the e2e gate jobs set it up (SI-293), the binary build,
-//     `verdi sync --produce`, and the upload. Each step passes the
-//     step-level whitelist net (stepKeyProblem).
+//     exactly as the e2e gate jobs set it up (SI-293), the static gate job's
+//     golangci-lint cache and install steps copied exactly, names included
+//     (SI-309), the binary build, `verdi sync --produce`, and the upload.
+//     Each step passes the step-level whitelist net (stepKeyProblem).
 //
 // The verdict call is defense in depth and a legible in-log witness of the
 // results the evidence binds. It needs no canary, unlike merge-gate.yml's
@@ -78,26 +79,60 @@ const (
 // verdict call over every gate job's result, Node set up exactly as the e2e
 // gate jobs set it up (SI-293's one ratified addition, before the build: the
 // Playwright producer `verdi sync --produce` runs needs it whenever an
-// obligation names a Playwright test), the binary build the static job's
-// self-lint also uses, `verdi sync --produce`, and the upload. Step names are
-// free; stepKeyProblem allows `name:` and nothing else beside them.
-func evidenceJobSteps(gates []string) []workflowStep {
+// obligation names a Playwright test), lintSetup, the static gate job's two
+// golangci-lint steps (SI-309: the strict lint gate's named tests, which
+// `verdi sync --produce` runs, need the pinned binary), the binary build the
+// static job's self-lint also uses, `verdi sync --produce`, and the upload.
+// Step names are free, except the copied golangci-lint steps', which keep the
+// static job's names and keys; stepKeyProblem allows `name:` and nothing else
+// beside them.
+func evidenceJobSteps(gates []string, lintSetup []workflowStep) []workflowStep {
 	// The golangci-lint pin feeds only the cache step's key, which is not
-	// read here.
+	// read here: the copied steps carry the static job's own.
 	setup := pinnedSetupActions("")
-	return []workflowStep{
+	steps := []workflowStep{
 		{Uses: "actions/checkout@v4", With: setup["actions/checkout@v4"]},
 		{Uses: "actions/setup-go@v5", With: setup["actions/setup-go@v5"]},
 		{Run: verdictRunFor(gates)},
 		{Uses: "actions/setup-node@v4", With: setup["actions/setup-node@v4"]},
-		{Run: mergeGatePostVerifyCommands[0]},
-		{Run: evidenceProduceRun},
-		{Uses: "actions/upload-artifact@v4", With: map[string]string{
+	}
+	for _, s := range lintSetup {
+		steps = append(steps, workflowStep{Name: s.Name, Uses: s.Uses, With: s.With, Run: strings.TrimSpace(s.Run), Keys: s.Keys})
+	}
+	return append(steps,
+		workflowStep{Run: mergeGatePostVerifyCommands[0]},
+		workflowStep{Run: evidenceProduceRun},
+		workflowStep{Uses: "actions/upload-artifact@v4", With: map[string]string{
 			"name":              evidenceArtifactName,
 			"path":              evidenceArtifactPath,
 			"if-no-files-found": "error",
 		}},
+	)
+}
+
+// staticLintSetup returns merge-gate.yml's static gate job's two golangci-lint
+// steps, the binary cache and the pinned install, which the evidence job
+// copies exactly (SI-309), or why they cannot be found.
+func staticLintSetup(mergeGateJobs map[string]workflowJob) ([]workflowStep, string) {
+	static, ok := mergeGateJobs[mergeGateLintJob]
+	if !ok {
+		return nil, fmt.Sprintf("merge-gate.yml has no %q job, whose golangci-lint steps the evidence job copies (SI-309)", mergeGateLintJob)
 	}
+	cache := findCacheStep(static.Steps, "golangci-lint")
+	install := findRunStep(static.Steps, "go install github.com/golangci/golangci-lint")
+	if cache == nil || install == nil {
+		return nil, fmt.Sprintf("merge-gate.yml's %q job carries no golangci-lint cache step and install step for the evidence job to copy (SI-309)", mergeGateLintJob)
+	}
+	return []workflowStep{*cache, *install}, ""
+}
+
+// describeWantStep renders an expected evidence step: describeStep, plus the
+// name a copied step must keep.
+func describeWantStep(step workflowStep) string {
+	if step.Name == "" {
+		return describeStep(step)
+	}
+	return fmt.Sprintf("%s, named %q", describeStep(step), step.Name)
 }
 
 // describeStep renders what a step runs, for failure messages.
@@ -208,9 +243,9 @@ func gateJobDiffs(verifyJobs, mergeGateJobs map[string]interface{}, gates []stri
 	return out
 }
 
-// evidenceJobViolations checks verify.yml's evidence job against gates: its
-// key set, its runner, its `needs:`, and its whole step list.
-func evidenceJobViolations(job workflowJob, gates []string) []string {
+// evidenceJobViolations checks verify.yml's evidence job against gates and
+// lintSetup: its key set, its runner, its `needs:`, and its whole step list.
+func evidenceJobViolations(job workflowJob, gates []string, lintSetup []workflowStep) []string {
 	var out []string
 	if !slices.Equal(job.Keys, evidenceJobKeys) {
 		out = append(out, fmt.Sprintf("verify.yml job %q must declare exactly the keys %v, got %v (extra: %v): an `if:` such as always() would let it produce evidence over a failed gate job, and `continue-on-error:` would report a failed production green", verifyEvidenceJob, evidenceJobKeys, job.Keys, keysOutside(job.Keys, evidenceJobKeys)))
@@ -221,11 +256,11 @@ func evidenceJobViolations(job workflowJob, gates []string) []string {
 	if needs := slices.Sorted(slices.Values(job.Needs)); !slices.Equal(needs, gates) {
 		out = append(out, fmt.Sprintf("verify.yml job %q needs %v, want exactly the gate jobs %v: evidence produced while a gate job outside `needs:` failed would bind a failed gate", verifyEvidenceJob, needs, gates))
 	}
-	want := evidenceJobSteps(gates)
+	want := evidenceJobSteps(gates, lintSetup)
 	if len(job.Steps) != len(want) {
 		described := make([]string, len(want))
 		for i, w := range want {
-			described[i] = describeStep(w)
+			described[i] = describeWantStep(w)
 		}
 		out = append(out, fmt.Sprintf("verify.yml job %q runs %d steps, want exactly these %d in order: %s", verifyEvidenceJob, len(job.Steps), len(want), strings.Join(described, "; ")))
 	}
@@ -236,8 +271,10 @@ func evidenceJobViolations(job workflowJob, gates []string) []string {
 		if i >= len(want) {
 			continue
 		}
-		if w := want[i]; step.Uses != w.Uses || !maps.Equal(step.With, w.With) || strings.TrimSpace(step.Run) != w.Run {
-			out = append(out, fmt.Sprintf("verify.yml job %q step %d must be: %s; got: %s", verifyEvidenceJob, i, describeStep(w), describeStep(step)))
+		w := want[i]
+		copied := w.Name != "" && (step.Name != w.Name || !slices.Equal(step.Keys, w.Keys))
+		if step.Uses != w.Uses || !maps.Equal(step.With, w.With) || strings.TrimSpace(step.Run) != w.Run || copied {
+			out = append(out, fmt.Sprintf("verify.yml job %q step %d must be: %s; got: %s", verifyEvidenceJob, i, describeWantStep(w), describeStep(step)))
 		}
 	}
 	return out
@@ -263,14 +300,19 @@ func verifyWorkflowViolations(verifyRaw, mergeGateRaw []byte) ([]string, error) 
 	}
 	verifyJobs, _ := asMap(verifyTop["jobs"])
 	mergeGateJobs, _ := asMap(mergeGateTop["jobs"])
-	gates := gateJobKeys(decodeJobs(mergeGateTop["jobs"]))
+	decodedGates := decodeJobs(mergeGateTop["jobs"])
+	gates := gateJobKeys(decodedGates)
 	out = append(out, gateJobDiffs(verifyJobs, mergeGateJobs, gates)...)
+	lintSetup, missing := staticLintSetup(decodedGates)
+	if missing != "" {
+		out = append(out, missing)
+	}
 
 	evidence, ok := verifyJobs[verifyEvidenceJob]
 	if !ok {
 		return append(out, fmt.Sprintf("verify.yml has no %q job: the evidence job's key is GITHUB_JOB there, which feeds provenance.job_name (SI-229)", verifyEvidenceJob)), nil
 	}
-	return append(out, evidenceJobViolations(decodeJob(evidence), gates)...), nil
+	return append(out, evidenceJobViolations(decodeJob(evidence), gates, lintSetup)...), nil
 }
 
 // verifyWorkflowFileViolations applies verifyWorkflowViolations to the
@@ -296,13 +338,30 @@ func verifyWorkflowFileViolations(t *testing.T, path string) []string {
 // has SI-267's shape: merge-gate.yml's gate jobs, identical in every key and
 // value, and one evidence job that needs all of them, carries no `if:` or
 // `continue-on-error:`, and runs exactly checkout, setup-go, the verdict call,
-// Node (SI-293), the build, `verdi sync --produce`, and the upload, in that
-// order.
+// Node (SI-293), the static job's golangci-lint cache and install steps
+// (SI-309), the build, `verdi sync --produce`, and the upload, in that order.
 func TestVerifyWorkflowRunsMergeGateJobsThenProducesEvidence(t *testing.T) {
 	for _, v := range verifyWorkflowFileViolations(t, workflowPath(verdiRepoRoot, "verify.yml")) {
 		t.Error(v)
 	}
 }
+
+// fixtureLintCache and fixtureLintInstall are the static gate job's two
+// golangci-lint steps in the fixture pair, which the evidence job copies
+// (SI-309).
+const (
+	fixtureLintCache = `      - name: Cache a tool
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+`
+	fixtureLintInstall = `      - name: Install a tool
+        run: |
+          test -x tool || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo installed
+`
+)
 
 // The fixture pair below is a two-gate-job merge-gate.yml and the verify.yml
 // SI-267 requires beside it. The gate jobs are one shared text, so the pair
@@ -314,11 +373,7 @@ const fixtureGateJobs = `  static:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install a tool
-        run: |
-          test -x tool || install tool
-          echo installed
-      - run: make build
+` + fixtureLintCache + fixtureLintInstall + `      - run: make build
       - run: make lint
   e2e:
     runs-on: ubuntu-latest
@@ -366,7 +421,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: e2e/package-lock.json
-      - run: go build -o .build/verdi ./cmd/verdi
+` + fixtureLintCache + fixtureLintInstall + `      - run: go build -o .build/verdi ./cmd/verdi
       - name: Produce the evidence bundle
         run: ./.build/verdi sync --produce
       - uses: actions/upload-artifact@v4
@@ -396,6 +451,7 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		evidenceSetupGo = "fetch-depth: 0\n      - uses: actions/setup-go@v5\n"
 		nodeStep        = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n"
 		buildStep       = "      - run: go build -o .build/verdi ./cmd/verdi\n"
+		lintSetup       = fixtureLintCache + fixtureLintInstall
 	)
 	cases := []struct {
 		name      string
@@ -410,13 +466,13 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		{name: "an extra key on a gate job", verify: verify(e2eJob, e2eJob+"    timeout-minutes: 5\n"), want: "at jobs.e2e.timeout-minutes verify.yml has 5, merge-gate.yml has nothing"},
 		{name: "an if: on a gate job", verify: verify(e2eJob, e2eJob+"    if: always()\n"), want: "at jobs.e2e.if"},
 		{name: "a continue-on-error: on a gate job", verify: verify(e2eJob, e2eJob+"    continue-on-error: true\n"), want: "at jobs.e2e.continue-on-error"},
-		{name: "an env: on a gate step", verify: verify("      - run: make build\n", "      - run: make build\n        env:\n          MAKEFLAGS: -i\n"), want: "at jobs.static.steps[2].env"},
+		{name: "an env: on a gate step", verify: verify("      - run: make build\n", "      - run: make build\n        env:\n          MAKEFLAGS: -i\n"), want: "at jobs.static.steps[3].env"},
 		{name: "an added with: entry", verify: verify("fetch-depth: 0\n      - run: make e2e", "fetch-depth: 0\n          ref: main\n      - run: make e2e"), want: "at jobs.e2e.steps[0].with.ref"},
 		{name: "a with: value of another type", verify: verify("fetch-depth: 0\n      - run: make e2e", "fetch-depth: \"0\"\n      - run: make e2e"), want: `at jobs.e2e.steps[0].with.fetch-depth verify.yml has "0", merge-gate.yml has 0`},
-		{name: "a changed step run:", verify: verify("      - run: make lint\n", "      - run: make lint || true\n"), want: `at jobs.static.steps[3].run verify.yml has "make lint || true", merge-gate.yml has "make lint"`},
-		{name: "a changed block-scalar run:", verify: verify("          echo installed\n", "          echo skipped\n"), want: "at jobs.static.steps[1].run"},
-		{name: "a dropped step", verify: verify("      - run: make lint\n", ""), want: "at jobs.static.steps verify.yml has 3 items, merge-gate.yml has 4 items"},
-		{name: "a reordered step", verify: verify("      - run: make build\n      - run: make lint\n", "      - run: make lint\n      - run: make build\n"), want: `at jobs.static.steps[2].run verify.yml has "make lint", merge-gate.yml has "make build"`},
+		{name: "a changed step run:", verify: verify("      - run: make lint\n", "      - run: make lint || true\n"), want: `at jobs.static.steps[4].run verify.yml has "make lint || true", merge-gate.yml has "make lint"`},
+		{name: "a changed block-scalar run:", verify: verify("          echo installed\n", "          echo skipped\n"), want: "at jobs.static.steps[2].run"},
+		{name: "a dropped step", verify: verify("      - run: make lint\n", ""), want: "at jobs.static.steps verify.yml has 4 items, merge-gate.yml has 5 items"},
+		{name: "a reordered step", verify: verify("      - run: make build\n      - run: make lint\n", "      - run: make lint\n      - run: make build\n"), want: `at jobs.static.steps[3].run verify.yml has "make lint", merge-gate.yml has "make build"`},
 		{name: "a missing gate job", verify: verify(e2eJobWhole, ""), want: `verify.yml has no job "e2e"`},
 		{name: "an extra job in verify.yml", verify: verify("jobs:\n", "jobs:\n  lint-again:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"), want: `verify.yml job "lint-again" is neither`},
 		{name: "a gate job changed on merge-gate.yml's side", verify: fixtureVerify, mergeGate: mergeGate(e2eJob, e2eJob+"    timeout-minutes: 5\n"), want: "at jobs.e2e.timeout-minutes verify.yml has nothing, merge-gate.yml has 5"},
@@ -432,21 +488,30 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		{name: "the evidence job needs no gate job", verify: verify(evidenceNeeds, ""), want: "needs [], want exactly the gate jobs [e2e static]"},
 		{name: "a shallow evidence checkout", verify: verify(evidenceSetupGo, "{}\n      - uses: actions/setup-go@v5\n"), want: "step 0 must be: uses actions/checkout@v4 with map[fetch-depth:0]; got: uses actions/checkout@v4 with map[]"},
 		{name: "the verdict omits a gate job", verify: verify("run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} static=", "run: scripts/merge-gate-verdict.sh static="), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} static=${{ needs.static.result }}\"; got: run \"scripts/merge-gate-verdict.sh static="},
-		{name: "no verdict step", verify: verify(verdictStep, ""), want: "runs 6 steps, want exactly these 7"},
-		{name: "production before the verdict", verify: verify(verdictStep+nodeStep+buildStep+produceStep, nodeStep+buildStep+produceStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
-		{name: "no Node setup", verify: verify(nodeStep, ""), want: "runs 6 steps, want exactly these 7"},
-		{name: "Node set up after the build", verify: verify(nodeStep+buildStep, buildStep+nodeStep), want: "step 3 must be: uses actions/setup-node@v4 with map[cache:npm cache-dependency-path:e2e/package-lock.json node-version:22]; got: run \"go build -o .build/verdi ./cmd/verdi\""},
+		{name: "no verdict step", verify: verify(verdictStep, ""), want: "runs 8 steps, want exactly these 9"},
+		{name: "production before the verdict", verify: verify(verdictStep+nodeStep+lintSetup+buildStep+produceStep, nodeStep+lintSetup+buildStep+produceStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
+		{name: "no Node setup", verify: verify(nodeStep, ""), want: "runs 8 steps, want exactly these 9"},
+		{name: "Node set up after the build", verify: verify(nodeStep+lintSetup+buildStep, lintSetup+buildStep+nodeStep), want: "step 3 must be: uses actions/setup-node@v4 with map[cache:npm cache-dependency-path:e2e/package-lock.json node-version:22]; got: uses actions/cache@v4"},
 		{name: "Node set up before the verdict", verify: verify(verdictStep+nodeStep, nodeStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
 		{name: "another Node version", verify: verify("node-version: \"22\"\n", "node-version: \"20\"\n"), want: "step 3 must be: uses actions/setup-node@v4"},
 		{name: "Node without the npm cache", verify: verify("          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n", ""), want: "step 3 must be: uses actions/setup-node@v4"},
-		{name: "Node set up twice", verify: verify(nodeStep, nodeStep+nodeStep), want: "runs 8 steps, want exactly these 7"},
+		{name: "Node set up twice", verify: verify(nodeStep, nodeStep+nodeStep), want: "runs 10 steps, want exactly these 9"},
 		{name: "an if: on the Node setup", verify: verify("      - uses: actions/setup-node@v4\n", "      - uses: actions/setup-node@v4\n        if: always()\n"), want: "step 3 (uses \"actions/setup-node@v4\"): key(s) [if] are not whitelisted"},
-		{name: "the upload before production", verify: verify(produceStep+uploadStep, uploadStep+produceStep), want: "step 5 must be: run \"./.build/verdi sync --produce\"; got: uses actions/upload-artifact@v4"},
-		{name: "production twice", verify: verify(produceStep, produceStep+produceStep), want: "runs 8 steps, want exactly these 7"},
-		{name: "production over its own failure", verify: verify("run: ./.build/verdi sync --produce\n", "run: ./.build/verdi sync --produce || true\n"), want: "step 5 must be: run \"./.build/verdi sync --produce\"; got: run \"./.build/verdi sync --produce || true\""},
-		{name: "the upload names another artifact", verify: verify("name: verdi-evidence\n", "name: other-evidence\n"), want: "step 6 must be: uses actions/upload-artifact@v4"},
-		{name: "the upload takes another path", verify: verify("path: .verdi/data/derived/\n", "path: .verdi/data/\n"), want: "step 6 must be: uses actions/upload-artifact@v4"},
-		{name: "an if: on an evidence step", verify: verify("      - uses: actions/upload-artifact@v4\n", "      - uses: actions/upload-artifact@v4\n        if: always()\n"), want: "step 6 (uses \"actions/upload-artifact@v4\"): key(s) [if] are not whitelisted"},
+		{name: "the upload before production", verify: verify(produceStep+uploadStep, uploadStep+produceStep), want: "step 7 must be: run \"./.build/verdi sync --produce\"; got: uses actions/upload-artifact@v4"},
+		{name: "production twice", verify: verify(produceStep, produceStep+produceStep), want: "runs 10 steps, want exactly these 9"},
+		{name: "production over its own failure", verify: verify("run: ./.build/verdi sync --produce\n", "run: ./.build/verdi sync --produce || true\n"), want: "step 7 must be: run \"./.build/verdi sync --produce\"; got: run \"./.build/verdi sync --produce || true\""},
+		{name: "the upload names another artifact", verify: verify("name: verdi-evidence\n", "name: other-evidence\n"), want: "step 8 must be: uses actions/upload-artifact@v4"},
+		{name: "the upload takes another path", verify: verify("path: .verdi/data/derived/\n", "path: .verdi/data/\n"), want: "step 8 must be: uses actions/upload-artifact@v4"},
+		{name: "the static job's golangci-lint steps, changed alike everywhere", verify: strings.ReplaceAll(fixtureVerify, "echo installed", "echo cached"), mergeGate: mergeGate("echo installed", "echo cached")},
+		{name: "no golangci-lint cache in the evidence job", verify: verify(nodeStep+fixtureLintCache, nodeStep), want: "runs 8 steps, want exactly these 9"},
+		{name: "no golangci-lint install in the evidence job", verify: verify(fixtureLintInstall+buildStep, buildStep), want: "runs 8 steps, want exactly these 9"},
+		{name: "the golangci-lint steps after the build", verify: verify(nodeStep+lintSetup+buildStep, nodeStep+buildStep+lintSetup), want: "step 4 must be: uses actions/cache@v4"},
+		{name: "a renamed copy of the install step", verify: verify(nodeStep+fixtureLintCache+"      - name: Install a tool\n", nodeStep+fixtureLintCache+"      - name: Install the tool\n"), want: `step 5 must be: run "test -x tool || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0\necho installed", named "Install a tool"; got:`},
+		{name: "an altered copy of the install step", verify: verify("          echo installed\n"+buildStep, "          echo skipped\n"+buildStep), want: "step 5 must be: run \"test -x tool"},
+		{name: "another cache key in the copy", verify: verify(nodeStep+"      - name: Cache a tool\n        uses: actions/cache@v4\n        with:\n          path: ~/go/bin/golangci-lint\n          key: golangci-lint-${{ runner.os }}-v2.5.0\n", nodeStep+"      - name: Cache a tool\n        uses: actions/cache@v4\n        with:\n          path: ~/go/bin/golangci-lint\n          key: golangci-lint-${{ runner.os }}-v2.4.0\n"), want: "step 4 must be: uses actions/cache@v4"},
+		{name: "an if: on the copied install step", verify: verify(nodeStep+fixtureLintCache+"      - name: Install a tool\n", nodeStep+fixtureLintCache+"      - name: Install a tool\n        if: false\n"), want: "key(s) [if] are not whitelisted"},
+		{name: "no golangci-lint steps in the static job to copy", verify: verify(fixtureLintCache+fixtureLintInstall+"      - run: make build\n", "      - run: make build\n"), mergeGate: mergeGate(fixtureLintCache+fixtureLintInstall, ""), want: "carries no golangci-lint cache step and install step for the evidence job to copy"},
+		{name: "an if: on an evidence step", verify: verify("      - uses: actions/upload-artifact@v4\n", "      - uses: actions/upload-artifact@v4\n        if: always()\n"), want: "step 8 (uses \"actions/upload-artifact@v4\"): key(s) [if] are not whitelisted"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
