@@ -621,3 +621,70 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 		})
 	}
 }
+
+// TestModuleGoFiles covers the path universe: the Go files `./...` visits,
+// skipping what the go tool skips (testdata, vendor, "." and "_" names,
+// another module) and every file that is not Go; a root that cannot be
+// walked is an error, never an empty universe.
+func TestModuleGoFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{
+		"a.go", "b_test.go", "doc.md", "pkg/z.go", "pkg/_x.go", "pkg/.y.go",
+		".hidden/x.go", "_scratch/x.go", "testdata/x.go", "pkg/testdata/x.go",
+		"vendor/x.go", "node_modules/x.go", "nested/go.mod", "nested/x.go",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name    string
+		root    string
+		want    []string
+		wantErr bool
+	}{
+		{name: "a module tree", root: root, want: []string{"a.go", "b_test.go", "pkg/z.go"}},
+		{name: "a root that does not exist", root: filepath.Join(root, "absent"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := moduleGoFiles(tc.root)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("moduleGoFiles(%s) error = %v, want error %v", tc.root, err, tc.wantErr)
+			}
+			if !tc.wantErr && !slices.Equal(got, tc.want) {
+				t.Fatalf("moduleGoFiles(%s) = %q, want %q", tc.root, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMessagesByLinter covers the message universe: each linter's distinct
+// messages, sorted, and nothing for a linter no key names.
+func TestMessagesByLinter(t *testing.T) {
+	cases := []struct {
+		name string
+		keys []lintratchet.Key
+		want map[string][]string
+	}{
+		{name: "no keys", keys: nil, want: map[string][]string{}},
+		{name: "repeats and two linters", keys: []lintratchet.Key{
+			{Linter: "noctx", Message: "b", Package: "p"},
+			{Linter: "noctx", Message: "a", Package: "q"},
+			{Linter: "noctx", Message: "b", Package: "r", Source: "s"},
+			{Linter: "errorlint", Message: "c"},
+		}, want: map[string][]string{"noctx": {"a", "b"}, "errorlint": {"c"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := messagesByLinter(tc.keys)
+			if !maps.EqualFunc(got, tc.want, slices.Equal[[]string]) {
+				t.Fatalf("messagesByLinter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

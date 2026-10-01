@@ -500,3 +500,25 @@ func TestGroundRuleSentences(t *testing.T) {
 		t.Fatalf("groundRuleSentences = %q, want %q", got, want)
 	}
 }
+
+// TestFlagValue covers reading a flag's value from a dry-run line's fields:
+// the next token without a trailing `;`, and nothing for a flag that is
+// absent or has no value after it.
+func TestFlagValue(t *testing.T) {
+	fields := strings.Fields(`.build/lintratchet check -lint-exit "$status" -report r.json -baseline b.json; rc=$?; -last`)
+	cases := []struct {
+		flag   string
+		want   string
+		wantOK bool
+	}{
+		{flag: "-lint-exit", want: `"$status"`, wantOK: true},
+		{flag: "-baseline", want: "b.json", wantOK: true},
+		{flag: "-config"},
+		{flag: "-last"},
+	}
+	for _, tc := range cases {
+		if got, ok := flagValue(fields, tc.flag); got != tc.want || ok != tc.wantOK {
+			t.Errorf("flagValue(%s) = %q, %v; want %q, %v", tc.flag, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
