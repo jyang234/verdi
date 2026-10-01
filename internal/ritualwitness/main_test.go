@@ -1,6 +1,7 @@
 package ritualwitness
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,7 +43,7 @@ func helperVerb(spec string) int {
 		return 3
 	}
 	if branch != "" {
-		if out, err := exec.Command("git", "branch", branch).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(context.Background(), "git", "branch", branch).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "helper: git branch %s: %v\n%s", branch, err, out)
 			return 3
 		}

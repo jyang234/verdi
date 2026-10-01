@@ -75,7 +75,7 @@ func TestRunBuildStart_CutsFromTheResolvedBase(t *testing.T) {
 			}
 			// Cut at the commit, not at origin/main's name: git sets up no
 			// upstream, a config write build start does not declare.
-			if out, err := exec.Command("git", "-C", repo.Dir, "config", "--local", "--get-regexp", `^branch\.feature/`).CombinedOutput(); err == nil {
+			if out, err := exec.CommandContext(context.Background(), "git", "-C", repo.Dir, "config", "--local", "--get-regexp", `^branch\.feature/`).CombinedOutput(); err == nil {
 				t.Fatalf("the cut wrote branch configuration %q; build start declares no config write", out)
 			}
 		})
