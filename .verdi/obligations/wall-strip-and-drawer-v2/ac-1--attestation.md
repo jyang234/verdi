@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/wall-strip-and-drawer-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: da729113549288efdee9961dcfa089c2d4ac199a }
 ---
 # The owner accepts the strip, Commit and push, and drawer's visual fidelity
 

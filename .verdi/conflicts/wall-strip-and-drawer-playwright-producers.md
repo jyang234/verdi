@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/wall-strip-and-drawer }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: da729113549288efdee9961dcfa089c2d4ac199a }
 ---
 # Conflict: wall-strip-and-drawer cannot cross verdi build start
 
