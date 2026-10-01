@@ -344,9 +344,14 @@ func goTestProducerRuntimeKindDisclosure(c testProducerCandidate) disclosure.Dis
 
 // selectGoTestObligations narrows candidates to exactly this CI job's own
 // authoritative obligations (SI-229: authoritative_source.ref ==
-// jobName), excludes a runtime-kind obligation (03 §Evidence kinds: runtime
-// evidence is post-deploy), then grammar-parses each survivor's producer ref
-// and rejects a package path that crosses into a nested module under root.
+// jobName), skips silently an obligation whose producer ref is the
+// Playwright producer's (a "playwright:" ref: each per-test producer handles
+// only its own scheme, SI-307 (8), so playwrightproducer.go alone selects or
+// discloses it, whatever its kind or form), excludes a runtime-kind
+// obligation (03 §Evidence kinds: runtime evidence is post-deploy), then
+// grammar-parses each survivor's producer ref and rejects a package path that
+// crosses into a nested module under root. Every other ref that is not
+// go-test: still fails the grammar and is disclosed as malformed.
 // jobName == "" (not running in a named CI job at all) naturally selects
 // nothing, since an elaborated obligation's authoritative_source.ref is
 // always non-blank (internal/artifact/obligation.go's Validate). A rejected
@@ -359,6 +364,9 @@ func selectGoTestObligations(root string, candidates []testProducerCandidate, jo
 	var discl []disclosure.Disclosure
 	for _, c := range candidates {
 		if jobName == "" || c.JobRef != jobName {
+			continue
+		}
+		if strings.HasPrefix(c.ProducerRef, playwrightProducerScheme) {
 			continue
 		}
 		if c.Kind == artifact.EvidenceRuntime {
@@ -621,22 +629,32 @@ type goTestAbsence struct {
 // (SI-238); withdrawn is writeManagedEvidence's report, keyed by spec ref. It
 // adds nothing when no such record was withdrawn.
 func discloseGoTestAbsence(a goTestAbsence, withdrawn map[string][]artifact.Evidence) disclosure.Disclosure {
+	return namedTestWithdrawalDisclosure(a.disclosed, a.obligation.testProducerCandidate, withdrawn)
+}
+
+// namedTestWithdrawalDisclosure returns d, the disclosure of a selected
+// obligation c that a per-test production run recorded nothing for, with a
+// note naming the earlier records the run withdrew for c's own producer in
+// c's own spec (SI-238); withdrawn is writeManagedEvidence's report, keyed by
+// spec ref. It adds nothing when no such record was withdrawn. Shared by the
+// go-test and Playwright producers.
+func namedTestWithdrawalDisclosure(d disclosure.Disclosure, c testProducerCandidate, withdrawn map[string][]artifact.Evidence) disclosure.Disclosure {
 	var verdicts []string
-	for _, r := range withdrawn[goTestSpecRef(a.obligation.SpecName)] {
-		if r.Producer == a.obligation.ProducerRef {
+	for _, r := range withdrawn[goTestSpecRef(c.SpecName)] {
+		if r.Producer == c.ProducerRef {
 			verdicts = append(verdicts, string(r.Verdict))
 		}
 	}
 	var note string
 	switch len(verdicts) {
 	case 0:
-		return a.disclosed
+		return d
 	case 1:
 		note = fmt.Sprintf("the earlier %s record for this producer at this commit was withdrawn", verdicts[0])
 	default:
 		note = fmt.Sprintf("the %d earlier records for this producer at this commit (%s) were withdrawn", len(verdicts), strings.Join(verdicts, ", "))
 	}
-	return disclosure.New(a.disclosed.Source, a.disclosed.Scope, a.disclosed.Text+"; "+note)
+	return disclosure.New(d.Source, d.Scope, d.Text+"; "+note)
 }
 
 // goTestSpecRef is the owning spec ref of an obligation's story slug: the
@@ -648,6 +666,17 @@ func goTestSpecRef(specName string) string { return "spec/" + specName }
 // owning spec ref, the producer ref of every obligation selected for this job
 // at this commit, whether or not the run records anything for it.
 func goTestManagedSubset(selected []selectedGoTestObligation) map[string]map[string]bool {
+	candidates := make([]testProducerCandidate, len(selected))
+	for i, s := range selected {
+		candidates[i] = s.testProducerCandidate
+	}
+	return namedTestManagedSubset(candidates)
+}
+
+// namedTestManagedSubset is a per-test production run's managed subset
+// (SI-238) over the obligations it selected: per owning spec ref, each one's
+// producer ref. Shared by the go-test and Playwright producers.
+func namedTestManagedSubset(selected []testProducerCandidate) map[string]map[string]bool {
 	managed := map[string]map[string]bool{}
 	for _, s := range selected {
 		specRef := goTestSpecRef(s.SpecName)

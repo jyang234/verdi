@@ -29,7 +29,10 @@ const (
 	// superseded.
 	AcceptedPendingBuild State = "accepted-pending-build"
 	// Superseded: a validated successor on the default branch names this
-	// revision as its predecessor.
+	// revision as its predecessor — for a feature, a successor carrying the
+	// supersedes edge and a supersession: block; for a story, both rung-3
+	// records: a story successor's whole-spec supersedes edge and a
+	// conflict with status superseded challenging the whole spec (SI-290).
 	Superseded State = "superseded"
 	// Closed: the exact revision is reachable from the default branch at
 	// its archive-zone path.
@@ -97,8 +100,11 @@ type Candidate struct {
 // randomness-dependent — but not always a single flat alphabetical sort:
 // a scan-incompleteness result puts one summary line first, followed by
 // every decode-witness message in sorted order. It is non-empty exactly
-// when State could not be fully proven, or when a legacy artifact needed
-// a compatibility note.
+// when State could not be fully proven, when a legacy artifact needed a
+// compatibility note, or when a story's Superseded state was derived from
+// its rung-3 records — one line per successor, naming it and the resolved
+// conflict (SI-290; the Result carries no other field that names a
+// successor).
 type Result struct {
 	State       State     `json:"state"`
 	Relation    Relation  `json:"relation"`
