@@ -16,12 +16,11 @@ import (
 // data.
 func probedGet(t *testing.T, h http.Handler, path string) (int, []barFacts) {
 	t.Helper()
-	var seen []barFacts
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-	req = req.WithContext(withBarProbe(req.Context(), func(f barFacts) { seen = append(seen, f) }))
+	probe := &barProbe{}
+	req := httptest.NewRequestWithContext(withBarProbe(t.Context(), probe), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	return rec.Code, seen
+	return rec.Code, probe.facts()
 }
 
 // pageBarCase is one workbench page and the bar facts its view data must
@@ -155,10 +154,11 @@ func TestEveryPageCarriesItsBarFacts_OtherSurfaces(t *testing.T) {
 // TestErrorPage_BeforeTheStoreIsRead: an error page whose handler knows no
 // store root discloses every Git fact as unproven, never omits them.
 func TestErrorPage_BeforeTheStoreIsRead(t *testing.T) {
-	var seen []barFacts
-	ctx := withBarProbe(t.Context(), func(f barFacts) { seen = append(seen, f) })
+	probe := &barProbe{}
+	ctx := withBarProbe(t.Context(), probe)
 	rec := httptest.NewRecorder()
 	renderError(ctx, rec, "", http.StatusInternalServerError, errors.New("the store could not be opened"))
+	seen := probe.facts()
 	if rec.Code != http.StatusInternalServerError || len(seen) != 1 {
 		t.Fatalf("status %d, facts %+v", rec.Code, seen)
 	}
@@ -187,8 +187,8 @@ func TestFavicon_RendersNoPageAndRunsNoGit(t *testing.T) {
 	root := newBarFixture(t)
 	h := NewHandler(root)
 	execs := &gitExecs{}
-	var bars []barFacts
-	ctx := withBarProbe(gitx.WithObserver(t.Context(), execs), func(f barFacts) { bars = append(bars, f) })
+	bars := &barProbe{}
+	ctx := withBarProbe(gitx.WithObserver(t.Context(), execs), bars)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, method, "/favicon.ico", nil))
@@ -196,8 +196,8 @@ func TestFavicon_RendersNoPageAndRunsNoGit(t *testing.T) {
 			t.Fatalf("%s /favicon.ico = %d with %d body bytes, want 204 and none", method, rec.Code, rec.Body.Len())
 		}
 	}
-	if execs.n != 0 || len(bars) != 0 {
-		t.Fatalf("/favicon.ico ran %d git execs and rendered %d pages, want none", execs.n, len(bars))
+	if execs.n != 0 || len(bars.facts()) != 0 {
+		t.Fatalf("/favicon.ico ran %d git execs and rendered %d pages, want none", execs.n, len(bars.facts()))
 	}
 	// Any other unserved path still renders the disclosed 404 page.
 	if status, seen := probedGet(t, h, "/favicon.png"); status != http.StatusNotFound || len(seen) != 1 {

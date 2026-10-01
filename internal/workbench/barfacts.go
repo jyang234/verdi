@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jyang234/verdi/internal/gitx"
 )
@@ -374,19 +375,37 @@ func unprovenBarFacts(title, checkout, reason string) barFacts {
 // barProbeKey is the request-context key of a bar probe.
 type barProbeKey struct{}
 
-// withBarProbe returns ctx carrying probe, which each page render calls
-// with the bar facts it puts in its view data. A package test seam: the
-// facts are not yet drawn by any markup (F1b draws the bar), so this is
-// how a test reads which facts a page carries. Production requests carry
-// no probe.
-func withBarProbe(ctx context.Context, probe func(barFacts)) context.Context {
+// barProbe records the bar facts each page render puts in its view data:
+// a package test seam, so a test reads which facts a page carries without
+// parsing its markup. It holds data only — no function value — so nothing
+// a probe carries can run code inside a route's reach (ledger SI-318's
+// write-scope witness). Production requests carry none, and no request
+// can set one: its context key is unexported.
+type barProbe struct {
+	mu   sync.Mutex
+	seen []barFacts
+}
+
+// facts returns a copy of every bar-facts value recorded so far, in
+// render order.
+func (p *barProbe) facts() []barFacts {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]barFacts(nil), p.seen...)
+}
+
+// withBarProbe returns ctx carrying probe, which observeBar records each
+// page render's bar facts into.
+func withBarProbe(ctx context.Context, probe *barProbe) context.Context {
 	return context.WithValue(ctx, barProbeKey{}, probe)
 }
 
-// observeBar hands f to ctx's bar probe, if it carries one.
+// observeBar records f in ctx's bar probe, if it carries one.
 func observeBar(ctx context.Context, f barFacts) {
-	if probe, ok := ctx.Value(barProbeKey{}).(func(barFacts)); ok {
-		probe(f)
+	if probe, ok := ctx.Value(barProbeKey{}).(*barProbe); ok {
+		probe.mu.Lock()
+		probe.seen = append(probe.seen, f)
+		probe.mu.Unlock()
 	}
 }
 
