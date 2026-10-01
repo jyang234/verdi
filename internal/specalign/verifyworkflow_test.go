@@ -22,8 +22,9 @@
 //     order do not, since neither changes what GitHub runs;
 //   - `verify` job declares any key but needs/runs-on/steps, needs anything
 //     but exactly the gate jobs, or runs anything but, in order: checkout,
-//     setup-go, the verdict call over every gate job's result, the binary
-//     build, `verdi sync --produce`, and the upload. Each step passes the
+//     setup-go, the verdict call over every gate job's result, Node set up
+//     exactly as the e2e gate jobs set it up (SI-293), the binary build,
+//     `verdi sync --produce`, and the upload. Each step passes the
 //     step-level whitelist net (stepKeyProblem).
 //
 // The verdict call is defense in depth and a legible in-log witness of the
@@ -74,9 +75,12 @@ const (
 
 // evidenceJobSteps is the evidence job's whole step list, in SI-267's order:
 // a full-history checkout, Go 1.25 (the gate jobs' pinned inputs), the
-// verdict call over every gate job's result, the binary build the static
-// job's self-lint also uses, `verdi sync --produce`, and the upload. Step
-// names are free; stepKeyProblem allows `name:` and nothing else beside them.
+// verdict call over every gate job's result, Node set up exactly as the e2e
+// gate jobs set it up (SI-293's one ratified addition, before the build: the
+// Playwright producer `verdi sync --produce` runs needs it whenever an
+// obligation names a Playwright test), the binary build the static job's
+// self-lint also uses, `verdi sync --produce`, and the upload. Step names are
+// free; stepKeyProblem allows `name:` and nothing else beside them.
 func evidenceJobSteps(gates []string) []workflowStep {
 	// The golangci-lint pin feeds only the cache step's key, which is not
 	// read here.
@@ -85,6 +89,7 @@ func evidenceJobSteps(gates []string) []workflowStep {
 		{Uses: "actions/checkout@v4", With: setup["actions/checkout@v4"]},
 		{Uses: "actions/setup-go@v5", With: setup["actions/setup-go@v5"]},
 		{Run: verdictRunFor(gates)},
+		{Uses: "actions/setup-node@v4", With: setup["actions/setup-node@v4"]},
 		{Run: mergeGatePostVerifyCommands[0]},
 		{Run: evidenceProduceRun},
 		{Uses: "actions/upload-artifact@v4", With: map[string]string{
@@ -291,7 +296,8 @@ func verifyWorkflowFileViolations(t *testing.T, path string) []string {
 // has SI-267's shape: merge-gate.yml's gate jobs, identical in every key and
 // value, and one evidence job that needs all of them, carries no `if:` or
 // `continue-on-error:`, and runs exactly checkout, setup-go, the verdict call,
-// the build, `verdi sync --produce`, and the upload, in that order.
+// Node (SI-293), the build, `verdi sync --produce`, and the upload, in that
+// order.
 func TestVerifyWorkflowRunsMergeGateJobsThenProducesEvidence(t *testing.T) {
 	for _, v := range verifyWorkflowFileViolations(t, workflowPath(verdiRepoRoot, "verify.yml")) {
 		t.Error(v)
@@ -355,6 +361,11 @@ jobs:
           go-version: "1.25"
       - name: Require every gate job to succeed
         run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} static=${{ needs.static.result }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
       - run: go build -o .build/verdi ./cmd/verdi
       - name: Produce the evidence bundle
         run: ./.build/verdi sync --produce
@@ -383,6 +394,8 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		produceStep     = "      - name: Produce the evidence bundle\n        run: ./.build/verdi sync --produce\n"
 		uploadStep      = "      - uses: actions/upload-artifact@v4\n        with:\n          name: verdi-evidence\n          path: .verdi/data/derived/\n          if-no-files-found: error\n"
 		evidenceSetupGo = "fetch-depth: 0\n      - uses: actions/setup-go@v5\n"
+		nodeStep        = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n"
+		buildStep       = "      - run: go build -o .build/verdi ./cmd/verdi\n"
 	)
 	cases := []struct {
 		name      string
@@ -419,14 +432,21 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		{name: "the evidence job needs no gate job", verify: verify(evidenceNeeds, ""), want: "needs [], want exactly the gate jobs [e2e static]"},
 		{name: "a shallow evidence checkout", verify: verify(evidenceSetupGo, "{}\n      - uses: actions/setup-go@v5\n"), want: "step 0 must be: uses actions/checkout@v4 with map[fetch-depth:0]; got: uses actions/checkout@v4 with map[]"},
 		{name: "the verdict omits a gate job", verify: verify("run: scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} static=", "run: scripts/merge-gate-verdict.sh static="), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh e2e=${{ needs.e2e.result }} static=${{ needs.static.result }}\"; got: run \"scripts/merge-gate-verdict.sh static="},
-		{name: "no verdict step", verify: verify(verdictStep, ""), want: "runs 5 steps, want exactly these 6"},
-		{name: "production before the verdict", verify: verify(verdictStep+"      - run: go build -o .build/verdi ./cmd/verdi\n"+produceStep, "      - run: go build -o .build/verdi ./cmd/verdi\n"+produceStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
-		{name: "the upload before production", verify: verify(produceStep+uploadStep, uploadStep+produceStep), want: "step 4 must be: run \"./.build/verdi sync --produce\"; got: uses actions/upload-artifact@v4"},
-		{name: "production twice", verify: verify(produceStep, produceStep+produceStep), want: "runs 7 steps, want exactly these 6"},
-		{name: "production over its own failure", verify: verify("run: ./.build/verdi sync --produce\n", "run: ./.build/verdi sync --produce || true\n"), want: "step 4 must be: run \"./.build/verdi sync --produce\"; got: run \"./.build/verdi sync --produce || true\""},
-		{name: "the upload names another artifact", verify: verify("name: verdi-evidence\n", "name: other-evidence\n"), want: "step 5 must be: uses actions/upload-artifact@v4"},
-		{name: "the upload takes another path", verify: verify("path: .verdi/data/derived/\n", "path: .verdi/data/\n"), want: "step 5 must be: uses actions/upload-artifact@v4"},
-		{name: "an if: on an evidence step", verify: verify("      - uses: actions/upload-artifact@v4\n", "      - uses: actions/upload-artifact@v4\n        if: always()\n"), want: "step 5 (uses \"actions/upload-artifact@v4\"): key(s) [if] are not whitelisted"},
+		{name: "no verdict step", verify: verify(verdictStep, ""), want: "runs 6 steps, want exactly these 7"},
+		{name: "production before the verdict", verify: verify(verdictStep+nodeStep+buildStep+produceStep, nodeStep+buildStep+produceStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
+		{name: "no Node setup", verify: verify(nodeStep, ""), want: "runs 6 steps, want exactly these 7"},
+		{name: "Node set up after the build", verify: verify(nodeStep+buildStep, buildStep+nodeStep), want: "step 3 must be: uses actions/setup-node@v4 with map[cache:npm cache-dependency-path:e2e/package-lock.json node-version:22]; got: run \"go build -o .build/verdi ./cmd/verdi\""},
+		{name: "Node set up before the verdict", verify: verify(verdictStep+nodeStep, nodeStep+verdictStep), want: "step 2 must be: run \"scripts/merge-gate-verdict.sh"},
+		{name: "another Node version", verify: verify("node-version: \"22\"\n", "node-version: \"20\"\n"), want: "step 3 must be: uses actions/setup-node@v4"},
+		{name: "Node without the npm cache", verify: verify("          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n", ""), want: "step 3 must be: uses actions/setup-node@v4"},
+		{name: "Node set up twice", verify: verify(nodeStep, nodeStep+nodeStep), want: "runs 8 steps, want exactly these 7"},
+		{name: "an if: on the Node setup", verify: verify("      - uses: actions/setup-node@v4\n", "      - uses: actions/setup-node@v4\n        if: always()\n"), want: "step 3 (uses \"actions/setup-node@v4\"): key(s) [if] are not whitelisted"},
+		{name: "the upload before production", verify: verify(produceStep+uploadStep, uploadStep+produceStep), want: "step 5 must be: run \"./.build/verdi sync --produce\"; got: uses actions/upload-artifact@v4"},
+		{name: "production twice", verify: verify(produceStep, produceStep+produceStep), want: "runs 8 steps, want exactly these 7"},
+		{name: "production over its own failure", verify: verify("run: ./.build/verdi sync --produce\n", "run: ./.build/verdi sync --produce || true\n"), want: "step 5 must be: run \"./.build/verdi sync --produce\"; got: run \"./.build/verdi sync --produce || true\""},
+		{name: "the upload names another artifact", verify: verify("name: verdi-evidence\n", "name: other-evidence\n"), want: "step 6 must be: uses actions/upload-artifact@v4"},
+		{name: "the upload takes another path", verify: verify("path: .verdi/data/derived/\n", "path: .verdi/data/\n"), want: "step 6 must be: uses actions/upload-artifact@v4"},
+		{name: "an if: on an evidence step", verify: verify("      - uses: actions/upload-artifact@v4\n", "      - uses: actions/upload-artifact@v4\n        if: always()\n"), want: "step 6 (uses \"actions/upload-artifact@v4\"): key(s) [if] are not whitelisted"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
