@@ -58,8 +58,9 @@ func Registry() []Declaration {
 			// built in a scratch index, commit-tree, and a create-only ref;
 			// no switch, the caller's index untouched. The board's actions
 			// under /b/{branch}/ are the same ritual served against the
-			// branch's managed worktree, which the mount adds on first use
-			// (ledger SI-314 (1)).
+			// branch's managed worktree, which the mount adds on first use,
+			// or against the serving checkout when the /b/ branch is the one
+			// checked out there (ledger SI-314 (1), SI-317 (2)).
 			Ritual: "scaffold_branch",
 			Verbs: []Verb{
 				CLI("design start --from-stub"),
@@ -249,9 +250,10 @@ func Registry() []Declaration {
 			// -A, a commit with no pathspec, and a push when an origin
 			// exists — the one declared carried ritual. Under /b/{branch}/
 			// it is the same ritual in the branch's managed worktree, which
-			// the mount adds on first use (ledger SI-314 (1); the owner's
-			// 2026-09-30 decision covers the board's Commit and push
-			// wherever it is served).
+			// the mount adds on first use, or in the serving checkout when
+			// the /b/ branch is the one checked out there (ledger SI-314
+			// (1), SI-317 (2); the owner's 2026-09-30 decision covers the
+			// board's Commit and push wherever it is served).
 			Ritual: RitualBoardCommitPush,
 			Verbs: []Verb{
 				Workbench("/b/{branch}/board/spec/{name}/api/git-commit"),
@@ -267,9 +269,12 @@ func Registry() []Declaration {
 		{
 			// internal/workbench (boardspecapi.go actionGitSwitch): refuses
 			// a dirty tree (a staged entry included) before checking out.
-			// Under /b/{branch}/ the action reaches the same checkout
-			// statically but always refuses (the instance's fixed branch);
-			// the mount adds the managed worktree first (ledger SI-314 (1)).
+			// Under /b/{branch}/ the mount adds the branch's managed
+			// worktree first, and the managed worktree's own instance (its
+			// fixed branch) refuses the switch; but when the /b/ branch is
+			// the one checked out at the serving root, the request reaches
+			// the serving instance and switches HEAD there, which this
+			// declaration's fields cover (ledger SI-314 (1), SI-317 (2)).
 			Ritual: "board_switch",
 			Verbs: []Verb{
 				Workbench("/b/{branch}/board/spec/{name}/api/git-switch"),
