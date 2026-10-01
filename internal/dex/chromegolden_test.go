@@ -293,8 +293,11 @@ func scanDeclarations(t *testing.T, css string) []cssDecl {
 //     than transparent, currentColor, and the CSS-wide keywords) is
 //     allowed only in a custom-property definition (a token), in a
 //     box-shadow or text-shadow value, or in a rule whose selectors all
-//     target the pushpin (pushpinSelector);
-//   - a font-family value is exactly one font token, var(--…).
+//     target the pushpin (pushpinRule). A var() fallback is scanned like
+//     any value: only the token's name is set aside;
+//   - a font-family value is exactly one font token, var(--…), and so is
+//     a font shorthand's family, unless the whole shorthand is a CSS-wide
+//     keyword (fontShorthandOK).
 //
 // Declarations outside workbench-only blocks are the docs site's shared
 // rules, which this story does not add, and are not checked.
@@ -313,6 +316,11 @@ func tokenRuleViolations(decls []cssDecl) []string {
 				out = append(out, fmt.Sprintf("%s: %s in %q uses no font token (var(--…))", d.name, d.value, d.rule))
 			}
 			continue
+		case prop == "font":
+			if !fontShorthandOK(d.value) {
+				out = append(out, fmt.Sprintf("%s: %s in %q has a family that is no font token (var(--…))", d.name, d.value, d.rule))
+			}
+			continue
 		case prop == "box-shadow" || prop == "text-shadow", pushpinRule(d.rule):
 			continue
 		}
@@ -324,13 +332,91 @@ func tokenRuleViolations(decls []cssDecl) []string {
 }
 
 // pushpinRule reports whether every selector of a rule's prelude targets
-// the pushpin: the handoff's .yarn-handle, or a class naming the pushpin.
+// the pushpin: its subject — the last compound selector, with :has() set
+// aside — carries the handoff's .yarn-handle class or a class naming the
+// pushpin. A rule that merely mentions the pushpin (.board:has(.yarn-handle),
+// .yarn-handle ~ .card) styles something else.
 func pushpinRule(prelude string) bool {
 	if strings.HasPrefix(prelude, "@") {
 		return false
 	}
-	for _, sel := range strings.Split(prelude, ",") {
-		if !strings.Contains(sel, ".yarn-handle") && !strings.Contains(sel, "pushpin") {
+	for _, sel := range splitTopLevel(prelude, func(c byte) bool { return c == ',' }) {
+		compounds := splitTopLevel(removeHas(sel), func(c byte) bool { return c == ' ' || c == '>' || c == '+' || c == '~' || c == '\t' || c == '\n' })
+		if len(compounds) == 0 || !pushpinClassRe.MatchString(compounds[len(compounds)-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+// splitTopLevel splits s at every byte sep accepts outside parentheses,
+// dropping empty parts.
+func splitTopLevel(s string, sep func(byte) bool) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case depth == 0 && sep(c):
+			if p := strings.TrimSpace(s[start:i]); p != "" {
+				parts = append(parts, p)
+			}
+			start = i + 1
+		}
+	}
+	if p := strings.TrimSpace(s[start:]); p != "" {
+		parts = append(parts, p)
+	}
+	return parts
+}
+
+// removeHas sets every :has(…) aside from a selector, its parentheses
+// balanced.
+func removeHas(sel string) string {
+	for {
+		i := strings.Index(sel, ":has(")
+		if i < 0 {
+			return sel
+		}
+		depth, j := 0, i+len(":has")
+		for ; j < len(sel); j++ {
+			if sel[j] == '(' {
+				depth++
+			} else if sel[j] == ')' {
+				depth--
+				if depth == 0 {
+					break
+				}
+			}
+		}
+		if j >= len(sel) {
+			return sel[:i]
+		}
+		sel = sel[:i] + sel[j+1:]
+	}
+}
+
+// fontShorthandOK reports whether a font shorthand keeps SI-326's font
+// rule: its whole value is a CSS-wide keyword, or its family — what
+// follows the style, variant, weight, stretch, and size/line-height
+// components — is exactly one font token, var(--…), with no family list.
+func fontShorthandOK(value string) bool {
+	v := strings.TrimSpace(strings.ToLower(value))
+	switch v {
+	case "inherit", "initial", "unset", "revert", "revert-layer":
+		return true
+	}
+	// A family list (a comma) leaves a token that is no component before
+	// the last, or a last token that is no font token: refused below.
+	tokens := strings.Fields(v)
+	if len(tokens) < 2 || !fontTokenRe.MatchString(tokens[len(tokens)-1]) {
+		return false
+	}
+	for _, t := range tokens[:len(tokens)-1] {
+		if !fontComponentRe.MatchString(t) {
 			return false
 		}
 	}
@@ -338,24 +424,33 @@ func pushpinRule(prelude string) bool {
 }
 
 var (
-	fontTokenRe       = regexp.MustCompile(`^var\(--[A-Za-z0-9_-]+\)$`)
-	hexColourRe       = regexp.MustCompile(`#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b`)
-	colourFunctionRe  = regexp.MustCompile(`\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(`)
-	nestedReferenceRe = regexp.MustCompile(`(?:var|url)\([^()]*\)|"[^"]*"|'[^']*'`)
-	wordRe            = regexp.MustCompile(`[a-z]+`)
+	fontTokenRe      = regexp.MustCompile(`^var\(--[A-Za-z0-9_-]+\)$`)
+	hexColourRe      = regexp.MustCompile(`#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b`)
+	colourFunctionRe = regexp.MustCompile(`\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(`)
+	// pushpinClassRe is a compound selector carrying the pushpin's class:
+	// the handoff's .yarn-handle, or a class naming the pushpin.
+	pushpinClassRe = regexp.MustCompile(`\.(?:yarn-handle|[a-z0-9_-]*pushpin[a-z0-9_-]*)(?:[^a-z0-9_-]|$)`)
+	// tokenNameRe is a var() reference's token name, which is set aside;
+	// its fallback is scanned.
+	tokenNameRe = regexp.MustCompile(`var\(\s*--[a-z0-9_-]+`)
+	// opaqueRe is what can carry no colour of a value's own: a url() and
+	// a string.
+	opaqueRe = regexp.MustCompile(`url\([^()]*\)|"[^"]*"|'[^']*'`)
+	// identRe is one whole identifier token, and whether a function's
+	// opening parenthesis follows it.
+	identRe = regexp.MustCompile(`-?[a-z_][a-z0-9_-]*(\()?`)
+	// fontComponentRe is a font shorthand component before the family: a
+	// style, variant, weight, or stretch keyword, a number, a size with an
+	// optional line height, or a token.
+	fontComponentRe = regexp.MustCompile(`^(?:normal|italic|oblique|small-caps|bold|bolder|lighter|(?:ultra-|extra-|semi-)?(?:condensed|expanded)|xx-small|x-small|small|medium|large|x-large|xx-large|xxx-large|smaller|larger|[0-9.]+(?:[a-z]+|%)?(?:/[0-9.]+(?:[a-z]+|%)?)?|var\(--[a-z0-9_-]+\))$`)
 )
 
-// colourLiteral returns the first colour literal value spells — tokens'
-// names, url()s, and strings set aside — or "" when it spells none.
+// colourLiteral returns the first colour literal value spells — a token's
+// name, url()s, and strings set aside, a var() fallback scanned — or ""
+// when it spells none. A named colour counts only as a whole identifier
+// token, never inside a longer one or as a function's name (tan()).
 func colourLiteral(value string) string {
-	v := strings.ToLower(value)
-	for {
-		stripped := nestedReferenceRe.ReplaceAllString(v, " ")
-		if stripped == v {
-			break
-		}
-		v = stripped
-	}
+	v := opaqueRe.ReplaceAllString(tokenNameRe.ReplaceAllString(strings.ToLower(value), "var("), " ")
 	if m := hexColourRe.FindString(v); m != "" {
 		return m
 	}
@@ -363,9 +458,9 @@ func colourLiteral(value string) string {
 		return m
 	}
 	named := namedColours()
-	for _, w := range wordRe.FindAllString(v, -1) {
-		if named[w] {
-			return w
+	for _, m := range identRe.FindAllStringSubmatch(v, -1) {
+		if m[1] == "" && named[m[0]] {
+			return m[0]
 		}
 	}
 	return ""

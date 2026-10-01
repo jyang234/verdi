@@ -34,6 +34,31 @@ func TestTokenRules(t *testing.T) {
 		// The pushpin keeps its gradient highlights.
 		{name: "the pushpin's gradient highlights", css: block(".yarn-handle { background: radial-gradient(circle at 33% 28%, #dd9482, var(--yarn) 55%, #6f2418); }")},
 		{name: "a rule targeting the pushpin and something else", css: block(".yarn-handle, .card { background: #dd9482; }"), refused: "background"},
+		// A var() fallback is scanned: only the token's name is set aside
+		// (F1A-A5).
+		{name: "a token with no fallback", css: block(".x { background: var(--paper); }")},
+		{name: "a hex fallback", css: block(".x { color: var(--wal-edge, #d6cdb6); }"), refused: "color"},
+		{name: "a named-colour fallback", css: block(".x { color: var(--ink, red); }"), refused: "color"},
+		{name: "a fallback nested in a fallback", css: block(".x { border: 1px solid var(--a, var(--b, #fff)); }"), refused: "border"},
+		{name: "an rgba() fallback", css: block(".x { color: var(--x, rgba(0,0,0,.5)); }"), refused: "color"},
+		{name: "a token fallback to another token", css: block(".x { color: var(--ink, var(--muted)); }")},
+		// A named colour only as a whole token, never a function's name.
+		{name: "the tan() math function", css: block(".x { color: tan(45deg); }")},
+		{name: "a hyphenated identifier holding a colour word", css: block(".x { transition: dark-red 1s; }")},
+		{name: "a named colour as a whole token", css: block(".x { color: tan; }"), refused: "color"},
+		// The pushpin is the rule's subject (F1A-A7).
+		{name: "the pushpin's own highlights", css: block(".yarn-handle { background: radial-gradient(#fff, #c33); }")},
+		{name: "the pushpin's hover state inside a card", css: block(".card .yarn-handle:hover { background: #dd9482; }")},
+		{name: "a rule whose subject has the pushpin", css: block(".board:has(.yarn-handle) { background: #fff; }"), refused: "background"},
+		{name: "a rule whose subject follows the pushpin", css: block(".yarn-handle ~ .card { color: #123456; }"), refused: "color"},
+		{name: "a rule whose subject is the pushpin's parent", css: block(".yarn-handle-row > .card { color: #123456; }"), refused: "color"},
+		{name: "the old card pseudo-element is no pushpin", css: block(".card::before { background: radial-gradient(#dd9482, #6f2418); }"), refused: "background"},
+		// The font shorthand's family is a font token (F1A-A6).
+		{name: "a font shorthand of a CSS-wide keyword", css: block(".x { font-family: var(--mono); font: inherit; }")},
+		{name: "a font shorthand with a token family", css: block(".chip { font: 700 10px/1 var(--mono); }")},
+		{name: "a font shorthand with a literal family", css: block(".sticky-body { font: italic 14px Georgia, serif; }"), refused: "font"},
+		{name: "a font shorthand with a generic family list", css: block(".chip { font: 700 10px/1 ui-monospace, monospace; }"), refused: "font"},
+		{name: "a font shorthand with a token and a literal fallback family", css: block(".chip { font: 700 10px/1 var(--mono), monospace; }"), refused: "font"},
 		// Fonts come from font tokens.
 		{name: "a font token", css: block(".chip { font-family: var(--mono); }")},
 		{name: "a literal font family", css: block(".chip { font-family: Georgia, serif; }"), refused: "font-family"},
