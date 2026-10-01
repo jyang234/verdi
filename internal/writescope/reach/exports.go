@@ -13,7 +13,9 @@ import (
 // declares, exported or not (a caller can hold an unexported type's value
 // through an exported function or interface), which covers an exported
 // alias of one of its own types; the methods of its interfaces; and its
-// exported package-level variables of function type. An exported alias of
+// exported package-level variables whose type can hold a function (a
+// function, or a struct, pointer, slice, array, map, or channel that can
+// contain one, or an empty interface). An exported alias of
 // a type declared elsewhere names methods that are not the package's
 // functions, so it is an error rather than a silent omission.
 func ExportedFuncs(prog *Program, pkgPath string) ([]string, error) {
@@ -30,7 +32,7 @@ func ExportedFuncs(prog *Program, pkgPath string) ([]string, error) {
 				out = append(out, prog.ObjectName(obj))
 			}
 		case *types.Var:
-			if _, isFunc := obj.Type().Underlying().(*types.Signature); isFunc && obj.Exported() {
+			if obj.Exported() && holdsFunc(obj.Type(), map[types.Type]bool{}) {
 				out = append(out, prog.ObjectName(obj))
 			}
 		case *types.TypeName:
@@ -61,6 +63,41 @@ func ExportedFuncs(prog *Program, pkgPath string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// holdsFunc reports whether a value of type t can hold a function: t is a
+// function type, an empty interface, or a struct, pointer, slice, array,
+// map, or channel that can contain one. An interface with methods (an
+// error sentinel) is not counted: a function value satisfies it only
+// through a named type whose methods the census lists.
+func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		return true
+	case *types.Interface:
+		return u.NumMethods() == 0
+	case *types.Pointer:
+		return holdsFunc(u.Elem(), seen)
+	case *types.Slice:
+		return holdsFunc(u.Elem(), seen)
+	case *types.Array:
+		return holdsFunc(u.Elem(), seen)
+	case *types.Chan:
+		return holdsFunc(u.Elem(), seen)
+	case *types.Map:
+		return holdsFunc(u.Key(), seen) || holdsFunc(u.Elem(), seen)
+	case *types.Struct:
+		for i := 0; i < u.NumFields(); i++ {
+			if holdsFunc(u.Field(i).Type(), seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // checkAlias accepts an exported alias only of a type the package itself

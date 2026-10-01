@@ -56,3 +56,18 @@ func NewStager() Stager { return stager{} }
 // Loc is an exported alias of a type this package declares: its methods
 // are Location's.
 type Loc = Location
+
+// Ops is an exported variable of struct type with a function field:
+// callable API through the field.
+var Ops = struct {
+	Stage func(ctx context.Context, dir string) error
+}{Stage: func(ctx context.Context, dir string) error { return Mutate(ctx, dir) }}
+
+// Steps is an exported map of functions.
+var Steps = map[string]func(ctx context.Context, dir string) error{
+	"stage": func(ctx context.Context, dir string) error { return Mutate(ctx, dir) },
+}
+
+// Default is an exported variable whose type holds no function: no code
+// runs through it.
+var Default = Location{Dir: "."}

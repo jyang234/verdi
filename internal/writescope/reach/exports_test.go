@@ -23,11 +23,13 @@ func testExportedFuncsListsEveryCallableExport(t *testing.T, prog *reach.Program
 		"gitx.CommonDir",
 		"gitx.Mutate",
 		"gitx.NewStager",
+		"gitx.Ops", // R1-RR4: exported struct variable with a function field
 		"gitx.Other",
 		"gitx.Prune",
 		"gitx.Publish",
 		"gitx.Read",
 		"gitx.StageAll", // exported variable of function type
+		"gitx.Steps",    // R1-RR4: exported map of functions
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("ExportedFuncs =\n%q\nwant\n%q", got, want)
