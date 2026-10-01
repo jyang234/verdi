@@ -13,7 +13,13 @@ import (
 // Route discovery: RouteEntries reads a package's http.ServeMux
 // registrations, statically evaluating each pattern and handler (through a
 // route table when the registration ranges over one), and scans each
-// handler for the actions it dispatches on a route wildcard.
+// handler for the actions it dispatches on a route wildcard. A
+// registration that hands a route table's row to the handler it calls
+// (internal/workbench's /b/{branch} mount: bb.dispatch(rt)) also roots the
+// route at the row's handler values, binds the row's function-typed
+// fields to them, and splits them on the route's wildcards like any other
+// handler, so the actions the row's handler dispatches are derived under
+// that route too.
 
 // RouteEntries derives the routes pkgPath registers on an http.ServeMux,
 // and the actions their handlers dispatch on a path wildcard.
@@ -25,6 +31,8 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 	type route struct {
 		pattern string
 		roots   []Root
+		bound   []*types.Var
+		site    Root
 		pkg     *Package
 	}
 	var routes []route
@@ -51,18 +59,23 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 				ferr = err
 				return false
 			}
+			site, err := enclosingFunc(pkg, f, call)
+			if err != nil {
+				ferr = err
+				return false
+			}
 			for _, env := range envs {
 				pattern, err := prog.evalString(pkg, call.Args[0], env)
 				if err != nil {
 					ferr = err
 					return false
 				}
-				root, err := prog.evalHandler(pkg, call.Args[1], env)
+				roots, bound, err := prog.evalHandler(pkg, call.Args[1], env)
 				if err != nil {
 					ferr = err
 					return false
 				}
-				routes = append(routes, route{pattern: pattern, roots: []Root{root}, pkg: pkg})
+				routes = append(routes, route{pattern: pattern, roots: roots, bound: bound, site: site, pkg: pkg})
 			}
 			return true
 		})
@@ -74,6 +87,7 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 		return nil, fmt.Errorf("reach: %s registers no route", pkgPath)
 	}
 	seen := map[string]bool{}
+	sites := map[string]Root{}
 	var out []Entry
 	s := newKeyScan(prog, false)
 	for _, rt := range routes {
@@ -81,8 +95,9 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 			return nil, fmt.Errorf("reach: %s registers route %q twice", pkgPath, rt.pattern)
 		}
 		seen[rt.pattern] = true
-		out = append(out, Entry{Surface: surface, Name: rt.pattern, Roots: rt.roots})
-		ctx := scanCtx{prefix: rt.pattern, keys: map[types.Object]string{}, wilds: wildcards(rt.pattern)}
+		sites[rt.pattern] = rt.site
+		out = append(out, Entry{Surface: surface, Name: rt.pattern, Roots: rt.roots, Site: rt.site, Bound: rt.bound})
+		ctx := scanCtx{parent: rt.pattern, prefix: rt.pattern, keys: map[types.Object]string{}, wilds: wildcards(rt.pattern)}
 		for _, r := range rt.roots {
 			switch {
 			case r.Func != nil:
@@ -97,6 +112,7 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 		if seen[e.Name] {
 			return nil, fmt.Errorf("reach: action %q collides with a registered route", e.Name)
 		}
+		e.Site = sites[s.parent[e.Name]]
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -235,28 +251,123 @@ func (p *Program) evalString(pkg *Package, e ast.Expr, env *rowEnv) (string, err
 	return "", fmt.Errorf("reach: %s: route pattern is neither a constant nor a route-table field", p.Fset.Position(e.Pos()))
 }
 
-func (p *Program) evalHandler(pkg *Package, e ast.Expr, env *rowEnv) (Root, error) {
+// evalHandler resolves a registration's handler to the roots its code
+// starts at, and the route-table fields it binds.
+func (p *Program) evalHandler(pkg *Package, e ast.Expr, env *rowEnv) ([]Root, []*types.Var, error) {
 	switch x := unparen(e).(type) {
 	case *ast.FuncLit:
-		return Root{Lit: x}, nil
+		return []Root{{Lit: x}}, nil, nil
 	case *ast.Ident, *ast.SelectorExpr:
 		if v, ok := env.rowField(pkg, x); ok {
 			return p.evalHandler(env.pkg, v, nil)
 		}
 		if fn := p.funcValue(pkg, x); fn != nil {
-			return Root{Func: fn}, nil
+			return []Root{{Func: fn}}, nil, nil
 		}
 	case *ast.CallExpr:
 		if v, ok := env.rowField(pkg, x.Fun); ok {
 			if fn := p.funcValue(env.pkg, v); fn != nil {
-				return Root{Func: fn}, nil
+				return []Root{{Func: fn}}, nil, nil
 			}
 		}
 		if fn := p.staticCallee(pkg, x); fn != nil {
-			return Root{Func: fn}, nil
+			roots, bound, err := p.rowArgs(pkg, x, env)
+			if err != nil {
+				return nil, nil, err
+			}
+			return append([]Root{{Func: fn}}, roots...), bound, nil
 		}
 	}
-	return Root{}, fmt.Errorf("reach: %s: route handler is not a function, method, literal, or route-table field", p.Fset.Position(e.Pos()))
+	return nil, nil, fmt.Errorf("reach: %s: route handler is not a function, method, literal, or route-table field", p.Fset.Position(e.Pos()))
+}
+
+// rowArgs returns the extra roots a handler call's arguments carry from
+// its route-table row: every function-typed field's value when the row
+// itself is handed over (those fields are then bound), or one field's
+// value when only that field is.
+func (p *Program) rowArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root, []*types.Var, error) {
+	if env == nil {
+		return nil, nil, nil
+	}
+	var roots []Root
+	var bound []*types.Var
+	for _, arg := range call.Args {
+		a := unparen(arg)
+		if u, ok := a.(*ast.UnaryExpr); ok && u.Op == token.AND {
+			a = unparen(u.X)
+		}
+		if id, ok := a.(*ast.Ident); ok && pkg.Info.Uses[id] == env.rangeVar {
+			st, ok := env.rangeVar.Type().Underlying().(*types.Struct)
+			if !ok {
+				return nil, nil, fmt.Errorf("reach: %s: a route-table row handed to a handler is not a struct", p.Fset.Position(arg.Pos()))
+			}
+			for i := 0; i < st.NumFields(); i++ {
+				f := st.Field(i)
+				if !isFuncField(f) {
+					continue
+				}
+				bound = append(bound, f.Origin())
+				v, ok := env.row[f.Name()]
+				if !ok {
+					continue // an omitted field is nil: it calls nothing
+				}
+				root, err := p.rowValue(env, v)
+				if err != nil {
+					return nil, nil, err
+				}
+				roots = append(roots, root)
+			}
+			continue
+		}
+		if v, ok := env.rowField(pkg, a); ok {
+			if t := pkg.Info.TypeOf(a); t != nil {
+				if _, isFunc := t.Underlying().(*types.Signature); isFunc {
+					root, err := p.rowValue(env, v)
+					if err != nil {
+						return nil, nil, err
+					}
+					roots = append(roots, root)
+				}
+			}
+		}
+	}
+	return roots, bound, nil
+}
+
+// rowValue resolves one function-typed row field's value; a value that is
+// not a module function, method, or literal fails closed.
+func (p *Program) rowValue(env *rowEnv, v ast.Expr) (Root, error) {
+	if lit, ok := unparen(v).(*ast.FuncLit); ok {
+		return Root{Lit: lit}, nil
+	}
+	if fn := p.funcValue(env.pkg, v); fn != nil {
+		return Root{Func: fn}, nil
+	}
+	return Root{}, fmt.Errorf("reach: %s: a route-table row's function-typed field is not a module function, method, or literal", p.Fset.Position(v.Pos()))
+}
+
+// enclosingFunc returns the declared function or function literal of f
+// whose body holds n: the code a host reaches when it registers n.
+func enclosingFunc(pkg *Package, f *ast.File, n ast.Node) (Root, error) {
+	var out Root
+	ast.Inspect(f, func(x ast.Node) bool {
+		if x == nil || x.Pos() > n.Pos() || n.End() > x.End() {
+			return x == nil
+		}
+		switch fn := x.(type) {
+		case *ast.FuncDecl:
+			if obj, ok := pkg.Info.Defs[fn.Name].(*types.Func); ok {
+				out = Root{Func: obj}
+			}
+		case *ast.FuncLit:
+			out = Root{Lit: fn}
+		}
+		return true
+	})
+	if out == (Root{}) {
+		return Root{}, fmt.Errorf("reach: %s is not inside a function", pkg.Path)
+	}
+	return out, nil
 }
 
 func isServeMuxRegistration(pkg *Package, call *ast.CallExpr) bool {

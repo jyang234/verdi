@@ -35,15 +35,22 @@ func Registry() []Declaration {
 		{
 			// internal/stubinstantiate.CommitScaffoldBranch: a blob, a tree
 			// built in a scratch index, commit-tree, and a create-only ref;
-			// no switch, the caller's index untouched.
+			// no switch, the caller's index untouched. The board's actions
+			// under /b/{branch}/ are the same ritual served against the
+			// branch's managed worktree, which the mount adds on first use
+			// (ledger SI-314 (1)).
 			Ritual: "scaffold_branch",
 			Verbs: []Verb{
 				CLI("design start --from-stub"),
+				Workbench("/b/{branch}/board/spec/{name}/api/create"),
+				Workbench("/b/{branch}/board/spec/{name}/api/revise"),
+				Workbench("/b/{branch}/board/spec/{name}/api/stub-instantiate"),
 				Workbench("/board/spec/{name}/api/create"),
 				Workbench("/board/spec/{name}/api/revise"),
 				Workbench("/board/spec/{name}/api/stub-instantiate"),
 			},
 			RefsCreate: []RefPattern{"refs/heads/design/*"},
+			Worktrees:  []WorktreePattern{".verdi/data/worktrees/*"},
 			StagePaths: []PathPattern{".verdi/specs/active/*/"},
 			IndexCarry: CarryScoped,
 		},
@@ -170,7 +177,9 @@ func Registry() []Declaration {
 		{
 			// internal/workbench (branchboard.go) through
 			// internal/wtmanager.EnsureWorktree: every /b/{branch}/ route
-			// adds the branch's managed worktree on first use.
+			// adds the branch's managed worktree on first use. The board's
+			// actions beneath the API route join their root ritual's
+			// declaration instead (ledger SI-314 (1)).
 			Ritual: "managed_worktree",
 			Verbs: []Verb{
 				Workbench("/b/{branch}/board/spec/{name}"),
@@ -215,10 +224,18 @@ func Registry() []Declaration {
 		{
 			// internal/workbench (boardspecapi.go actionGitCommit): git add
 			// -A, a commit with no pathspec, and a push when an origin
-			// exists — the one declared carried ritual.
-			Ritual:            RitualBoardCommitPush,
-			Verbs:             []Verb{Workbench("/board/spec/{name}/api/git-commit")},
+			// exists — the one declared carried ritual. Under /b/{branch}/
+			// it is the same ritual in the branch's managed worktree, which
+			// the mount adds on first use (ledger SI-314 (1); the owner's
+			// 2026-09-30 decision covers the board's Commit and push
+			// wherever it is served).
+			Ritual: RitualBoardCommitPush,
+			Verbs: []Verb{
+				Workbench("/b/{branch}/board/spec/{name}/api/git-commit"),
+				Workbench("/board/spec/{name}/api/git-commit"),
+			},
 			RefsMove:          []RefPattern{RefCheckedOut},
+			Worktrees:         []WorktreePattern{".verdi/data/worktrees/*"},
 			StagePaths:        []PathPattern{PathWholeTree},
 			IndexCarry:        CarryCarried,
 			UntrackedMayEnter: true,
@@ -227,9 +244,16 @@ func Registry() []Declaration {
 		{
 			// internal/workbench (boardspecapi.go actionGitSwitch): refuses
 			// a dirty tree (a staged entry included) before checking out.
-			Ritual:     "board_switch",
-			Verbs:      []Verb{Workbench("/board/spec/{name}/api/git-switch")},
+			// Under /b/{branch}/ the action reaches the same checkout
+			// statically but always refuses (the instance's fixed branch);
+			// the mount adds the managed worktree first (ledger SI-314 (1)).
+			Ritual: "board_switch",
+			Verbs: []Verb{
+				Workbench("/b/{branch}/board/spec/{name}/api/git-switch"),
+				Workbench("/board/spec/{name}/api/git-switch"),
+			},
 			HeadSwitch: true,
+			Worktrees:  []WorktreePattern{".verdi/data/worktrees/*"},
 			IndexCarry: CarryRefused,
 		},
 	}

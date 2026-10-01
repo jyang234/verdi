@@ -18,6 +18,7 @@ func TestExportedFuncs_ListsFunctionsAndExportedMethods(t *testing.T) {
 		"gitx.CommonDir",
 		"gitx.Mutate",
 		"gitx.Other",
+		"gitx.Publish",
 		"gitx.Read",
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {

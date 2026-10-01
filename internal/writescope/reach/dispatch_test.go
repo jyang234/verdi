@@ -132,7 +132,12 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 		t.Fatalf("RouteEntries: %v", err)
 	}
 	want := []string{
+		"/audit",
 		"/b/{branch}/thing/{name}",
+		"/b/{branch}/thing/{name}/api/look",
+		"/b/{branch}/thing/{name}/api/mutate",
+		"/b/{branch}/thing/{name}/api/peek",
+		"/b/{branch}/thing/{name}/api/push",
 		"/b/{branch}/thing/{name}/api/{action}",
 		"/health",
 		"/legacy/{key}/commit",
@@ -147,20 +152,24 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 		"/thing/{name}/api/{action}",
 	}
 	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("route entries =\n%q\nwant\n%q", got, want)
+		t.Errorf("route entries =\n%q\nwant\n%q", got, want)
 	}
 	got := reachByName(t, prog, entries)
 	tests := []struct {
 		route string
 		want  string
 	}{
-		{"/thing/{name}/api/push", "Mutate"},                // switch arm in the handler closure
+		{"/thing/{name}/api/push", "Publish"},               // switch arm in the handler closure
 		{"/thing/{name}/api/mutate", "Mutate"},              // arm of a helper the key is handed to
 		{"/thing/{name}/api/look", ""},                      // read-only arm
 		{"/thing/{name}/api/{action}", ""},                  // the route itself: its arms are cut
 		{"/legacy/{key}/commit", "Mutate"},                  // switch directly on r.PathValue
-		{"/b/{branch}/thing/{name}", "Mutate"},              // prefix mount's own work, from a route table
-		{"/b/{branch}/thing/{name}/api/{action}", "Mutate"}, // same root, second table row
+		{"/b/{branch}/thing/{name}", "Mutate"},              // prefix mount's own work only, from a route table
+		{"/b/{branch}/thing/{name}/api/{action}", "Mutate"}, // the prefix's own work; the row's actions are cut
+		{"/b/{branch}/thing/{name}/api/push", "Publish"},    // R1-A1: the row's handler, split on {action} under the prefix
+		{"/b/{branch}/thing/{name}/api/mutate", "Mutate"},   // the row's helper arm under the prefix
+		{"/b/{branch}/thing/{name}/api/look", ""},           // read-only arm under the prefix
+		{"/audit", "Mutate"},                                // a function-typed field Register filled, through a parameter and a second field
 		{"/thing/{name}", ""},                               // table row's handler, read-only
 		{"/health", ""},
 	}
@@ -168,6 +177,51 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 		t.Run(tt.route, func(t *testing.T) {
 			if got[tt.route] != tt.want {
 				t.Fatalf("%s reaches %q, want %q", tt.route, got[tt.route], tt.want)
+			}
+		})
+	}
+}
+
+// TestRouteEntries_FailClosedOnUnresolvedFieldCalls pins R1-A1's fail-closed
+// half: inside a route's reach, a call through a route table's
+// function-typed field its registration did not bind, or through a field
+// holding a value no static evaluation can follow, is an error, never a
+// route that reaches nothing.
+func TestRouteEntries_FailClosedOnUnresolvedFieldCalls(t *testing.T) {
+	prog := loadSynth(t)
+	entries, err := reach.RouteEntries(prog, "example.com/synth/strictweb", "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	if got := entryNames(entries); strings.Join(got, "|") != "/opaque|/p/x|/stray" {
+		t.Fatalf("route entries = %q", got)
+	}
+	g, err := reach.Build(prog, entries)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	tests := []struct {
+		route   string
+		wantErr string // "" for no error
+	}{
+		{"/p/x", ""},
+		{"/stray", "handler"},
+		{"/opaque", "hook"},
+	}
+	byName := map[string]reach.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	for _, tt := range tests {
+		t.Run(tt.route, func(t *testing.T) {
+			hits, err := g.Reach(byName[tt.route], synthTargets(t, prog))
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("Reach(%s) = %v, want no error", tt.route, err)
+			case tt.wantErr != "" && err == nil:
+				t.Fatalf("Reach(%s) = %v, nil; want an error naming %q (fail closed)", tt.route, hitNames(hits), tt.wantErr)
+			case tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr):
+				t.Fatalf("Reach(%s) = %v, want it to name %q", tt.route, err, tt.wantErr)
 			}
 		})
 	}

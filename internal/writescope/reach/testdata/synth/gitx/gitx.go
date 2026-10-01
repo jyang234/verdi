@@ -1,5 +1,5 @@
-// Package gitx is a synthetic stand-in for internal/gitx: one mutating
-// primitive, one read-only primitive, one mutating primitive no entry
+// Package gitx is a synthetic stand-in for internal/gitx: two mutating
+// primitives, one read-only primitive, one mutating primitive no entry
 // reaches, and the git-directory locator the taint detector sources from.
 package gitx
 
@@ -7,6 +7,10 @@ import "context"
 
 // Mutate is the synthetic mutating primitive.
 func Mutate(ctx context.Context, dir string) error { return nil }
+
+// Publish is the second mutating primitive: only the workbench API's
+// actions reach it, so a test can tell an action's work from its route's.
+func Publish(ctx context.Context, dir string) error { return nil }
 
 // Read is the synthetic read-only primitive.
 func Read(ctx context.Context, dir string) (string, error) { return dir, nil }

@@ -171,12 +171,14 @@ type keyScan struct {
 	prog    *Program
 	cli     bool
 	arms    map[string][]ast.Node
+	parent  map[string]string // arm name -> the entry whose dispatch derives it
 	visited map[string]bool
 }
 
 // scanCtx is one dispatch level.
 type scanCtx struct {
 	pkg    *Package
+	parent string                  // the entry this level's arms belong to
 	prefix string                  // CLI: the verb so far plus a space; routes: the pattern
 	args   map[types.Object]bool   // CLI: []string values whose [0] is the key
 	keys   map[types.Object]string // values holding the key -> the route wildcard it came from
@@ -184,7 +186,7 @@ type scanCtx struct {
 }
 
 func newKeyScan(prog *Program, cli bool) *keyScan {
-	return &keyScan{prog: prog, cli: cli, arms: map[string][]ast.Node{}, visited: map[string]bool{}}
+	return &keyScan{prog: prog, cli: cli, arms: map[string][]ast.Node{}, parent: map[string]string{}, visited: map[string]bool{}}
 }
 
 func (s *keyScan) entries(surface string) []Entry {
@@ -214,7 +216,7 @@ func (s *keyScan) scanFunc(fn *types.Func, ctx scanCtx) {
 }
 
 func (s *keyScan) scanNode(body ast.Node, ctx scanCtx) {
-	memo := fmt.Sprintf("%d|%s|%s|%s", body.Pos(), ctx.prefix, objList(ctx.args), keyList(ctx.keys))
+	memo := fmt.Sprintf("%d|%s|%s|%s|%s", body.Pos(), ctx.parent, ctx.prefix, objList(ctx.args), keyList(ctx.keys))
 	if s.visited[memo] {
 		return
 	}
@@ -299,6 +301,7 @@ func (s *keyScan) visit(n ast.Node, ctx scanCtx, arms []string) {
 				names := s.armNames(ctx, w, lits)
 				for _, name := range names {
 					s.arms[name] = appendNode(s.arms[name], cc)
+					s.parent[name] = ctx.parent
 				}
 				for _, b := range cc.Body {
 					s.visit(b, ctx, names)
@@ -320,6 +323,7 @@ func (s *keyScan) visit(n ast.Node, ctx scanCtx, arms []string) {
 			names := s.armNames(ctx, w, lits)
 			for _, name := range names {
 				s.arms[name] = appendNode(s.arms[name], st.Body)
+				s.parent[name] = ctx.parent
 			}
 			s.visit(st.Body, ctx, names)
 			if st.Else != nil {
@@ -351,19 +355,19 @@ func (s *keyScan) followCall(ctx scanCtx, call *ast.CallExpr, arms []string) {
 		}
 		param := params.At(pi)
 		if w, ok := s.keyOf(ctx, arg); ok {
-			s.scanFunc(callee, scanCtx{prefix: ctx.prefix, args: map[types.Object]bool{}, keys: map[types.Object]string{param: w}, wilds: ctx.wilds})
+			s.scanFunc(callee, scanCtx{parent: ctx.parent, prefix: ctx.prefix, args: map[types.Object]bool{}, keys: map[types.Object]string{param: w}, wilds: ctx.wilds})
 			continue
 		}
 		if !s.cli {
 			continue
 		}
 		if id, ok := unparen(arg).(*ast.Ident); ok && ctx.args[ctx.pkg.Info.Uses[id]] {
-			s.scanFunc(callee, scanCtx{prefix: ctx.prefix, args: map[types.Object]bool{param: true}, keys: map[types.Object]string{}})
+			s.scanFunc(callee, scanCtx{parent: ctx.parent, prefix: ctx.prefix, args: map[types.Object]bool{param: true}, keys: map[types.Object]string{}})
 			continue
 		}
 		if s.isRestOfArgs(ctx, arg) {
 			for _, a := range arms {
-				s.scanFunc(callee, scanCtx{prefix: a + " ", args: map[types.Object]bool{param: true}, keys: map[types.Object]string{}})
+				s.scanFunc(callee, scanCtx{parent: a, prefix: a + " ", args: map[types.Object]bool{param: true}, keys: map[types.Object]string{}})
 			}
 		}
 	}

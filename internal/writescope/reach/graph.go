@@ -25,6 +25,17 @@ type Entry struct {
 	Surface string
 	Name    string
 	Roots   []Root
+	// Site is the code that dispatches the entry from a host: the function
+	// or function literal holding a route's ServeMux registration (a route
+	// action carries its route's). Zero for a verb no host serves. An entry
+	// with a site fails closed, in Reach, on a call through a
+	// function-typed field the analysis cannot resolve: its collaborators
+	// were built by code outside its own reach.
+	Site Root
+	// Bound names the route table's function-typed fields whose row values
+	// Roots already holds, because the registration handed the row itself
+	// to the handler it calls (internal/workbench's /b/{branch} mount).
+	Bound []*types.Var
 }
 
 // Hit is one target an entry reaches, with one call path from a root of
@@ -59,13 +70,29 @@ type Graph struct {
 	named []*types.Named
 	impls map[*types.Func][]*types.Func
 
+	// flow and fieldVals resolve reads of function-typed struct fields
+	// (fields.go); bound is every route-table field some entry binds, whose
+	// reads resolve per entry instead; stores is every selector an
+	// assignment writes, which is not a read.
+	flow      *fieldFlow
+	fieldVals map[*types.Var]fieldValue
+	bound     map[*types.Var]bool
+	stores    map[ast.Expr]bool
+
 	cut map[int]bool
 }
 
 type node struct {
-	name string
-	fn   *types.Func
-	out  map[int]bool
+	name  string
+	fn    *types.Func
+	out   map[int]bool
+	reads []fieldRead
+}
+
+// fieldRead is one read of a function-typed struct field in a node's code.
+type fieldRead struct {
+	field *types.Var
+	pos   token.Pos
 }
 
 // Build builds the graph for prog, with every root of entries as a node
@@ -79,6 +106,10 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 		byVar:  map[*types.Var]int{},
 		impls:  map[*types.Func][]*types.Func{},
 		cut:    map[int]bool{},
+
+		fieldVals: map[*types.Var]fieldValue{},
+		bound:     map[*types.Var]bool{},
+		stores:    map[ast.Expr]bool{},
 	}
 	for _, e := range entries {
 		if len(e.Roots) == 0 {
@@ -97,7 +128,13 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 			}
 		}
 	}
+	for _, e := range entries {
+		for _, f := range e.Bound {
+			g.bound[f.Origin()] = true
+		}
+	}
 	g.declare()
+	g.flow = newFieldFlow(prog)
 	g.connect()
 	for _, e := range entries {
 		ids, err := g.rootIDs(e)
@@ -134,6 +171,11 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) 
 			queue = append(queue, id)
 		}
 	}
+	hosted := entry.Site != (Root{})
+	boundHere := map[*types.Var]bool{}
+	for _, f := range entry.Bound {
+		boundHere[f.Origin()] = true
+	}
 	var hits []Hit
 	for len(queue) > 0 {
 		id := queue[0]
@@ -141,6 +183,11 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) 
 		n := g.nodes[id]
 		if n.fn != nil && targets[n.fn] {
 			hits = append(hits, Hit{Func: n.fn, Path: g.path(parent, id)})
+		}
+		if hosted {
+			if err := g.checkReads(entry, n, boundHere); err != nil {
+				return nil, err
+			}
 		}
 		for _, next := range sortedKeys(n.out) {
 			if _, seen := parent[next]; seen {
@@ -155,6 +202,32 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) 
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].Func.FullName() < hits[j].Func.FullName() })
 	return hits, nil
+}
+
+// checkReads fails closed on a hosted entry's read of a function-typed
+// field whose values this entry cannot know: a route table's field its
+// registration did not bind, or a field holding a value the field flow
+// cannot follow.
+func (g *Graph) checkReads(entry Entry, n *node, boundHere map[*types.Var]bool) error {
+	for _, rd := range n.reads {
+		name := g.fieldName(rd.field)
+		switch {
+		case boundHere[rd.field]:
+		case g.bound[rd.field]:
+			return fmt.Errorf("reach: entry %s %q: %s reads route-table field %s outside the registration that binds it, so its value is unknown here (fail closed)",
+				entry.Surface, entry.Name, g.prog.Fset.Position(rd.pos), name)
+		default:
+			if v := g.fieldValues(rd.field); v.opaque {
+				return fmt.Errorf("reach: entry %s %q: %s reads function-typed field %s, but a value stored in it (%s) cannot be followed statically (fail closed)",
+					entry.Surface, entry.Name, g.prog.Fset.Position(rd.pos), name, g.prog.Fset.Position(v.opaqueAt))
+			}
+		}
+	}
+	return nil
+}
+
+func (g *Graph) fieldName(f *types.Var) string {
+	return strings.TrimPrefix(f.Pkg().Path(), g.prog.Module+"/") + "." + f.Name()
 }
 
 // FuncName returns fn's full name with the module path prefix trimmed,
@@ -329,7 +402,24 @@ func (g *Graph) walk(pkg *Package, from int, root ast.Node, sig *types.Signature
 					g.convert(from, pkg, res, sig.Results().At(i).Type())
 				}
 			}
+		case *ast.SelectorExpr:
+			if g.stores[x] {
+				break
+			}
+			if field := funcFieldOf(pkg, x); field != nil {
+				g.nodes[from].reads = append(g.nodes[from].reads, fieldRead{field: field, pos: x.Pos()})
+				if !g.bound[field] {
+					for _, id := range g.fieldValues(field).ids {
+						g.edge(from, id)
+					}
+				}
+			}
 		case *ast.AssignStmt:
+			for _, lhs := range x.Lhs {
+				if sel, ok := unparen(lhs).(*ast.SelectorExpr); ok {
+					g.stores[sel] = true
+				}
+			}
 			if len(x.Lhs) == len(x.Rhs) {
 				for i := range x.Lhs {
 					g.convert(from, pkg, x.Rhs[i], pkg.Info.TypeOf(x.Lhs[i]))

@@ -64,6 +64,9 @@ func ReadOnly(ctx context.Context) error {
 	return err
 }
 
+// Publish reaches the second mutating primitive.
+func Publish(ctx context.Context) error { return gitx.Publish(ctx, ".") }
+
 // Unreached is the only caller of gitx.Other, and no entry reaches it.
 func Unreached(ctx context.Context) error { return gitx.Other(ctx) }
 

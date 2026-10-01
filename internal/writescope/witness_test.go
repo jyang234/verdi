@@ -61,6 +61,52 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 	t.Logf("%d of %d verbs reach a mutating function; %d declarations; %d gitx exports; %d git-directory writers; union of %d targets; %v",
 		mutating, len(facts.Verbs), len(ws.Registry()), len(facts.GitxExports), len(facts.GitDirWriters),
 		len(reach.Targets()), time.Since(start).Round(time.Millisecond))
+
+	// The falsifiers, on these same facts: each mutation of the registry,
+	// its awaiting-fix list, or the classification turns the witness red.
+	for _, m := range liveMutants() {
+		t.Run(m.name, func(t *testing.T) {
+			decls, awaiting, classes := ws.Registry(), ws.AwaitingFixes(), ws.Classification()
+			m.mutate(&decls, &awaiting, &classes)
+			got := strings.Join(ws.Check(decls, awaiting, classes, facts), "\n")
+			if !strings.Contains(got, m.want) {
+				t.Fatalf("the witness stayed green under %q (findings:\n%s\n); want a finding mentioning %q", m.name, got, m.want)
+			}
+		})
+	}
+}
+
+// liveMutant is one mutation the witness must catch on the module's own
+// facts.
+type liveMutant struct {
+	name   string
+	mutate func(*[]ws.Declaration, *[]ws.AwaitingFix, *[]ws.Classified)
+	want   string
+}
+
+// branchBoardCommit is the board's Commit and push under the /b/{branch}
+// managed-worktree mount (ledger SI-314 (1)).
+const branchBoardCommit = "/b/{branch}/board/spec/{name}/api/git-commit"
+
+func liveMutants() []liveMutant {
+	return []liveMutant{
+		{"undeclaring the /b/ git-commit action (R1-B1)", func(d *[]ws.Declaration, _ *[]ws.AwaitingFix, _ *[]ws.Classified) {
+			dropVerb(*d, ws.Workbench(branchBoardCommit))
+		}, "verb workbench:" + branchBoardCommit + " reaches internal/gitx.AddAll"},
+	}
+}
+
+// dropVerb removes v from whichever declaration names it.
+func dropVerb(decls []ws.Declaration, v ws.Verb) {
+	for i := range decls {
+		var kept []ws.Verb
+		for _, have := range decls[i].Verbs {
+			if have != v {
+				kept = append(kept, have)
+			}
+		}
+		decls[i].Verbs = kept
+	}
 }
 
 // analyzeModule computes the facts for the module at root, as the union

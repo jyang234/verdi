@@ -20,7 +20,14 @@
 //   - a dependency that type-asserts a module value received as an empty
 //     interface (any) to another interface and calls it is not followed;
 //   - a function value stored by code outside an entry's reach and called
-//     inside it is attributed to the code that stored it;
+//     inside it is attributed to the code that stored it, except through a
+//     function-typed struct field: a read of one resolves to every value
+//     the module stores in it (fields.go), and an entry a host dispatches
+//     (a workbench route or action) fails closed on a field whose stored
+//     value cannot be followed, or on a route table's field its
+//     registration did not bind; values in maps, slices, and channels, and
+//     a variable assigned through a pointer, are still attributed to the
+//     code that stored them;
 //   - generic types are not candidates for interface dispatch (the module
 //     declares no generic type with methods at the time of writing);
 //   - each Program is one build target; the witness loads every target in
