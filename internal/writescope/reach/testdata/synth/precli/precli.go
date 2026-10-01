@@ -12,8 +12,10 @@ import (
 	"example.com/synth/hooks"
 )
 
-// booted runs a mutation while the package initializes, before any verb.
-var booted = boot()
+// A blank initializer runs a mutation while the package initializes,
+// before any verb; no code refers to it, so only the initializer itself
+// reaches what it runs.
+var _ = boot()
 
 // later only names a mutating primitive; nothing runs it at initialization.
 var later = gitx.Prune
@@ -36,9 +38,6 @@ func Run(args []string) int {
 	if args[0] == "later" {
 		_ = later(context.Background())
 		return 0
-	}
-	if booted != nil {
-		return 1
 	}
 	return 2
 }
