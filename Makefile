@@ -33,7 +33,7 @@ build:
 # cmd/e2eharness joined with the unproven-board fixture (MVP release amendment
 # R2): its tests call buildBinary — `go build ./cmd/verdi` in a subprocess —
 # and exec the result as `verdi serve`, the same cache blindness.
-CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/...
+CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/... ./internal/writescope/...
 
 # The Go tests run as disjoint shards (SI-266, owner directive 2026-09-24;
 # SI-268 split test-slow out of test-rest, owner directive 2026-09-25), so
