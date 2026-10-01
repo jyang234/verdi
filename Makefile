@@ -1,11 +1,12 @@
-.PHONY: build test test-cmd test-cross test-slow test-rest vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e-setup e2e-1 e2e-2 e2e-3 e2e lint-showcase showcase-coverage hooks
+.PHONY: build test test-cmd test-cross test-slow test-rest vet fmt fmt-check lint lint-strict lint-strict-baseline verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e-setup e2e-1 e2e-2 e2e-3 e2e lint-showcase showcase-coverage hooks
 
-# Pin for the lint target. Both CI workflows install golangci-lint at this
-# exact version before the lint step runs (verify.yml and merge-gate.yml,
-# each in its static job before `make lint`), so in CI the
-# lint gate is mandatory — the `lint` target's CI=true branch refuses to pass
-# by skipping. Kept in lockstep with verdi-go's own pin so results agree
-# across the workspace if both are ever run side by side.
+# Pin for the lint and lint-strict targets. Both CI workflows install
+# golangci-lint at this exact version before the lint steps run (verify.yml
+# and merge-gate.yml, each in its static job before `make lint` and `make
+# lint-strict`; verify.yml's verify job restores the same binary, SI-309), so
+# in CI both lint gates are mandatory — each target's CI=true branch refuses
+# to pass by skipping. Kept in lockstep with verdi-go's own pin so results
+# agree across the workspace if both are ever run side by side.
 GOLANGCI_LINT_VERSION ?= v2.5.0
 
 # Where lint-store builds the real verdi binary (gitignored — see root
@@ -33,7 +34,9 @@ build:
 # cmd/e2eharness joined with the unproven-board fixture (MVP release amendment
 # R2): its tests call buildBinary — `go build ./cmd/verdi` in a subprocess —
 # and exec the result as `verdi serve`, the same cache blindness.
-CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/...
+# internal/writescope is listed because its witness reads cmd/verdi's source
+# (`go list` in a subprocess), so a source change must not hit a stale test cache.
+CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/... ./internal/writescope/...
 
 # The Go tests run as disjoint shards (SI-266, owner directive 2026-09-24;
 # SI-268 split test-slow out of test-rest, owner directive 2026-09-25), so
@@ -142,6 +145,69 @@ lint:
 	else \
 		echo "WARNING: golangci-lint not installed locally; skipping lint (install it to gate this locally)" >&2; \
 	fi
+
+# lint-strict is the strict lint gate (spec/strict-lint-gate; ledger SI-309,
+# SI-311). It runs the Makefile's one pinned golangci-lint (co-2) with
+# --config .golangci.strict.yml, so golangci-lint reads that file alone and
+# never merges .golangci.yml, the parity configuration `lint` runs, which
+# stays byte-identical; for GOOS=linux GOARCH=amd64, so every machine reports
+# CI's findings (build-constrained files differ by platform); and with
+# --issues-exit-code=0, so a reported finding is data. The JSON report goes to
+# a temporary directory. cmd/lintratchet then decides the step's exit status
+# from golangci-lint's own exit status, the report, the committed baseline
+# (.golangci.strict-baseline.json), and the baseline at the merge base with
+# the default branch, or, on the default branch, at HEAD's first parent: 0
+# clean; 1 for a new finding, a stale allowance, or a grown baseline; 2 for
+# any operational failure, a nonzero golangci-lint exit included
+# (internal/lintratchet).
+#
+# A missing golangci-lint behaves exactly as in `lint`: a hard failure when
+# CI=true, a warning and a skip locally; another version than the pin is a
+# warning. The gate timing series records the step's time like every
+# VERIFY_STEPS entry's, against the declared 60-second budget
+# (strict-lint-target-v2 dc-5). internal/specalign's
+# TestStrictLintTargetIsWired reads this recipe through `make -n`.
+#
+# lint-strict-baseline regenerates the baseline from the same run. Run it
+# after fixing a finding, so the change that fixes it also removes its
+# allowance; a new finding is fixed, never written into the baseline (co-2).
+# It refuses any golangci-lint but the pinned version and is never a
+# VERIFY_STEPS entry.
+LINT_STRICT_CONFIG := .golangci.strict.yml
+LINT_STRICT_BASELINE := .golangci.strict-baseline.json
+LINT_RATCHET_BIN := .build/lintratchet
+LINT_STRICT_RUN = GOOS=linux GOARCH=amd64 golangci-lint run --config $(LINT_STRICT_CONFIG) --issues-exit-code=0
+GOLANGCI_LINT_INSTALLED = golangci-lint version 2>/dev/null | grep -oE 'version v?[0-9]+\.[0-9]+\.[0-9]+' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1
+
+lint-strict:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		have=$$($(GOLANGCI_LINT_INSTALLED)); \
+		if [ -n "$$have" ] && [ "v$${have#v}" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+			echo "warning: golangci-lint $$have differs from CI pin $(GOLANGCI_LINT_VERSION); the strict findings may diverge from the baseline" >&2; \
+		fi; \
+		go build -o $(LINT_RATCHET_BIN) ./cmd/lintratchet || exit 2; \
+		tmp=$$(mktemp -d) || exit 2; \
+		$(LINT_STRICT_RUN) --output.json.path="$$tmp/report.json" ./...; status=$$?; \
+		$(LINT_RATCHET_BIN) check -lint-exit "$$status" -report "$$tmp/report.json" -baseline $(LINT_STRICT_BASELINE); rc=$$?; \
+		rm -rf "$$tmp"; exit $$rc; \
+	elif [ "$$CI" = "true" ]; then \
+		echo "ERROR: golangci-lint not installed but CI=true — the strict lint gate is mandatory in CI. Both CI workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) in their static job before 'make lint' and 'make lint-strict'; a missing binary means that install step regressed. Refusing to pass by skipping." >&2; \
+		exit 1; \
+	else \
+		echo "WARNING: golangci-lint not installed locally; skipping lint-strict (install it to gate this locally)" >&2; \
+	fi
+
+lint-strict-baseline:
+	@have=$$($(GOLANGCI_LINT_INSTALLED)); \
+	if [ "v$${have#v}" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "ERROR: lint-strict-baseline writes the baseline CI checks against, so it needs golangci-lint $(GOLANGCI_LINT_VERSION), the Makefile's pin; found '$${have:-none}'" >&2; \
+		exit 2; \
+	fi; \
+	go build -o $(LINT_RATCHET_BIN) ./cmd/lintratchet || exit 2; \
+	tmp=$$(mktemp -d) || exit 2; \
+	$(LINT_STRICT_RUN) --output.json.path="$$tmp/report.json" ./...; status=$$?; \
+	$(LINT_RATCHET_BIN) baseline -lint-exit "$$status" -report "$$tmp/report.json" -baseline $(LINT_STRICT_BASELINE); rc=$$?; \
+	rm -rf "$$tmp"; exit $$rc
 
 # fixture runs the fixturegit determinism test package (PLAN.md Phase 1 test
 # strategy: "fixturegit determinism test (build twice, assert identical
@@ -603,7 +669,7 @@ e2e: e2e-setup
 # TEST_SLOW_PKGS, TEST_REST_PKGS, and E2E_SHARD_1..3 are each assigned exactly
 # once, with `=` or `:=`, and the Makefile includes or evals no other makefile
 # text: the guards read only the first assignment, and only this file.
-VERIFY_STEPS := build fmt-check vet lint test-cmd test-cross test-slow test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e-1 e2e-2 e2e-3
+VERIFY_STEPS := build fmt-check vet lint lint-strict test-cmd test-cross test-slow test-rest fixture lint-store spec-align lint-showcase showcase-coverage e2e-1 e2e-2 e2e-3
 GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
 
 verify:
