@@ -1,0 +1,54 @@
+# golangci-lint v2 configuration for the strict lint gate (spec/strict-lint-gate,
+# spec/strict-lint-target-v2): the linters that enforce rules written in
+# docs/ground-rules.md, each under the sentence it enforces, quoted.
+#
+# make lint-strict passes this file explicitly with --config, so golangci-lint
+# reads it alone and never merges .golangci.yml, the parity configuration, which
+# this gate leaves byte-identical (co-1, dc-6). It sits at the repository root,
+# so golangci-lint reports paths relative to the root and the committed
+# baseline, .golangci.strict-baseline.json, stays portable. Findings are
+# ratcheted, never fixed retroactively: internal/lintratchet compares them with
+# that baseline (make lint-strict) and with the baseline at the merge base.
+#
+# internal/specalign holds this file to its story: TestStrictLintTargetIsWired
+# pins the linter set, each quoted sentence, the errorlint checks, and the
+# uncapped issues section; TestStrictLintExclusionsCounted counts the
+# exclusions (none today) and refuses an unnamed, unreasoned, or wholesale one.
+version: "2"
+
+linters:
+  # Only the gated linters run (strict-lint-target-v2 dc-2).
+  default: none
+  enable:
+    # docs/ground-rules.md: "`context.Context` is the first parameter of anything that blocks or does I/O; never stored in a struct."
+    - containedctx
+    # docs/ground-rules.md: "`context.Context` is the first parameter of anything that blocks or does I/O; never stored in a struct."
+    - contextcheck
+    # docs/ground-rules.md: "`context.Context` is the first parameter of anything that blocks or does I/O; never stored in a struct."
+    - noctx
+    # docs/ground-rules.md: "Errors: wrap with `%w` and context; distinguish verdict failures from operational errors — every verb exits 0 (clean) / 1 (verdict) / 2 (operational)."
+    - errorlint
+    # docs/ground-rules.md: "No package-level mutable state: a package-level variable is only a sentinel error, a compiled regular expression, an embedded file, or a blank (`_`) compile-time check."
+    - gochecknoglobals
+  settings:
+    errorlint:
+      # Only the errorf check, which enforces "wrap with %w". The comparison
+      # and type-assertion checks enforce a rule the ground rules do not state
+      # (strict-lint-target-v2 dc-2).
+      errorf: true
+      asserts: false
+      comparison: false
+  exclusions:
+    # Nothing is excluded implicitly: v2's default, lax, drops findings in
+    # generated files without naming them (ledger SI-311 (3)). Every exclusion
+    # names a path or a text pattern and carries a reason (ac-3).
+    generated: disable
+
+issues:
+  # No caps: with golangci-lint's defaults (50 per linter, 3 identical), a new
+  # finding whose text matches existing ones would be hidden and pass (ac-1).
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # A second finding on a line that already has one is reported, not merged
+  # into it (ledger SI-311 (2)).
+  uniq-by-line: false
