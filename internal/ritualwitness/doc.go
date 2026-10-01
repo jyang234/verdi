@@ -60,9 +60,13 @@
 // worktree's HEAD reaches it, or the worktree is gone, the log shows a
 // commit made in it, and none was logged in the fixture's own checkouts;
 // in both, no fixture ref or HEAD may reach it except through a logged
-// fast-forward of @checked-out (the context-execution hand-back). Without
-// a command log, a commit whose ownership needs that logged exception is
-// unattributable, never outside. A worktree counts as added only when the
+// fast-forward of @checked-out to a commit the still-present worktree
+// reaches, with no commit logged in the fixture's own checkouts (the
+// context-execution hand-back); a gone worktree cannot show that reach,
+// so the exception never applies to it. Without a command log, a commit
+// whose ownership needs that logged exception is unattributable, never
+// outside. A created commit carrying a foreign entry, owned or judged, is
+// outside under every declaration but carried. A worktree counts as added only when the
 // after-state lists it and the before-state does not, or the log shows
 // both its add and its remove. Every branch move is also judged by its net
 // tree difference against the stage paths, for the paths no created commit

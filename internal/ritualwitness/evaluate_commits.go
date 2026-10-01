@@ -161,16 +161,18 @@ func (e *evaluation) worktreeStart(w string) string {
 }
 
 // handbackTips returns the commit @checked-out moved to, when it could be
-// a hand-back from the added worktree aw: the worktree, if still present,
-// reaches it (a gone worktree's HEAD is no longer sensed). Whether a
-// logged fast-forward made the move is loggedHandback's question.
+// a hand-back from the added worktree aw: the worktree is still present
+// and reaches it — a gone worktree cannot show that it did, so the
+// exception never applies to it — and no commit or commit-tree was logged
+// in the fixture's own checkouts (SI-329 (5′)). Whether a logged
+// fast-forward made the move is loggedHandback's question.
 func (e *evaluation) handbackTips(aw Worktree, present bool) map[string]bool {
 	tips := map[string]bool{}
-	if !e.checkedOutMoved() {
+	if !e.checkedOutMoved() || e.commitLoggedInFixture() {
 		return tips
 	}
 	tip := e.a.Refs[e.checkedOutBefore()].Object
-	if !present || e.reachable(tip, aw.Head.Commit) {
+	if present && e.reachable(tip, aw.Head.Commit) {
 		tips[tip] = true
 	}
 	return tips
@@ -258,7 +260,8 @@ func treeDiff(a, b map[string]TreeEntry) []string {
 }
 
 // carry asserts the declared index carry exactly (story ac-1; parent
-// dc-3; SI-329 (3′)), with two refusal predicates. A strict refusal is
+// dc-3; SI-329 (3′), (5′)), with two refusal predicates; a carried foreign
+// entry is outside under every declaration but carried. A strict refusal is
 // exit 2 with no git mutation remaining and no commit object created;
 // refused conforms only to it, and is held to it only when a foreign entry
 // existed to refuse. A refusal is exit 2 with nothing remaining, whatever
@@ -278,10 +281,10 @@ func (e *evaluation) carry(created, judged int, carried map[string]bool) Verdict
 		observed = string(ws.CarryRefused)
 	case refusal:
 		observed = "refused, leaving an unreferenced commit"
-	case judged == 0:
-		observed = string(ws.CarryNoCommit)
 	case len(paths) > 0:
 		observed = string(ws.CarryCarried)
+	case judged == 0:
+		observed = string(ws.CarryNoCommit)
 	}
 	var conforms bool
 	switch e.decl.IndexCarry {
@@ -290,9 +293,14 @@ func (e *evaluation) carry(created, judged int, carried map[string]bool) Verdict
 	case ws.CarryNoCommit:
 		conforms = judged == 0
 	case ws.CarryScoped:
-		conforms = !refusal && len(paths) == 0
+		conforms = !refusal
 	case ws.CarryCarried:
 		conforms = true
+	}
+	// A commit carrying a foreign entry, owned or judged, is outside under
+	// every declaration but carried (SI-329 (5′), (6)).
+	if e.decl.IndexCarry != ws.CarryCarried && len(paths) > 0 {
+		conforms = false
 	}
 	detail := "declares " + string(e.decl.IndexCarry) + "; observed " + observed
 	if len(paths) > 0 {

@@ -194,6 +194,7 @@ func harnessCases() []harnessCase {
 		gitDirCases(),
 		logCases(),
 		si329Cases(),
+		closureCases(),
 	} {
 		cases = append(cases, group...)
 	}
