@@ -389,6 +389,10 @@ func commitCases() []harnessCase {
 			setup: func(t *testing.T, ctx context.Context, fx *Fixture) {
 				c := runGitFixture(t, ctx, fx.Dir, "commit-tree", "-p", SideBranch, "-m", "side diverges", "HEAD^{tree}")
 				runGitFixture(t, ctx, fx.Dir, "update-ref", "refs/heads/side", trimNL(c))
+				// A clean tracked tree: git 2.50 and later make stash-like
+				// commit objects ("WIP on", "index on") when merging over
+				// dirty tracked work, which this case is not about.
+				runGitFixture(t, ctx, fx.Dir, "checkout", "--quiet", "--", TrackedFile)
 			},
 			driver: inProcess(steps(newBranch("ritual/merge"), plain("merge", "--quiet", "--no-ff", "--no-commit", SideBranch),
 				stage("outside.txt", "outside\n"), commitIndex)),
