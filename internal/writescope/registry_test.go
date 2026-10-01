@@ -162,3 +162,33 @@ func TestHostVerbs_AreServeMcpAndContextMcp(t *testing.T) {
 		t.Fatal("HostVerbs() shares state between calls")
 	}
 }
+
+// TestAwaitingFixes_PinStoryDc3 pins R1-RR-B2: the awaiting-fix list is
+// exactly story dc-3's five ritual paths (design start, design start
+// --supersedes, the commit-to-design ritual, accept diagram, constitution
+// propose), and each sits in a declaration that states the scoped fix.
+func TestAwaitingFixes_PinStoryDc3(t *testing.T) {
+	want := []string{
+		"design_start|verdi design start",
+		"design_start|verdi design start --supersedes",
+		"commit_to_design|verdi board commit, and the workbench's POST /board/{key}/commit",
+		"accept_diagram|verdi accept diagram/<name>",
+		"constitution_propose|verdi context constitution propose",
+	}
+	var got []string
+	for _, a := range ws.AwaitingFixes() {
+		got = append(got, a.Ritual+"|"+a.Path)
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("AwaitingFixes() =\n%s\nwant story dc-3's five\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	carry := map[string]ws.IndexCarry{}
+	for _, d := range ws.Registry() {
+		carry[d.Ritual] = d.IndexCarry
+	}
+	for _, a := range ws.AwaitingFixes() {
+		if carry[a.Ritual] != ws.CarryScoped {
+			t.Errorf("%s (%s) is declared %q; story dc-3 declares it scoped", a.Ritual, a.Path, carry[a.Ritual])
+		}
+	}
+}
