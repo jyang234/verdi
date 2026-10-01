@@ -58,6 +58,8 @@ const (
 // an exact ref ("refs/heads/policy/adopt"), every ref under a namespace
 // ("refs/heads/design/*", the final segment "*" matching one or more
 // segments), any local branch ("refs/heads/*"), or the role RefCheckedOut.
+// A remote-tracking ref a push creates or moves is not one: it belongs to
+// MayPush (Declaration).
 type RefPattern string
 
 // RefCheckedOut is the branch checked out in the checkout the ritual acts
@@ -110,7 +112,13 @@ type Declaration struct {
 	StagePaths        []PathPattern
 	IndexCarry        IndexCarry
 	UntrackedMayEnter bool
-	MayPush           bool
+	// MayPush is whether the ritual may push. A push with --set-upstream
+	// (gitx.Push) also creates or moves the remote-tracking ref
+	// refs/remotes/origin/<branch> and writes the branch's upstream
+	// configuration (branch.<branch>.*); both belong to MayPush (parent
+	// dc-7, ledger SI-314 (4)), never to the refs fields, which name local
+	// branches only.
+	MayPush bool
 }
 
 var (

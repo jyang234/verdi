@@ -36,8 +36,15 @@ const (
 // a git directory is classified and every classified name exists; every
 // CLI verb, workbench route or action, and MCP tool that reaches a
 // mutating function is named by exactly one declaration; no declaration
-// names a verb that reaches none; and the awaiting-fix list is reported
-// with its count.
+// names a verb that reaches none; the code every verb runs outside its arm
+// reaches none; and the awaiting-fix list is reported with its count.
+//
+// The list and its count are reported in this test's output (t.Logf),
+// which the evidence producer's `go test -json` stream carries (ledger
+// SI-314 (5)); plain `go test` prints a passing test's log only with -v.
+// The subtests are the falsifiers run on these same facts: each mutation
+// of the registry, the awaiting-fix list, or the classification must turn
+// the witness red.
 func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 	start := time.Now()
 	facts := analyzeModule(t, filepath.Join("..", ".."))
