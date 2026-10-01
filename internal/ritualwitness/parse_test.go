@@ -72,16 +72,21 @@ func TestParseIndex(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty index", "", nil, false},
-		{"entries sorted by path then stage, NUL paths kept verbatim",
-			"100644 " + oidB + " 0\tz.txt\x00100755 " + oidA + " 0\tcafé \"q\".txt\x00",
-			[]IndexEntry{{Mode: "100755", Object: oidA, Stage: 0, Path: "café \"q\".txt"}, {Mode: "100644", Object: oidB, Stage: 0, Path: "z.txt"}}, false},
-		{"no tab", "100644 " + oidA + " 0 x\x00", nil, true},
-		{"too few metadata fields", "100644 " + oidA + "\tx\x00", nil, true},
-		{"a non-numeric stage", "100644 " + oidA + " s\tx\x00", nil, true},
-		{"a stage above 3", "100644 " + oidA + " 4\tx\x00", nil, true},
-		{"a malformed object id", "100644 nothex 0\tx\x00", nil, true},
-		{"an empty path", "100644 " + oidA + " 0\t\x00", nil, true},
-		{"output not NUL-terminated", "100644 " + oidA + " 0\tx", nil, true},
+		{"entries sorted by path then stage, NUL paths kept verbatim, flag tags kept",
+			"H 100644 " + oidB + " 0\tz.txt\x00h 100755 " + oidA + " 0\tcaf\u00e9 \"q\".txt\x00S 100644 " + oidC + " 0\tk\x00",
+			[]IndexEntry{
+				{Tag: "h", Mode: "100755", Object: oidA, Stage: 0, Path: "caf\u00e9 \"q\".txt"},
+				{Tag: "S", Mode: "100644", Object: oidC, Stage: 0, Path: "k"},
+				{Tag: "H", Mode: "100644", Object: oidB, Stage: 0, Path: "z.txt"},
+			}, false},
+		{"no tab", "H 100644 " + oidA + " 0 x\x00", nil, true},
+		{"no tag (ls-files -s alone)", "100644 " + oidA + " 0\tx\x00", nil, true},
+		{"an unknown tag", "Q 100644 " + oidA + " 0\tx\x00", nil, true},
+		{"a non-numeric stage", "H 100644 " + oidA + " s\tx\x00", nil, true},
+		{"a stage above 3", "H 100644 " + oidA + " 4\tx\x00", nil, true},
+		{"a malformed object id", "H 100644 nothex 0\tx\x00", nil, true},
+		{"an empty path", "H 100644 " + oidA + " 0\t\x00", nil, true},
+		{"output not NUL-terminated", "H 100644 " + oidA + " 0\tx", nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,6 +96,27 @@ func TestParseIndex(t *testing.T) {
 			}
 			if !tt.wantErr && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("parseIndex = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseReflogStart(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+		wantErr        bool
+	}{
+		{"a worktree add", strings.Repeat("0", 40) + " " + oidA + " F <f@x> 1 +0000\n" + oidA + " " + oidB + " F <f@x> 2 +0000\tcommit\n", oidA, false},
+		{"one entry without a newline", strings.Repeat("0", 40) + " " + oidB + " F <f@x> 1 +0000", oidB, false},
+		{"empty", "", "", true},
+		{"a malformed new id", strings.Repeat("0", 40) + " nothex F <f@x> 1 +0000\n", "", true},
+		{"too few fields", oidA + "\n", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseReflogStart([]byte(tt.in))
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("parseReflogStart = (%q, %v), want (%q, err %v)", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

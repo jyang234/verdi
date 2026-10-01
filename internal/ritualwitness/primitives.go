@@ -215,6 +215,47 @@ func (c loggedCall) checkedOutRef() string {
 	return ""
 }
 
+// checkoutTarget is what a checkout call switches its worktree to: a
+// branch's full refname, or a commit id it detaches at; "" for any other
+// call.
+func (c loggedCall) checkoutTarget() string {
+	switch c.Kind {
+	case primCheckoutNew:
+		return "refs/heads/" + c.Args[2]
+	case primCheckout:
+		if isObjectID(c.Args[1]) {
+			return c.Args[1]
+		}
+		return "refs/heads/" + c.Args[1]
+	}
+	return ""
+}
+
+// pathspecs returns the pathspecs an add or commit call names, and
+// whether it names any: `add -A` and a commit without "--" name none.
+func (c loggedCall) pathspecs() ([]string, bool) {
+	switch c.Kind {
+	case primStage:
+		if c.Args[1] == "--" {
+			return c.Args[2:], true
+		}
+	case primCommit:
+		if len(c.Args) > 3 && c.Args[3] == "--" {
+			return c.Args[4:], true
+		}
+	}
+	return nil, false
+}
+
+// addedCommit is the commit-ish a worktree-add call starts the worktree
+// at, or "".
+func (c loggedCall) addedCommit() string {
+	if c.Kind != primWorktreeAdd {
+		return ""
+	}
+	return c.Args[len(c.Args)-1]
+}
+
 // worktreePath is the canonical path a worktree call names, resolved
 // against its own directory, or "".
 func (c loggedCall) worktreePath() string {

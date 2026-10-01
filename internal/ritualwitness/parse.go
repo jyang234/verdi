@@ -84,10 +84,11 @@ func parseRefs(out []byte) (map[string]Ref, error) {
 	return refs, nil
 }
 
-// parseIndex reads `ls-files -s -z`: "<mode> <object> <stage>\t<path>"
-// fields, sorted by path and then stage.
+// parseIndex reads `ls-files -s -t -v -z`: "<tag> <mode> <object>
+// <stage>\t<path>" fields, sorted by path and then stage. The tag is one
+// of git's status letters, lowercase when the entry is assume-unchanged.
 func parseIndex(out []byte) ([]IndexEntry, error) {
-	fields, err := nulFields(out, "ls-files -s -z")
+	fields, err := nulFields(out, "ls-files -s -t -v -z")
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +96,17 @@ func parseIndex(out []byte) ([]IndexEntry, error) {
 	for _, f := range fields {
 		meta, path, ok := strings.Cut(f, "\t")
 		if !ok || path == "" {
-			return nil, fmt.Errorf("ls-files -s -z: malformed entry %q", f)
+			return nil, fmt.Errorf("ls-files -s -t -v -z: malformed entry %q", f)
 		}
 		parts := strings.Split(meta, " ")
-		if len(parts) != 3 || !isObjectID(parts[1]) {
-			return nil, fmt.Errorf("ls-files -s -z: malformed metadata %q", meta)
+		if len(parts) != 4 || len(parts[0]) != 1 || !strings.Contains("HhSsMmRrCcKk", parts[0]) || !isObjectID(parts[2]) {
+			return nil, fmt.Errorf("ls-files -s -t -v -z: malformed metadata %q", meta)
 		}
-		stage, err := strconv.Atoi(parts[2])
+		stage, err := strconv.Atoi(parts[3])
 		if err != nil || stage < 0 || stage > 3 {
-			return nil, fmt.Errorf("ls-files -s -z: malformed stage %q", parts[2])
+			return nil, fmt.Errorf("ls-files -s -t -v -z: malformed stage %q", parts[3])
 		}
-		entries = append(entries, IndexEntry{Mode: parts[0], Object: parts[1], Stage: stage, Path: path})
+		entries = append(entries, IndexEntry{Tag: parts[0], Mode: parts[1], Object: parts[2], Stage: stage, Path: path})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Path != entries[j].Path {
@@ -271,6 +272,18 @@ func parseHeadFile(content []byte) (ref, oid string, err error) {
 		return "", s, nil
 	}
 	return "", "", fmt.Errorf("HEAD file: malformed content %q", s)
+}
+
+// parseReflogStart reads a reflog's first entry, "<old> <new> <ident>
+// <time> <zone>\t<message>", and returns its new object id: for a linked
+// worktree's HEAD reflog, the commit the worktree was added at.
+func parseReflogStart(content []byte) (string, error) {
+	first, _, _ := strings.Cut(string(content), "\n")
+	f := strings.SplitN(first, " ", 3)
+	if len(f) < 3 || !isObjectID(f[0]) || !isObjectID(f[1]) {
+		return "", fmt.Errorf("reflog: malformed first entry %q", first)
+	}
+	return f[1], nil
 }
 
 // headFromSymbolicRef reads `symbolic-ref -q HEAD`'s result: an attached

@@ -9,9 +9,11 @@ import (
 // except a branch's upstream configuration (branch.<b>.remote,
 // branch.<b>.merge) for a branch that a push the ritual may make created
 // or moved on the remote, which belongs to may_push (parent dc-7; SI-314
-// (4a)) and is attributed to a logged push.
+// (4a)). It is attributed only to a logged push of that branch, and only
+// with the values a push writes: origin and refs/heads/<b> (SI-329 (8′)).
 func (e *evaluation) config() []Verdict {
 	var out []Verdict
+	pushed := e.pushedBranches()
 	for _, k := range unionKeys(e.b.Config, e.a.Config) {
 		bv, had := e.b.Config[k]
 		av, has := e.a.Config[k]
@@ -26,7 +28,7 @@ func (e *evaluation) config() []Verdict {
 			verb = "unset"
 		}
 		out = append(out, Verdict{Field: "config", Detail: "config " + k + " " + verb,
-			Status: classify(e.upstreamOfPush(k), e.at.has("", primPush))})
+			Status: classify(e.upstreamOfPush(k), has && upstreamWrittenByPush(k, av, pushed))})
 	}
 	return out
 }
@@ -42,6 +44,23 @@ func (e *evaluation) upstreamOfPush(key string) bool {
 		if branch, ok := strings.CutSuffix(rest, suffix); ok && branch != "" {
 			return e.remotePushedTo("refs/heads/" + branch)
 		}
+	}
+	return false
+}
+
+// upstreamWrittenByPush reports whether key, holding values, is the
+// upstream configuration gitx.Push writes for a branch it pushed:
+// branch.<b>.remote = origin, or branch.<b>.merge = refs/heads/<b>.
+func upstreamWrittenByPush(key string, values []string, pushed map[string]bool) bool {
+	rest, ok := strings.CutPrefix(key, "branch.")
+	if !ok || len(values) != 1 {
+		return false
+	}
+	if b, ok := strings.CutSuffix(rest, ".remote"); ok {
+		return pushed[b] && values[0] == "=origin"
+	}
+	if b, ok := strings.CutSuffix(rest, ".merge"); ok {
+		return pushed[b] && values[0] == "=refs/heads/"+b
 	}
 	return false
 }

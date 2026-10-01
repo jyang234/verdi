@@ -7,13 +7,12 @@ import "reflect"
 // when it is the tree difference of a declared HEAD switch or of a commit
 // or fast-forward moving @checked-out (HEAD's tree changed at the path and
 // the index now holds exactly the new tree's entry), or when it lies in a worktree the ritual added;
-// otherwise it is outside, naming the path. It is attributed to a logged
-// add, commit, checkout, or fast-forward in the main worktree — never to
-// BuildTreeWithFile's update-index, which writes a scratch index.
+// otherwise it is outside, naming the path. It is attributed per effect
+// (SI-329 (8′), indexEntryAttributed) — never to BuildTreeWithFile's
+// update-index, which writes a scratch index.
 func (e *evaluation) index() []Verdict {
 	before, after := indexByPath(e.b.Index), indexByPath(e.a.Index)
 	treeMove := (e.decl.HeadSwitch && e.switched) || (e.declaresCheckedOutMove() && e.checkedOutMoved())
-	attributed := e.at.has(e.a.Root, primStage, primCommit, primCheckout, primCheckoutNew, primFastForward)
 	var out []Verdict
 	for _, p := range unionKeys(before, after) {
 		bv, had := before[p]
@@ -28,12 +27,38 @@ func (e *evaluation) index() []Verdict {
 		case !has:
 			verb = "removed"
 		}
-		admitted := e.stagePathAdmits(p) ||
-			e.inAddedWorktree(e.repoPathOf(p)) ||
-			(treeMove && e.treeDiffers(p) && e.indexMatchesHeadTree(av, p))
-		out = append(out, Verdict{Field: "index", Detail: "index entry " + p + " " + verb, Status: classify(admitted, attributed)})
+		treeDifference := e.treeDiffers(p) && e.indexMatchesHeadTree(av, p)
+		admitted := e.stagePathAdmits(p) || e.inAddedWorktree(e.repoPathOf(p)) || (treeMove && treeDifference)
+		out = append(out, Verdict{Field: "index", Detail: "index entry " + p + " " + verb,
+			Status: classify(admitted, e.indexEntryAttributed(e.a.Root, p, treeDifference))})
 	}
 	return out
+}
+
+// indexEntryAttributed is SI-329 (8′) for an index entry at path p in
+// worktree wt: an add or a commit whose pathspec matches it; `add -A`,
+// which names no paths, per worktree (the disclosed residual); and a
+// checkout or fast-forward only for the tree difference it makes in the
+// main worktree. A commit without a pathspec changes no index entry.
+func (e *evaluation) indexEntryAttributed(wt, p string, treeDifference bool) bool {
+	for _, c := range e.at.in(wt, primStage, primCommit, primCheckout, primCheckoutNew, primFastForward) {
+		switch c.Kind {
+		case primStage, primCommit:
+			specs, named := c.pathspecs()
+			if (!named && c.Kind == primStage) || (named && pathspecMatches(wt, c, specs, p)) {
+				return true
+			}
+		case primCheckout, primCheckoutNew:
+			if wt == e.a.Root && treeDifference && e.switched && e.headSwitchAttributed() {
+				return true
+			}
+		case primFastForward:
+			if wt == e.a.Root && treeDifference && e.checkedOutMoved() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // treeDiffers reports whether HEAD's tree changed at path in the run.

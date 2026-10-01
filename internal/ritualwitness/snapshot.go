@@ -17,16 +17,22 @@ type Snapshot struct {
 	// CommonDir is the repository's git common directory.
 	CommonDir string
 
-	// Refs is every ref under refs/ in the repository; RemoteRefs every
-	// ref under refs/ in the bare remote.
+	// Refs is every ref under refs/ in the repository (the main
+	// worktree's own refs/worktree and refs/bisect included); RemoteRefs
+	// every ref under refs/ in the bare remote, and RemoteHead the bare
+	// remote's HEAD.
 	Refs       map[string]Ref
 	RemoteRefs map[string]Ref
+	RemoteHead Head
 	// Head is the main worktree's HEAD.
 	Head Head
 	// HeadTree is the main worktree's HEAD tree (`ls-tree -r -z`), by
 	// repository-relative path: what a HEAD switch or a move of the
 	// checked-out branch changes.
 	HeadTree map[string]TreeEntry
+	// Trees is the tree of every local branch's tip (refs/heads/*), by
+	// commit: what a branch move changes (SI-329 (5′)).
+	Trees map[string]map[string]TreeEntry
 	// Index is the main worktree's index (`ls-files -s -z`).
 	Index []IndexEntry
 	// Status is the main worktree's `status --porcelain -z`.
@@ -65,8 +71,11 @@ type Head struct {
 	Commit   string
 }
 
-// IndexEntry is one `git ls-files -s -z` entry.
+// IndexEntry is one `git ls-files -s -t -v -z` entry: Tag is git's
+// status tag, which carries the index flag bits (lowercase for
+// assume-unchanged, "S" for skip-worktree).
 type IndexEntry struct {
+	Tag    string
 	Mode   string
 	Object string
 	Stage  int
@@ -114,14 +123,19 @@ type Worktree struct {
 	// Head is the linked worktree's HEAD, from its administrative entry;
 	// for an attached HEAD, Commit is the branch's tip.
 	Head Head
+	// Start is the commit the worktree was added at, the first entry of
+	// its HEAD reflog, or "" when that reflog is missing.
+	Start string
 	// Locked is whether the entry holds a lock; LockReason is the lock
 	// file's content.
 	Locked     bool
 	LockReason string
 	// Present is whether the worktree's directory exists. Index is its
-	// index, read only when it does.
+	// index and Refs its own refs (refs/worktree/*, refs/bisect/*), read
+	// only when it does.
 	Present bool
 	Index   []IndexEntry
+	Refs    map[string]Ref
 }
 
 // CommitObject is one commit: its parents, in order, and its file list

@@ -98,7 +98,7 @@ type evaluation struct {
 	at       attribution
 	linkedB  map[string]Worktree
 	linkedA  map[string]Worktree
-	addedWT  map[string]bool // linked worktrees the ritual added (present after, or named by a logged add)
+	addedWT  map[string]bool // linked worktrees the ritual added (SI-329 (5′))
 	switched bool            // the main worktree's HEAD switched (SI-325 (4))
 }
 
@@ -118,11 +118,9 @@ func newEvaluation(decl ws.Declaration, exit int, b, a Snapshot, log CommandLog)
 			e.addedWT[p] = true
 		}
 	}
-	for _, c := range e.at.in("", primWorktreeAdd) {
-		if p := c.worktreePath(); p != "" {
-			if _, existed := e.linkedB[p]; !existed {
-				e.addedWT[p] = true
-			}
+	for p := range e.at.addedAndRemoved {
+		if _, existed := e.linkedB[p]; !existed {
+			e.addedWT[p] = true
 		}
 	}
 	e.switched = headSwitched(b.Head, a.Head)

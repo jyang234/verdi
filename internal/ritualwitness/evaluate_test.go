@@ -47,18 +47,48 @@ func TestEvaluate(t *testing.T) {
 		want   []Verdict
 	}{
 		{
-			name: "a may-push push's upstream config is within",
+			name: "a may-push push's remote branch and upstream config are within for the branch it pushed",
 			decl: pushDecl(),
 			mutate: func(_, a *Snapshot) {
-				a.RemoteRefs["refs/heads/x"] = Ref{Object: oidA}
-				a.Config["branch.x.remote"] = []string{"=origin"}
-				a.Config["branch.x.merge"] = []string{"=refs/heads/x"}
+				a.RemoteRefs["refs/heads/main"] = Ref{Object: oidB}
+				a.Config["branch.main.remote"] = []string{"=origin"}
+				a.Config["branch.main.merge"] = []string{"=refs/heads/main"}
 			},
 			log: logOf("/repo", push),
 			want: []Verdict{
+				v("may_push", Within, "the remote's refs/heads/main changed"),
+				v("config", Within, "config branch.main.merge set"),
+				v("config", Within, "config branch.main.remote set"),
+				v("index_carry", Within, noCommit),
+			},
+		},
+		{
+			name: "a push is credited with the branch checked out when it ran, replaying logged checkouts",
+			decl: pushDecl(),
+			mutate: func(_, a *Snapshot) {
+				a.RemoteRefs["refs/heads/x"] = Ref{Object: oidA}
+				a.RemoteRefs["refs/heads/y"] = Ref{Object: oidA}
+				a.Config["branch.x.remote"] = []string{"=origin"}
+				a.Config["branch.x.merge"] = []string{"=refs/heads/elsewhere"}
+			},
+			log: logOf("/repo", []string{"checkout", "-b", "x"}, push, []string{"checkout", "main"}),
+			want: []Verdict{
 				v("may_push", Within, "the remote's refs/heads/x created"),
-				v("config", Within, "config branch.x.merge set"),
+				v("may_push", Unattributable, "the remote's refs/heads/y created"),
+				v("config", Unattributable, "config branch.x.merge set"),
 				v("config", Within, "config branch.x.remote set"),
+				v("index_carry", Within, noCommit),
+			},
+		},
+		{
+			name: "a push from a detached HEAD pushes no branch",
+			decl: pushDecl(),
+			mutate: func(_, a *Snapshot) {
+				a.RemoteRefs["refs/heads/main"] = Ref{Object: oidB}
+			},
+			log: logOf("/repo", []string{"checkout", oidA}, push),
+			want: []Verdict{
+				v("may_push", Unattributable, "the remote's refs/heads/main changed"),
 				v("index_carry", Within, noCommit),
 			},
 		},
@@ -75,16 +105,31 @@ func TestEvaluate(t *testing.T) {
 			},
 		},
 		{
-			name: "upstream config for a branch a push deleted is outside",
+			name: "a remote deletion is never attributed to gitx.Push; upstream config for it is outside",
 			decl: pushDecl(),
 			mutate: func(b, a *Snapshot) {
 				b.RemoteRefs["refs/heads/z"] = Ref{Object: oidA}
+				b.Refs["refs/remotes/origin/z"] = Ref{Object: oidA}
 				a.Config["branch.z.merge"] = []string{"=refs/heads/z"}
+			},
+			log: logOf("/repo", []string{"checkout", "z"}, push),
+			want: []Verdict{
+				v("may_push", Unattributable, "refs/remotes/origin/z deleted"),
+				v("may_push", Unattributable, "the remote's refs/heads/z deleted"),
+				v("config", Outside, "config branch.z.merge set"),
+				v("index_carry", Within, noCommit),
+			},
+		},
+		{
+			name: "the remote's HEAD changing is outside",
+			decl: pushDecl(),
+			mutate: func(b, a *Snapshot) {
+				b.RemoteHead = Head{Ref: "refs/heads/main"}
+				a.RemoteHead = Head{Ref: "refs/heads/other"}
 			},
 			log: logOf("/repo", push),
 			want: []Verdict{
-				v("may_push", Within, "the remote's refs/heads/z deleted"),
-				v("config", Outside, "config branch.z.merge set"),
+				v("may_push", Outside, "the remote's HEAD changed"),
 				v("index_carry", Within, noCommit),
 			},
 		},
@@ -145,7 +190,7 @@ func TestEvaluate(t *testing.T) {
 				b.Refs["refs/remotes/origin/HEAD"] = Ref{Object: oidA, Symref: "refs/remotes/origin/main"}
 				a.Refs["refs/remotes/origin/HEAD"] = Ref{Object: oidA, Symref: "refs/remotes/origin/x"}
 			},
-			log: logOf("/repo", push),
+			log: logOf("/repo", []string{"checkout", "x"}, push),
 			want: []Verdict{
 				v("may_push", Outside, "refs/remotes/origin/HEAD changed"),
 				v("may_push", Outside, "refs/remotes/upstream/x created"),

@@ -2,6 +2,9 @@ package ritualwitness
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,9 +88,11 @@ type Fixture struct {
 // ignoring IgnoredDir), SideBranch at the same commit, a linked worktree
 // registered at RegisteredWorktree, a local bare remote as origin with a
 // resolvable default branch, and state's own working-tree and index layer.
-// Every git invocation here is local-path-only.
+// Every git invocation here is local-path-only, and runs with ambient git
+// configuration isolated (isolateGitConfig).
 func Build(t testing.TB, ctx context.Context, state SeedState) *Fixture {
 	t.Helper()
+	isolateGitConfig(t)
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -116,6 +121,67 @@ func Build(t testing.TB, ctx context.Context, state SeedState) *Fixture {
 		Registered: canonicalPath(repo.Dir, RegisteredWorktree),
 		State:      state,
 	}
+}
+
+// isolateGitConfig makes every git process the test starts — the
+// fixture's, the ritual's, and the sensors' — ignore ambient global and
+// system configuration (SI-329 (7′)), so an operator's core.excludesFile
+// or hooks cannot change a fixture or a classification. A process already
+// isolated by IsolateGitConfig (this package's TestMain) keeps its
+// parallel tests; otherwise the test is isolated with t.Setenv, and so
+// cannot run in parallel.
+func isolateGitConfig(t testing.TB) {
+	t.Helper()
+	if gitConfigIsolated() {
+		return
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
+// gitConfigIsolated reports whether the process already ignores ambient
+// global and system git configuration: GIT_CONFIG_GLOBAL is the empty
+// file, system configuration is off, and XDG_CONFIG_HOME holds no git
+// directory.
+func gitConfigIsolated() bool {
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	if os.Getenv("GIT_CONFIG_GLOBAL") != os.DevNull || os.Getenv("GIT_CONFIG_NOSYSTEM") != "1" || xdg == "" {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(xdg, "git"))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// IsolateGitConfig isolates the whole test process from ambient global
+// and system git configuration, for a TestMain whose tests use Build in
+// parallel. It returns a function restoring the previous environment.
+func IsolateGitConfig() (restore func(), err error) {
+	xdg, err := os.MkdirTemp("", "ritualwitness-xdg-")
+	if err != nil {
+		return nil, fmt.Errorf("ritualwitness: IsolateGitConfig: %w", err)
+	}
+	keys := []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "XDG_CONFIG_HOME"}
+	values := []string{os.DevNull, "1", xdg}
+	previous := make([]*string, len(keys))
+	for i, k := range keys {
+		if v, ok := os.LookupEnv(k); ok {
+			previous[i] = &v
+		}
+		if err := os.Setenv(k, values[i]); err != nil {
+			return nil, fmt.Errorf("ritualwitness: IsolateGitConfig: %w", err)
+		}
+	}
+	return func() {
+		for i, k := range keys {
+			if previous[i] == nil {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, *previous[i])
+			}
+		}
+		_ = os.RemoveAll(xdg)
+	}, nil
 }
 
 // seedWorkingState writes state's operator work on top of the clean base

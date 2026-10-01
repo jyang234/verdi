@@ -103,6 +103,7 @@ func TestHarness_SensorsAndVerdicts(t *testing.T) {
 	// Ambient core.quotePath must change no result: every path is read
 	// with -z. These run first and sequentially, since they set the
 	// process environment for git.
+	t.Run(ambientConfigCase().name, func(t *testing.T) { runCase(t, ctx, ambientConfigCase(), SeedClean) })
 	for _, quote := range []string{"true", "false"} {
 		t.Run("ambient core.quotePath="+quote, func(t *testing.T) {
 			t.Setenv("GIT_CONFIG_COUNT", "1")
@@ -192,6 +193,7 @@ func harnessCases() []harnessCase {
 		commitCases(),
 		gitDirCases(),
 		logCases(),
+		si329Cases(),
 	} {
 		cases = append(cases, group...)
 	}
@@ -604,7 +606,7 @@ func indexAndTreeCases() []harnessCase {
 			},
 		},
 		{
-			name: "a detached HEAD moved by a commit is within a declared HEAD switch", states: both(),
+			name: "a detached HEAD moved by a commit is unattributable: only a checkout naming its target attributes a switch (SI-329 (8′))", states: both(),
 			decl: func() ws.Declaration { d := checkedOutDecl(); d.HeadSwitch = true; return d }(),
 			setup: func(t *testing.T, ctx context.Context, fx *Fixture) {
 				runGitFixture(t, ctx, fx.Dir, "checkout", "--quiet", "--detach")
@@ -613,12 +615,12 @@ func indexAndTreeCases() []harnessCase {
 			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
 				c := onlyCommit(t, res)
 				return []Verdict{
-					v("head_switch", Within, "HEAD switched from detached at "+short(fx.BaseCommit)+" to detached at "+c),
+					v("head_switch", Unattributable, "HEAD switched from detached at "+short(fx.BaseCommit)+" to detached at "+c),
 					v("index", Within, "index entry owned/x.txt added"),
 					v("working_tree", Within, "owned/x.txt created"+fileWrite),
 					v("stage_paths", Within, "commit "+c+" recorded owned/x.txt"),
 					v("index_carry", Within, "declares scoped; observed scoped"),
-				}, Pass
+				}, Unproven
 			},
 		},
 		{

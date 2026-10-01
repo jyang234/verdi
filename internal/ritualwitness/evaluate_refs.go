@@ -103,15 +103,17 @@ func (e *evaluation) movedByFastForward(ref, newTip string) bool {
 	return false
 }
 
-// remoteRefs judges the remote's refs and the repository's
-// remote-tracking refs against may_push (SI-325 (7)): a remote branch
-// changes within may_push only through a logged push; a remote tag or any
-// other namespace is outside; a remote-tracking ref is within only as the
-// mirror of a push the ritual may make, or of a fetch the log shows, and
-// only when it equals the remote's ref after the run.
+// remoteRefs judges the remote's refs and HEAD and the repository's
+// remote-tracking refs against may_push (SI-325 (7), SI-329 (7′), (8′)): a
+// remote branch is created or moved within may_push, attributed only for
+// the branch a logged push pushed; a remote deletion is never attributed
+// to gitx.Push; a remote tag, any other namespace, and the remote's HEAD
+// are outside; a remote-tracking ref is within only as the mirror of a
+// push the ritual may make, or of a fetch the log shows, and only when it
+// equals the remote's ref after the run.
 func (e *evaluation) remoteRefs() []Verdict {
 	var out []Verdict
-	pushed := e.at.has("", primPush)
+	pushed := e.pushedBranches()
 	for _, ref := range unionKeys(e.b.Refs, e.a.Refs) {
 		if !strings.HasPrefix(ref, "refs/remotes/") {
 			continue
@@ -121,14 +123,14 @@ func (e *evaluation) remoteRefs() []Verdict {
 		if had && has && bv == av {
 			continue
 		}
-		mirror, isOrigin := strings.CutPrefix(ref, "refs/remotes/origin/")
-		mirror = "refs/heads/" + mirror
+		branch, isOrigin := strings.CutPrefix(ref, "refs/remotes/origin/")
+		mirror := "refs/heads/" + branch
 		pushMirror := isOrigin && e.decl.MayPush && e.remoteChanged(mirror)
 		rv, onRemote := e.a.RemoteRefs[mirror]
 		equal := has == onRemote && (!has || (av.Symref == "" && av.Object == rv.Object))
 		admitted := isOrigin && (pushMirror || e.at.fetched) && equal
 		out = append(out, Verdict{Field: "may_push", Detail: ref + " " + changeVerb(had, has),
-			Status: classify(admitted, pushMirror && pushed)})
+			Status: classify(admitted, pushMirror && has && pushed[branch])})
 	}
 	for _, ref := range unionKeys(e.b.RemoteRefs, e.a.RemoteRefs) {
 		bv, had := e.b.RemoteRefs[ref]
@@ -136,11 +138,59 @@ func (e *evaluation) remoteRefs() []Verdict {
 		if had && has && bv == av {
 			continue
 		}
-		admitted := strings.HasPrefix(ref, "refs/heads/") && e.decl.MayPush
+		branch, isBranch := strings.CutPrefix(ref, "refs/heads/")
 		out = append(out, Verdict{Field: "may_push", Detail: "the remote's " + ref + " " + changeVerb(had, has),
-			Status: classify(admitted, pushed)})
+			Status: classify(isBranch && e.decl.MayPush, has && pushed[branch])})
+	}
+	if e.b.RemoteHead != e.a.RemoteHead {
+		out = append(out, Verdict{Field: "may_push", Status: Outside, Detail: "the remote's HEAD changed"})
 	}
 	return out
+}
+
+// pushedBranches returns the branch each logged push pushed (SI-329
+// (8′)): gitx.Push pushes HEAD's branch, so each push is credited with
+// the branch checked out in its worktree when it ran, replaying the
+// worktree's HEAD before the run and the logged checkouts there.
+func (e *evaluation) pushedBranches() map[string]bool {
+	pushed := map[string]bool{}
+	current := map[string]string{}
+	for _, c := range e.at.calls {
+		wt := e.at.worktreeOf(c.Dir)
+		if wt == "" {
+			continue
+		}
+		if _, seen := current[wt]; !seen {
+			current[wt] = e.headBefore(wt)
+		}
+		switch c.Kind {
+		case primCheckout, primCheckoutNew:
+			current[wt] = c.checkoutTarget()
+		case primWorktreeAdd:
+			if c.Args[2] == "--detach" {
+				current[c.worktreePath()] = ""
+			} else {
+				current[c.worktreePath()] = "refs/heads/" + c.Args[3]
+			}
+		case primPush:
+			if b, ok := strings.CutPrefix(current[wt], "refs/heads/"); ok {
+				pushed[b] = true
+			}
+		}
+	}
+	return pushed
+}
+
+// headBefore is the branch checked out in worktree wt before the run, or
+// "" when its HEAD was detached or it did not exist.
+func (e *evaluation) headBefore(wt string) string {
+	if wt == e.a.Root {
+		return e.checkedOutBefore()
+	}
+	if w, ok := e.linkedB[wt]; ok && !w.Head.Detached {
+		return w.Head.Ref
+	}
+	return ""
 }
 
 // remoteChanged reports whether the remote's ref changed in the run.
@@ -158,18 +208,31 @@ func (e *evaluation) remotePushedTo(ref string) bool {
 }
 
 // headSwitch judges the main worktree's HEAD switch (SI-325 (4)) against
-// head_switch: attributed to a logged checkout there, or, for a detached
-// HEAD a commit moved, to a logged commit there whose new commit's parent
-// is the old one.
+// head_switch, attributed only to a logged checkout there naming its
+// target (SI-329 (8′)).
 func (e *evaluation) headSwitch() []Verdict {
 	if !e.switched {
 		return nil
 	}
 	b, a := e.b.Head, e.a.Head
-	attributed := e.at.has(e.a.Root, primCheckout, primCheckoutNew) ||
-		(b.Detached && a.Detached && e.firstParent(a.Commit) == b.Commit && e.at.has(e.a.Root, primCommit))
 	return []Verdict{{Field: "head_switch", Detail: "HEAD switched from " + headLabel(b) + " to " + headLabel(a),
-		Status: classify(e.decl.HeadSwitch, attributed)}}
+		Status: classify(e.decl.HeadSwitch, e.headSwitchAttributed())}}
+}
+
+// headSwitchAttributed reports a logged checkout in the main worktree
+// naming the switch's target: the branch HEAD ended on, or the commit it
+// ended detached at.
+func (e *evaluation) headSwitchAttributed() bool {
+	return e.at.switchesTo(e.a.Root, headTarget(e.a.Head))
+}
+
+// headTarget is what a checkout naming h's state names: its branch, or
+// the commit it is detached at.
+func headTarget(h Head) string {
+	if h.Detached {
+		return h.Commit
+	}
+	return h.Ref
 }
 
 func unionKeys[V any](a, b map[string]V) []string {

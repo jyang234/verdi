@@ -281,21 +281,21 @@ func worktreeCases() []harnessCase {
 			want: func(_ *testing.T, fx *Fixture, _ Result) ([]Verdict, RunOutcome) {
 				return []Verdict{
 					v("worktrees", Outside, "worktree "+fx.Registered+": HEAD changed"),
-					v("worktrees", Outside, "worktree "+fx.Registered+": index changed"),
+					v("worktrees", Outside, "worktree "+fx.Registered+": index entry op-staged.txt removed"),
 					v("worktrees", Outside, "worktree "+fx.Registered+": administrative entry changed"),
 					v("index_carry", Within, "declares no_commit; observed no_commit"),
 				}, Fail
 			},
 		},
 		{
-			name: "changes inside a pre-existing worktree a declared pattern covers are within, its lock unattributable", states: both(),
+			name: "a covered pre-existing worktree: a gitx switch is within; plain-git unstaging and the lock are unattributable", states: both(),
 			decl:   worktreeDecl(ws.WorktreeRegistered),
 			setup:  stageInRegistered,
 			driver: changeRegistered,
 			want: func(_ *testing.T, fx *Fixture, _ Result) ([]Verdict, RunOutcome) {
 				return []Verdict{
 					v("worktrees", Within, "worktree "+fx.Registered+": HEAD changed"),
-					v("worktrees", Within, "worktree "+fx.Registered+": index changed"),
+					v("worktrees", Unattributable, "worktree "+fx.Registered+": index entry op-staged.txt removed"),
 					v("worktrees", Unattributable, "worktree "+fx.Registered+": administrative entry changed"),
 					v("index_carry", Within, "declares no_commit; observed no_commit"),
 				}, Unproven
@@ -562,7 +562,15 @@ func commitCases() []harnessCase {
 			driver: func(t *testing.T, _ *Fixture) Driver {
 				tmp := filepath.Join(t.TempDir(), "evaluation")
 				return InProcess{Fn: steps(
-					func(ctx context.Context, dir string) error { return gitx.WorktreeAddDetached(ctx, dir, tmp, "HEAD") },
+					// constitution_evaluation's shape: the add names the
+					// commit it starts at.
+					func(ctx context.Context, dir string) error {
+						base, err := gitx.RevParse(ctx, dir, "HEAD")
+						if err != nil {
+							return err
+						}
+						return gitx.WorktreeAddDetached(ctx, dir, tmp, base)
+					},
 					func(ctx context.Context, _ string) error { return writeAndStage(ctx, tmp, "eval.txt", "evaluated\n") },
 					func(ctx context.Context, _ string) error { return commitIndex(ctx, tmp) },
 					func(ctx context.Context, dir string) error { return gitx.WorktreeRemove(ctx, dir, tmp) },
@@ -788,19 +796,21 @@ func logCases() []harnessCase {
 			}),
 			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
 				// The residual is the refs_move verdict: within, though the
-				// move was made outside gitx. In the full state the plain
-				// write-tree also recorded the foreign entry, which the
-				// state diff catches whoever made the commit.
+				// move was made outside gitx. The index entry and the
+				// commit's path are attributed per path (SI-329 (8′)): the
+				// failed commit named owned/keep.txt, so neither is. In the
+				// full state the plain write-tree also recorded the foreign
+				// entry, which the state diff catches whoever made it.
 				vs := []Verdict{
 					v("refs_move", Within, "refs/heads/main moved"),
-					v("index", Within, "index entry owned/q.txt added"),
+					v("index", Unattributable, "index entry owned/q.txt added"),
 					v("working_tree", Within, "owned/q.txt created"+fileWrite),
-					v("stage_paths", Within, "commit "+onlyCommit(t, res)+" recorded owned/q.txt"),
+					v("stage_paths", Unattributable, "commit "+onlyCommit(t, res)+" recorded owned/q.txt"),
 				}
 				if fx.State == SeedFull {
 					return append(vs, v("index_carry", Outside, "declares scoped; observed carried; carried foreign "+ForeignFile)), Fail
 				}
-				return append(vs, v("index_carry", Within, "declares scoped; observed scoped")), Pass
+				return append(vs, v("index_carry", Within, "declares scoped; observed scoped")), Unproven
 			},
 		},
 	}

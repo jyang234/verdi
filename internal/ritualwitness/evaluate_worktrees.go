@@ -31,16 +31,49 @@ func (e *evaluation) worktrees() []Verdict {
 	return out
 }
 
+// preExistingWorktree judges the changes inside a worktree registered
+// before the run (SI-325 (7), SI-329 (7′), (8′)): its HEAD, attributed
+// only to a logged checkout there naming its target; each index entry,
+// attributed as in the main worktree but for checkouts (whose tree
+// difference a linked worktree's sensors do not read); each of its own
+// refs, a create attributed to a logged update-ref there naming it; and
+// its administrative entry, which no gitx primitive writes.
 func (e *evaluation) preExistingWorktree(p string, bw, aw Worktree) []Verdict {
 	admitted := e.worktreeAdmitted(p, true)
 	var out []Verdict
 	if headSwitched(bw.Head, aw.Head) {
 		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": HEAD changed",
-			Status: classify(admitted, e.at.has(p, primCheckout, primCheckoutNew, primCommit))})
+			Status: classify(admitted, e.at.switchesTo(p, headTarget(aw.Head)))})
 	}
-	if !reflect.DeepEqual(bw.Index, aw.Index) {
-		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": index changed",
-			Status: classify(admitted, e.at.has(p, primStage, primCommit, primCheckout, primCheckoutNew, primFastForward))})
+	before, after := indexByPath(bw.Index), indexByPath(aw.Index)
+	for _, path := range unionKeys(before, after) {
+		bv, had := before[path]
+		av, has := after[path]
+		if had && has && reflect.DeepEqual(bv, av) {
+			continue
+		}
+		verb := "changed"
+		switch {
+		case !had:
+			verb = "added"
+		case !has:
+			verb = "removed"
+		}
+		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": index entry " + path + " " + verb,
+			Status: classify(admitted, e.indexEntryAttributed(p, path, false))})
+	}
+	for _, ref := range unionKeys(bw.Refs, aw.Refs) {
+		bv, had := bw.Refs[ref]
+		av, has := aw.Refs[ref]
+		if had && has && bv == av {
+			continue
+		}
+		attributed := false
+		for _, c := range e.at.in(p, primUpdateRef) {
+			attributed = attributed || (!had && c.createdRef() == ref)
+		}
+		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": ref " + ref + " " + changeVerb(had, has),
+			Status: classify(admitted, attributed)})
 	}
 	if bw.ID != aw.ID || bw.Locked != aw.Locked || bw.LockReason != aw.LockReason || bw.Present != aw.Present {
 		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": administrative entry changed",

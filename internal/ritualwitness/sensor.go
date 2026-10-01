@@ -18,8 +18,9 @@ import (
 // Capture takes a Snapshot of the repository whose store root is dir, and
 // of bareRemote, its origin. Every git invocation here is read-only, runs
 // with no gitx.Observer (so sensing never enters a ritual's command log),
-// and passes --no-optional-locks so even `git status` never rewrites the
-// index it is reading.
+// passes --no-optional-locks so even `git status` never rewrites the index
+// it is reading, and runs with ambient git configuration isolated
+// (sensorEnv).
 func Capture(ctx context.Context, dir, bareRemote string) (Snapshot, error) {
 	s := Snapshot{StoreRoot: canonicalPath("", dir)}
 	top, err := sensorLine(ctx, s.StoreRoot, "rev-parse", "--show-toplevel")
@@ -44,6 +45,8 @@ func Capture(ctx context.Context, dir, bareRemote string) (Snapshot, error) {
 	}{
 		{"refs", func() (e error) { s.Refs, e = captureRefs(ctx, s.Root); return }},
 		{"remote refs", func() (e error) { s.RemoteRefs, e = captureRefs(ctx, bareRemote); return }},
+		{"remote HEAD", func() (e error) { s.RemoteHead, e = captureRemoteHead(ctx, bareRemote); return }},
+		{"branch tip trees", func() (e error) { s.Trees, e = captureTrees(ctx, s.Root, s.Refs); return }},
 		{"HEAD", func() (e error) { s.Head, e = captureHead(ctx, s.Root); return }},
 		{"HEAD tree", func() (e error) { s.HeadTree, e = captureHeadTree(ctx, s.Root); return }},
 		{"index", func() (e error) { s.Index, e = captureIndex(ctx, s.Root); return }},
@@ -67,6 +70,7 @@ func Capture(ctx context.Context, dir, bareRemote string) (Snapshot, error) {
 func sensorGit(ctx context.Context, dir string, stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "--no-replace-objects"}, args...)...)
 	cmd.Dir = dir
+	cmd.Env = sensorEnv(os.Environ())
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -77,6 +81,23 @@ func sensorGit(ctx context.Context, dir string, stdin []byte, args ...string) ([
 		return stdout.Bytes(), fmt.Errorf("git %s (dir %s): %w: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// sensorEnv is env with every GIT_* variable and XDG_CONFIG_HOME removed
+// and ambient global and system git configuration switched off (SI-329
+// (7′)): an operator's core.excludesFile, attributes, or GIT_CONFIG_*
+// injection can change no sensor's reading, and no GIT_DIR or
+// GIT_INDEX_FILE inherited from a caller can redirect one.
+func sensorEnv(env []string) []string {
+	out := make([]string, 0, len(env)+3)
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "GIT_") || k == "XDG_CONFIG_HOME" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "XDG_CONFIG_HOME="+filepath.Join(os.DevNull, "ritualwitness"))
 }
 
 // sensorLine is sensorGit for a one-line answer, without its newline.
@@ -116,15 +137,50 @@ func captureHead(ctx context.Context, dir string) (Head, error) {
 }
 
 func captureHeadTree(ctx context.Context, dir string) (map[string]TreeEntry, error) {
-	out, err := sensorGit(ctx, dir, nil, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+	return captureTree(ctx, dir, "HEAD")
+}
+
+func captureTree(ctx context.Context, dir, rev string) (map[string]TreeEntry, error) {
+	out, err := sensorGit(ctx, dir, nil, "ls-tree", "-r", "-z", "--full-tree", rev)
 	if err != nil {
 		return nil, err
 	}
 	return parseTree(out)
 }
 
+// captureTrees reads the tree of every local branch's tip.
+func captureTrees(ctx context.Context, dir string, refs map[string]Ref) (map[string]map[string]TreeEntry, error) {
+	trees := map[string]map[string]TreeEntry{}
+	for name, r := range refs {
+		if !strings.HasPrefix(name, "refs/heads/") || trees[r.Object] != nil {
+			continue
+		}
+		tree, err := captureTree(ctx, dir, r.Object)
+		if err != nil {
+			return nil, err
+		}
+		trees[r.Object] = tree
+	}
+	return trees, nil
+}
+
+// captureRemoteHead reads the bare remote's HEAD: the branch it names, or
+// the commit it is detached at.
+func captureRemoteHead(ctx context.Context, bareRemote string) (Head, error) {
+	out, runErr := sensorGit(ctx, bareRemote, nil, "symbolic-ref", "-q", "HEAD")
+	ref, detached, err := headFromSymbolicRef(out, runErr)
+	if err != nil || !detached {
+		return Head{Ref: ref}, err
+	}
+	commit, err := sensorLine(ctx, bareRemote, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+	if err != nil {
+		return Head{}, err
+	}
+	return Head{Detached: true, Commit: commit}, nil
+}
+
 func captureIndex(ctx context.Context, dir string) ([]IndexEntry, error) {
-	out, err := sensorGit(ctx, dir, nil, "ls-files", "-s", "-z")
+	out, err := sensorGit(ctx, dir, nil, "ls-files", "-s", "-t", "-v", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +315,15 @@ func readAdminEntry(ctx context.Context, entryDir string, refs map[string]Ref) (
 	if ref != "" {
 		wt.Head.Commit = refs[ref].Object
 	}
+	reflog, err := os.ReadFile(filepath.Join(entryDir, "logs", "HEAD"))
+	switch {
+	case err == nil:
+		if wt.Start, err = parseReflogStart(reflog); err != nil {
+			return Worktree{}, fmt.Errorf("worktree %s: %w", wt.ID, err)
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return Worktree{}, fmt.Errorf("worktree %s: HEAD reflog: %w", wt.ID, err)
+	}
 	lock, err := os.ReadFile(filepath.Join(entryDir, "locked"))
 	switch {
 	case err == nil:
@@ -272,6 +337,13 @@ func readAdminEntry(ctx context.Context, entryDir string, refs map[string]Ref) (
 		wt.Present = true
 		if wt.Index, err = captureIndex(ctx, wt.Path); err != nil {
 			return Worktree{}, fmt.Errorf("worktree %s: index: %w", wt.Path, err)
+		}
+		out, err := sensorGit(ctx, wt.Path, nil, "for-each-ref", "--format=%(objectname)%00%(refname)%00%(symref)", "refs/worktree/", "refs/bisect/")
+		if err != nil {
+			return Worktree{}, fmt.Errorf("worktree %s: own refs: %w", wt.Path, err)
+		}
+		if wt.Refs, err = parseRefs(out); err != nil {
+			return Worktree{}, fmt.Errorf("worktree %s: own refs: %w", wt.Path, err)
 		}
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return Worktree{}, fmt.Errorf("worktree %s: %w", wt.Path, err)
