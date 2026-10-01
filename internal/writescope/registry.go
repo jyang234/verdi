@@ -267,7 +267,7 @@ func ValidateRegistry(decls []Declaration, awaiting []AwaitingFix) error {
 			return fmt.Errorf("writescope: awaiting fix %q names unknown ritual %s", a.Path, a.Ritual)
 		}
 		if d.IndexCarry != CarryScoped {
-			return fmt.Errorf("writescope: awaiting fix %q sits in %s, which is not declared scoped (story dc-3)", a.Path, a.Ritual)
+			return fmt.Errorf("writescope: awaiting fix %q sits in %s, which is not declared scoped (spec/write-scope-registry dc-3)", a.Path, a.Ritual)
 		}
 		if a.Path == "" {
 			return fmt.Errorf("writescope: an awaiting fix in %s names no invocation path", a.Ritual)
