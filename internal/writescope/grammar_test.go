@@ -138,6 +138,14 @@ func TestDeclarationValidate_RejectsUnknownAndInconsistentValues(t *testing.T) {
 			d.StagePaths = nil
 		}, "stage"},
 		{"scoped commit landing on no branch", func(d *ws.Declaration) { d.RefsCreate = nil }, "branch"},
+		// R1-B5: a stage path means a commit, whatever the carry.
+		{"refused, stages a path, lands on no branch", func(d *ws.Declaration) {
+			d.IndexCarry = ws.CarryRefused
+			d.RefsCreate = nil
+		}, "branch"},
+		{"refused, no stage path, untracked files may enter", func(d *ws.Declaration) {
+			*d = ws.Declaration{Ritual: "switch", Verbs: []ws.Verb{ws.CLI("switch")}, HeadSwitch: true, IndexCarry: ws.CarryRefused, UntrackedMayEnter: true}
+		}, "untracked"},
 		{"declares no effect", func(d *ws.Declaration) {
 			*d = ws.Declaration{Ritual: "noop", Verbs: []ws.Verb{ws.CLI("noop")}, IndexCarry: ws.CarryNoCommit}
 		}, "no effect"},

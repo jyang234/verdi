@@ -132,8 +132,13 @@ var (
 //     not declare the whole tree: a scoped commit records only declared
 //     paths, and a declared whole tree would make it a carried commit.
 //   - only carried declares the whole tree.
-//   - scoped and carried commit, so they declare at least one stage path
-//     and at least one branch the commit lands on (created or moved).
+//   - scoped and carried commit, so they declare at least one stage path.
+//   - a declaration that stages a path commits it, whatever its carry, so
+//     it declares at least one branch the commit lands on (created or
+//     moved): refused stages only after its refusal passes, and still
+//     commits.
+//   - untracked files may enter only a declaration that stages a path:
+//     without one there is no commit for them to enter.
 //   - RefCheckedOut is only ever moved: it exists, and the checkout
 //     holding it cannot delete it.
 //   - a declaration declares at least one effect: it exists because its
@@ -308,13 +313,14 @@ func (d Declaration) validateConsistency() error {
 	if whole && d.IndexCarry != CarryCarried {
 		return fmt.Errorf("writescope: %s: only a carried declaration may stage the whole tree", d.Ritual)
 	}
-	if d.IndexCarry == CarryScoped || d.IndexCarry == CarryCarried {
-		if len(d.StagePaths) == 0 {
-			return fmt.Errorf("writescope: %s: a %s commit records declared paths, but no stage path is declared", d.Ritual, d.IndexCarry)
-		}
-		if len(d.RefsCreate)+len(d.RefsMove) == 0 {
-			return fmt.Errorf("writescope: %s: a %s commit lands on a branch, but no branch is created or moved", d.Ritual, d.IndexCarry)
-		}
+	if (d.IndexCarry == CarryScoped || d.IndexCarry == CarryCarried) && len(d.StagePaths) == 0 {
+		return fmt.Errorf("writescope: %s: a %s commit records declared paths, but no stage path is declared", d.Ritual, d.IndexCarry)
+	}
+	if len(d.StagePaths) > 0 && len(d.RefsCreate)+len(d.RefsMove) == 0 {
+		return fmt.Errorf("writescope: %s: it stages paths, so it commits, and a commit lands on a branch, but no branch is created or moved", d.Ritual)
+	}
+	if d.UntrackedMayEnter && len(d.StagePaths) == 0 {
+		return fmt.Errorf("writescope: %s: untracked files may enter only a commit, but no stage path is declared", d.Ritual)
 	}
 	if len(d.RefsCreate)+len(d.RefsMove)+len(d.RefsDelete)+len(d.Worktrees)+len(d.StagePaths) == 0 && !d.HeadSwitch && !d.MayPush {
 		return fmt.Errorf("writescope: %s declares no effect", d.Ritual)
