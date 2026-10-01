@@ -10,7 +10,13 @@ import (
 // Function values (ledger SI-318), and values that carry one (ledger
 // SI-319, SI-320: an interface a named function type with methods
 // implements, a type parameter constrained to a function type, never the
-// empty interface; Program.carriesFunc). The graph is use-based: a function
+// empty interface; Program.carriesFunc). The classes ledger SI-321
+// discloses fall outside these rules and are neither followed nor failed
+// closed until BL-136: values held by dependency code, values passed
+// through a type parameter constrained by any, an embedded function type,
+// a method-value handler's bound receiver, and (suspected) a store through
+// a pointer to a function-typed field; see the package doc. The graph is
+// use-based: a function
 // value is an edge from the code that names it. That code is in a verb's
 // reach whenever the activation that produced the value is part of the
 // verb's execution: an uncaptured parameter's value was named by a caller,
@@ -19,8 +25,9 @@ import (
 // node). A value named outside the verb's execution reaches it only
 // through state that outlives the activation, and each such shape is
 // handled explicitly:
-//   - a function-typed struct field: every read resolves to every value
-//     the module stores in it (fields.go);
+//   - a named function-typed (or function-carrying interface) struct
+//     field: every read resolves to every value the module stores in it
+//     (fields.go); an embedded function type is not followed (SI-321);
 //   - a function value captured from an enclosing function: a call through
 //     it resolves through the flow, and fails closed when the flow cannot
 //     follow it; any other use of it (passed on as an argument, assigned,

@@ -35,28 +35,29 @@
 //     http.HandlerFunc's ServeHTTP, calls the function with no assertion), a
 //     type parameter whose constraint has a function type among its terms, and
 //     a pointer, slice, array, map, or channel of these. The empty interface
-//     does not carry one: a value of that type reaches a call in module code
-//     only through a type assertion or type switch, which fails closed
-//     whenever its target carries a function, and in dependency code only
-//     through reflection or the dependency's own assertion, the boundaries
-//     this list discloses. A function value is an edge from the code that
-//     names it, which is in a verb's reach whenever the activation that
-//     produced the value is part of the verb's execution (an uncaptured
-//     parameter's value was named by a caller, an uncaptured local's by its
-//     own function, a call's result by its callee, a package-level variable's
-//     by its initializer). Values that outlive their activation are handled
-//     explicitly: a read of a function-typed or function-carrying interface
-//     field resolves to every value the module stores in it (fields.go); a
-//     call through a captured function value, or a method called on a captured
-//     value that carries one, resolves through the flow, conversions
-//     transparent; every function-typed or function-carrying interface
-//     argument of a route registration's wrapper is a root of the route; and
-//     every value the analysis cannot follow fails closed, naming its site, in
-//     every entry whose reach holds it: a captured function value used other
-//     than by calling it (passed on as an argument, assigned, returned,
-//     stored), a call through a captured value the flow cannot follow, a
-//     channel receive yielding a function value, a type assertion or type
-//     switch to a type that carries one, a dereference of a pointer to a
+//     does not count (SI-320), on the premise that a value of that type
+//     reaches a call in module code only through a type assertion or type
+//     switch, which fails closed whenever its target carries a function;
+//     generic instantiation refutes that premise (a type parameter constrained
+//     by any carries a function with no assertion), a class disclosed below
+//     (SI-321). A function value is an edge from the code that names it, which
+//     is in a verb's reach whenever the activation that produced the value is
+//     part of the verb's execution (an uncaptured parameter's value was named
+//     by a caller, an uncaptured local's by its own function, a call's result
+//     by its callee, a package-level variable's by its initializer). Values
+//     that outlive their activation are handled explicitly: a read of a named
+//     function-typed or function-carrying interface field resolves to every
+//     value the module stores in it (fields.go; an embedded field does not, a
+//     class disclosed below); a call through a captured function value, or a
+//     method called on a captured value that carries one, resolves through the
+//     flow, conversions transparent; every function-typed or function-carrying
+//     interface argument of a route registration's wrapper is a root of the
+//     route; and every value the analysis cannot follow fails closed, naming
+//     its site, in every entry whose reach holds it: a captured function value
+//     used other than by calling it (passed on as an argument, assigned,
+//     returned, stored), a call through a captured value the flow cannot
+//     follow, a channel receive yielding a function value, a type assertion or
+//     type switch to a type that carries one, a dereference of a pointer to a
 //     function value not loaded from a package-level variable, a read of a
 //     field-held container of function values, and, for an entry a host
 //     dispatches, a function-typed field holding a value the flow cannot
@@ -64,6 +65,27 @@
 //     (valuecalls.go). A package-level variable reassigned outside its
 //     initializer (package-level mutable state the ground rules forbid) is
 //     still attributed to the code that assigns it;
+//   - reachability classes ledger SI-321 discloses: in each, a function value
+//     reaches a route by a path the analysis neither follows nor fails closed
+//     on, and the witness passed while the built binary committed and pushed.
+//     TestSynth/DisclosedBoundaries pins one witnessed shape of each until
+//     BL-136 rebuilds reachability on SSA with a VTA call graph. (1) A value
+//     held by dependency code, since the flow follows only function-typed
+//     dependency arguments: http.StripPrefix over an http.Handler, or a
+//     sub-ServeMux built in another module package and served by a route. (2)
+//     A value passed through a type parameter constrained by any: a generic
+//     identity func id[T any](v T) T, or a generic box's T-typed field. (3) A
+//     struct embedding a function type, whose promoted method is dropped:
+//     struct{ http.HandlerFunc } called as ServeHTTP, or a struct embedding a
+//     module function type. (4) A method value of a module function type used
+//     as a handler, whose bound receiver is never rooted: mux.HandleFunc(p,
+//     serveFn(fv).ServeHTTP). One further class is suspected and unprobed: a
+//     store through a pointer to a function-typed field (p := &s.f; *p = fv),
+//     which is not a recorded field store. Hence spec/write-scope-registry
+//     ac-1 (a verb that reaches a mutating gitx function with no declaration
+//     fails the witness) is proven for the module's current code and the
+//     pinned evasion corpus, and disclosed-as-unproven beyond them until
+//     BL-136 lands;
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type's method set (methods promoted
 //     from embedded fields included) has the methods of a module

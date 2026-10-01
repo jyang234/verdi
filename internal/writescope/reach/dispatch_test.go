@@ -366,6 +366,58 @@ func testRouteEntriesFailClosedOnUnfollowableFunctionValues(t *testing.T, prog *
 	}
 }
 
+// testDisclosedBoundaries pins the reachability classes ledger SI-321
+// discloses, which BL-136's rebuild is to close: each witnessed shape
+// (W1-W6) is today neither followed nor failed closed, and its control is
+// followed. When a shape's behavior changes, reach/doc.go's boundary list,
+// ledger SI-321, and BL-136 must change with it.
+func testDisclosedBoundaries(t *testing.T, prog *reach.Program) {
+	entries, err := reach.RouteEntries(prog, "example.com/synth/disclosed", "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	g, err := reach.Build(prog, entries)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	byName := map[string]reach.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	tests := []struct {
+		route, class string
+		followed     bool
+	}{
+		{"/w1", "W1, a dependency (http.StripPrefix) holding an http.Handler", false},
+		{"/w2", "W2, a generic identity constrained by any", false},
+		{"/w3", "W3, a struct embedding http.HandlerFunc", false},
+		{"/w3b", "W3b, a struct embedding a module function type", false},
+		{"/w4", "W4, a generic box's T-typed field", false},
+		{"/w5", "W5, a method-value handler of a module function type", false},
+		{"/w6", "W6, a sub-ServeMux built in another module package", false},
+		{"/w1ctl", "W1ctl, the dependency wrapper handed the function-typed value", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.route, func(t *testing.T) {
+			e, ok := byName[tt.route]
+			if !ok {
+				t.Fatalf("no route %s; got %v", tt.route, entryNames(entries))
+			}
+			hits, err := g.Reach(e, synthTargets(t, prog))
+			if err != nil {
+				t.Fatalf("%s (%s) now fails closed: %v; the disclosed class changed, so update reach/doc.go's boundary list, ledger SI-321, and BL-136 with this pin", tt.route, tt.class, err)
+			}
+			followed := strings.Contains(strings.Join(hitNames(hits), ","), "Publish")
+			switch {
+			case followed && !tt.followed:
+				t.Fatalf("%s (%s) is now followed (reaches %v): the disclosed class closed, so update reach/doc.go's boundary list, ledger SI-321, and BL-136 with this pin", tt.route, tt.class, hitNames(hits))
+			case !followed && tt.followed:
+				t.Fatalf("%s (%s) is no longer followed (reaches %v): the control regressed", tt.route, tt.class, hitNames(hits))
+			}
+		})
+	}
+}
+
 func testRouteEntriesFailClosedOnAnUnresolvableRegistration(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name, pkg string

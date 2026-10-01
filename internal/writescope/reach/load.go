@@ -308,13 +308,14 @@ func (p *Program) collectFuncTypes(checked map[string]*types.Package) {
 
 // ifaceCarries reports whether a value of interface type iface carries a
 // function value the analysis must follow (ledger SI-319, SI-320). The
-// empty interface (no methods, every type in its type set) does not: a
-// value of that type reaches a call in module code only through a type
-// assertion or type switch, which fails closed whenever its target type
-// carries a function, and in dependency code only through reflection or
-// the dependency's own assertion, the boundaries the package doc
-// discloses. A method-less constraint with type terms carries one when a
-// term's underlying type does (a ~func type parameter is callable). Any
+// empty interface (no methods, every type in its type set) does not, on
+// SI-320's premise that a value of that type reaches a call in module code
+// only through a type assertion or type switch, which fails closed
+// whenever its target type carries a function. Generic instantiation
+// refutes that premise: a type parameter constrained by any carries a
+// function with no assertion, a class ledger SI-321 discloses (the package
+// doc; BL-136). A method-less constraint with type terms carries one when
+// a term's underlying type does (a ~func type parameter is callable). Any
 // other interface carries one when a named function type with methods
 // implements it (a generic one judged by method names and arities, as the
 // tripwire is): a method of that type calls the function with no
@@ -392,10 +393,12 @@ func shapeCovers(gen *types.Named, iface *types.Interface) bool {
 // implements (a method of that type calls the function with no
 // assertion); a type parameter whose constraint has a function type among
 // its terms; or a pointer, slice, array, map, or channel of any of these.
-// The empty interface is excluded (see ifaceCarries): a function stored in
-// it surfaces only through an assertion, which fails closed on its own. A
-// struct's function-typed and function-carrying interface fields resolve
-// through the field flow instead.
+// The empty interface is excluded (see ifaceCarries), and so is a type
+// parameter constrained by it, which generic instantiation calls with no
+// assertion (ledger SI-321, disclosed). A struct is not a carrier: its
+// named function-typed and function-carrying interface fields resolve
+// through the field flow, but a function type it embeds is not followed
+// (its promoted method is dropped; SI-321, disclosed).
 func (p *Program) carriesFunc(t types.Type) bool {
 	for depth := 0; t != nil && depth < 16; depth++ {
 		switch u := t.Underlying().(type) {
