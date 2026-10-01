@@ -256,7 +256,7 @@ func specBarFacts(p *BoardProjection, asd *asdView) barFacts {
 			spec.StatusBadgeLabel = p.StatusLabel
 		}
 	}
-	posture := asd.branchPosture.facts()
+	posture := asd.facts() // the embedded branchPosture's
 	digest := provenFact(asd.BaseDigest)
 	posture.BaseDigest = &digest
 	return barFacts{Title: p.Title, Spec: spec, Posture: posture}
