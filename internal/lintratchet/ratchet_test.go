@@ -88,20 +88,48 @@ func setDefaultBranch(t *testing.T, dir, commit string) {
 	git(t, dir, "update-ref", "refs/remotes/origin/main", commit)
 }
 
-// check runs Check in dir against the named captured report with the given
-// golangci-lint exit status, and returns its exit status and output.
+// check runs Check at the repository root dir against the named captured
+// report with the given golangci-lint exit status, and returns its exit
+// status and output.
 func check(t *testing.T, dir, report string, lintExit int) (int, string) {
 	t.Helper()
+	return checkFrom(t, dir, baselineName, report, lintExit)
+}
+
+// checkFrom runs Check as cmd/lintratchet runs it: from the working
+// directory dir, with the baseline at baselinePath relative to dir, and the
+// earlier baseline read through NewGitEarlier.
+func checkFrom(t *testing.T, dir, baselinePath, report string, lintExit int) (int, string) {
+	t.Helper()
+	earlier, err := NewGitEarlier(t.Context(), dir, baselinePath)
+	if err != nil {
+		t.Fatalf("NewGitEarlier(%s, %s): %v", dir, baselinePath, err)
+	}
 	var stdout, stderr bytes.Buffer
 	code := Check(t.Context(), CheckInput{
 		LintExit:     lintExit,
 		ReportPath:   report,
-		BaselinePath: filepath.Join(dir, baselineName),
-		Earlier:      GitEarlier{Dir: dir, Path: baselineName},
+		BaselinePath: filepath.Join(dir, filepath.FromSlash(baselinePath)),
+		Earlier:      earlier,
 	}, &stdout, &stderr)
 	out := stdout.String() + stderr.String()
 	t.Logf("exit %d:\n%s", code, out)
 	return code, out
+}
+
+// checkIn runs check at repo's root, or, when fromSub, from a directory
+// below the root with the baseline named relative to it, as `lintratchet
+// check -baseline ../.golangci.strict-baseline.json` run there names it.
+func checkIn(t *testing.T, repo *fixturegit.Repo, fromSub bool, report string) (int, string) {
+	t.Helper()
+	if !fromSub {
+		return check(t, repo.Dir, report, 0)
+	}
+	sub := filepath.Join(repo.Dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return checkFrom(t, sub, "../"+baselineName, report, 0)
 }
 
 // TestRatchet_Verdicts proves the baseline check's verdicts (spec/strict-lint-gate
@@ -129,6 +157,7 @@ func TestRatchet_Verdicts(t *testing.T) {
 		name               string
 		mergeBase, head    string // baselines committed at the merge base and at HEAD
 		report             string
+		fromSub            bool // the check runs from a directory below the root
 		want               int
 		wantOut            string
 		wantOutAtMergeBase bool // wantOut is followed by the merge base's commit
@@ -150,12 +179,14 @@ func TestRatchet_Verdicts(t *testing.T) {
 		{name: "bootstrap: a new finding still fails", mergeBase: noBaseline, head: "base", report: "newfinding", want: 1, wantOut: "new finding: gochecknoglobals in alpha"},
 		{name: "bootstrap: a stale allowance still fails", mergeBase: noBaseline, head: "base", report: "fixed", want: 1, wantOut: "stale allowance: gochecknoglobals in alpha"},
 		{name: "a malformed baseline at the merge base", mergeBase: malformedBaseline, head: "base", report: "base", want: 2, wantOut: "malformed"},
+		{name: "from a subdirectory: equal findings and baseline", mergeBase: "base", head: "base", report: "base", fromSub: true, want: 0, wantOut: "it allows nothing more than the baseline at the merge base of HEAD with origin/main "},
+		{name: "from a subdirectory: a baseline grown against the merge base", mergeBase: "base", head: "newfinding", report: "newfinding", fromSub: true, want: 1, wantOut: "baseline grew: gochecknoglobals in alpha"},
 	}
 	for _, tc := range feature {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := buildRepo(t, tc.mergeBase, tc.head)
 			setDefaultBranch(t, repo.Dir, repo.Heads[0])
-			code, out := check(t, repo.Dir, capturedReport(tc.report), 0)
+			code, out := checkIn(t, repo, tc.fromSub, capturedReport(tc.report))
 			if code != tc.want {
 				t.Fatalf("exit %d, want %d; output:\n%s", code, tc.want, out)
 			}
@@ -175,6 +206,7 @@ func TestRatchet_Verdicts(t *testing.T) {
 		name          string
 		parent, head  string
 		report        string
+		fromSub       bool // the check runs from a directory below the root
 		want          int
 		wantOut       string
 		wantOutParent bool
@@ -183,12 +215,13 @@ func TestRatchet_Verdicts(t *testing.T) {
 		{name: "on the default branch: shrunk", parent: "base", head: "fixed", report: "fixed", want: 0, wantOut: "lint-strict OK"},
 		{name: "on the default branch: grown against the first parent", parent: "base", head: "newfinding", report: "newfinding", want: 1, wantOut: "baseline grew: gochecknoglobals in alpha"},
 		{name: "on the default branch: bootstrap, no baseline at the first parent", parent: noBaseline, head: "base", report: "base", want: 0, wantOut: "disclosed-unproven [lint-strict:growth-comparison] ", wantOutParent: true},
+		{name: "on the default branch, from a subdirectory: grown against the first parent", parent: "base", head: "newfinding", report: "newfinding", fromSub: true, want: 1, wantOut: "baseline grew: gochecknoglobals in alpha"},
 	}
 	for _, tc := range onDefault {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := buildRepo(t, tc.parent, tc.head)
 			setDefaultBranch(t, repo.Dir, repo.Head)
-			code, out := check(t, repo.Dir, capturedReport(tc.report), 0)
+			code, out := checkIn(t, repo, tc.fromSub, capturedReport(tc.report))
 			if code != tc.want {
 				t.Fatalf("exit %d, want %d; output:\n%s", code, tc.want, out)
 			}

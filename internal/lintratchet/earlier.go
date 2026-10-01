@@ -35,27 +35,31 @@ type EarlierBaseline struct {
 // branch itself, where that merge base is HEAD, at HEAD's first parent, the
 // default branch before the change. It reads the file with git show.
 type GitEarlier struct {
-	// Dir is a directory inside the repository.
+	// Dir is the repository's top level. Every git read runs there, because
+	// git ls-tree resolves its path against its working directory: run from
+	// a subdirectory, it would look for Path below that subdirectory and
+	// report the baseline absent (review finding S1-A1).
 	Dir string
 	// Path is the baseline's repository-relative, slash-separated path.
 	Path string
 }
 
 // NewGitEarlier returns the GitEarlier for the baseline at baselinePath, a
-// path relative to dir, which must stay inside the repository.
+// path relative to dir, which must stay inside the repository. The result
+// reads at the repository's top level, wherever inside it dir is.
 func NewGitEarlier(ctx context.Context, dir, baselinePath string) (GitEarlier, error) {
 	if baselinePath == "" || filepath.IsAbs(baselinePath) {
 		return GitEarlier{}, fmt.Errorf("baseline path %q must be relative to the working directory", baselinePath)
 	}
-	prefix, err := gitx.RepoPrefix(ctx, dir)
+	loc, err := gitx.Locate(ctx, dir)
 	if err != nil {
 		return GitEarlier{}, fmt.Errorf("locating %s in its repository: %w", dir, err)
 	}
-	rel := path.Clean(path.Join(prefix, filepath.ToSlash(baselinePath)))
+	rel := path.Clean(path.Join(loc.Prefix, filepath.ToSlash(baselinePath)))
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
 		return GitEarlier{}, fmt.Errorf("baseline path %q does not name a file inside the repository", baselinePath)
 	}
-	return GitEarlier{Dir: dir, Path: rel}, nil
+	return GitEarlier{Dir: loc.TopLevel, Path: rel}, nil
 }
 
 // ReadEarlierBaseline resolves the earlier commit and reads the baseline

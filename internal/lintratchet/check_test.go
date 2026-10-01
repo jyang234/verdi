@@ -12,11 +12,20 @@ import (
 )
 
 // TestNewGitEarlier covers resolving the baseline's repository-relative path
-// from a path relative to the working directory.
+// from a path relative to the working directory, and that every git read
+// runs at the repository's top level, wherever the check runs from: git
+// ls-tree resolves its path against its working directory (review finding
+// S1-A1).
 func TestNewGitEarlier(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"sub/README": "x\n"}, Message: "init"}})
 	sub := filepath.Join(repo.Dir, "sub")
 	notRepo := t.TempDir()
+	// git prints the top level with symlinks resolved (a temporary directory
+	// under /var is /private/var on macOS).
+	top, err := filepath.EvalSymlinks(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name, dir, path string
 		want            string
@@ -43,8 +52,8 @@ func TestNewGitEarlier(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewGitEarlier: %v", err)
 			}
-			if got.Path != tc.want || got.Dir != tc.dir {
-				t.Fatalf("NewGitEarlier = %+v, want Dir %s Path %s", got, tc.dir, tc.want)
+			if got.Path != tc.want || got.Dir != top {
+				t.Fatalf("NewGitEarlier = %+v, want Dir %s (the top level) Path %s", got, top, tc.want)
 			}
 		})
 	}
