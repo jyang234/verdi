@@ -153,7 +153,13 @@ func si329Cases() []harnessCase {
 				if err := os.WriteFile(filepath.Join(x, "occupied"), []byte("x\n"), 0o644); err != nil {
 					return 2, err
 				}
-				_ = gitx.WorktreeAddDetached(ctx, dir, x, "HEAD") // fails: x exists and is not empty
+				base, err := gitx.RevParse(ctx, dir, "HEAD")
+				if err != nil {
+					return 2, err
+				}
+				// Fails, x being occupied; it names a full commit, so only
+				// the missing listing can keep x from counting as added.
+				_ = gitx.WorktreeAddDetached(ctx, dir, x, base)
 				return steps(func(ctx context.Context, _ string) error {
 					base, err := gitx.RevParse(ctx, dir, "HEAD")
 					if err != nil {
@@ -166,6 +172,31 @@ func si329Cases() []harnessCase {
 			}),
 			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
 				vs := []Verdict{v("stage_paths", Outside, "commit "+onlyCommit(t, res)+" recorded owned/o.txt")}
+				if fx.State == SeedFull {
+					return append(vs, orphanedForeign()...), Fail
+				}
+				return append(vs, v("index_carry", Outside, "declares no_commit; observed scoped")), Fail
+			},
+		},
+		{
+			name: "a commit made before a worktree was added at it is never that worktree's (SI-329 (5′), made after the add)", states: both(),
+			decl: tempDecl(nil),
+			driver: func(t *testing.T, _ *Fixture) Driver {
+				tmp := filepath.Join(t.TempDir(), "at-orphan")
+				var orphan string
+				return InProcess{Fn: steps(append(append([]func(context.Context, string) error{}, orphanSteps[:3]...),
+					func(ctx context.Context, dir string) (err error) {
+						orphan, err = gitx.RevParse(ctx, dir, "HEAD")
+						return err
+					},
+					checkout("main"),
+					func(ctx context.Context, dir string) error { return gitx.WorktreeAddDetached(ctx, dir, tmp, orphan) })...)}
+			},
+			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
+				vs := []Verdict{
+					v("worktrees", Within, "worktree "+addedWorktree(t, res)+" added"),
+					v("stage_paths", Outside, "commit "+onlyCommit(t, res)+" recorded owned/o.txt"),
+				}
 				if fx.State == SeedFull {
 					return append(vs, orphanedForeign()...), Fail
 				}
