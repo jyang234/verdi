@@ -36,8 +36,10 @@
 //     (a workbench route or action, an MCP tool) fails closed on a field
 //     whose stored value cannot be followed, or on a route table's field
 //     its registration did not bind; values in maps, slices, and channels,
-//     and a variable assigned through a pointer, are still attributed to
-//     the code that stored them;
+//     a variable assigned through a pointer, and a package-level variable
+//     reassigned outside its initializer (package-level mutable state the
+//     ground rules forbid) are still attributed to the code that stored
+//     them;
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type with methods has the methods
 //     of a module interface (the tripwire), so the gap cannot pass
