@@ -127,7 +127,11 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 			for _, h := range merged {
 				have[h.Func] = true
 			}
-			for _, h := range g.Reach(e, targets) {
+			hits, err := g.Reach(e, targets)
+			if err != nil {
+				t.Fatalf("%s: %v", target, err)
+			}
+			for _, h := range hits {
 				if name := prog.FuncName(h.Func); !have[name] {
 					merged = append(merged, ws.Hit{Func: name, Path: h.Path})
 					have[name] = true

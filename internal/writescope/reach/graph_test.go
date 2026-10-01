@@ -1,6 +1,7 @@
 package reach_test
 
 import (
+	"go/ast"
 	"go/types"
 	"sort"
 	"strings"
@@ -45,6 +46,16 @@ func synthTargets(t *testing.T, prog *reach.Program) map[*types.Func]bool {
 	}
 }
 
+// mustReach is Graph.Reach for an entry the test built the graph with.
+func mustReach(t *testing.T, g *reach.Graph, e reach.Entry, targets map[*types.Func]bool) []reach.Hit {
+	t.Helper()
+	hits, err := g.Reach(e, targets)
+	if err != nil {
+		t.Fatalf("Reach(%s): %v", e.Name, err)
+	}
+	return hits
+}
+
 func hitNames(hits []reach.Hit) []string {
 	var out []string
 	for _, h := range hits {
@@ -79,7 +90,7 @@ func TestGraph_ReachResolvesEveryCallShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			got := hitNames(g.Reach(entry, synthTargets(t, prog)))
+			got := hitNames(mustReach(t, g, entry, synthTargets(t, prog)))
 			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
 				t.Fatalf("Reach(%s) = %v, want %v", tt.root, got, tt.want)
 			}
@@ -100,7 +111,7 @@ func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
 	}
 	other := lookupFunc(t, prog, "example.com/synth/gitx", "Other")
 	for _, e := range entries {
-		for _, h := range g.Reach(e, synthTargets(t, prog)) {
+		for _, h := range mustReach(t, g, e, synthTargets(t, prog)) {
 			if h.Func == other {
 				t.Fatalf("%s reaches gitx.Other, which only the unlisted Unreached calls", e.Name)
 			}
@@ -117,10 +128,10 @@ func TestGraph_ReachStopsAtAnotherEntrysRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if got := hitNames(g.Reach(outer, synthTargets(t, prog))); len(got) != 0 {
+	if got := hitNames(mustReach(t, g, outer, synthTargets(t, prog))); len(got) != 0 {
 		t.Fatalf("outer reaches %v through inner's root; the most specific entry owns the mutation", got)
 	}
-	if got := hitNames(g.Reach(inner, synthTargets(t, prog))); strings.Join(got, ",") != "Mutate" {
+	if got := hitNames(mustReach(t, g, inner, synthTargets(t, prog))); strings.Join(got, ",") != "Mutate" {
 		t.Fatalf("inner reaches %v, want [Mutate]", got)
 	}
 }
@@ -132,13 +143,43 @@ func TestGraph_HitPathRunsFromRootToTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	hits := g.Reach(entry, synthTargets(t, prog))
+	hits := mustReach(t, g, entry, synthTargets(t, prog))
 	if len(hits) != 1 {
 		t.Fatalf("hits = %v, want one", hitNames(hits))
 	}
 	path := hits[0].Path
 	if len(path) < 3 || path[0] != "app.ViaClosure" || path[len(path)-1] != "gitx.Mutate" {
 		t.Fatalf("path = %v, want app.ViaClosure -> closure -> gitx.Mutate", path)
+	}
+}
+
+// TestGraph_ReachFailsOnRootsOutsideTheGraph pins R1-A7: an entry whose
+// roots the graph has no node for is an error, never "reaches nothing".
+func TestGraph_ReachFailsOnRootsOutsideTheGraph(t *testing.T) {
+	prog := loadSynth(t)
+	built := reach.Entry{Surface: "test", Name: "built", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "Direct")}}}
+	g, err := reach.Build(prog, []reach.Entry{built})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, err := g.Reach(built, synthTargets(t, prog)); err != nil {
+		t.Fatalf("Reach(built) = %v, want no error", err)
+	}
+	tests := []struct {
+		name  string
+		entry reach.Entry
+	}{
+		{"an arm the graph was not built with", reach.Entry{Surface: "test", Name: "stranger", Roots: []reach.Root{{Arm: &ast.CaseClause{}}}}},
+		{"an empty root", reach.Entry{Surface: "test", Name: "empty", Roots: []reach.Root{{}}}},
+		{"no roots", reach.Entry{Surface: "test", Name: "bare"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hits, err := g.Reach(tt.entry, synthTargets(t, prog))
+			if err == nil {
+				t.Fatalf("Reach(%s) = %v, nil; want an error, never \"reaches nothing\"", tt.entry.Name, hits)
+			}
+		})
 	}
 }
 

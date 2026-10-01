@@ -27,7 +27,7 @@ func reachByName(t *testing.T, prog *reach.Program, entries []reach.Entry) map[s
 	}
 	out := map[string]string{}
 	for _, e := range entries {
-		out[e.Name] = strings.Join(hitNames(g.Reach(e, synthTargets(t, prog))), ",")
+		out[e.Name] = strings.Join(hitNames(mustReach(t, g, e, synthTargets(t, prog))), ",")
 	}
 	return out
 }

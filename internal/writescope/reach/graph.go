@@ -115,11 +115,12 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 // shortest path. Traversal never enters a root of another entry: the
 // mutation behind it is that entry's, the most specific verb that reaches
 // it (a server verb hosts the workbench's and MCP's entries; a dispatcher
-// hosts its subcommands' arms).
-func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) []Hit {
+// hosts its subcommands' arms). An entry whose roots the graph has no
+// node for is an error, never an entry that reaches nothing.
+func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) {
 	own, err := g.rootIDs(entry)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	ownSet := map[int]bool{}
 	for _, id := range own {
@@ -153,7 +154,7 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) []Hit {
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].Func.FullName() < hits[j].Func.FullName() })
-	return hits
+	return hits, nil
 }
 
 // FuncName returns fn's full name with the module path prefix trimmed,
