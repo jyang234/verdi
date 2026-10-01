@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -18,9 +19,10 @@ import (
 // chrome-and-tokens-v2--ac-4--static): a small committed fixture store,
 // independent of examples/showcase, and the docs-site build of it.
 //
-// The golden under chromeGoldenSite was captured at commit 9b2ffd4e (the
-// base of feature/chrome-and-tokens-v2: no production change of the story
-// yet), from verdi/, with
+// The golden under chromeGoldenSite was captured at commit 3a9ded5c, the
+// commit that adds it, whose production code is its parent 9b2ffd4e's
+// (the base of feature/chrome-and-tokens-v2: no production change of the
+// story yet), from verdi/, with
 //
 //	go test -count=1 ./internal/dex/testdata/chromegolden/capture
 //
@@ -35,11 +37,12 @@ const (
 	chromeGoldenHead = "8ab53965d70e04e8fed85f1f886ece764eddaf94"
 )
 
-// TestWorkbenchChromeLeavesDocsSiteUnchanged is ac-4's static producer. Its
-// two halves: the docs-site build of the fixture store equals the golden in
-// every output file, byte for byte, and the stylesheet defines --wall-edge
-// and --scrim with dark-mode overrides inside workbench-only blocks (SI-322),
-// which the docs build strips.
+// TestWorkbenchChromeLeavesDocsSiteUnchanged is ac-4's static producer: the
+// docs-site build of the fixture store equals the golden in every output
+// file, byte for byte; the stylesheet defines --wall-edge and --scrim with
+// dark-mode overrides inside workbench-only blocks (SI-322), which the docs
+// build strips; and every rule in those blocks uses tokens only, except the
+// pushpin highlights and shadows (SI-326).
 func TestWorkbenchChromeLeavesDocsSiteUnchanged(t *testing.T) {
 	t.Run("docs site equals the golden", func(t *testing.T) {
 		built := buildChromeGoldenSite(t)
@@ -53,7 +56,7 @@ func TestWorkbenchChromeLeavesDocsSiteUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading assets/style.css: %v", err)
 		}
-		defs := scanCustomProperties(t, string(css))
+		defs := scanDeclarations(t, string(css))
 		for _, tok := range []struct {
 			name, light, dark string
 		}{
@@ -62,7 +65,7 @@ func TestWorkbenchChromeLeavesDocsSiteUnchanged(t *testing.T) {
 			{"--wall-edge", "#d6cdb6", "#3a3325"},
 			{"--scrim", "rgba(35,41,32,.28)", "rgba(0,0,0,.5)"},
 		} {
-			var light, dark []customPropertyDef
+			var light, dark []cssDecl
 			for _, d := range defs {
 				if d.name != tok.name {
 					continue
@@ -85,6 +88,26 @@ func TestWorkbenchChromeLeavesDocsSiteUnchanged(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("new rules use tokens only, except the pushpin highlights and shadows (SI-326)", func(t *testing.T) {
+		css, err := os.ReadFile(filepath.Join("assets", "style.css"))
+		if err != nil {
+			t.Fatalf("reading assets/style.css: %v", err)
+		}
+		decls := scanDeclarations(t, string(css))
+		inBlocks := 0
+		for _, d := range decls {
+			if d.inBlock {
+				inBlocks++
+			}
+		}
+		if inBlocks == 0 {
+			t.Fatal("no declaration sits inside a workbench-only block: the check would be vacuous")
+		}
+		for _, v := range tokenRuleViolations(decls) {
+			t.Error(v)
+		}
+	})
 }
 
 // buildChromeGoldenSite builds the docs site of the chrome golden's store
@@ -92,17 +115,25 @@ func TestWorkbenchChromeLeavesDocsSiteUnchanged(t *testing.T) {
 // store file, then Build with Root and OutDir only.
 func buildChromeGoldenSite(t *testing.T) string {
 	t.Helper()
+	repo := chromeGoldenRepo(t)
+	out := t.TempDir()
+	if err := Build(context.Background(), Options{Root: repo.Dir, OutDir: out}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return out
+}
+
+// chromeGoldenRepo is the chrome golden's store as its one-commit
+// fixturegit repository, its HEAD pinned.
+func chromeGoldenRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
 	neutralizeCIEnv(t)
 	files := readTreeFiles(t, filepath.Join(chromeGoldenStore, ".verdi"), ".verdi")
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "chrome golden fixture store"}})
 	if repo.Head != chromeGoldenHead {
 		t.Fatalf("fixture HEAD = %s, want %s: the store or its commit changed, so the golden's stamps no longer describe it", repo.Head, chromeGoldenHead)
 	}
-	out := t.TempDir()
-	if err := Build(context.Background(), Options{Root: repo.Dir, OutDir: out}); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	return out
+	return repo
 }
 
 // compareTrees returns one line per difference between the golden tree
@@ -170,15 +201,16 @@ func firstDiff(a, b []byte) int {
 	return n
 }
 
-// customPropertyDef is one custom-property declaration in a stylesheet:
-// its value, whether a prefers-color-scheme: dark at-rule encloses it, and
-// whether it sits inside a workbench-only block.
-type customPropertyDef struct {
-	name, value   string
-	dark, inBlock bool
+// cssDecl is one declaration in a stylesheet: its property and value, the
+// innermost rule's prelude (its selectors, or an at-rule), whether a
+// prefers-color-scheme: dark at-rule encloses it, and whether it sits
+// inside a workbench-only block.
+type cssDecl struct {
+	name, value, rule string
+	dark, inBlock     bool
 }
 
-func (d customPropertyDef) String() string {
+func (d cssDecl) String() string {
 	return fmt.Sprintf("{%s: %s dark=%t}", d.name, d.value, d.dark)
 }
 
@@ -189,25 +221,22 @@ const (
 	testWorkbenchOnlyEnd   = "/* verdi:workbench-only:end */"
 )
 
-// scanCustomProperties walks css once: a marker line opens or closes a
+// scanDeclarations walks css once: a marker line opens or closes a
 // workbench-only block, a comment is skipped, "{" pushes the rule's
-// prelude, "}" pops it, and every "--name: value" declaration is recorded
+// prelude, "}" pops it, and every "name: value" declaration is recorded
 // with its context. Enough CSS for this stylesheet, which carries no
 // braces or semicolons inside strings.
-func scanCustomProperties(t *testing.T, css string) []customPropertyDef {
+func scanDeclarations(t *testing.T, css string) []cssDecl {
 	t.Helper()
-	var defs []customPropertyDef
+	var defs []cssDecl
 	var stack []string
 	var stmt strings.Builder
 	inBlock := false
 	declare := func() {
 		s := strings.TrimSpace(stmt.String())
 		stmt.Reset()
-		if !strings.HasPrefix(s, "--") {
-			return
-		}
 		name, value, ok := strings.Cut(s, ":")
-		if !ok {
+		if !ok || len(stack) == 0 {
 			return
 		}
 		dark := false
@@ -216,7 +245,7 @@ func scanCustomProperties(t *testing.T, css string) []customPropertyDef {
 				dark = true
 			}
 		}
-		defs = append(defs, customPropertyDef{name: strings.TrimSpace(name), value: strings.TrimSpace(value), dark: dark, inBlock: inBlock})
+		defs = append(defs, cssDecl{name: strings.TrimSpace(name), value: strings.TrimSpace(value), rule: stack[len(stack)-1], dark: dark, inBlock: inBlock})
 	}
 	for i := 0; i < len(css); {
 		if strings.HasPrefix(css[i:], "/*") {
@@ -255,4 +284,114 @@ func scanCustomProperties(t *testing.T, css string) []customPropertyDef {
 		t.Fatalf("%d rule(s) left open at the end of the stylesheet", len(stack))
 	}
 	return defs
+}
+
+// tokenRuleViolations returns one line per declaration inside a
+// workbench-only block that breaks ac-4's "new rules use tokens only,
+// except the pushpin highlights and shadows" as ledger SI-326 reads it:
+//   - a colour literal (hex, a colour function, or a named colour other
+//     than transparent, currentColor, and the CSS-wide keywords) is
+//     allowed only in a custom-property definition (a token), in a
+//     box-shadow or text-shadow value, or in a rule whose selectors all
+//     target the pushpin (pushpinSelector);
+//   - a font-family value is exactly one font token, var(--…).
+//
+// Declarations outside workbench-only blocks are the docs site's shared
+// rules, which this story does not add, and are not checked.
+func tokenRuleViolations(decls []cssDecl) []string {
+	var out []string
+	for _, d := range decls {
+		if !d.inBlock {
+			continue
+		}
+		prop := strings.ToLower(d.name)
+		switch {
+		case strings.HasPrefix(prop, "--"):
+			continue
+		case prop == "font-family":
+			if !fontTokenRe.MatchString(strings.TrimSpace(d.value)) {
+				out = append(out, fmt.Sprintf("%s: %s in %q uses no font token (var(--…))", d.name, d.value, d.rule))
+			}
+			continue
+		case prop == "box-shadow" || prop == "text-shadow", pushpinRule(d.rule):
+			continue
+		}
+		if lit := colourLiteral(d.value); lit != "" {
+			out = append(out, fmt.Sprintf("%s: %s in %q carries the colour literal %q, not a token", d.name, d.value, d.rule, lit))
+		}
+	}
+	return out
+}
+
+// pushpinRule reports whether every selector of a rule's prelude targets
+// the pushpin: the handoff's .yarn-handle, or a class naming the pushpin.
+func pushpinRule(prelude string) bool {
+	if strings.HasPrefix(prelude, "@") {
+		return false
+	}
+	for _, sel := range strings.Split(prelude, ",") {
+		if !strings.Contains(sel, ".yarn-handle") && !strings.Contains(sel, "pushpin") {
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	fontTokenRe       = regexp.MustCompile(`^var\(--[A-Za-z0-9_-]+\)$`)
+	hexColourRe       = regexp.MustCompile(`#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b`)
+	colourFunctionRe  = regexp.MustCompile(`\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(`)
+	nestedReferenceRe = regexp.MustCompile(`(?:var|url)\([^()]*\)|"[^"]*"|'[^']*'`)
+	wordRe            = regexp.MustCompile(`[a-z]+`)
+)
+
+// colourLiteral returns the first colour literal value spells — tokens'
+// names, url()s, and strings set aside — or "" when it spells none.
+func colourLiteral(value string) string {
+	v := strings.ToLower(value)
+	for {
+		stripped := nestedReferenceRe.ReplaceAllString(v, " ")
+		if stripped == v {
+			break
+		}
+		v = stripped
+	}
+	if m := hexColourRe.FindString(v); m != "" {
+		return m
+	}
+	if m := colourFunctionRe.FindString(v); m != "" {
+		return m
+	}
+	named := namedColours()
+	for _, w := range wordRe.FindAllString(v, -1) {
+		if named[w] {
+			return w
+		}
+	}
+	return ""
+}
+
+// namedColours is CSS Color Module 4's named colours (transparent,
+// currentColor, and the CSS-wide keywords are no colour literal and are
+// absent).
+func namedColours() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Fields(`aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond
+		blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan
+		darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange
+		darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet
+		deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro
+		ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki
+		lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray
+		lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
+		lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid
+		mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue
+		mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod
+		palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple
+		red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+		slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white
+		whitesmoke yellow yellowgreen`) {
+		m[n] = true
+	}
+	return m
 }

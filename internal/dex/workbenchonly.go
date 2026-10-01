@@ -21,16 +21,18 @@ const (
 	workbenchOnlyStem = "verdi:workbench-only"
 )
 
-// docsStyleCSS returns the docs site's stylesheet: StyleCSS, the
-// stylesheet the workbench serves, with every workbench-only block
-// removed. Anything the docs build derives from its stylesheet's bytes
+// docsStyleCSS returns the docs site's stylesheet from the committed
+// stylesheet's bytes raw: every workbench-only block stripped first — so a
+// refused marker is named by the committed file's own line — then the
+// chroma palettes composed in, exactly as StyleCSS composes the
+// workbench's. Anything the docs build derives from its stylesheet's bytes
 // derives from these.
-func docsStyleCSS() ([]byte, error) {
-	full, err := StyleCSS()
+func docsStyleCSS(raw []byte) ([]byte, error) {
+	stripped, err := stripWorkbenchOnly(raw)
 	if err != nil {
 		return nil, err
 	}
-	return stripWorkbenchOnly(full)
+	return composeStyleCSS(stripped)
 }
 
 // stripWorkbenchOnly returns css with every workbench-only block removed
