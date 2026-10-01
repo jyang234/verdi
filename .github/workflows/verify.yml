@@ -35,6 +35,11 @@
 # hard-fails when CI=true and the binary is absent). The evidence job copies
 # those two steps exactly (SI-309), because the strict lint gate's named
 # tests, which `verdi sync --produce` runs there, need the pinned binary.
+# The static job also caches golangci-lint's analysis, keyed by the pin and
+# go.sum (spec/strict-lint-reach dc-1); the evidence job does not copy that
+# step. The evidence job's checkout is full-history, so it holds the two
+# commits the retro-witness (spec/strict-lint-reach ac-1) exports, 410db101
+# and e4d5b141.
 # pages.yml only builds the dex site (no lint), so it needs no linter.
 #
 # What internal/specalign enforces here (verifyworkflow_test.go, SI-267). The
@@ -218,6 +223,17 @@ jobs:
           test -x "$(go env GOPATH)/bin/golangci-lint" || \
             go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      # golangci-lint's analysis cache (spec/strict-lint-reach dc-1), at the
+      # location golangci-lint uses when GOLANGCI_LINT_CACHE is unset (the
+      # user cache directory), keyed by the pinned version and go.sum. It only
+      # shortens the job: make lint-strict holds its 60-second budget with a
+      # cold cache, and the cache changes no finding. verify.yml's evidence
+      # job does not copy it.
+      - name: Cache golangci-lint analysis
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-analysis-${{ runner.os }}-v2.5.0-${{ hashFiles('go.sum') }}
       - run: make build
       - run: make fmt-check
       - run: make vet
