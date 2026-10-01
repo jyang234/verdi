@@ -424,7 +424,9 @@ func TestCloseDispatchChecksOutExactCommitDetached(t *testing.T) {
 //     `continue-on-error:`, so GitHub runs it only once every gate job of the
 //     same run has succeeded;
 //   - inside `verify`, the verdict call over every gate job's result, then
-//     `verdi sync --produce`, then the upload of "verdi-evidence" from
+//     Node set up exactly as the e2e gate jobs set it up and the binary
+//     build (SI-293: the Playwright producer needs Node), then `verdi sync
+//     --produce`, then the upload of "verdi-evidence" from
 //     .verdi/data/derived/ each run once, in that order.
 //
 // The self-hosted evidence producer is honest only when it runs after every
