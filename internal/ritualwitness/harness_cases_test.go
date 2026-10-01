@@ -340,6 +340,48 @@ func commitCases() []harnessCase {
 		},
 		stage("owned/o.txt", "o\n"), commitIndex, checkout("main"))
 	unit := func(fx *Fixture) string { return filepath.Join(fx.Dir, ".verdi", "data", "worktrees", "unit") }
+	handbackDecl := ws.Declaration{Ritual: "test_handback", Verbs: []ws.Verb{ws.CLI("test handback")},
+		RefsMove: []ws.RefPattern{ws.RefCheckedOut}, Worktrees: []ws.WorktreePattern{".verdi/data/worktrees/*"}, IndexCarry: ws.CarryNoCommit}
+	// cleanRunway: a runway is clean, since the fast-forward refuses a
+	// dirty tree.
+	cleanRunway := func(t *testing.T, ctx context.Context, fx *Fixture) {
+		runGitFixture(t, ctx, fx.Dir, "checkout", "--quiet", "--", TrackedFile)
+		if err := os.Remove(filepath.Join(fx.Dir, UntrackedFile)); err != nil {
+			t.Fatal(err)
+		}
+		if fx.State == SeedFull {
+			runGitFixture(t, ctx, fx.Dir, "rm", "--quiet", "--cached", "--", ForeignFile)
+			if err := os.Remove(filepath.Join(fx.Dir, ForeignFile)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// handback is context execution's shape: a unit worktree, an agent
+	// commit made there with plain git, and a fast-forward of the runway.
+	handback := func(fx *Fixture) Ritual {
+		return steps(
+			func(ctx context.Context, dir string) error {
+				return gitx.WorktreeAddDetached(ctx, dir, unit(fx), "HEAD")
+			},
+			writeFile(".verdi/data/worktrees/unit/unit.txt", "agent work\n"),
+			func(ctx context.Context, _ string) error {
+				_, err := plainGit(ctx, unit(fx), "add", "unit.txt")
+				return err
+			},
+			func(ctx context.Context, _ string) error {
+				_, err := plainGit(ctx, unit(fx), "commit", "--quiet", "-m", "agent work")
+				return err
+			},
+			func(ctx context.Context, dir string) error {
+				out, err := gitx.RevParse(ctx, unit(fx), "HEAD")
+				if err != nil {
+					return err
+				}
+				_, err = gitx.FastForwardOnly(ctx, dir, out)
+				return err
+			},
+		)
+	}
 	return []harnessCase{
 		{
 			name: "a transient commit no ref reaches still counts under no_commit (B P6)", states: both(),
@@ -591,46 +633,9 @@ func commitCases() []harnessCase {
 		},
 		{
 			name: "a fast-forward of @checked-out to an added worktree's commit is a declared move (context execution's hand-back)", states: both(),
-			decl: ws.Declaration{Ritual: "test_handback", Verbs: []ws.Verb{ws.CLI("test handback")},
-				RefsMove: []ws.RefPattern{ws.RefCheckedOut}, Worktrees: []ws.WorktreePattern{".verdi/data/worktrees/*"}, IndexCarry: ws.CarryNoCommit},
-			setup: func(t *testing.T, ctx context.Context, fx *Fixture) {
-				// A runway is clean: the fast-forward refuses a dirty tree.
-				runGitFixture(t, ctx, fx.Dir, "checkout", "--quiet", "--", TrackedFile)
-				if err := os.Remove(filepath.Join(fx.Dir, UntrackedFile)); err != nil {
-					t.Fatal(err)
-				}
-				if fx.State == SeedFull {
-					runGitFixture(t, ctx, fx.Dir, "rm", "--quiet", "--cached", "--", ForeignFile)
-					if err := os.Remove(filepath.Join(fx.Dir, ForeignFile)); err != nil {
-						t.Fatal(err)
-					}
-				}
-			},
-			driver: func(_ *testing.T, fx *Fixture) Driver {
-				return InProcess{Fn: steps(
-					func(ctx context.Context, dir string) error {
-						return gitx.WorktreeAddDetached(ctx, dir, unit(fx), "HEAD")
-					},
-					// The agent commits with plain git, as a sealed agent does.
-					writeFile(".verdi/data/worktrees/unit/unit.txt", "agent work\n"),
-					func(ctx context.Context, _ string) error {
-						_, err := plainGit(ctx, unit(fx), "add", "unit.txt")
-						return err
-					},
-					func(ctx context.Context, _ string) error {
-						_, err := plainGit(ctx, unit(fx), "commit", "--quiet", "-m", "agent work")
-						return err
-					},
-					func(ctx context.Context, dir string) error {
-						out, err := gitx.RevParse(ctx, unit(fx), "HEAD")
-						if err != nil {
-							return err
-						}
-						_, err = gitx.FastForwardOnly(ctx, dir, out)
-						return err
-					},
-				)}
-			},
+			decl:   handbackDecl,
+			setup:  cleanRunway,
+			driver: func(_ *testing.T, fx *Fixture) Driver { return InProcess{Fn: handback(fx)} },
 			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
 				w := canonicalPath("", unit(fx))
 				return []Verdict{
@@ -641,6 +646,24 @@ func commitCases() []harnessCase {
 					v("worktrees", Within, "commit "+onlyCommit(t, res)+" made in added worktree "+w),
 					v("index_carry", Within, "declares no_commit; observed no_commit"),
 				}, Pass
+			},
+		},
+		{
+			name: "without a command log the hand-back is unproven, never outside: its agent commit needs the logged fast-forward (SI-329 (5′))", states: both(),
+			decl:   handbackDecl,
+			setup:  cleanRunway,
+			driver: func(_ *testing.T, fx *Fixture) Driver { return noLog{fn: handback(fx)} },
+			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
+				w := canonicalPath("", unit(fx))
+				return []Verdict{
+					v("command_log", Unattributable, "the driver supplied no git command log"),
+					v("refs_move", Unattributable, "refs/heads/main moved"),
+					v("index", Unattributable, "index entry unit.txt added"),
+					v("working_tree", Within, "unit.txt created"+fileWrite),
+					v("worktrees", Unattributable, "worktree "+w+" added"),
+					v("worktrees", Unattributable, "commit "+onlyCommit(t, res)+" made in added worktree "+w),
+					v("index_carry", Within, "declares no_commit; observed no_commit"),
+				}, Unproven
 			},
 		},
 		{

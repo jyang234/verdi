@@ -495,7 +495,7 @@ func si329Cases() []harnessCase {
 			},
 		},
 		{
-			name: "a gone worktree owns a commit by the log alone, even one a fixture ref later reaches (SI-329 (5′)(ii), as written)", states: both(),
+			name: "a gone worktree's commit a fixture ref later reaches is judged, not owned (SI-329 (5′)(ii))", states: both(),
 			decl: tempDecl(nil),
 			driver: func(t *testing.T, _ *Fixture) Driver {
 				tmp := filepath.Join(t.TempDir(), "evaluation")
@@ -522,17 +522,11 @@ func si329Cases() []harnessCase {
 				)}
 			},
 			want: func(t *testing.T, _ *Fixture, res Result) ([]Verdict, RunOutcome) {
-				var tmp string
-				for _, c := range res.Log.Calls {
-					if len(c.Args) == 5 && c.Args[1] == "add" {
-						tmp = canonicalPath(c.Dir, c.Args[3])
-					}
-				}
 				return []Verdict{
 					v("refs_create", Within, "refs/heads/ritual/kept created"),
-					v("worktrees", Within, "commit "+onlyCommit(t, res)+" made in added worktree "+tmp),
-					v("index_carry", Within, "declares no_commit; observed no_commit"),
-				}, Pass
+					v("stage_paths", Outside, "commit "+onlyCommit(t, res)+" recorded decoy.txt"),
+					v("index_carry", Outside, "declares no_commit; observed scoped"),
+				}, Fail
 			},
 		},
 	}

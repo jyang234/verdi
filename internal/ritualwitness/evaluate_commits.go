@@ -38,9 +38,12 @@ func (e *evaluation) commits() []Verdict {
 				carried[f] = true
 			}
 		}
-		if w := e.ownerWorktree(id); w != "" {
-			out = append(out, Verdict{Field: "worktrees", Detail: "commit " + short(id) + " made in added worktree " + w,
-				Status: classify(e.worktreeAdmitted(w, false), true)})
+		if w, proven := e.ownerWorktree(id); w != "" {
+			status := classify(e.worktreeAdmitted(w, false), true)
+			if !proven {
+				status = Unattributable
+			}
+			out = append(out, Verdict{Field: "worktrees", Detail: "commit " + short(id) + " made in added worktree " + w, Status: status})
 			continue
 		}
 		judged++
@@ -96,14 +99,17 @@ func (e *evaluation) commitPathAttributed(f string) bool {
 }
 
 // ownerWorktree returns the added worktree a created commit belongs to
-// (SI-329 (5′)), or "". The commit must have been made after the
-// worktree was added — the commit the worktree started at does not reach
-// it — and either (i) the worktree's HEAD after the run reaches it and no
-// fixture ref or HEAD does, except through a logged fast-forward of
-// @checked-out to a commit the worktree reaches (the context-execution
-// hand-back), or (ii) the worktree is gone after the run, the log shows a
-// commit made in it, and none made in the fixture.
-func (e *evaluation) ownerWorktree(id string) string {
+// (SI-329 (5′)), or "", and whether that ownership is proven. The commit
+// must have been made after the worktree was added — the commit the
+// worktree started at, when known, does not reach it — and either (i) the
+// worktree's HEAD after the run reaches it, or (ii) the worktree is gone
+// after the run, the log shows a commit made in it, and none was logged in
+// the fixture; and in both, no fixture ref or HEAD reaches it except
+// through a logged fast-forward of @checked-out to a commit the worktree
+// reaches (the context-execution hand-back). When the driver supplied no
+// log and ownership needs that logged exception, the worktree is returned
+// unproven: the commit is unattributable, never outside.
+func (e *evaluation) ownerWorktree(id string) (string, bool) {
 	added := make([]string, 0, len(e.addedWT))
 	for w := range e.addedWT {
 		added = append(added, w)
@@ -114,17 +120,22 @@ func (e *evaluation) ownerWorktree(id string) string {
 		if start == "" || e.reachable(id, start) {
 			continue
 		}
-		if aw, present := e.linkedA[w]; present {
-			if e.reachable(id, aw.Head.Commit) && !e.fixtureReaches(id, e.handbackTips(aw)) {
-				return w
-			}
+		aw, present := e.linkedA[w]
+		switch {
+		case present && e.reachable(id, aw.Head.Commit):
+		case !present && e.at.has(w, primCommit, primCommitTree) && !e.commitLoggedInFixture():
+		default:
 			continue
 		}
-		if e.at.has(w, primCommit, primCommitTree) && !e.commitLoggedInFixture() {
-			return w
+		tips := e.handbackTips(aw, present)
+		if !e.fixtureReaches(id, e.loggedHandback(tips)) {
+			return w, true
+		}
+		if !e.at.ok && !e.fixtureReaches(id, tips) {
+			return w, false
 		}
 	}
-	return ""
+	return "", false
 }
 
 // worktreeStart is the commit an added worktree started at: the first
@@ -149,18 +160,32 @@ func (e *evaluation) worktreeStart(w string) string {
 	return ""
 }
 
-// handbackTips returns the commit a logged fast-forward moved
-// @checked-out to, when the added worktree aw reaches it.
-func (e *evaluation) handbackTips(aw Worktree) map[string]bool {
+// handbackTips returns the commit @checked-out moved to, when it could be
+// a hand-back from the added worktree aw: the worktree, if still present,
+// reaches it (a gone worktree's HEAD is no longer sensed). Whether a
+// logged fast-forward made the move is loggedHandback's question.
+func (e *evaluation) handbackTips(aw Worktree, present bool) map[string]bool {
 	tips := map[string]bool{}
 	if !e.checkedOutMoved() {
 		return tips
 	}
 	tip := e.a.Refs[e.checkedOutBefore()].Object
-	if e.at.fastForwardsTo(e.a.Root, tip) && e.reachable(tip, aw.Head.Commit) {
+	if !present || e.reachable(tip, aw.Head.Commit) {
 		tips[tip] = true
 	}
 	return tips
+}
+
+// loggedHandback keeps the tips a logged fast-forward in the main
+// worktree moved @checked-out to.
+func (e *evaluation) loggedHandback(tips map[string]bool) map[string]bool {
+	logged := map[string]bool{}
+	for t := range tips {
+		if e.at.fastForwardsTo(e.a.Root, t) {
+			logged[t] = true
+		}
+	}
+	return logged
 }
 
 // fixtureReaches reports whether any ref of the repository or the remote,

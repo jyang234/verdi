@@ -56,14 +56,17 @@
 //
 // A created commit belongs to a worktree the ritual added (SI-329 (5′))
 // only when it was made after the add — the commit the worktree started at
-// does not reach it — and either the worktree's HEAD reaches it and no
-// fixture ref or HEAD does, except through a logged fast-forward of
-// @checked-out (the context-execution hand-back), or the worktree is gone,
-// the log shows a commit made in it, and none in the fixture. A worktree
-// counts as added only when the after-state lists it and the before-state
-// does not, or the log shows both its add and its remove. Every branch move
-// is also judged by its net tree difference against the stage paths, for
-// the paths no created commit it brings in recorded.
+// does not reach it; an unknown start owns nothing — and either the
+// worktree's HEAD reaches it, or the worktree is gone, the log shows a
+// commit made in it, and none was logged in the fixture's own checkouts;
+// in both, no fixture ref or HEAD may reach it except through a logged
+// fast-forward of @checked-out (the context-execution hand-back). Without
+// a command log, a commit whose ownership needs that logged exception is
+// unattributable, never outside. A worktree counts as added only when the
+// after-state lists it and the before-state does not, or the log shows
+// both its add and its remove. Every branch move is also judged by its net
+// tree difference against the stage paths, for the paths no created commit
+// it brings in recorded, owned or judged.
 //
 // # Disclosed
 //
