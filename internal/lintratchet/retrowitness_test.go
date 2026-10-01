@@ -85,6 +85,11 @@ func retroPackages() []string {
 // abstain, never as a pass (dc-2). TestRetroWitnessDisposition proves how it
 // ends in each case.
 func TestRetroWitness_ReadinessLoaderGlobals(t *testing.T) {
+	// The obligation's claim names these two variables; the witness checks
+	// exactly them, never a shorter list (review finding S2-2).
+	if want := []string{"serveReadinessLoader", "serveReadinessDefaultSpec"}; !slices.Equal(retroGlobals(), want) {
+		t.Fatalf("the retro-witness checks %q, want exactly %q", retroGlobals(), want)
+	}
 	forbidFetch(t)
 	root := repoRoot(t)
 	if err := retroHistory(t.Context(), root, retroBefore, retroAfter); err != nil {
