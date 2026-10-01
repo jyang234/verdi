@@ -58,9 +58,9 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 			mutating++
 		}
 	}
-	t.Logf("%d of %d verbs reach a mutating function; %d declarations; %d gitx exports, %d git-directory writers; %s on %d targets in %v",
+	t.Logf("%d of %d verbs reach a mutating function; %d declarations; %d gitx exports; %d git-directory writers; union of %d targets; %v",
 		mutating, len(facts.Verbs), len(ws.Registry()), len(facts.GitxExports), len(facts.GitDirWriters),
-		"union", len(reach.Targets()), time.Since(start).Round(time.Millisecond))
+		len(reach.Targets()), time.Since(start).Round(time.Millisecond))
 }
 
 // analyzeModule computes the facts for the module at root, as the union
@@ -68,6 +68,10 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 func analyzeModule(t *testing.T, root string) ws.Facts {
 	t.Helper()
 	ctx := context.Background()
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatalf("resolving %s: %v", root, err)
+	}
 	tools := liveMCPTools(t, root)
 	facts := ws.Facts{GitxPackage: gitxPackage, Functions: map[string]bool{}, Verbs: map[ws.Verb][]ws.Hit{}}
 	exports := map[string]bool{}
@@ -90,15 +94,18 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 		if locator == nil {
 			t.Fatalf("%s: the git-directory locator %s no longer exists", target, gitDirLocator)
 		}
-		ws2, err := reach.GitDirWriters(prog, []*types.Func{locator}, []string{mod + gitxPackage})
+		found, err := reach.GitDirWriters(prog, []*types.Func{locator}, []string{mod + gitxPackage})
 		if err != nil {
 			t.Fatalf("%s: %v", target, err)
 		}
-		for _, w := range ws2 {
+		for _, w := range found {
 			name := prog.FuncName(w.Func)
 			if _, seen := writers[name]; !seen {
-				rel, _ := filepath.Rel(root, w.At)
-				writers[name] = ws.Writer{Func: name, At: filepath.ToSlash(rel)}
+				at := w.At
+				if rel, err := filepath.Rel(absRoot, w.At); err == nil {
+					at = filepath.ToSlash(rel)
+				}
+				writers[name] = ws.Writer{Func: name, At: at}
 			}
 		}
 

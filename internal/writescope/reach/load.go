@@ -49,7 +49,13 @@ type Program struct {
 	byPath   map[string]*Package
 	decls    map[*types.Func]funcDecl
 	byName   map[string]*types.Func
+	inputs   []string
 }
+
+// Inputs returns the directories and module files Load read in-process
+// beyond the parsed sources: every module package's directory and the
+// module's go.mod and go.sum (each that exists).
+func (p *Program) Inputs() []string { return p.inputs }
 
 // funcDecl is where a module function is declared.
 type funcDecl struct {
@@ -150,6 +156,10 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 	if l.modulePath == "" {
 		return nil, fmt.Errorf("reach: no package of the main module matched %v in %s", patterns, dir)
 	}
+	inputs, err := readInputs(listed, l.inModule)
+	if err != nil {
+		return nil, err
+	}
 	paths := make([]string, 0, len(listed))
 	for _, lp := range listed {
 		paths = append(paths, lp.ImportPath)
@@ -160,7 +170,7 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 			return nil, err
 		}
 	}
-	prog := &Program{Fset: l.fset, Module: l.modulePath, Target: target, byPath: l.module, decls: map[*types.Func]funcDecl{}, byName: map[string]*types.Func{}}
+	prog := &Program{Fset: l.fset, Module: l.modulePath, Target: target, byPath: l.module, decls: map[*types.Func]funcDecl{}, byName: map[string]*types.Func{}, inputs: inputs}
 	for _, path := range paths {
 		pkg, ok := l.module[path]
 		if !ok {
@@ -179,6 +189,48 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 		}
 	}
 	return prog, nil
+}
+
+// readInputs reads, in this process, every module package's directory and
+// the module's go.mod and go.sum. `go list` reads them in a child process,
+// which `go test`'s result cache cannot see; reading them here records them
+// as test inputs, so a file added to or removed from any analyzed package,
+// or a changed module file, invalidates a cached pass. (Parsed source files
+// are recorded already: the parser opens each in-process.)
+func readInputs(listed []*listedPackage, inModule map[string]bool) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, lp := range listed {
+		if !inModule[lp.ImportPath] {
+			continue
+		}
+		if _, err := os.ReadDir(lp.Dir); err != nil {
+			return nil, fmt.Errorf("reach: reading package directory %s: %w", lp.Dir, err)
+		}
+		out = append(out, lp.Dir)
+		var goMod string
+		if raw, ok := lp.Module["GoMod"]; ok {
+			if err := json.Unmarshal(raw, &goMod); err != nil {
+				return nil, fmt.Errorf("reach: go list: package %s: module file: %w", lp.ImportPath, err)
+			}
+		}
+		if goMod == "" || seen[goMod] {
+			continue
+		}
+		seen[goMod] = true
+		for _, f := range []string{goMod, filepath.Join(filepath.Dir(goMod), "go.sum")} {
+			_, err := os.ReadFile(f)
+			switch {
+			case err == nil:
+				out = append(out, f)
+			case errors.Is(err, os.ErrNotExist) && f != goMod:
+			default:
+				return nil, fmt.Errorf("reach: reading %s: %w", f, err)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // goList runs `go list -deps -json` hermetically and strict-decodes its

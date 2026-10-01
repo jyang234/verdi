@@ -3,6 +3,7 @@ package reach_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -98,6 +99,28 @@ func TestTargets_CoverBothReleasePlatforms(t *testing.T) {
 	for _, want := range []string{"linux/amd64", "darwin/arm64"} {
 		if !got[want] {
 			t.Errorf("Targets() lacks %s: %v", want, got)
+		}
+	}
+}
+
+func TestLoad_ReportsTheInputsGoTestMustTrack(t *testing.T) {
+	prog := loadSynth(t)
+	inputs := prog.Inputs()
+	want := map[string]bool{
+		filepath.Join("testdata", "synth", "go.mod"): false,
+		filepath.Join("testdata", "synth", "gitx"):   false,
+		filepath.Join("testdata", "synth", "cli"):    false,
+	}
+	for _, in := range inputs {
+		for w := range want {
+			if strings.HasSuffix(in, w) {
+				want[w] = true
+			}
+		}
+	}
+	for w, seen := range want {
+		if !seen {
+			t.Errorf("Inputs() lacks %s; got %v", w, inputs)
 		}
 	}
 }
