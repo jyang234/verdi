@@ -18,7 +18,7 @@ decisions:
   - { id: dc-1, text: "The baseline check lives in one internal package, internal/lintratchet, which parses golangci-lint's JSON report, keys and counts findings, and compares them, with a thin command the Makefile runs. golangci-lint runs with --issues-exit-code=0 so a reported finding is data; the check alone decides exit 0, 1, or 2, and any nonzero golangci-lint exit is operational.", anchor: dc-1 }
   - { id: dc-2, text: "The merge base is taken against the default branch resolved as verdi resolves it elsewhere (CI_DEFAULT_BRANCH, then origin/HEAD, then origin/main or origin/master). On the default branch itself, where the merge base would be HEAD, the growth comparison reads the baseline at HEAD's first parent, the default branch before the change, so a change pushed straight to the default branch is checked too. A merge base or parent that cannot be resolved, such as in a shallow clone, exits 2, never a pass.", anchor: dc-2 }
   - { id: dc-3, text: "Tests that run the real linter skip, with a printed reason, when the Makefile's pinned golangci-lint is absent, as it is in CI's test jobs. CI job verify, which produces the evidence records, gains the static job's two golangci-lint steps, copied exactly (ledger SI-309): it runs after the static job and restores the binary the static job cached under the same key, so the install step runs only on a cache miss and CI still installs the pinned version once per version (parent co-2). A skip in verify would be recorded as abstain, never as a pass.", anchor: dc-3 }
-  - { id: dc-4, text: "The witness reads the source directives itself, with golangci-lint's directive grammar (//nolint, optionally followed by :linter[,linter...], then an optional // reason), over every Go file of the module outside testdata directories and nested modules. No linter joins the gated set (parent dc-2): nolintlint, which could require named linters and reasons, would be a sixth linter, so the witness does that work instead, to the same effect as nolintlint's require-specific and require-explanation for the gated linters. A directive naming only ungated linters is not counted; one naming a gated linter among others is.", anchor: dc-4 }
+  - { id: dc-4, text: "The witness reads the source directives itself, with golangci-lint's directive grammar (//nolint, optionally followed by :linter[,linter...], then an optional // reason), over the module's linux/amd64 lint set: the files make lint-strict analyzes, test files included, testdata directories and nested modules excluded, the same universe the configuration-exclusion witness measures (parent dc-3; ledger SI-315). No linter joins the gated set (parent dc-2): nolintlint, which could require named linters and reasons, would be a sixth linter, so the witness does that work instead, to the same effect as nolintlint's require-specific and require-explanation for the gated linters. A directive naming only ungated linters is not counted; one naming a gated linter among others is.", anchor: dc-4 }
 links:
   - { type: implements, ref: "spec/strict-lint-target-v2#ac-1" }
   - { type: implements, ref: "spec/strict-lint-target-v2#ac-2" }
@@ -115,8 +115,9 @@ same key, so the install step runs only on a cache miss and CI still installs th
 ## dc-4
 
 The witness reads the source directives itself, with golangci-lint's directive grammar (//nolint, optionally followed by
-:linter[,linter...], then an optional // reason), over every Go file of the module outside testdata directories and
-nested modules. No linter joins the gated set (parent dc-2): nolintlint, which could require named linters and reasons,
-would be a sixth linter, so the witness does that work instead, to the same effect as nolintlint's require-specific and
-require-explanation for the gated linters. A directive naming only ungated linters is not counted; one naming a gated
-linter among others is.
+:linter[,linter...], then an optional // reason), over the module's linux/amd64 lint set: the files make lint-strict
+analyzes, test files included, testdata directories and nested modules excluded, the same universe the
+configuration-exclusion witness measures (parent dc-3; ledger SI-315). No linter joins the gated set (parent dc-2):
+nolintlint, which could require named linters and reasons, would be a sixth linter, so the witness does that work
+instead, to the same effect as nolintlint's require-specific and require-explanation for the gated linters. A directive
+naming only ungated linters is not counted; one naming a gated linter among others is.
