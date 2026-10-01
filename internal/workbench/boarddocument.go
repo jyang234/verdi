@@ -204,19 +204,19 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		name := r.PathValue("name")
 		kind, err := documentKindFromQuery(r)
 		if err != nil {
-			renderError(w, http.StatusBadRequest, err)
+			renderError(r.Context(), w, s.root, http.StatusBadRequest, err)
 			return
 		}
 		format, err := documentFormatFromQuery(r)
 		if err != nil {
-			renderError(w, http.StatusBadRequest, err)
+			renderError(r.Context(), w, s.root, http.StatusBadRequest, err)
 			return
 		}
 		snap, err := s.loadDocument(r.Context(), name, kind)
 		if err != nil {
 			// The HTML route fails as the board does: renderError's page,
 			// never a plain-text body (/snapshot keeps JSON errors).
-			renderError(w, documentLoadStatus(name, err), err)
+			renderError(r.Context(), w, s.root, documentLoadStatus(name, err), err)
 			return
 		}
 		if format == "md" {
@@ -245,7 +245,7 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		observeBar(r.Context(), bar)
 		page, err := renderBoardDocumentPage(r.URL.EscapedPath(), name, snap, bar)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

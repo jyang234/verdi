@@ -128,7 +128,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// Deps.ReadinessDefaultSpec (nil loader, or neither name, discloses an
 	// honest 503). Method checks live in the handler, matching the
 	// method-prefix note above.
-	mux.HandleFunc("/readiness", readinessHandler(deps.ReadinessLoader, deps.ReadinessDefaultSpec))
+	mux.HandleFunc("/readiness", readinessHandler(root, deps.ReadinessLoader, deps.ReadinessDefaultSpec))
 
 	// The mechanical spec importer's browser adapter (spec-import-contract
 	// "Browser routes"; specimport.go): the import page, the two strict

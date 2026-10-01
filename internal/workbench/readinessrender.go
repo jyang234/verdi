@@ -14,6 +14,7 @@
 package workbench
 
 import (
+	"context"
 	stdhtml "html"
 	"html/template"
 	"strconv"
@@ -89,8 +90,9 @@ func newReadinessEmission(snap readinesspilot.Snapshot) *readinessEmission {
 	return &readinessEmission{labels: labels, anchored: make(map[readinesspilot.AreaID]bool, len(snap.Areas))}
 }
 
-// renderReadiness renders the cockpit page for one immutable snapshot.
-func renderReadiness(snap readinesspilot.Snapshot) ([]byte, error) {
+// renderReadiness renders the cockpit page for one immutable snapshot,
+// its top bar stating the checkout at root (renderPage).
+func renderReadiness(ctx context.Context, root string, snap readinesspilot.Snapshot) ([]byte, error) {
 	em := newReadinessEmission(snap)
 	var b strings.Builder
 	b.WriteString(`<div class="readiness-page">`)
@@ -103,7 +105,7 @@ func renderReadiness(snap readinesspilot.Snapshot) ([]byte, error) {
 	// the target's technical facts would precede the orientation. They
 	// live in the orientation's own trailing disclosure instead
 	// (writeReadinessTargetTech).
-	return renderPage(pageData{
+	return renderPage(ctx, root, pageData{
 		Title:     "Readiness",
 		Nav:       template.HTML(`<a href="/">index</a> <span class="current">readiness</span>`),
 		BodyHTML:  template.HTML(b.String()), //nolint:gosec // built above from escaped snapshot text only

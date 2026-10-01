@@ -114,9 +114,9 @@ func (s *specImportServer) pageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	out, err := renderSpecImportPage(s.model)
+	out, err := renderSpecImportPage(r.Context(), s.root, s.model)
 	if err != nil {
-		renderError(w, http.StatusInternalServerError, err)
+		renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -235,7 +235,7 @@ func (s *specImportServer) recordHandler(w http.ResponseWriter, r *http.Request)
 	branch := r.URL.Query().Get("branch")
 	slug := r.URL.Query().Get("spec")
 	if reason := validateSpecImportRecordQuery(branch, slug); reason != "" {
-		renderSpecImportRecordInvalid(w, reason)
+		renderSpecImportRecordInvalid(r.Context(), w, s.root, reason)
 		return
 	}
 	view, err := specimport.ReadRecord(r.Context(), s.root, branch, slug)
@@ -245,12 +245,12 @@ func (s *specImportServer) recordHandler(w http.ResponseWriter, r *http.Request)
 			log.Printf("workbench: spec import record %s %s: %v", branch, slug, err)
 			detail = ""
 		}
-		renderSpecImportRecordUnavailable(w, status, code, detail, branch, slug)
+		renderSpecImportRecordUnavailable(r.Context(), w, s.root, status, code, detail, branch, slug)
 		return
 	}
-	out, err := renderSpecImportRecord(view, branch, slug)
+	out, err := renderSpecImportRecord(r.Context(), s.root, view, branch, slug)
 	if err != nil {
-		renderError(w, http.StatusInternalServerError, err)
+		renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -34,13 +34,13 @@ func TestBuildIdentificationFooter(t *testing.T) {
 		{
 			name: "shared read-page shell",
 			render: func() ([]byte, error) {
-				return renderPage(pageData{Title: "T", BodyHTML: "<p>body</p>"})
+				return renderPage(t.Context(), "", pageData{Title: "T", BodyHTML: "<p>body</p>"})
 			},
 		},
 		{
 			name: "v0 board page",
 			render: func() ([]byte, error) {
-				return renderBoardPage(boardClientState{Key: "STORY-1"}, classWords{})
+				return renderBoardPage(boardClientState{Key: "STORY-1"}, classWords{}, barFacts{})
 			},
 		},
 		{

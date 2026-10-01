@@ -109,10 +109,7 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		return nil, fmt.Errorf("workbench: diagram editor state: %w", err)
 	}
 
-	title := v.Title
-	if title == "" {
-		title = v.Name
-	}
+	title := v.pageTitle()
 	data := struct {
 		Name      string
 		Title     string
@@ -124,6 +121,8 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		Region    template.HTML
 		Dialogs   template.HTML
 		StateJSON template.JS
+		// Bar is the top bar's facts, not yet drawn by the template.
+		Bar barFacts
 	}{
 		Name:      v.Name,
 		Title:     title,
@@ -135,6 +134,7 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		Region:    template.HTML(renderDiagramEditorRegion(v)),
 		Dialogs:   template.HTML(renderDiagramEditorDialogs(v)),
 		StateJSON: template.JS(stateJSON),
+		Bar:       v.Bar,
 	}
 	var buf bytes.Buffer
 	if err := diagramEditorPageTemplate.Execute(&buf, data); err != nil {

@@ -127,9 +127,13 @@ var (
 
 // lintRuns counts lint enumerations through gitx's observer: every lint
 // run starts with lint.BuildContext's `git symbolic-ref --short -q HEAD`.
+// So does every page's top bar (SI-323 (1)): its facts read the checkout's
+// branch through gitState once per page render. The bar probe counts
+// those renders, and count subtracts them, leaving the lint runs alone.
 type lintRuns struct {
-	mu sync.Mutex
-	n  int
+	mu   sync.Mutex
+	n    int
+	bars int
 }
 
 func (l *lintRuns) Observe(_ string, args []string) {
@@ -140,10 +144,27 @@ func (l *lintRuns) Observe(_ string, args []string) {
 	}
 }
 
+// observeBar is the bar probe: one page render's branch-level bar facts,
+// each built by exactly one gitState branch read.
+func (l *lintRuns) observeBar(f barFacts) {
+	if f.Spec != nil {
+		return
+	}
+	l.mu.Lock()
+	l.bars++
+	l.mu.Unlock()
+}
+
 func (l *lintRuns) count() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.n
+	return l.n - l.bars
+}
+
+// context returns a request context that reports both the Git reads and
+// the bar renders to l.
+func (l *lintRuns) context() context.Context {
+	return withBarProbe(gitx.WithObserver(context.Background(), l), l.observeBar)
 }
 
 // countIndexEnumerations wraps the index's enumeration seam and returns
@@ -189,7 +210,7 @@ func TestIndex_DisclosuresCount(t *testing.T) {
 			root := tt.setup(t)
 			calls := countIndexEnumerations(t)
 			runs := &lintRuns{}
-			ctx := gitx.WithObserver(context.Background(), runs)
+			ctx := runs.context()
 			h := NewHandlerWithHome(root, Deps{Disclosures: tt.extras}, HomeDeps{Index: cannedIndex(nil, nil)})
 
 			var body string
@@ -284,7 +305,7 @@ func TestDisclosuresPage_EnumeratesEveryRender(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := tt.store(t)
 			runs := &lintRuns{}
-			ctx := gitx.WithObserver(context.Background(), runs)
+			ctx := runs.context()
 			h := NewHandlerWithHome(root, Deps{}, HomeDeps{Index: cannedIndex(nil, nil)})
 
 			if rec := serveWith(t, h, ctx, "/"); rec.Code != http.StatusOK {
@@ -331,7 +352,7 @@ func TestDisclosuresPage_LeavesTheCacheAsItFoundIt(t *testing.T) {
 			root := quietGitStore(t)
 			extra := disclosure.New("mcp:review-feed", "", "forge configured but unreachable")
 			runs := &lintRuns{}
-			ctx := gitx.WithObserver(context.Background(), runs)
+			ctx := runs.context()
 			h := NewHandlerWithHome(root, Deps{Disclosures: []disclosure.Disclosure{extra}}, HomeDeps{Index: cannedIndex(nil, nil)})
 
 			if tt.indexFirst {

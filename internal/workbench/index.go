@@ -46,7 +46,7 @@ func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) ht
 	home = home.resolve(root)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			renderPathNotFound(w, r.URL.Path)
+			renderPathNotFound(r.Context(), w, root, r.URL.Path)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -55,7 +55,7 @@ func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) ht
 		}
 		out, err := renderHome(r.Context(), root, home, extras)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -127,7 +127,7 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	writeServicesSection(&body, root)
 	writeBoardsSection(&body, root)
 
-	return renderPage(pageData{
+	return renderPage(ctx, root, pageData{
 		Title:    "Workbench",
 		BodyHTML: template.HTML(body.String()),
 	})

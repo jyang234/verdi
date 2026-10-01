@@ -8,6 +8,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	stdhtml "html"
 	"html/template"
@@ -68,6 +69,11 @@ type pageData struct {
 	// script pair from the pages (verdict viewer, matrix, most corpus pages)
 	// that never contain a diagram.
 	HasMermaid bool
+	// Bar is the top bar's facts (spec/chrome-and-tokens-v2; SI-323 (1)):
+	// every page on this shell is a page not about one spec, so renderPage
+	// fills it from the branch-level builder. Not yet drawn by the
+	// template.
+	Bar barFacts
 }
 
 var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<!doctype html>
@@ -105,8 +111,14 @@ var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<
 `))
 
 // renderPage executes pageTemplate against data, gating the mermaid client
-// on whether the page body actually carries a mermaid block.
-func renderPage(data pageData) ([]byte, error) {
+// on whether the page body actually carries a mermaid block. It fills the
+// page's top bar facts for the checkout at root (branchBarFacts): its
+// branch, working tree, and branch-level posture, each fact it cannot
+// obtain disclosed-unproven — a root of "" (a page that knows none)
+// included.
+func renderPage(ctx context.Context, root string, data pageData) ([]byte, error) {
+	data.Bar = branchBarFacts(ctx, root, data.Title)
+	observeBar(ctx, data.Bar)
 	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {

@@ -423,7 +423,7 @@ func TestRenderBoardPageV0_ModelVocabulary(t *testing.T) {
 		},
 	}
 
-	renamed, err := renderBoardPage(state, classWords{m: vocabTestModel()})
+	renamed, err := renderBoardPage(state, classWords{m: vocabTestModel()}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage: %v", err)
 	}
@@ -444,11 +444,11 @@ func TestRenderBoardPageV0_ModelVocabulary(t *testing.T) {
 		}
 	}
 
-	plain, err := renderBoardPage(state, classWords{})
+	plain, err := renderBoardPage(state, classWords{}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage plain: %v", err)
 	}
-	canonical, err := renderBoardPage(state, classWords{m: model.Canonical()})
+	canonical, err := renderBoardPage(state, classWords{m: model.Canonical()}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage canonical: %v", err)
 	}

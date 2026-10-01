@@ -191,11 +191,11 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 	name := r.PathValue("name")
 	proj, git, err := b.loadSealed(r.Context(), branch, ref, name)
 	if errors.Is(err, ErrBoardNotFound) {
-		b.renderSpecNotOnRef(w, name, ref)
+		b.renderSpecNotOnRef(r.Context(), w, name, ref)
 		return
 	}
 	if err != nil {
-		renderError(w, http.StatusInternalServerError, err)
+		renderError(r.Context(), w, b.root, http.StatusInternalServerError, err)
 		return
 	}
 	asd := sealedASDView(branch, ref, proj)
@@ -207,7 +207,7 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 	observeBar(r.Context(), specBarFacts(proj, asd))
 	out, err := renderBoardSpecPage(proj, git, asd)
 	if err != nil {
-		renderError(w, http.StatusInternalServerError, err)
+		renderError(r.Context(), w, b.root, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -338,8 +338,7 @@ func (b *branchBoards) renderCutFailure(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, http.StatusInternalServerError, msg)
 		return
 	}
-	_ = r
-	renderError(w, http.StatusInternalServerError, errors.New(msg))
+	renderError(r.Context(), w, b.root, http.StatusInternalServerError, errors.New(msg))
 }
 
 // renderBranchGone is dc-4's no-ref shape: the disclosed notice page —
@@ -354,15 +353,14 @@ func (b *branchBoards) renderBranchGone(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("design branch %s no longer resolves to any ref in this store", branch))
 		return
 	}
-	_ = r
-	renderStaleEntryNotice(w, branch)
+	renderStaleEntryNotice(r.Context(), w, b.root, branch)
 }
 
 // renderSpecNotOnRef is the sealed path's own 404: the branch's
 // remote-tracking ref exists but carries no such spec — still a legible
 // page with a way back (notfound.go's shared shell), never a bare
 // NotFound.
-func (b *branchBoards) renderSpecNotOnRef(w http.ResponseWriter, name, ref string) {
+func (b *branchBoards) renderSpecNotOnRef(ctx context.Context, w http.ResponseWriter, name, ref string) {
 	var body strings.Builder
 	body.WriteString(`<div class="error-page" role="alert" data-testid="stale-entry-notice">`)
 	body.WriteString(`<p class="error-message"><strong>No such spec on this branch.</strong></p>`)
@@ -373,5 +371,5 @@ func (b *branchBoards) renderSpecNotOnRef(w http.ResponseWriter, name, ref strin
 	body.WriteString(`</code> under <code>.verdi/specs/active/</code>.</p>`)
 	writeBackToDirectory(&body)
 	body.WriteString(`</div>`)
-	writeNotFoundPage(w, body.String())
+	writeNotFoundPage(ctx, w, b.root, body.String())
 }

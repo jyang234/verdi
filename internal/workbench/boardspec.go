@@ -743,14 +743,14 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		proj.DocumentHref = r.URL.EscapedPath() + "/document"
 		observeBar(r.Context(), specBarFacts(proj, asd))
 		out, err := renderBoardSpecPage(proj, git, asd)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -774,7 +774,7 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
