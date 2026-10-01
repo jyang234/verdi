@@ -32,8 +32,7 @@ func reachByName(t *testing.T, prog *reach.Program, entries []reach.Entry) map[s
 	return out
 }
 
-func TestCLIEntries_DeriveVerbsFromTheDispatcher(t *testing.T) {
-	prog := loadSynth(t)
+func testCLIEntriesDeriveVerbsFromTheDispatcher(t *testing.T, prog *reach.Program) {
 	entries, err := reach.CLIEntries(prog, "example.com/synth/cli", "Run", "cli")
 	if err != nil {
 		t.Fatalf("CLIEntries: %v", err)
@@ -72,8 +71,7 @@ func TestCLIEntries_DeriveVerbsFromTheDispatcher(t *testing.T) {
 	}
 }
 
-func TestCLIEntries_Errors(t *testing.T) {
-	prog := loadSynth(t)
+func testCLIEntriesErrors(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name, pkg, fn string
 	}{
@@ -91,13 +89,12 @@ func TestCLIEntries_Errors(t *testing.T) {
 	}
 }
 
-// TestPreDispatchEntry_ReachesWhatRunsForEveryVerb pins R1-A2 (ledger
+// testPreDispatchEntryReachesWhatRunsForEveryVerb pins R1-A2 (ledger
 // SI-314 (3)): main, the dispatcher outside its arms, every init function
 // and every package-level variable initializer that runs code, in the
 // packages the binary links, form one pseudo-entry, and what it reaches is
 // visible; a variable that only names a function runs nothing.
-func TestPreDispatchEntry_ReachesWhatRunsForEveryVerb(t *testing.T) {
-	prog := loadSynth(t)
+func testPreDispatchEntryReachesWhatRunsForEveryVerb(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name, pkg string
 		want      string
@@ -133,8 +130,7 @@ func TestPreDispatchEntry_ReachesWhatRunsForEveryVerb(t *testing.T) {
 	}
 }
 
-func TestPreDispatchEntry_Errors(t *testing.T) {
-	prog := loadSynth(t)
+func testPreDispatchEntryErrors(t *testing.T, prog *reach.Program) {
 	for _, tt := range []struct{ name, pkg, fn string }{
 		{"unknown package", "example.com/synth/nope", "Run"},
 		{"unknown dispatcher", "example.com/synth/cli", "Nope"},
@@ -147,8 +143,7 @@ func TestPreDispatchEntry_Errors(t *testing.T) {
 	}
 }
 
-func TestSwitchEntries_MatchTheInventorysOneSwitch(t *testing.T) {
-	prog := loadSynth(t)
+func testSwitchEntriesMatchTheInventorysOneSwitch(t *testing.T, prog *reach.Program) {
 	entries, err := reach.SwitchEntries(prog, "example.com/synth/tools", "mcp", []string{"write_tool", "read_tool"})
 	if err != nil {
 		t.Fatalf("SwitchEntries: %v", err)
@@ -162,8 +157,7 @@ func TestSwitchEntries_MatchTheInventorysOneSwitch(t *testing.T) {
 	}
 }
 
-func TestSwitchEntries_Errors(t *testing.T) {
-	prog := loadSynth(t)
+func testSwitchEntriesErrors(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name  string
 		names []string
@@ -182,8 +176,7 @@ func TestSwitchEntries_Errors(t *testing.T) {
 	}
 }
 
-func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
-	prog := loadSynth(t)
+func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 	entries, err := reach.RouteEntries(prog, "example.com/synth/web", "workbench")
 	if err != nil {
 		t.Fatalf("RouteEntries: %v", err)
@@ -241,13 +234,12 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 	}
 }
 
-// TestRouteEntries_FailClosedOnUnresolvedFieldCalls pins R1-A1's fail-closed
+// testRouteEntriesFailClosedOnUnresolvedFieldCalls pins R1-A1's fail-closed
 // half: inside a route's reach, a call through a route table's
 // function-typed field its registration did not bind, or through a field
 // holding a value no static evaluation can follow, is an error, never a
 // route that reaches nothing.
-func TestRouteEntries_FailClosedOnUnresolvedFieldCalls(t *testing.T) {
-	prog := loadSynth(t)
+func testRouteEntriesFailClosedOnUnresolvedFieldCalls(t *testing.T, prog *reach.Program) {
 	entries, err := reach.RouteEntries(prog, "example.com/synth/strictweb", "workbench")
 	if err != nil {
 		t.Fatalf("RouteEntries: %v", err)
@@ -286,8 +278,7 @@ func TestRouteEntries_FailClosedOnUnresolvedFieldCalls(t *testing.T) {
 	}
 }
 
-func TestRouteEntries_FailClosedOnAnUnresolvableRegistration(t *testing.T) {
-	prog := loadSynth(t)
+func testRouteEntriesFailClosedOnAnUnresolvableRegistration(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name, pkg string
 	}{
@@ -304,8 +295,7 @@ func TestRouteEntries_FailClosedOnAnUnresolvableRegistration(t *testing.T) {
 	}
 }
 
-func TestStringKeyedMap(t *testing.T) {
-	prog := loadSynth(t)
+func testStringKeyedMap(t *testing.T, prog *reach.Program) {
 	got, err := reach.StringKeyedMap(prog, "example.com/synth/cli", "verbs")
 	if err != nil {
 		t.Fatalf("StringKeyedMap: %v", err)

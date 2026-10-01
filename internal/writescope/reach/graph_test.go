@@ -70,8 +70,7 @@ func hitNames(hits []reach.Hit) []string {
 	return out
 }
 
-func TestGraph_ReachResolvesEveryCallShape(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachResolvesEveryCallShape(t *testing.T, prog *reach.Program) {
 	const app = "example.com/synth/app"
 	tests := []struct {
 		name string
@@ -103,11 +102,10 @@ func TestGraph_ReachResolvesEveryCallShape(t *testing.T) {
 	}
 }
 
-// TestGraph_ReachHitsEveryTargetShape pins the reach half of R1-A4: a
+// testGraphReachHitsEveryTargetShape pins the reach half of R1-A4: a
 // classified exported variable of function type and a classified interface
 // method are targets a verb reaches by using them.
-func TestGraph_ReachHitsEveryTargetShape(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachHitsEveryTargetShape(t *testing.T, prog *reach.Program) {
 	const app = "example.com/synth/app"
 	targets := map[types.Object]bool{}
 	for _, name := range []string{"gitx.StageAll", "(gitx.Stager).Stage"} {
@@ -142,8 +140,7 @@ func TestGraph_ReachHitsEveryTargetShape(t *testing.T) {
 // TestGraph_ReachFollowsGitxsOtherExportShapes: through gitx's exported
 // function-typed variable and its interface's unexported implementation,
 // a verb reaches the primitive they call.
-func TestGraph_ReachFollowsGitxsOtherExportShapes(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachFollowsGitxsOtherExportShapes(t *testing.T, prog *reach.Program) {
 	const app = "example.com/synth/app"
 	tests := []struct {
 		name string
@@ -168,8 +165,7 @@ func TestGraph_ReachFollowsGitxsOtherExportShapes(t *testing.T) {
 	}
 }
 
-func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphUnreachedTargetStaysUnreached(t *testing.T, prog *reach.Program) {
 	const app = "example.com/synth/app"
 	var entries []reach.Entry
 	for _, root := range []string{"Direct", "ViaInterface", "ViaClosure", "ViaMethodValue", "ViaFuncValue", "ViaPackageVar", "NewHandler", "ReadOnly"} {
@@ -189,12 +185,11 @@ func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
 	}
 }
 
-// TestGraph_ReachCutsOnlyAtItsOwnDescendants pins R1-A3 (ledger SI-314
+// testGraphReachCutsOnlyAtItsOwnDescendants pins R1-A3 (ledger SI-314
 // (2)): traversal stops at the roots of the traversing entry's own
 // descendants, never at an unrelated entry's root, so a verb that
 // delegates to another verb's code reaches what that code reaches.
-func TestGraph_ReachCutsOnlyAtItsOwnDescendants(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachCutsOnlyAtItsOwnDescendants(t *testing.T, prog *reach.Program) {
 	const app = "example.com/synth/app"
 	tests := []struct {
 		name      string
@@ -222,12 +217,11 @@ func TestGraph_ReachCutsOnlyAtItsOwnDescendants(t *testing.T) {
 	}
 }
 
-// TestGraph_ReachCutsAtTheEntriesAHostServes pins the other half of R1-A3:
+// testGraphReachCutsAtTheEntriesAHostServes pins the other half of R1-A3:
 // a verb that reaches the code dispatching another surface's entries (the
 // workbench's route registrations, the MCP tool switch) serves them, and
 // stops at their roots; every other call is traversed.
-func TestGraph_ReachCutsAtTheEntriesAHostServes(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachCutsAtTheEntriesAHostServes(t *testing.T, prog *reach.Program) {
 	cli, err := reach.CLIEntries(prog, "example.com/synth/cli", "Run", "cli")
 	if err != nil {
 		t.Fatalf("CLIEntries: %v", err)
@@ -270,16 +264,14 @@ func TestGraph_ReachCutsAtTheEntriesAHostServes(t *testing.T) {
 
 // TestBuild_RejectsAnEntryNamedTwice: descendants and hosts are found by
 // name, so a name must mean one entry per surface.
-func TestBuild_RejectsAnEntryNamedTwice(t *testing.T) {
-	prog := loadSynth(t)
+func testBuildRejectsAnEntryNamedTwice(t *testing.T, prog *reach.Program) {
 	e := reach.Entry{Surface: "test", Name: "twice", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "Direct")}}}
 	if _, err := reach.Build(prog, []reach.Entry{e, e}); err == nil {
 		t.Fatal("Build accepted two entries with one surface and name")
 	}
 }
 
-func TestGraph_HitPathRunsFromRootToTarget(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphHitPathRunsFromRootToTarget(t *testing.T, prog *reach.Program) {
 	entry := reach.Entry{Surface: "test", Name: "closure", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "ViaClosure")}}}
 	g, err := reach.Build(prog, []reach.Entry{entry})
 	if err != nil {
@@ -295,10 +287,9 @@ func TestGraph_HitPathRunsFromRootToTarget(t *testing.T) {
 	}
 }
 
-// TestGraph_ReachFailsOnRootsOutsideTheGraph pins R1-A7: an entry whose
+// testGraphReachFailsOnRootsOutsideTheGraph pins R1-A7: an entry whose
 // roots the graph has no node for is an error, never "reaches nothing".
-func TestGraph_ReachFailsOnRootsOutsideTheGraph(t *testing.T) {
-	prog := loadSynth(t)
+func testGraphReachFailsOnRootsOutsideTheGraph(t *testing.T, prog *reach.Program) {
 	built := reach.Entry{Surface: "test", Name: "built", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "Direct")}}}
 	g, err := reach.Build(prog, []reach.Entry{built})
 	if err != nil {
@@ -326,8 +317,7 @@ func TestGraph_ReachFailsOnRootsOutsideTheGraph(t *testing.T) {
 	}
 }
 
-func TestBuild_RejectsRootsOutsideTheModule(t *testing.T) {
-	prog := loadSynth(t)
+func testBuildRejectsRootsOutsideTheModule(t *testing.T, prog *reach.Program) {
 	foreign := types.NewFunc(0, types.NewPackage("example.org/elsewhere", "elsewhere"), "F", types.NewSignatureType(nil, nil, nil, nil, nil, false))
 	tests := []struct {
 		name  string
@@ -349,8 +339,7 @@ func TestBuild_RejectsRootsOutsideTheModule(t *testing.T) {
 // TestBuild_FailsOnAGenericImplementationOfAModuleInterface pins R1-A5's
 // tripwire: interface dispatch to a generic type is not modeled, so a
 // module where a generic type with methods implements a module interface
-// is refused rather than analyzed with the call missing. A generic type
-// that implements no module interface (synth's pair) is fine.
+// is refused rather than analyzed with the call missing.
 func TestBuild_FailsOnAGenericImplementationOfAModuleInterface(t *testing.T) {
 	prog, err := reach.Load(context.Background(), filepath.Join("testdata", "generic"), reach.Targets()[0], "./...")
 	if err != nil {
@@ -364,9 +353,14 @@ func TestBuild_FailsOnAGenericImplementationOfAModuleInterface(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "box") || !strings.Contains(err.Error(), "Sizer") {
 		t.Fatalf("Build = %v, want an error naming the generic type box and the interface Sizer", err)
 	}
-	synth := loadSynth(t)
-	entry := reach.Entry{Surface: "test", Name: "swapped", Roots: []reach.Root{{Func: lookupFunc(t, synth, "example.com/synth/app", "Swapped")}}}
-	if _, err := reach.Build(synth, []reach.Entry{entry}); err != nil {
+}
+
+// testBuildAcceptsAGenericTypeNoModuleInterfaceMatches: synth's pair is a
+// generic type with methods that implement no module interface, so the
+// tripwire stays quiet.
+func testBuildAcceptsAGenericTypeNoModuleInterfaceMatches(t *testing.T, prog *reach.Program) {
+	entry := reach.Entry{Surface: "test", Name: "swapped", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "Swapped")}}}
+	if _, err := reach.Build(prog, []reach.Entry{entry}); err != nil {
 		t.Fatalf("Build(synth) = %v, want nil: pair implements no module interface", err)
 	}
 }

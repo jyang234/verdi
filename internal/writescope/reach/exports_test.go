@@ -7,11 +7,10 @@ import (
 	"github.com/jyang234/verdi/internal/writescope/reach"
 )
 
-// TestExportedFuncs_ListsEveryCallableExport pins R1-A4: the export census
+// testExportedFuncsListsEveryCallableExport pins R1-A4: the export census
 // lists every shape a caller outside gitx can run code through, not only
 // declared functions and the methods of exported types.
-func TestExportedFuncs_ListsEveryCallableExport(t *testing.T) {
-	prog := loadSynth(t)
+func testExportedFuncsListsEveryCallableExport(t *testing.T, prog *reach.Program) {
 	got, err := reach.ExportedFuncs(prog, "example.com/synth/gitx")
 	if err != nil {
 		t.Fatalf("ExportedFuncs: %v", err)
@@ -35,8 +34,7 @@ func TestExportedFuncs_ListsEveryCallableExport(t *testing.T) {
 	}
 }
 
-func TestExportedFuncs_Errors(t *testing.T) {
-	prog := loadSynth(t)
+func testExportedFuncsErrors(t *testing.T, prog *reach.Program) {
 	for _, tt := range []struct{ name, pkg string }{
 		{"unknown package", "example.com/synth/nope"},
 		{"an exported alias of another package's type", "example.com/synth/aliasgitx"},
@@ -49,8 +47,7 @@ func TestExportedFuncs_Errors(t *testing.T) {
 	}
 }
 
-func TestObjectByName_ResolvesEveryNameForm(t *testing.T) {
-	prog := loadSynth(t)
+func testObjectByNameResolvesEveryNameForm(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name string
 		ok   bool
@@ -80,8 +77,7 @@ func TestObjectByName_ResolvesEveryNameForm(t *testing.T) {
 	}
 }
 
-func TestFuncByName_FindsOnlyDeclaredFunctions(t *testing.T) {
-	prog := loadSynth(t)
+func testFuncByNameFindsOnlyDeclaredFunctions(t *testing.T, prog *reach.Program) {
 	tests := []struct {
 		name string
 		ok   bool

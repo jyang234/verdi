@@ -8,8 +8,7 @@ import (
 	"github.com/jyang234/verdi/internal/writescope/reach"
 )
 
-func TestGitDirWriters_FindsEveryWriteUnderTheGitDirectory(t *testing.T) {
-	prog := loadSynth(t)
+func testGitDirWritersFindsEveryWriteUnderTheGitDirectory(t *testing.T, prog *reach.Program) {
 	locator := lookupFunc(t, prog, "example.com/synth/gitx", "CommonDir")
 	writers, err := reach.GitDirWriters(prog, []*types.Func{locator}, []string{"example.com/synth/gitx"})
 	if err != nil {
@@ -50,8 +49,7 @@ func TestGitDirWriters_FindsEveryWriteUnderTheGitDirectory(t *testing.T) {
 	}
 }
 
-func TestGitDirWriters_Errors(t *testing.T) {
-	prog := loadSynth(t)
+func testGitDirWritersErrors(t *testing.T, prog *reach.Program) {
 	foreign := types.NewFunc(0, types.NewPackage("example.org/elsewhere", "elsewhere"), "CommonDir", types.NewSignatureType(nil, nil, nil, nil, nil, false))
 	tests := []struct {
 		name     string
