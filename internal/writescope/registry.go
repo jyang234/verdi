@@ -43,9 +43,9 @@ func Registry() []Declaration {
 		{
 			// cmd/verdi/design.go (runDesignStart) and designsupersede.go:
 			// cut design/<name> from the resolved base and switch to it,
-			// write the spec directory, git add -- <dir>, then a commit
-			// with no pathspec. Awaiting fix: the commit carries pre-staged
-			// entries today (UAT-036).
+			// write the spec directory, git add -- <dir>, then a commit.
+			// runDesignStart's commit names the directory (UAT-036 fixed);
+			// the --supersedes path's has no pathspec and awaits its fix.
 			Ritual:     "design_start",
 			Verbs:      []Verb{CLI("design start")},
 			RefsCreate: []RefPattern{"refs/heads/design/*"},

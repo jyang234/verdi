@@ -164,12 +164,16 @@ func TestHostVerbs_AreServeMcpAndContextMcp(t *testing.T) {
 }
 
 // TestAwaitingFixes_PinStoryDc3 pins R1-RR-B2: the awaiting-fix list is
-// exactly story dc-3's five ritual paths (design start, design start
-// --supersedes, the commit-to-design ritual, accept diagram, constitution
-// propose), and each sits in a declaration that states the scoped fix.
+// exactly those of story dc-3's five ritual paths (design start, design
+// start --supersedes, the commit-to-design ritual, accept diagram,
+// constitution propose) whose fix has not landed, and each sits in a
+// declaration that states the scoped fix. The story's intent is that the
+// list only shrinks: spec/ritual-effect-witness removes each path in the
+// same change as the fix that makes its ritual conform (dc-2), until the
+// list is empty, and no path is ever added back. Fixed so far: design
+// start.
 func TestAwaitingFixes_PinStoryDc3(t *testing.T) {
 	want := []string{
-		"design_start|verdi design start",
 		"design_start|verdi design start --supersedes",
 		"commit_to_design|verdi board commit, and the workbench's POST /board/{key}/commit",
 		"accept_diagram|verdi accept diagram/<name>",
@@ -180,7 +184,7 @@ func TestAwaitingFixes_PinStoryDc3(t *testing.T) {
 		got = append(got, a.Ritual+"|"+a.Path)
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("AwaitingFixes() =\n%s\nwant story dc-3's five\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		t.Fatalf("AwaitingFixes() =\n%s\nwant story dc-3's unfixed paths\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	carry := map[string]ws.IndexCarry{}
 	for _, d := range ws.Registry() {

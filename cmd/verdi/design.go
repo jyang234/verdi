@@ -657,7 +657,11 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		// vocab:identity — git commit subject (history, never display prose)
 		msg = fmt.Sprintf("design start: scaffold %s (%s spec, story %s)", specRef.String(), kind, storyRef)
 	}
-	headCommit, err := gitx.CreateCommit(ctx, root, msg)
+	// UAT-036: commit exactly the staged spec directory. A commit with no
+	// pathspec records the whole index, so an entry the operator had staged
+	// before the run (carried across the branch cut) rode into the scaffold
+	// commit; the pathspec form leaves it staged and uncommitted.
+	headCommit, err := gitx.CreateCommitPaths(ctx, root, msg, specDir)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
