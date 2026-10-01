@@ -104,6 +104,9 @@ func RouteEntries(prog *Program, pkgPath, surface string) ([]Entry, error) {
 				s.scanFunc(r.Func, ctx)
 			case r.Lit != nil:
 				ctx.pkg = rt.pkg
+				if lp := prog.flow.litPkg[r.Lit]; lp != nil {
+					ctx.pkg = lp
+				}
 				s.scanNode(r.Lit.Body, ctx)
 			}
 		}
@@ -275,7 +278,11 @@ func (p *Program) evalHandler(pkg *Package, e ast.Expr, env *rowEnv) ([]Root, []
 			if err != nil {
 				return nil, nil, err
 			}
-			return append([]Root{{Func: fn}}, roots...), bound, nil
+			wrapped, err := p.wrapperArgs(pkg, x, env)
+			if err != nil {
+				return nil, nil, err
+			}
+			return append(append([]Root{{Func: fn}}, roots...), wrapped...), bound, nil
 		}
 	}
 	return nil, nil, fmt.Errorf("reach: %s: route handler is not a function, method, literal, or route-table field", p.Fset.Position(e.Pos()))
@@ -332,6 +339,43 @@ func (p *Program) rowArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root
 		}
 	}
 	return roots, bound, nil
+}
+
+// wrapperArgs roots every function-typed argument of a registration's
+// handler call that is not a route-table row's value (ledger SI-318): the
+// wrapped handler is named by the registration, outside the route's own
+// code, so the route starts there too. A value the flow cannot follow
+// fails closed.
+func (p *Program) wrapperArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root, error) {
+	var out []Root
+	for _, arg := range call.Args {
+		if !isFuncTyped(pkg, arg) {
+			continue
+		}
+		if _, isRow := env.rowField(pkg, arg); isRow {
+			continue
+		}
+		v := p.resolve(pkg, arg, nil)
+		if v.opaque {
+			return nil, fmt.Errorf("reach: %s: a registration's wrapper argument holds a function value that cannot be followed statically (fail closed)", p.Fset.Position(arg.Pos()))
+		}
+		for fn := range v.funcs {
+			if isAbstract(fn) {
+				for _, impl := range p.implementationsOf(fn) {
+					out = append(out, Root{Func: impl})
+				}
+				continue
+			}
+			out = append(out, Root{Func: fn})
+		}
+		for lit := range v.lits {
+			out = append(out, Root{Lit: lit})
+		}
+		for vr := range v.vars {
+			out = append(out, Root{Var: vr})
+		}
+	}
+	return out, nil
 }
 
 // rowValue resolves one function-typed row field's value; a value that is

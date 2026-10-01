@@ -189,6 +189,7 @@ func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 		"/b/{branch}/thing/{name}/api/peek",
 		"/b/{branch}/thing/{name}/api/push",
 		"/b/{branch}/thing/{name}/api/{action}",
+		"/captured/thing/{name}/api/{action}",
 		"/health",
 		"/legacy/{key}/commit",
 		"/legacy/{key}/save",
@@ -201,6 +202,12 @@ func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 		"/thing/{name}/api/peek",
 		"/thing/{name}/api/push",
 		"/thing/{name}/api/{action}",
+		"/wrapped/thing/{name}/api/look",
+		"/wrapped/thing/{name}/api/mutate",
+		"/wrapped/thing/{name}/api/peek",
+		"/wrapped/thing/{name}/api/push",
+		"/wrapped/thing/{name}/api/{action}",
+		"/wrappedlit/thing/{name}/api/{action}",
 	}
 	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("route entries =\n%q\nwant\n%q", got, want)
@@ -222,7 +229,15 @@ func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 		{"/b/{branch}/thing/{name}/api/look", ""},              // read-only arm under the prefix
 		{"/audit", "Mutate"},                                   // a function-typed field Register filled, through a parameter and a second field
 		{"/quick/thing/{name}/api/{action}", "Mutate,Publish"}, // R1-A3: wraps the API handler; its actions are another route's, so they are traversed
-		{"/thing/{name}", ""},                                  // table row's handler, read-only
+		// R1-RR1 (ledger SI-318): the API handler reached through a local
+		// the registration captured (N1a), a wrapper's argument (N1b, whose
+		// actions are derived under the wrapping route), and a wrapper
+		// handed a literal that calls it (N1c).
+		{"/captured/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/wrapped/thing/{name}/api/push", "Publish"},
+		{"/wrapped/thing/{name}/api/mutate", "Mutate"},
+		{"/wrappedlit/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/thing/{name}", ""}, // table row's handler, read-only
 		{"/health", ""},
 	}
 	for _, tt := range tests {
@@ -273,6 +288,57 @@ func testRouteEntriesFailClosedOnUnresolvedFieldCalls(t *testing.T, prog *reach.
 				t.Fatalf("Reach(%s) = %v, nil; want an error naming %q (fail closed)", tt.route, hitNames(hits), tt.wantErr)
 			case tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr):
 				t.Fatalf("Reach(%s) = %v, want it to name %q", tt.route, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// testRouteEntriesFailClosedOnUnfollowableFunctionValues pins SI-318's
+// fail-closed shapes: a route that calls a function value the analysis
+// cannot follow is an error naming the site, never a route that reaches
+// nothing; a pointer loaded from a package-level variable is followed.
+func testRouteEntriesFailClosedOnUnfollowableFunctionValues(t *testing.T, prog *reach.Program) {
+	entries, err := reach.RouteEntries(prog, "example.com/synth/holes", "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	g, err := reach.Build(prog, entries)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	byName := map[string]reach.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	tests := []struct {
+		route   string
+		wantErr string // "" for no error
+	}{
+		{"/hole/argument", "direct"},    // a captured function value passed on as an argument
+		{"/hole/receive", "<-s.ch"},     // a channel receive yielding a function value
+		{"/hole/assert", "anyHook"},     // a type assertion to a function type
+		{"/hole/deref", "*p"},           // a dereference of a pointer loaded from a local map
+		{"/hole/element", "s.handlers"}, // an element of a field-held container
+		{"/control/packagederef", ""},   // a pointer loaded from a package-level variable
+		{"/control/benign", ""},         // a field-held container's length, keys, and nil comparison
+		{"/control/capturednil", ""},    // a captured function compared to nil, then called (resolved)
+	}
+	for _, tt := range tests {
+		t.Run(tt.route, func(t *testing.T) {
+			e, ok := byName[tt.route]
+			if !ok {
+				t.Fatalf("no route %s; got %v", tt.route, entryNames(entries))
+			}
+			hits, err := g.Reach(e, synthTargets(t, prog))
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("Reach(%s) = %v, want no error", tt.route, err)
+			case tt.route == "/control/capturednil" && strings.Join(hitNames(hits), ",") != "Mutate":
+				t.Fatalf("Reach(%s) = %v, want [Mutate]: the captured call resolves through the flow", tt.route, hitNames(hits))
+			case tt.wantErr != "" && err == nil:
+				t.Fatalf("Reach(%s) = %v, nil; want a fail-closed error naming %q", tt.route, hitNames(hits), tt.wantErr)
+			case tt.wantErr != "" && (!strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "fail closed")):
+				t.Fatalf("Reach(%s) = %v, want a fail-closed error naming %q", tt.route, err, tt.wantErr)
 			}
 		})
 	}

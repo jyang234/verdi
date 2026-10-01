@@ -57,6 +57,13 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("/quick/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) {
 		s.api()(w, r)
 	})
+	// The API handler reached through a local the registration captured
+	// (N1a), through a wrapper's argument (N1b), and through a wrapper
+	// handed a literal that calls it (N1c).
+	api := s.api()
+	mux.HandleFunc("/captured/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) { api(w, r) })
+	mux.HandleFunc("/wrapped/thing/{name}/api/{action}", withTrace(s.api()))
+	mux.HandleFunc("/wrappedlit/thing/{name}/api/{action}", withTrace(func(w http.ResponseWriter, r *http.Request) { s.api()(w, r) }))
 	mux.HandleFunc("/legacy/{key}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
 		case "commit":
@@ -68,6 +75,12 @@ func Register(mux *http.ServeMux) {
 }
 
 func health() http.HandlerFunc { return func(w http.ResponseWriter, r *http.Request) {} }
+
+// withTrace wraps a handler: the wrapped handler is its argument, named by
+// the registration, outside the route's own code.
+func withTrace(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { next(w, r) }
+}
 
 func (s *server) static(w http.ResponseWriter, r *http.Request) {}
 

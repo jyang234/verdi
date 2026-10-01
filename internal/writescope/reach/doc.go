@@ -29,23 +29,37 @@
 //     of a verb;
 //   - a dependency that type-asserts a module value received as an empty
 //     interface (any) to another interface and calls it is not followed;
-//   - a function value stored by code outside an entry's reach and called
-//     inside it is attributed to the code that stored it, except through a
-//     function-typed struct field: a read of one resolves to every value
-//     the module stores in it (fields.go), and an entry a host dispatches
-//     (a workbench route or action, an MCP tool) fails closed on a field
-//     whose stored value cannot be followed, or on a route table's field
-//     its registration did not bind; values in maps, slices, and channels,
-//     a variable assigned through a pointer, and a package-level variable
+//   - function values (ledger SI-318): a function value is an edge from the
+//     code that names it, which is in a verb's reach whenever the
+//     activation that produced the value is part of the verb's execution
+//     (an uncaptured parameter's value was named by a caller, an
+//     uncaptured local's by its own function, a call's result by its
+//     callee, a package-level variable's by its initializer). Values that
+//     outlive their activation are handled explicitly: a read of a
+//     function-typed struct field resolves to every value the module
+//     stores in it (fields.go); a call through a function value captured
+//     from an enclosing function resolves through the flow; every
+//     function-typed argument of a route registration's wrapper is a root
+//     of the route; and every value the analysis cannot follow fails
+//     closed, naming its site, in every entry whose reach holds it: a
+//     captured function value used other than by calling it (passed on as
+//     an argument, assigned, returned, stored), a call through a captured
+//     value the flow cannot follow, a channel receive yielding a function
+//     value, a type assertion to a function type, a dereference of a
+//     pointer to a function value not loaded from a package-level
+//     variable, a read of a field-held container of function values, and,
+//     for an entry a host dispatches, a function-typed field holding a
+//     value the flow cannot follow or a route table's field its
+//     registration did not bind (valuecalls.go). A package-level variable
 //     reassigned outside its initializer (package-level mutable state the
-//     ground rules forbid) are still attributed to the code that stored
-//     them;
+//     ground rules forbid) is still attributed to the code that assigns
+//     it;
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type's method set (methods promoted
 //     from embedded fields included) has the methods of a module
-//     interface (the tripwire), so the gap cannot pass silently. A generic type converted to a dependency's interface is
-//     followed (internal/governanceprincipal's byContent[T], a
-//     sort.Interface, is);
+//     interface (the tripwire), so the gap cannot pass silently. A generic
+//     type converted to a dependency's interface is followed
+//     (internal/governanceprincipal's byContent[T], a sort.Interface, is);
 //   - each Program is one build target; the witness loads every target in
 //     Targets so platform-specific files are all analyzed.
 package reach

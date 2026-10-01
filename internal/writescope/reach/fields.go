@@ -6,24 +6,25 @@ import (
 	"go/types"
 )
 
-// Function values stored in struct fields.
+// Function values: the flow resolver.
 //
 // The call graph is use-based: a function is an edge from the code that
-// names it. A function stored in a struct field by one piece of code and
-// called through the field by another is therefore an edge from the code
-// that stored it, and when that code lies outside the caller's entry (a
-// server a host verb constructed, a route table) the call would be lost.
-// fieldFlow closes that gap for function-typed struct fields: a read of
-// such a field resolves to every function value the module stores in it,
-// following the stored expression through other function-typed fields,
-// local variables, the arguments a declared function's direct callers
-// bind to its parameters, conversions, and the returns of the declared
-// function a call names. A dependency's function, or a call to one,
-// reaches module code only through the function values it was handed. A
-// stored value the flow cannot follow (an index expression, a type
-// assertion, a parameter of a function that escapes as a value, ...) makes
-// the field opaque, and an entry dispatched by a host fails closed on
-// reading it (Graph.Reach).
+// names it. A function value named by one piece of code and called by
+// another is therefore an edge from the code that named it. The flow
+// resolves an expression holding a function value to every function value
+// that can reach it, following stores into function-typed fields,
+// assignments to local variables, the arguments a declared function's
+// direct callers bind to its parameters, conversions, and the returns of
+// the function (declared or literal) a call reaches. A dependency's
+// function, or a call to one, reaches module code only through the
+// function values it was handed. A value the flow cannot follow (an index
+// expression on anything but a package-level variable, a type assertion,
+// a range variable, a parameter of a function that escapes as a value or
+// of a function literal, ...) makes the result opaque. Three readers use
+// it (ledger SI-318): a read of a function-typed field, a call through a
+// function value captured from an enclosing function (valuecalls.go), and
+// a registration's wrapper argument (routes.go); each fails closed on an
+// opaque result where its rule says so.
 
 // flowSite is one value: expr evaluated in pkg, the idx-th result when
 // expr is a multi-value call (-1 otherwise), or, when obj is set, the
@@ -59,6 +60,9 @@ type fieldFlow struct {
 	escapes map[*types.Func]bool         // declared function used other than as a direct callee
 	returns map[*types.Func][][]flowSite // declared function (origin) -> per return statement, its results
 	bodies  map[*types.Func]bool         // declared functions with a body
+
+	litReturns map[*ast.FuncLit][][]flowSite // function literal -> per return statement, its results
+	litPkg     map[*ast.FuncLit]*Package     // function literal -> the package declaring it
 }
 
 // isFuncField reports whether v is a struct field of function type.
@@ -95,6 +99,9 @@ func newFieldFlow(prog *Program) *fieldFlow {
 		escapes: map[*types.Func]bool{},
 		returns: map[*types.Func][][]flowSite{},
 		bodies:  map[*types.Func]bool{},
+
+		litReturns: map[*ast.FuncLit][][]flowSite{},
+		litPkg:     map[*ast.FuncLit]*Package{},
 	}
 	for fn, d := range prog.decls {
 		sig := fn.Type().(*types.Signature)
@@ -118,6 +125,11 @@ func newFieldFlow(prog *Program) *fieldFlow {
 					callees[calleeExpr(x)] = true
 					if fn := prog.staticCallee(pkg, x); fn != nil {
 						ff.calls[fn] = append(ff.calls[fn], flowCall{pkg: pkg, call: x})
+					}
+				case *ast.FuncLit:
+					ff.litPkg[x] = pkg
+					if sig, ok := pkg.Info.TypeOf(x).(*types.Signature); ok {
+						ff.litReturns[x] = returnSites(pkg, x.Body, sig)
 					}
 				case *ast.CompositeLit:
 					ff.recordComposite(pkg, x)
@@ -301,54 +313,70 @@ func (ff *fieldFlow) recordValueSpec(pkg *Package, vs *ast.ValueSpec) {
 	}
 }
 
-// fieldValue is a resolved function-typed field: the nodes of every
-// function value stored in it, and where (if anywhere) a stored value the
-// flow cannot follow was found.
-type fieldValue struct {
-	ids      []int
+// funcValues is what a function-valued expression may hold: module
+// functions and methods (an interface method stands for every module
+// implementation), function literals, and package-level variables (whose
+// node carries their initializer). needs names route-table fields whose
+// values only an entry that binds them knows (Entry.Bound); opaque marks a
+// value the flow cannot follow, first met at opaqueAt.
+type funcValues struct {
+	funcs    map[*types.Func]bool
+	lits     map[*ast.FuncLit]bool
+	vars     map[*types.Var]bool
+	needs    map[*types.Var]bool
 	opaque   bool
 	opaqueAt token.Pos
 }
 
-// fieldValues resolves field, once per graph.
-func (g *Graph) fieldValues(field *types.Var) fieldValue {
-	if v, ok := g.fieldVals[field]; ok {
-		return v
+func newFuncValues() *funcValues {
+	return &funcValues{funcs: map[*types.Func]bool{}, lits: map[*ast.FuncLit]bool{}, vars: map[*types.Var]bool{}, needs: map[*types.Var]bool{}}
+}
+
+func (v *funcValues) fail(pos token.Pos) {
+	if !v.opaque {
+		v.opaque, v.opaqueAt = true, pos
 	}
-	r := &resolver{g: g, seen: map[any]bool{}, ids: map[int]bool{}}
-	r.field(field)
-	v := fieldValue{ids: sortedKeys(r.ids), opaque: r.opaque, opaqueAt: r.opaqueAt}
-	g.fieldVals[field] = v
-	return v
 }
 
-// resolver follows one field's stored values to the functions they name.
+// resolve returns what e, evaluated in pkg, may hold; reads of the fields
+// in bound are recorded as needs rather than followed.
+func (p *Program) resolve(pkg *Package, e ast.Expr, bound map[*types.Var]bool) *funcValues {
+	r := &resolver{p: p, bound: bound, seen: map[any]bool{}, out: newFuncValues()}
+	r.expr(pkg, e, -1)
+	return r.out
+}
+
+// resolveField returns what a function-typed field may hold.
+func (p *Program) resolveField(f *types.Var, bound map[*types.Var]bool) *funcValues {
+	r := &resolver{p: p, bound: bound, seen: map[any]bool{}, out: newFuncValues()}
+	r.field(f)
+	return r.out
+}
+
+// resolver follows one expression's values to the functions they name.
 type resolver struct {
-	g        *Graph
-	seen     map[any]bool
-	ids      map[int]bool
-	opaque   bool
-	opaqueAt token.Pos
+	p     *Program
+	bound map[*types.Var]bool
+	seen  map[any]bool
+	out   *funcValues
 }
 
-// returnKey is one result of one declared function.
+// returnKey is one result of one declared function or literal.
 type returnKey struct {
-	fn  *types.Func
+	fn  any
 	idx int
 }
 
-func (r *resolver) fail(pos token.Pos) {
-	if !r.opaque {
-		r.opaque, r.opaqueAt = true, pos
-	}
-}
-
 func (r *resolver) field(f *types.Var) {
+	if r.bound[f] {
+		r.out.needs[f] = true
+		return
+	}
 	if r.seen[f] {
 		return
 	}
 	r.seen[f] = true
-	for _, s := range r.g.flow.stores[f] {
+	for _, s := range r.p.flow.stores[f] {
 		r.site(s)
 	}
 }
@@ -360,17 +388,15 @@ func (r *resolver) site(s flowSite) {
 	case s.expr != nil:
 		r.expr(s.pkg, s.expr, s.idx)
 	default:
-		r.fail(s.pos)
+		r.out.fail(s.pos)
 	}
 }
 
 func (r *resolver) expr(pkg *Package, e ast.Expr, idx int) {
 	switch x := unparen(e).(type) {
 	case *ast.FuncLit:
-		if id, ok := r.g.byLit[x]; ok {
-			r.ids[id] = true
-			return
-		}
+		r.out.lits[x] = true
+		return
 	case *ast.Ident:
 		r.object(pkg.Info.Uses[x], x.Pos())
 		return
@@ -393,37 +419,146 @@ func (r *resolver) expr(pkg *Package, e ast.Expr, idx int) {
 				return
 			}
 		}
+	case *ast.IndexExpr:
+		if r.packageContainer(pkg, x.X) {
+			return
+		}
+		if fn := genericFunc(pkg, x.X); fn != nil {
+			r.function(fn, x.Pos())
+			return
+		}
+	case *ast.IndexListExpr:
+		if fn := genericFunc(pkg, x.X); fn != nil {
+			r.function(fn, x.Pos())
+			return
+		}
 	case *ast.CallExpr:
-		if tv, ok := pkg.Info.Types[x.Fun]; ok && tv.IsType() {
-			if len(x.Args) == 1 {
-				r.expr(pkg, x.Args[0], -1)
-				return
-			}
-			break
-		}
-		if fn := r.g.prog.staticCallee(pkg, x); fn != nil {
-			r.returns(fn, idx, x.Pos())
-			return
-		}
-		if dependencyCall(r.g, pkg, x) {
-			// A dependency's function returns module code only if it was
-			// handed some: follow the function values among its arguments.
-			for _, a := range x.Args {
-				if t := pkg.Info.TypeOf(a); t != nil {
-					if _, isFunc := t.Underlying().(*types.Signature); isFunc {
-						r.expr(pkg, a, -1)
-					}
-				}
-			}
-			return
-		}
+		r.result(pkg, x, idx)
+		return
 	}
-	r.fail(e.Pos())
+	r.out.fail(e.Pos())
+}
+
+// packageContainer resolves an element of a package-level variable (a map
+// or slice of functions) to that variable: its node carries the
+// initializer's elements, and the ground rules forbid changing it later
+// outside initialization, which the pre-dispatch entry covers.
+func (r *resolver) packageContainer(pkg *Package, x ast.Expr) bool {
+	var id *ast.Ident
+	switch c := unparen(x).(type) {
+	case *ast.Ident:
+		id = c
+	case *ast.SelectorExpr:
+		if _, isSel := pkg.Info.Selections[c]; isSel {
+			return false
+		}
+		id = c.Sel
+	default:
+		return false
+	}
+	v, ok := pkg.Info.Uses[id].(*types.Var)
+	if !ok || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() || r.p.byPath[v.Pkg().Path()] == nil {
+		return false
+	}
+	r.out.vars[v] = true
+	return true
+}
+
+// genericFunc returns the generic module function e instantiates, or nil.
+func genericFunc(pkg *Package, e ast.Expr) *types.Func {
+	var id *ast.Ident
+	switch f := unparen(e).(type) {
+	case *ast.Ident:
+		id = f
+	case *ast.SelectorExpr:
+		id = f.Sel
+	default:
+		return nil
+	}
+	fn, ok := pkg.Info.Uses[id].(*types.Func)
+	if !ok {
+		return nil
+	}
+	return fn
+}
+
+// result follows the idx-th result of call to what the function it
+// reaches returns.
+func (r *resolver) result(pkg *Package, call *ast.CallExpr, idx int) {
+	if tv, ok := pkg.Info.Types[call.Fun]; ok && tv.IsType() {
+		if len(call.Args) == 1 {
+			r.expr(pkg, call.Args[0], -1)
+			return
+		}
+		r.out.fail(call.Pos())
+		return
+	}
+	if fn := r.p.staticCallee(pkg, call); fn != nil {
+		r.returns(fn, idx, call.Pos())
+		return
+	}
+	if dependencyCall(r.p, pkg, call) {
+		// A dependency's function returns module code only if it was
+		// handed some: follow the function values among its arguments.
+		for _, a := range call.Args {
+			if isFuncTyped(pkg, a) {
+				r.expr(pkg, a, -1)
+			}
+		}
+		return
+	}
+	callee, dynamic := dynamicCallee(pkg, call)
+	if !dynamic {
+		// A method called through an interface: what each implementation
+		// returns.
+		if fn := abstractCallee(pkg, call); fn != nil {
+			for _, impl := range r.p.implementationsOf(fn) {
+				r.returns(impl, idx, call.Pos())
+			}
+			return
+		}
+		r.out.fail(call.Pos())
+		return
+	}
+	// A call through a function value: what each value it may hold
+	// returns.
+	inner := &resolver{p: r.p, bound: r.bound, seen: r.seen, out: newFuncValues()}
+	inner.expr(pkg, callee, -1)
+	if inner.out.opaque {
+		r.out.fail(inner.out.opaqueAt)
+	}
+	for f := range inner.out.needs {
+		r.out.needs[f] = true // what a bound field's values return is reached from the entry's roots
+	}
+	for fn := range inner.out.funcs {
+		if isAbstract(fn) {
+			for _, impl := range r.p.implementationsOf(fn) {
+				r.returns(impl, idx, call.Pos())
+			}
+			continue
+		}
+		r.returns(fn, idx, call.Pos())
+	}
+	for lit := range inner.out.lits {
+		r.litResult(lit, idx, call.Pos())
+	}
+	if len(inner.out.vars) > 0 {
+		r.out.fail(call.Pos()) // a call of a function a package-level variable holds, for its result
+	}
+}
+
+func isFuncTyped(pkg *Package, e ast.Expr) bool {
+	t := pkg.Info.TypeOf(e)
+	if t == nil {
+		return false
+	}
+	_, ok := t.Underlying().(*types.Signature)
+	return ok
 }
 
 // dependencyCall reports whether call statically calls a function declared
 // outside the module.
-func dependencyCall(g *Graph, pkg *Package, call *ast.CallExpr) bool {
+func dependencyCall(p *Program, pkg *Package, call *ast.CallExpr) bool {
 	var id *ast.Ident
 	switch f := calleeExpr(call).(type) {
 	case *ast.Ident:
@@ -434,7 +569,58 @@ func dependencyCall(g *Graph, pkg *Package, call *ast.CallExpr) bool {
 		return false
 	}
 	fn, ok := pkg.Info.Uses[id].(*types.Func)
-	return ok && !isAbstract(fn) && !g.inModule(fn.Pkg())
+	return ok && !isAbstract(fn) && p.byPath[fn.Pkg().Path()] == nil
+}
+
+// abstractCallee returns the interface method call calls, or nil.
+func abstractCallee(pkg *Package, call *ast.CallExpr) *types.Func {
+	sel, ok := unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	fn, ok := pkg.Info.Uses[sel.Sel].(*types.Func)
+	if !ok || !isAbstract(fn) {
+		return nil
+	}
+	return fn
+}
+
+// dynamicCallee returns the expression a call obtains its function from
+// when that function is a value rather than a declared function or method:
+// a variable, a struct field, a call's result, an element, an assertion.
+// Conversions, builtins, declared functions and methods (an interface's
+// included: class-hierarchy analysis resolves those), generic
+// instantiations, and immediately called literals are not dynamic.
+func dynamicCallee(pkg *Package, call *ast.CallExpr) (ast.Expr, bool) {
+	if tv, ok := pkg.Info.Types[call.Fun]; ok && (tv.IsType() || tv.IsBuiltin()) {
+		return nil, false
+	}
+	f := unparen(call.Fun)
+	switch ix := f.(type) {
+	case *ast.IndexExpr:
+		if genericFunc(pkg, ix.X) != nil {
+			return nil, false
+		}
+	case *ast.IndexListExpr:
+		return nil, false
+	}
+	switch x := f.(type) {
+	case *ast.FuncLit:
+		return nil, false
+	case *ast.Ident:
+		if _, isFunc := pkg.Info.Uses[x].(*types.Func); isFunc {
+			return nil, false
+		}
+	case *ast.SelectorExpr:
+		if sel, ok := pkg.Info.Selections[x]; ok {
+			if sel.Kind() != types.FieldVal {
+				return nil, false
+			}
+		} else if _, isFunc := pkg.Info.Uses[x.Sel].(*types.Func); isFunc {
+			return nil, false
+		}
+	}
+	return f, true
 }
 
 func (r *resolver) object(obj types.Object, pos token.Pos) {
@@ -445,29 +631,25 @@ func (r *resolver) object(obj types.Object, pos token.Pos) {
 	case *types.Var:
 		r.variable(o, pos)
 	default:
-		r.fail(pos)
+		r.out.fail(pos)
 	}
 }
 
-// function adds fn as a value: an interface method resolves to every
-// module implementation; a dependency's function runs no module code.
+// function adds fn as a value: an interface method stands for every module
+// implementation; a dependency's function runs no module code.
 func (r *resolver) function(fn *types.Func, pos token.Pos) {
 	if isAbstract(fn) {
-		for _, impl := range r.g.implementations(fn) {
-			if id, ok := r.g.byFunc[impl.Origin()]; ok {
-				r.ids[id] = true
-			}
-		}
+		r.out.funcs[fn] = true
 		return
 	}
-	if !r.g.inModule(fn.Pkg()) {
+	if r.p.byPath[fn.Pkg().Path()] == nil {
 		return
 	}
-	if id, ok := r.g.byFunc[fn.Origin()]; ok {
-		r.ids[id] = true
+	if _, ok := r.p.decls[fn.Origin()]; !ok {
+		r.out.fail(pos)
 		return
 	}
-	r.fail(pos)
+	r.out.funcs[fn.Origin()] = true
 }
 
 func (r *resolver) variable(v *types.Var, pos token.Pos) {
@@ -478,18 +660,18 @@ func (r *resolver) variable(v *types.Var, pos token.Pos) {
 	if v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
 		// A package-level variable: its node carries its initializer's
 		// edges (and an initializer that runs code is pre-dispatch code).
-		if id, ok := r.g.byVar[v]; ok {
-			r.ids[id] = true
+		if r.p.byPath[v.Pkg().Path()] != nil {
+			r.out.vars[v] = true
 			return
 		}
-		r.fail(pos)
+		r.out.fail(pos)
 		return
 	}
-	if slot, ok := r.g.flow.params[v]; ok {
+	if slot, ok := r.p.flow.params[v]; ok {
 		r.param(slot, pos)
 		return
 	}
-	if sites, ok := r.g.flow.locals[v]; ok {
+	if sites, ok := r.p.flow.locals[v]; ok {
 		for _, s := range sites {
 			r.site(s)
 		}
@@ -497,19 +679,19 @@ func (r *resolver) variable(v *types.Var, pos token.Pos) {
 	}
 	// A receiver, a function literal's parameter, or a variable no
 	// assignment names.
-	r.fail(pos)
+	r.out.fail(pos)
 }
 
 // param follows a declared function's parameter to the arguments its
 // direct callers bind; a function that escapes as a value has callers no
 // call site shows.
 func (r *resolver) param(slot paramSlot, pos token.Pos) {
-	if slot.variadic || r.g.flow.escapes[slot.fn] {
-		r.fail(pos)
+	if slot.variadic || r.p.flow.escapes[slot.fn] {
+		r.out.fail(pos)
 		return
 	}
 	n := slot.fn.Type().(*types.Signature).Params().Len()
-	for _, c := range r.g.flow.calls[slot.fn] {
+	for _, c := range r.p.flow.calls[slot.fn] {
 		args := c.call.Args
 		if sel, ok := calleeExpr(c.call).(*ast.SelectorExpr); ok {
 			if s, ok := c.pkg.Info.Selections[sel]; ok && s.Kind() == types.MethodExpr && len(args) > 0 {
@@ -517,7 +699,7 @@ func (r *resolver) param(slot paramSlot, pos token.Pos) {
 			}
 		}
 		if len(args) != n {
-			r.fail(c.call.Pos()) // a tuple spread into the parameters
+			r.out.fail(c.call.Pos()) // a tuple spread into the parameters
 			continue
 		}
 		r.expr(c.pkg, args[slot.index], -1)
@@ -535,13 +717,30 @@ func (r *resolver) returns(fn *types.Func, idx int, pos token.Pos) {
 		return
 	}
 	r.seen[key] = true
-	if !r.g.flow.bodies[fn] {
-		r.fail(pos)
+	if !r.p.flow.bodies[fn] {
+		r.out.fail(pos)
 		return
 	}
-	for _, ret := range r.g.flow.returns[fn] {
+	r.yields(r.p.flow.returns[fn], idx, pos)
+}
+
+// litResult follows the idx-th result of a function literal.
+func (r *resolver) litResult(lit *ast.FuncLit, idx int, pos token.Pos) {
+	if idx < 0 {
+		idx = 0
+	}
+	key := returnKey{fn: lit, idx: idx}
+	if r.seen[key] {
+		return
+	}
+	r.seen[key] = true
+	r.yields(r.p.flow.litReturns[lit], idx, pos)
+}
+
+func (r *resolver) yields(rets [][]flowSite, idx int, pos token.Pos) {
+	for _, ret := range rets {
 		if idx >= len(ret) {
-			r.fail(pos)
+			r.out.fail(pos)
 			continue
 		}
 		r.site(ret[idx])

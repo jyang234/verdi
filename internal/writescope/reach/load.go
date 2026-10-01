@@ -51,6 +51,15 @@ type Program struct {
 	byName   map[string]*types.Func
 	objects  map[string]types.Object // interface methods and package-level variables, by ObjectName
 	inputs   []string
+
+	// named, ifaces, and generics are the module's named types, sorted by
+	// position: non-generic concrete types (the candidates for interface
+	// dispatch), interfaces, and generic types with methods. flow is the
+	// module's function-value record (fields.go).
+	named    []*types.Named
+	ifaces   []*types.Named
+	generics []*types.Named
+	flow     *fieldFlow
 }
 
 // Inputs returns the directories and module files Load read in-process
@@ -203,7 +212,66 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 			}
 		}
 	}
+	prog.collectTypes()
+	prog.flow = newFieldFlow(prog)
 	return prog, nil
+}
+
+// collectTypes sorts the module's named types into the candidates for
+// interface dispatch, the interfaces, and the generic types with methods.
+func (p *Program) collectTypes() {
+	for _, pkg := range p.packages {
+		for _, obj := range pkg.Info.Defs {
+			tn, ok := obj.(*types.TypeName)
+			if !ok || tn.IsAlias() {
+				continue
+			}
+			named, ok := tn.Type().(*types.Named)
+			if !ok {
+				continue
+			}
+			switch {
+			case types.IsInterface(named):
+				p.ifaces = append(p.ifaces, named)
+			case named.TypeParams().Len() > 0:
+				// A generic type's full method set, promoted methods
+				// included, can complete an interface (the tripwire).
+				if types.NewMethodSet(types.NewPointer(named)).Len() > 0 {
+					p.generics = append(p.generics, named)
+				}
+			default:
+				p.named = append(p.named, named)
+			}
+		}
+	}
+	for _, list := range [][]*types.Named{p.named, p.ifaces, p.generics} {
+		sort.Slice(list, func(i, j int) bool { return list[i].Obj().Pos() < list[j].Obj().Pos() })
+	}
+}
+
+// implementationsOf returns every module method an interface method call
+// to m may dispatch to (class-hierarchy analysis over the module's
+// non-generic named types).
+func (p *Program) implementationsOf(m *types.Func) []*types.Func {
+	sig := m.Type().(*types.Signature)
+	iface, _ := sig.Recv().Type().Underlying().(*types.Interface)
+	var out []*types.Func
+	if iface == nil {
+		return nil
+	}
+	for _, named := range p.named {
+		for _, t := range []types.Type{named, types.NewPointer(named)} {
+			if !types.Implements(t, iface) {
+				continue
+			}
+			obj, _, _ := types.LookupFieldOrMethod(t, true, m.Pkg(), m.Name())
+			if fn, ok := obj.(*types.Func); ok && fn.Pkg() != nil && p.byPath[fn.Pkg().Path()] != nil {
+				out = append(out, fn.Origin())
+			}
+			break
+		}
+	}
+	return out
 }
 
 // readInputs reads, in this process, every module package's directory and

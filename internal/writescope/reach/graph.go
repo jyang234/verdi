@@ -83,17 +83,15 @@ type Graph struct {
 	byArm  map[ast.Node]int
 	byVar  map[*types.Var]int
 
-	named    []*types.Named
-	ifaces   []*types.Named
-	generics []*types.Named
-	impls    map[*types.Func][]*types.Func
+	impls map[*types.Func][]*types.Func
 
-	// flow and fieldVals resolve reads of function-typed struct fields
-	// (fields.go); bound is every route-table field some entry binds, whose
-	// reads resolve per entry instead; stores is every selector an
-	// assignment writes, which is not a read.
-	flow      *fieldFlow
-	fieldVals map[*types.Var]fieldValue
+	// fieldVals memoizes each function-typed field's values (fields.go);
+	// bound is every route-table field some entry binds, whose reads resolve
+	// per entry instead; stores is every selector an assignment writes,
+	// which is not a read.
+	fieldVals map[*types.Var]*funcValues
+	spans     map[*token.File][]funcSpan
+	allowed   map[ast.Expr]bool
 	bound     map[*types.Var]bool
 	stores    map[ast.Expr]bool
 
@@ -113,6 +111,10 @@ type node struct {
 	obj   types.Object // the function, interface method, or variable the node is; nil for literals and arms
 	out   map[int]bool
 	reads []fieldRead
+	// unfollowed lists the function values in the node's code the
+	// analysis cannot follow (valuecalls.go): an entry whose reach holds
+	// one fails closed.
+	unfollowed []unfollowed
 }
 
 // fieldRead is one read of a function-typed struct field in a node's code.
@@ -137,7 +139,9 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 		byEntry:  map[entryKey]int{},
 		children: map[int][]int{},
 
-		fieldVals: map[*types.Var]fieldValue{},
+		fieldVals: map[*types.Var]*funcValues{},
+		spans:     map[*token.File][]funcSpan{},
+		allowed:   map[ast.Expr]bool{},
 		bound:     map[*types.Var]bool{},
 		stores:    map[ast.Expr]bool{},
 	}
@@ -169,10 +173,10 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 		}
 	}
 	g.declare()
+	g.indexSpans()
 	if err := g.genericTripwire(); err != nil {
 		return nil, err
 	}
-	g.flow = newFieldFlow(prog)
 	g.connect()
 	g.entries = entries
 	for i, e := range entries {
@@ -337,25 +341,33 @@ func (g *Graph) siteNode(i int) (int, error) {
 	return -1, nil
 }
 
-// readChecker returns the fail-closed check for entry i's traversal: an
-// entry a host dispatches (one with a site) must resolve every
-// function-typed field it reads; any other entry needs none.
+// readChecker returns the fail-closed check for entry i's traversal:
+// every entry fails closed on a function value in its reach the analysis
+// cannot follow (checkUnfollowed); an entry a host dispatches (one with a
+// site) must also resolve every function-typed field it reads
+// (checkReads).
 func (g *Graph) readChecker(i int) func(*node) error {
-	if site, _ := g.siteNode(i); site < 0 {
-		return nil
-	}
 	entry := g.entries[i]
 	boundHere := map[*types.Var]bool{}
 	for _, f := range entry.Bound {
 		boundHere[f.Origin()] = true
 	}
-	return func(n *node) error { return g.checkReads(entry, n, boundHere) }
+	site, _ := g.siteNode(i)
+	return func(n *node) error {
+		if err := g.checkUnfollowed(entry, n); err != nil {
+			return err
+		}
+		if site < 0 {
+			return nil
+		}
+		return g.checkReads(entry, n, boundHere)
+	}
 }
 
 // checkReads fails closed on a hosted entry's read of a function-typed
 // field whose values this entry cannot know: a route table's field its
-// registration did not bind, or a field holding a value the field flow
-// cannot follow.
+// registration did not bind, or a field holding a value the flow cannot
+// follow.
 func (g *Graph) checkReads(entry Entry, n *node, boundHere map[*types.Var]bool) error {
 	for _, rd := range n.reads {
 		name := g.fieldName(rd.field)
@@ -437,8 +449,8 @@ func (g *Graph) position(pos token.Pos) string {
 	return fmt.Sprintf("%s:%d", filepath.Base(p.Filename), p.Line)
 }
 
-// declare creates a node for every function, literal, and initialized
-// package-level variable, and collects the module's named types.
+// declare creates a node for every function, function literal,
+// package-level variable, and interface method of the module.
 func (g *Graph) declare() {
 	for _, pkg := range g.prog.packages {
 		for _, f := range pkg.Files {
@@ -471,36 +483,10 @@ func (g *Graph) declare() {
 				return true
 			})
 		}
-		for _, obj := range pkg.Info.Defs {
-			tn, ok := obj.(*types.TypeName)
-			if !ok || tn.IsAlias() {
-				continue
-			}
-			named, ok := tn.Type().(*types.Named)
-			if !ok {
-				continue
-			}
-			if types.IsInterface(named) {
-				g.ifaces = append(g.ifaces, named)
-				continue
-			}
-			if named.TypeParams().Len() > 0 {
-				if types.NewMethodSet(types.NewPointer(named)).Len() > 0 {
-					g.generics = append(g.generics, named)
-				}
-				continue
-			}
-			g.named = append(g.named, named)
-		}
 	}
-	byPos := func(list []*types.Named) {
-		sort.Slice(list, func(i, j int) bool { return list[i].Obj().Pos() < list[j].Obj().Pos() })
-	}
-	byPos(g.ifaces)
-	byPos(g.generics)
 	// An interface method is a node too: a call to it is an edge to it as
 	// well as to every implementation, so a classified one is found.
-	for _, named := range g.ifaces {
+	for _, named := range g.prog.ifaces {
 		iface := named.Underlying().(*types.Interface)
 		for i := 0; i < iface.NumExplicitMethods(); i++ {
 			m := iface.ExplicitMethod(i)
@@ -509,9 +495,6 @@ func (g *Graph) declare() {
 			}
 		}
 	}
-	sort.Slice(g.named, func(i, j int) bool {
-		return g.named[i].Obj().Pos() < g.named[j].Obj().Pos()
-	})
 }
 
 // genericTripwire refuses a module where a generic type whose method set
@@ -523,7 +506,7 @@ func (g *Graph) declare() {
 // method names and parameter and result counts, which over-approximates:
 // a false alarm is visible, a missed dispatch would not be.
 func (g *Graph) genericTripwire() error {
-	for _, gen := range g.generics {
+	for _, gen := range g.prog.generics {
 		// The full method set: methods promoted from embedded fields count,
 		// since they too can complete an interface.
 		have := map[string]bool{}
@@ -533,7 +516,7 @@ func (g *Graph) genericTripwire() error {
 				have[methodShape(fn)] = true
 			}
 		}
-		for _, in := range g.ifaces {
+		for _, in := range g.prog.ifaces {
 			iface := in.Underlying().(*types.Interface)
 			if iface.NumMethods() == 0 {
 				continue
@@ -604,6 +587,7 @@ func (g *Graph) walk(pkg *Package, from int, root ast.Node, sig *types.Signature
 				return false
 			}
 		}
+		g.valueChecks(from, pkg, n)
 		switch x := n.(type) {
 		case *ast.FuncLit:
 			if n == root {
@@ -629,7 +613,7 @@ func (g *Graph) walk(pkg *Package, from int, root ast.Node, sig *types.Signature
 			if field := funcFieldOf(pkg, x); field != nil {
 				g.nodes[from].reads = append(g.nodes[from].reads, fieldRead{field: field, pos: x.Pos()})
 				if !g.bound[field] {
-					for _, id := range g.fieldValues(field).ids {
+					for _, id := range g.valueIDs(g.fieldValues(field)) {
 						g.edge(from, id)
 					}
 				}
@@ -823,25 +807,9 @@ func (g *Graph) implementations(m *types.Func) []*types.Func {
 	if impls, ok := g.impls[m]; ok {
 		return impls
 	}
-	sig := m.Type().(*types.Signature)
-	iface, _ := sig.Recv().Type().Underlying().(*types.Interface)
-	var out []*types.Func
-	if iface != nil {
-		for _, named := range g.named {
-			for _, t := range []types.Type{named, types.NewPointer(named)} {
-				if !types.Implements(t, iface) {
-					continue
-				}
-				obj, _, _ := types.LookupFieldOrMethod(t, true, m.Pkg(), m.Name())
-				if fn, ok := obj.(*types.Func); ok && g.inModule(fn.Pkg()) {
-					out = append(out, fn.Origin())
-				}
-				break
-			}
-		}
-	}
-	g.impls[m] = out
-	return out
+	impls := g.prog.implementationsOf(m)
+	g.impls[m] = impls
+	return impls
 }
 
 func (g *Graph) inModule(pkg *types.Package) bool {
