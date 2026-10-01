@@ -38,8 +38,12 @@
 //     its registration did not bind; values in maps, slices, and channels,
 //     and a variable assigned through a pointer, are still attributed to
 //     the code that stored them;
-//   - generic types are not candidates for interface dispatch (the module
-//     declares no generic type with methods at the time of writing);
+//   - generic types are not candidates for interface dispatch; Build
+//     refuses a module where a generic type with methods has the methods
+//     of a module interface (the tripwire), so the gap cannot pass
+//     silently. A generic type converted to a dependency's interface is
+//     followed (internal/governanceprincipal's byContent[T], a
+//     sort.Interface, is);
 //   - each Program is one build target; the witness loads every target in
 //     Targets so platform-specific files are all analyzed.
 package reach

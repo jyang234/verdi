@@ -76,6 +76,20 @@ func ViaExportedInterface(ctx context.Context) error { return gitx.NewStager().S
 // Unreached is the only caller of gitx.Other, and no entry reaches it.
 func Unreached(ctx context.Context) error { return gitx.Other(ctx) }
 
+// pair is a generic type with methods that implement no module interface:
+// the generic tripwire must stay quiet for it.
+type pair[T any] struct{ a, b T }
+
+// Swap exchanges the pair's halves.
+func (p *pair[T]) Swap() { p.a, p.b = p.b, p.a }
+
+// Swapped returns a swapped pair.
+func Swapped(a, b int) (int, int) {
+	p := &pair[int]{a, b}
+	p.Swap()
+	return p.a, p.b
+}
+
 type handler struct{}
 
 // ServeHTTP is called by the standard library, never by module code.

@@ -78,8 +78,10 @@ type Graph struct {
 	byArm  map[ast.Node]int
 	byVar  map[*types.Var]int
 
-	named []*types.Named
-	impls map[*types.Func][]*types.Func
+	named    []*types.Named
+	ifaces   []*types.Named
+	generics []*types.Named
+	impls    map[*types.Func][]*types.Func
 
 	// flow and fieldVals resolve reads of function-typed struct fields
 	// (fields.go); bound is every route-table field some entry binds, whose
@@ -162,6 +164,9 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 		}
 	}
 	g.declare()
+	if err := g.genericTripwire(); err != nil {
+		return nil, err
+	}
 	g.flow = newFieldFlow(prog)
 	g.connect()
 	g.entries = entries
@@ -429,7 +434,6 @@ func (g *Graph) position(pos token.Pos) string {
 // declare creates a node for every function, literal, and initialized
 // package-level variable, and collects the module's named types.
 func (g *Graph) declare() {
-	var ifaces []*types.Named
 	for _, pkg := range g.prog.packages {
 		for _, f := range pkg.Files {
 			for _, decl := range f.Decls {
@@ -471,19 +475,26 @@ func (g *Graph) declare() {
 				continue
 			}
 			if types.IsInterface(named) {
-				ifaces = append(ifaces, named)
+				g.ifaces = append(g.ifaces, named)
 				continue
 			}
 			if named.TypeParams().Len() > 0 {
+				if named.NumMethods() > 0 {
+					g.generics = append(g.generics, named)
+				}
 				continue
 			}
 			g.named = append(g.named, named)
 		}
 	}
+	byPos := func(list []*types.Named) {
+		sort.Slice(list, func(i, j int) bool { return list[i].Obj().Pos() < list[j].Obj().Pos() })
+	}
+	byPos(g.ifaces)
+	byPos(g.generics)
 	// An interface method is a node too: a call to it is an edge to it as
 	// well as to every implementation, so a classified one is found.
-	sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].Obj().Pos() < ifaces[j].Obj().Pos() })
-	for _, named := range ifaces {
+	for _, named := range g.ifaces {
 		iface := named.Underlying().(*types.Interface)
 		for i := 0; i < iface.NumExplicitMethods(); i++ {
 			m := iface.ExplicitMethod(i)
@@ -495,6 +506,42 @@ func (g *Graph) declare() {
 	sort.Slice(g.named, func(i, j int) bool {
 		return g.named[i].Obj().Pos() < g.named[j].Obj().Pos()
 	})
+}
+
+// genericTripwire refuses a module where a generic type with methods could
+// implement a module interface. Class-hierarchy analysis here considers
+// only non-generic types (types.Implements is unspecified for an
+// uninstantiated generic type), so a call through such an interface could
+// reach the generic type's methods unseen. "Could implement" is judged by
+// method names and parameter and result counts, which over-approximates:
+// a false alarm is visible, a missed dispatch would not be.
+func (g *Graph) genericTripwire() error {
+	for _, gen := range g.generics {
+		have := map[string]bool{}
+		for i := 0; i < gen.NumMethods(); i++ {
+			have[methodShape(gen.Method(i))] = true
+		}
+		for _, in := range g.ifaces {
+			iface := in.Underlying().(*types.Interface)
+			if iface.NumMethods() == 0 {
+				continue
+			}
+			all := true
+			for i := 0; i < iface.NumMethods() && all; i++ {
+				all = have[methodShape(iface.Method(i))]
+			}
+			if all {
+				return fmt.Errorf("reach: generic type %s has the methods of module interface %s; interface dispatch to a generic type is not modeled, so a call through %s could reach it unseen (extend the analysis before relying on it)",
+					g.prog.ObjectName(gen.Obj()), g.prog.ObjectName(in.Obj()), in.Obj().Name())
+			}
+		}
+	}
+	return nil
+}
+
+func methodShape(m *types.Func) string {
+	sig := m.Type().(*types.Signature)
+	return fmt.Sprintf("%s/%d/%d", m.Name(), sig.Params().Len(), sig.Results().Len())
 }
 
 // connect adds every node's outgoing edges.

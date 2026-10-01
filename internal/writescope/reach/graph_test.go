@@ -1,8 +1,10 @@
 package reach_test
 
 import (
+	"context"
 	"go/ast"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -341,5 +343,30 @@ func TestBuild_RejectsRootsOutsideTheModule(t *testing.T) {
 				t.Fatal("Build accepted an entry whose roots name no module code")
 			}
 		})
+	}
+}
+
+// TestBuild_FailsOnAGenericImplementationOfAModuleInterface pins R1-A5's
+// tripwire: interface dispatch to a generic type is not modeled, so a
+// module where a generic type with methods implements a module interface
+// is refused rather than analyzed with the call missing. A generic type
+// that implements no module interface (synth's pair) is fine.
+func TestBuild_FailsOnAGenericImplementationOfAModuleInterface(t *testing.T) {
+	prog, err := reach.Load(context.Background(), filepath.Join("testdata", "generic"), reach.Targets()[0], "./...")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	use := prog.FuncByName("g.Use")
+	if use == nil {
+		t.Fatal("no g.Use")
+	}
+	_, err = reach.Build(prog, []reach.Entry{{Surface: "test", Name: "use", Roots: []reach.Root{{Func: use}}}})
+	if err == nil || !strings.Contains(err.Error(), "box") || !strings.Contains(err.Error(), "Sizer") {
+		t.Fatalf("Build = %v, want an error naming the generic type box and the interface Sizer", err)
+	}
+	synth := loadSynth(t)
+	entry := reach.Entry{Surface: "test", Name: "swapped", Roots: []reach.Root{{Func: lookupFunc(t, synth, "example.com/synth/app", "Swapped")}}}
+	if _, err := reach.Build(synth, []reach.Entry{entry}); err != nil {
+		t.Fatalf("Build(synth) = %v, want nil: pair implements no module interface", err)
 	}
 }
