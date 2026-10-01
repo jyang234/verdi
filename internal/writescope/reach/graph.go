@@ -610,7 +610,7 @@ func (g *Graph) walk(pkg *Package, from int, root ast.Node, sig *types.Signature
 			if g.stores[x] {
 				break
 			}
-			if field := funcFieldOf(pkg, x); field != nil {
+			if field := g.prog.flowFieldOf(pkg, x); field != nil {
 				g.nodes[from].reads = append(g.nodes[from].reads, fieldRead{field: field, pos: x.Pos()})
 				if !g.bound[field] {
 					for _, id := range g.valueIDs(g.fieldValues(field)) {

@@ -74,14 +74,29 @@ func isFuncField(v *types.Var) bool {
 	return ok
 }
 
-// funcFieldOf returns the function-typed field a selector reads, or nil.
-func funcFieldOf(pkg *Package, sel *ast.SelectorExpr) *types.Var {
+// isFlowField reports whether v is a struct field the field flow
+// follows: one of function type, or of an interface type a named function
+// type with methods implements (ledger SI-319).
+func (p *Program) isFlowField(v *types.Var) bool {
+	if isFuncField(v) {
+		return true
+	}
+	if v == nil || !v.IsField() {
+		return false
+	}
+	iface, ok := v.Type().Underlying().(*types.Interface)
+	return ok && p.ifaceCarries(iface)
+}
+
+// flowFieldOf returns the field a selector reads when the field flow
+// follows it, or nil.
+func (p *Program) flowFieldOf(pkg *Package, sel *ast.SelectorExpr) *types.Var {
 	s, ok := pkg.Info.Selections[sel]
 	if !ok || s.Kind() != types.FieldVal {
 		return nil
 	}
 	v, _ := s.Obj().(*types.Var)
-	if !isFuncField(v) {
+	if !p.isFlowField(v) {
 		return nil
 	}
 	return v.Origin()
@@ -132,9 +147,9 @@ func newFieldFlow(prog *Program) *fieldFlow {
 						ff.litReturns[x] = returnSites(pkg, x.Body, sig)
 					}
 				case *ast.CompositeLit:
-					ff.recordComposite(pkg, x)
+					ff.recordComposite(prog, pkg, x)
 				case *ast.AssignStmt:
-					ff.recordAssign(pkg, x)
+					ff.recordAssign(prog, pkg, x)
 				case *ast.ValueSpec:
 					ff.recordValueSpec(pkg, x)
 				case *ast.RangeStmt:
@@ -241,7 +256,7 @@ func localVar(pkg *Package, e ast.Expr) *types.Var {
 	return v
 }
 
-func (ff *fieldFlow) recordComposite(pkg *Package, lit *ast.CompositeLit) {
+func (ff *fieldFlow) recordComposite(prog *Program, pkg *Package, lit *ast.CompositeLit) {
 	t := pkg.Info.TypeOf(lit)
 	if t == nil {
 		return
@@ -266,13 +281,13 @@ func (ff *fieldFlow) recordComposite(pkg *Package, lit *ast.CompositeLit) {
 		} else if i < st.NumFields() {
 			field = st.Field(i)
 		}
-		if isFuncField(field) {
+		if prog.isFlowField(field) {
 			ff.stores[field.Origin()] = append(ff.stores[field.Origin()], flowSite{pkg: pkg, expr: val, idx: -1, pos: val.Pos()})
 		}
 	}
 }
 
-func (ff *fieldFlow) recordAssign(pkg *Package, as *ast.AssignStmt) {
+func (ff *fieldFlow) recordAssign(prog *Program, pkg *Package, as *ast.AssignStmt) {
 	if as.Tok != token.ASSIGN && as.Tok != token.DEFINE {
 		return
 	}
@@ -287,7 +302,7 @@ func (ff *fieldFlow) recordAssign(pkg *Package, as *ast.AssignStmt) {
 			continue
 		}
 		if sel, ok := unparen(lhs).(*ast.SelectorExpr); ok {
-			if field := funcFieldOf(pkg, sel); field != nil {
+			if field := prog.flowFieldOf(pkg, sel); field != nil {
 				ff.stores[field] = append(ff.stores[field], site)
 			}
 			continue
@@ -393,6 +408,14 @@ func (r *resolver) site(s flowSite) {
 }
 
 func (r *resolver) expr(pkg *Package, e ast.Expr, idx int) {
+	if t := pkg.Info.TypeOf(e); t != nil && !r.p.carriesFunc(t) {
+		if _, isTuple := t.(*types.Tuple); !isTuple {
+			// A value that cannot hold a function (a struct behind an
+			// interface, nil, a constant): class-hierarchy analysis
+			// dispatches its methods; there is nothing to follow.
+			return
+		}
+	}
 	switch x := unparen(e).(type) {
 	case *ast.FuncLit:
 		r.out.lits[x] = true
@@ -409,7 +432,7 @@ func (r *resolver) expr(pkg *Package, e ast.Expr, idx int) {
 		}
 		switch sel.Kind() {
 		case types.FieldVal:
-			if f := funcFieldOf(pkg, x); f != nil {
+			if f := r.p.flowFieldOf(pkg, x); f != nil {
 				r.field(f)
 				return
 			}

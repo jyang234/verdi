@@ -32,7 +32,7 @@ func ExportedFuncs(prog *Program, pkgPath string) ([]string, error) {
 				out = append(out, prog.ObjectName(obj))
 			}
 		case *types.Var:
-			if obj.Exported() && holdsFunc(obj.Type(), map[types.Type]bool{}) {
+			if obj.Exported() && prog.holdsFunc(obj.Type(), map[types.Type]bool{}) {
 				out = append(out, prog.ObjectName(obj))
 			}
 		case *types.TypeName:
@@ -66,11 +66,10 @@ func ExportedFuncs(prog *Program, pkgPath string) ([]string, error) {
 }
 
 // holdsFunc reports whether a value of type t can hold a function: t is a
-// function type, an empty interface, or a struct, pointer, slice, array,
-// map, or channel that can contain one. An interface with methods (an
-// error sentinel) is not counted: a function value satisfies it only
-// through a named type whose methods the census lists.
-func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
+// function type, the empty interface (as SI-318 recorded), another
+// interface that carries a function value (ledger SI-319, SI-320), or a
+// struct, pointer, slice, array, map, or channel that can contain one.
+func (p *Program) holdsFunc(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -79,20 +78,20 @@ func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Signature:
 		return true
 	case *types.Interface:
-		return u.NumMethods() == 0
+		return u.Empty() || p.ifaceCarries(u)
 	case *types.Pointer:
-		return holdsFunc(u.Elem(), seen)
+		return p.holdsFunc(u.Elem(), seen)
 	case *types.Slice:
-		return holdsFunc(u.Elem(), seen)
+		return p.holdsFunc(u.Elem(), seen)
 	case *types.Array:
-		return holdsFunc(u.Elem(), seen)
+		return p.holdsFunc(u.Elem(), seen)
 	case *types.Chan:
-		return holdsFunc(u.Elem(), seen)
+		return p.holdsFunc(u.Elem(), seen)
 	case *types.Map:
-		return holdsFunc(u.Key(), seen) || holdsFunc(u.Elem(), seen)
+		return p.holdsFunc(u.Key(), seen) || p.holdsFunc(u.Elem(), seen)
 	case *types.Struct:
 		for i := 0; i < u.NumFields(); i++ {
-			if holdsFunc(u.Field(i).Type(), seen) {
+			if p.holdsFunc(u.Field(i).Type(), seen) {
 				return true
 			}
 		}

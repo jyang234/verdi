@@ -3,8 +3,14 @@
 // captured function value passed on as an argument rather than called, a
 // channel receive, a type assertion to a function type, a dereference of
 // a pointer loaded from a non-package container, and an element of a
-// field-held container; and a type switch to a function type (the
-// switch form of the assertion rule). Control routes dereference a pointer loaded from
+// field-held container; a type switch to a function type (the switch
+// form of the assertion rule); and, for an interface value holding a
+// function (ledger SI-319), a channel of http.Handler and a field-held
+// slice of http.Handler; and a function laundered through the empty
+// interface or a type parameter (ledger SI-320): asserted from a captured
+// any, asserted from a captured map[string]any, asserted by a helper a
+// captured any is handed to, and a captured ~func type parameter passed
+// on. Control routes dereference a pointer loaded from
 // a package-level variable, use a field-held container only benignly
 // (its length, its keys, a nil comparison), and compare a captured
 // function to nil before calling it; the analysis follows each.
@@ -21,6 +27,8 @@ type server struct {
 	ch       chan func() error
 	anyHook  any
 	handlers map[string]func() error
+	hch      chan http.Handler
+	hs       []http.Handler
 }
 
 // seam is a package-level pointer to a function, filled only at
@@ -37,7 +45,16 @@ func Register(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("/hole/deref", s.deref)
 	mux.HandleFunc("/hole/element", s.element)
 	mux.HandleFunc("/hole/switch", s.typeSwitch)
+	mux.HandleFunc("/hole/ifacechan", s.ifaceChan)
+	mux.HandleFunc("/hole/ifaceslice", s.ifaceSlice)
 	mux.HandleFunc("/control/packagederef", s.packageDeref)
+	hv := func(w http.ResponseWriter, r *http.Request) { _ = app.Direct(r.Context()) }
+	var anyH any = http.HandlerFunc(hv)
+	mux.HandleFunc("/launder/assert", func(w http.ResponseWriter, r *http.Request) { anyH.(http.Handler).ServeHTTP(w, r) })
+	m := map[string]any{"k": http.HandlerFunc(hv)}
+	mux.HandleFunc("/launder/map", func(w http.ResponseWriter, r *http.Request) { m["k"].(http.HandlerFunc)(w, r) })
+	mux.HandleFunc("/launder/helper", func(w http.ResponseWriter, r *http.Request) { assertAndServe(anyH, w, r) })
+	registerTyped(mux, hv)
 	mux.HandleFunc("/control/benign", s.benign)
 	mux.HandleFunc("/control/capturednil", func(w http.ResponseWriter, r *http.Request) {
 		if direct != nil {
@@ -94,4 +111,26 @@ func (s *server) typeSwitch(w http.ResponseWriter, r *http.Request) {
 	case func() error:
 		_ = f()
 	}
+}
+
+func (s *server) ifaceChan(w http.ResponseWriter, r *http.Request) {
+	h := <-s.hch
+	h.ServeHTTP(w, r)
+}
+
+func (s *server) ifaceSlice(w http.ResponseWriter, r *http.Request) {
+	s.hs[0].ServeHTTP(w, r)
+}
+
+// assertAndServe asserts what it is handed to http.Handler and calls it.
+func assertAndServe(v any, w http.ResponseWriter, r *http.Request) { v.(http.Handler).ServeHTTP(w, r) }
+
+// registerTyped registers a route whose handler passes on a function held
+// in a type parameter constrained to a function type.
+func registerTyped[F ~func(http.ResponseWriter, *http.Request)](mux *http.ServeMux, f F) {
+	mux.HandleFunc("/launder/typeparam", func(w http.ResponseWriter, r *http.Request) { callTyped(f, w, r) })
+}
+
+func callTyped[F ~func(http.ResponseWriter, *http.Request)](f F, w http.ResponseWriter, r *http.Request) {
+	f(w, r)
 }

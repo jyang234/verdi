@@ -7,7 +7,10 @@ import (
 	"go/types"
 )
 
-// Function values (ledger SI-318). The graph is use-based: a function
+// Function values (ledger SI-318), and values that carry one (ledger
+// SI-319, SI-320: an interface a named function type with methods
+// implements, a type parameter constrained to a function type, never the
+// empty interface; Program.carriesFunc). The graph is use-based: a function
 // value is an edge from the code that names it. That code is in a verb's
 // reach whenever the activation that produced the value is part of the
 // verb's execution: an uncaptured parameter's value was named by a caller,
@@ -82,33 +85,6 @@ func (g *Graph) captured(v *types.Var, pos token.Pos) bool {
 	return g.innermost(v.Pos()) != g.innermost(pos)
 }
 
-// carriesFunc reports whether a value of type t is a function value or a
-// pointer, slice, array, map, or channel of them. A struct's
-// function-typed fields resolve through the field flow instead, and an
-// interface value becomes a function value only through a type assertion,
-// which fails closed.
-func carriesFunc(t types.Type) bool {
-	for depth := 0; t != nil && depth < 16; depth++ {
-		switch u := t.Underlying().(type) {
-		case *types.Signature:
-			return true
-		case *types.Pointer:
-			t = u.Elem()
-		case *types.Slice:
-			t = u.Elem()
-		case *types.Array:
-			t = u.Elem()
-		case *types.Map:
-			t = u.Elem()
-		case *types.Chan:
-			t = u.Elem()
-		default:
-			return false
-		}
-	}
-	return false
-}
-
 func (g *Graph) fail(from int, e ast.Expr, why string, at token.Pos) {
 	g.nodes[from].unfollowed = append(g.nodes[from].unfollowed, unfollowed{pos: e.Pos(), expr: types.ExprString(e), why: why, at: at})
 }
@@ -149,24 +125,24 @@ func (g *Graph) valueChecks(from int, pkg *Package, n ast.Node) {
 		g.fieldContainer(from, pkg, x)
 	case *ast.UnaryExpr:
 		if x.Op == token.ARROW {
-			if ch, ok := pkg.Info.TypeOf(x.X).Underlying().(*types.Chan); ok && carriesFunc(ch.Elem()) {
+			if ch, ok := pkg.Info.TypeOf(x.X).Underlying().(*types.Chan); ok && g.prog.carriesFunc(ch.Elem()) {
 				g.fail(from, x, "receives a function value from a channel, which code outside this reach may have sent", x.Pos())
 			}
 		}
 	case *ast.TypeAssertExpr:
-		if x.Type != nil && carriesFunc(pkg.Info.TypeOf(x.Type)) {
+		if x.Type != nil && g.prog.carriesFunc(pkg.Info.TypeOf(x.Type)) {
 			g.fail(from, x, "asserts an interface value to a function type, a value code outside this reach may have stored", x.Pos())
 		}
 	case *ast.TypeSwitchStmt:
 		for _, st := range x.Body.List {
 			for _, te := range st.(*ast.CaseClause).List {
-				if tv := pkg.Info.Types[te]; tv.IsType() && carriesFunc(tv.Type) {
+				if tv := pkg.Info.Types[te]; tv.IsType() && g.prog.carriesFunc(tv.Type) {
 					g.fail(from, te, "switches an interface value to a function type, a value code outside this reach may have stored", te.Pos())
 				}
 			}
 		}
 	case *ast.StarExpr:
-		if tv := pkg.Info.Types[x]; !tv.IsType() && carriesFunc(tv.Type) && !g.packageLoaded(pkg, x.X, map[types.Object]bool{}) {
+		if tv := pkg.Info.Types[x]; !tv.IsType() && g.prog.carriesFunc(tv.Type) && !g.packageLoaded(pkg, x.X, map[types.Object]bool{}) {
 			g.fail(from, x, "dereferences a pointer to a function value that was not loaded from a package-level variable", x.Pos())
 		}
 	}
@@ -174,11 +150,13 @@ func (g *Graph) valueChecks(from int, pkg *Package, n ast.Node) {
 
 // calleeValue handles a call. A benign builtin's arguments are benign
 // uses. A call through a function value captured from an enclosing
-// function resolves through the flow, its values becoming edges (an
-// unfollowable one fails closed). Any other callee is covered: a field by
-// the field flow, a call's result by its callee, an uncaptured variable by
-// the activation that produced it, and an element, receive, assertion, or
-// dereference by its own rule.
+// function, or a method called on a captured value that holds one (an
+// interface a function type implements, or a named function type: the
+// method calls the function, ledger SI-319), resolves through the flow,
+// its values becoming edges (an unfollowable one fails closed). Any other
+// callee is covered: a field by the field flow, a call's result by its
+// callee, an uncaptured variable by the activation that produced it, and
+// an element, receive, assertion, or dereference by its own rule.
 func (g *Graph) calleeValue(from int, pkg *Package, call *ast.CallExpr) {
 	if tv, ok := pkg.Info.Types[call.Fun]; ok && tv.IsBuiltin() {
 		if benignBuiltins()[types.ExprString(unparen(call.Fun))] {
@@ -188,16 +166,19 @@ func (g *Graph) calleeValue(from int, pkg *Package, call *ast.CallExpr) {
 		}
 		return
 	}
-	callee, ok := dynamicCallee(pkg, call)
-	if !ok {
-		return
+	var id *ast.Ident
+	if callee, dynamic := dynamicCallee(pkg, call); dynamic {
+		id, _ = callee.(*ast.Ident)
+	} else if sel, ok := unparen(call.Fun).(*ast.SelectorExpr); ok {
+		if s, ok := pkg.Info.Selections[sel]; ok && s.Kind() == types.MethodVal {
+			id, _ = unparen(sel.X).(*ast.Ident)
+		}
 	}
-	id, ok := callee.(*ast.Ident)
-	if !ok {
+	if id == nil {
 		return
 	}
 	v, ok := pkg.Info.Uses[id].(*types.Var)
-	if !ok || !g.captured(v, id.Pos()) {
+	if !ok || !g.prog.carriesFunc(v.Type()) || !g.captured(v, id.Pos()) {
 		return
 	}
 	g.allowed[id] = true
@@ -217,7 +198,7 @@ func (g *Graph) calleeValue(from int, pkg *Package, call *ast.CallExpr) {
 // shapes the analysis follows.
 func (g *Graph) capturedUse(from int, pkg *Package, id *ast.Ident) {
 	v, ok := pkg.Info.Uses[id].(*types.Var)
-	if !ok || g.allowed[id] || !carriesFunc(v.Type()) || !g.captured(v, id.Pos()) {
+	if !ok || g.allowed[id] || !g.prog.carriesFunc(v.Type()) || !g.captured(v, id.Pos()) {
 		return
 	}
 	g.fail(from, id, "uses a function value captured from an enclosing function other than by calling it (passed on, stored, or read element-wise)", id.Pos())
@@ -235,9 +216,9 @@ func (g *Graph) fieldContainer(from int, pkg *Package, sel *ast.SelectorExpr) {
 	if !ok || s.Kind() != types.FieldVal {
 		return
 	}
-	t := s.Obj().Type()
-	if _, isFunc := t.Underlying().(*types.Signature); isFunc || !carriesFunc(t) {
-		return // a function-typed field resolves through the field flow
+	field, _ := s.Obj().(*types.Var)
+	if g.prog.isFlowField(field) || !g.prog.carriesFunc(field.Type()) {
+		return // a function-typed or function-carrying interface field resolves through the field flow
 	}
 	g.fail(from, sel, "reads a field-held container of function values, whose elements code outside this reach may have stored", sel.Pos())
 }
@@ -251,7 +232,7 @@ func (g *Graph) rangeValues(from int, pkg *Package, rs *ast.RangeStmt) {
 		return
 	}
 	if ch, ok := t.Underlying().(*types.Chan); ok {
-		if carriesFunc(ch.Elem()) && rs.Key != nil {
+		if g.prog.carriesFunc(ch.Elem()) && rs.Key != nil {
 			g.fail(from, rs.X, "receives function values from a channel, which code outside this reach may have sent", rs.X.Pos())
 		}
 		g.allowed[unparen(rs.X)] = true

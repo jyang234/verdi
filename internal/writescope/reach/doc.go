@@ -29,31 +29,41 @@
 //     of a verb;
 //   - a dependency that type-asserts a module value received as an empty
 //     interface (any) to another interface and calls it is not followed;
-//   - function values (ledger SI-318): a function value is an edge from the
-//     code that names it, which is in a verb's reach whenever the
-//     activation that produced the value is part of the verb's execution
-//     (an uncaptured parameter's value was named by a caller, an
-//     uncaptured local's by its own function, a call's result by its
-//     callee, a package-level variable's by its initializer). Values that
-//     outlive their activation are handled explicitly: a read of a
-//     function-typed struct field resolves to every value the module
-//     stores in it (fields.go); a call through a function value captured
-//     from an enclosing function resolves through the flow; every
-//     function-typed argument of a route registration's wrapper is a root
-//     of the route; and every value the analysis cannot follow fails
-//     closed, naming its site, in every entry whose reach holds it: a
-//     captured function value used other than by calling it (passed on as
-//     an argument, assigned, returned, stored), a call through a captured
-//     value the flow cannot follow, a channel receive yielding a function
-//     value, a type assertion to a function type, a dereference of a
-//     pointer to a function value not loaded from a package-level
-//     variable, a read of a field-held container of function values, and,
-//     for an entry a host dispatches, a function-typed field holding a
-//     value the flow cannot follow or a route table's field its
-//     registration did not bind (valuecalls.go). A package-level variable
-//     reassigned outside its initializer (package-level mutable state the
-//     ground rules forbid) is still attributed to the code that assigns
-//     it;
+//   - function values (ledger SI-318, SI-319, SI-320): what follows applies to
+//     a function value and to a value that carries one: an interface a named
+//     function type with methods implements (a method of that type, such as
+//     http.HandlerFunc's ServeHTTP, calls the function with no assertion), a
+//     type parameter whose constraint has a function type among its terms, and
+//     a pointer, slice, array, map, or channel of these. The empty interface
+//     does not carry one: a value of that type reaches a call in module code
+//     only through a type assertion or type switch, which fails closed
+//     whenever its target carries a function, and in dependency code only
+//     through reflection or the dependency's own assertion, the boundaries
+//     this list discloses. A function value is an edge from the code that
+//     names it, which is in a verb's reach whenever the activation that
+//     produced the value is part of the verb's execution (an uncaptured
+//     parameter's value was named by a caller, an uncaptured local's by its
+//     own function, a call's result by its callee, a package-level variable's
+//     by its initializer). Values that outlive their activation are handled
+//     explicitly: a read of a function-typed or function-carrying interface
+//     field resolves to every value the module stores in it (fields.go); a
+//     call through a captured function value, or a method called on a captured
+//     value that carries one, resolves through the flow, conversions
+//     transparent; every function-typed or function-carrying interface
+//     argument of a route registration's wrapper is a root of the route; and
+//     every value the analysis cannot follow fails closed, naming its site, in
+//     every entry whose reach holds it: a captured function value used other
+//     than by calling it (passed on as an argument, assigned, returned,
+//     stored), a call through a captured value the flow cannot follow, a
+//     channel receive yielding a function value, a type assertion or type
+//     switch to a type that carries one, a dereference of a pointer to a
+//     function value not loaded from a package-level variable, a read of a
+//     field-held container of function values, and, for an entry a host
+//     dispatches, a function-typed field holding a value the flow cannot
+//     follow or a route table's field its registration did not bind
+//     (valuecalls.go). A package-level variable reassigned outside its
+//     initializer (package-level mutable state the ground rules forbid) is
+//     still attributed to the code that assigns it;
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type's method set (methods promoted
 //     from embedded fields included) has the methods of a module

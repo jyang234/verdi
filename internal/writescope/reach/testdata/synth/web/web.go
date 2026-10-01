@@ -18,6 +18,9 @@ const routeAPI = "/thing/{name}/api/{action}"
 type server struct {
 	// audit is stored by Register, outside every route's own code.
 	audit func(context.Context) error
+	// hook is an interface-typed field Register fills with a function
+	// value (ledger SI-319).
+	hook http.Handler
 }
 
 type route struct {
@@ -64,6 +67,19 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("/captured/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) { api(w, r) })
 	mux.HandleFunc("/wrapped/thing/{name}/api/{action}", withTrace(s.api()))
 	mux.HandleFunc("/wrappedlit/thing/{name}/api/{action}", withTrace(func(w http.ResponseWriter, r *http.Request) { s.api()(w, r) }))
+	// The API handler held in an interface value (ledger SI-319): captured
+	// through a conversion to http.Handler (H6), through a module function
+	// type whose ServeHTTP calls it (H6b), and set in an interface-typed
+	// field the route reads. A struct behind the same interface is the
+	// control: class-hierarchy analysis dispatches its method.
+	h6 := http.Handler(http.HandlerFunc(s.api()))
+	mux.HandleFunc("/iface/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) { h6.ServeHTTP(w, r) })
+	h6b := http.Handler(serveFunc(s.api()))
+	mux.HandleFunc("/ifacemod/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) { h6b.ServeHTTP(w, r) })
+	s.hook = s.api()
+	mux.HandleFunc("/ifield/thing/{name}/api/{action}", s.ifield)
+	sh := http.Handler(readOnlyHandler{})
+	mux.HandleFunc("/ifacestruct", func(w http.ResponseWriter, r *http.Request) { sh.ServeHTTP(w, r) })
 	mux.HandleFunc("/legacy/{key}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
 		case "commit":
@@ -75,6 +91,23 @@ func Register(mux *http.ServeMux) {
 }
 
 func health() http.HandlerFunc { return func(w http.ResponseWriter, r *http.Request) {} }
+
+// serveFunc is a module function type whose ServeHTTP calls its receiver.
+type serveFunc func(http.ResponseWriter, *http.Request)
+
+// ServeHTTP calls f.
+func (f serveFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) { f(w, r) }
+
+// readOnlyHandler is a struct behind http.Handler.
+type readOnlyHandler struct{}
+
+// ServeHTTP only reads.
+func (readOnlyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	_ = app.ReadOnly(r.Context())
+}
+
+// ifield calls the handler Register stored in the server's interface field.
+func (s *server) ifield(w http.ResponseWriter, r *http.Request) { s.hook.ServeHTTP(w, r) }
 
 // withTrace wraps a handler: the wrapped handler is its argument, named by
 // the registration, outside the route's own code.

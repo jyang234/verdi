@@ -60,6 +60,13 @@ type Program struct {
 	ifaces   []*types.Named
 	generics []*types.Named
 	flow     *fieldFlow
+
+	// funcTypes are the named function types with methods anywhere in the
+	// loaded type universe (the module and every package it imports), the
+	// types through which an interface value can hold a function (ledger
+	// SI-319); carries memoizes which interfaces one of them implements.
+	funcTypes []*types.Named
+	carries   map[*types.Interface]bool
 }
 
 // Inputs returns the directories and module files Load read in-process
@@ -213,6 +220,7 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 		}
 	}
 	prog.collectTypes()
+	prog.collectFuncTypes(l.checked)
 	prog.flow = newFieldFlow(prog)
 	return prog, nil
 }
@@ -247,6 +255,169 @@ func (p *Program) collectTypes() {
 	for _, list := range [][]*types.Named{p.named, p.ifaces, p.generics} {
 		sort.Slice(list, func(i, j int) bool { return list[i].Obj().Pos() < list[j].Obj().Pos() })
 	}
+}
+
+// collectFuncTypes records every named function type with a non-empty
+// method set (its own or its pointer's) in the type universe: each
+// type-checked package's package-level types, and the module's local
+// ones. Sorted by package path, then position.
+func (p *Program) collectFuncTypes(checked map[string]*types.Package) {
+	p.carries = map[*types.Interface]bool{}
+	seen := map[*types.Named]bool{}
+	add := func(tn *types.TypeName) {
+		if tn == nil || tn.IsAlias() {
+			return
+		}
+		named, ok := tn.Type().(*types.Named)
+		if !ok || seen[named] {
+			return
+		}
+		if _, isFunc := named.Underlying().(*types.Signature); !isFunc {
+			return
+		}
+		if types.NewMethodSet(types.NewPointer(named)).Len() == 0 {
+			return
+		}
+		seen[named] = true
+		p.funcTypes = append(p.funcTypes, named)
+	}
+	for _, pkg := range checked {
+		if pkg == nil {
+			continue
+		}
+		scope := pkg.Scope()
+		for _, name := range scope.Names() {
+			tn, _ := scope.Lookup(name).(*types.TypeName)
+			add(tn)
+		}
+	}
+	for _, pkg := range p.packages {
+		for _, obj := range pkg.Info.Defs {
+			tn, _ := obj.(*types.TypeName)
+			add(tn)
+		}
+	}
+	sort.Slice(p.funcTypes, func(i, j int) bool {
+		a, b := p.funcTypes[i].Obj(), p.funcTypes[j].Obj()
+		if a.Pkg().Path() != b.Pkg().Path() {
+			return a.Pkg().Path() < b.Pkg().Path()
+		}
+		return a.Pos() < b.Pos()
+	})
+}
+
+// ifaceCarries reports whether a value of interface type iface carries a
+// function value the analysis must follow (ledger SI-319, SI-320). The
+// empty interface (no methods, every type in its type set) does not: a
+// value of that type reaches a call in module code only through a type
+// assertion or type switch, which fails closed whenever its target type
+// carries a function, and in dependency code only through reflection or
+// the dependency's own assertion, the boundaries the package doc
+// discloses. A method-less constraint with type terms carries one when a
+// term's underlying type does (a ~func type parameter is callable). Any
+// other interface carries one when a named function type with methods
+// implements it (a generic one judged by method names and arities, as the
+// tripwire is): a method of that type calls the function with no
+// assertion.
+func (p *Program) ifaceCarries(iface *types.Interface) bool {
+	if v, ok := p.carries[iface]; ok {
+		return v
+	}
+	p.carries[iface] = false // a cycle through embedded constraints carries nothing more
+	if iface.Empty() {
+		return false
+	}
+	if iface.NumMethods() == 0 {
+		carries := p.termsCarry(iface)
+		p.carries[iface] = carries
+		return carries
+	}
+	carries := false
+	for _, ft := range p.funcTypes {
+		if ft.TypeParams().Len() > 0 {
+			carries = shapeCovers(ft, iface)
+		} else {
+			carries = types.Implements(ft, iface) || types.Implements(types.NewPointer(ft), iface)
+		}
+		if carries {
+			break
+		}
+	}
+	p.carries[iface] = carries
+	return carries
+}
+
+// termsCarry reports whether a method-less constraint's type terms (its
+// embedded unions and constraints) include a type that carries a
+// function value.
+func (p *Program) termsCarry(iface *types.Interface) bool {
+	for i := 0; i < iface.NumEmbeddeds(); i++ {
+		switch e := iface.EmbeddedType(i).(type) {
+		case *types.Union:
+			for j := 0; j < e.Len(); j++ {
+				if p.carriesFunc(e.Term(j).Type()) {
+					return true
+				}
+			}
+		default:
+			if p.carriesFunc(e) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shapeCovers reports whether a generic type's method set has a method of
+// every name and arity iface names.
+func shapeCovers(gen *types.Named, iface *types.Interface) bool {
+	have := map[string]bool{}
+	mset := types.NewMethodSet(types.NewPointer(gen))
+	for i := 0; i < mset.Len(); i++ {
+		if fn, ok := mset.At(i).Obj().(*types.Func); ok {
+			have[methodShape(fn)] = true
+		}
+	}
+	for i := 0; i < iface.NumMethods(); i++ {
+		if !have[methodShape(iface.Method(i))] {
+			return false
+		}
+	}
+	return true
+}
+
+// carriesFunc reports whether a value of type t is a function value or can
+// hold one where the analysis must follow it (ledger SI-319, SI-320): a
+// function type; an interface a named function type with methods
+// implements (a method of that type calls the function with no
+// assertion); a type parameter whose constraint has a function type among
+// its terms; or a pointer, slice, array, map, or channel of any of these.
+// The empty interface is excluded (see ifaceCarries): a function stored in
+// it surfaces only through an assertion, which fails closed on its own. A
+// struct's function-typed and function-carrying interface fields resolve
+// through the field flow instead.
+func (p *Program) carriesFunc(t types.Type) bool {
+	for depth := 0; t != nil && depth < 16; depth++ {
+		switch u := t.Underlying().(type) {
+		case *types.Signature:
+			return true
+		case *types.Interface:
+			return p.ifaceCarries(u)
+		case *types.Pointer:
+			t = u.Elem()
+		case *types.Slice:
+			t = u.Elem()
+		case *types.Array:
+			t = u.Elem()
+		case *types.Map:
+			t = u.Elem()
+		case *types.Chan:
+			t = u.Elem()
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // implementationsOf returns every module method an interface method call

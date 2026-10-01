@@ -191,6 +191,10 @@ func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 		"/b/{branch}/thing/{name}/api/{action}",
 		"/captured/thing/{name}/api/{action}",
 		"/health",
+		"/iface/thing/{name}/api/{action}",
+		"/ifacemod/thing/{name}/api/{action}",
+		"/ifacestruct",
+		"/ifield/thing/{name}/api/{action}",
 		"/legacy/{key}/commit",
 		"/legacy/{key}/save",
 		"/legacy/{key}/{action}",
@@ -237,7 +241,16 @@ func testRouteEntriesDeriveRoutesAndActions(t *testing.T, prog *reach.Program) {
 		{"/wrapped/thing/{name}/api/push", "Publish"},
 		{"/wrapped/thing/{name}/api/mutate", "Mutate"},
 		{"/wrappedlit/thing/{name}/api/{action}", "Mutate,Publish"},
-		{"/thing/{name}", ""}, // table row's handler, read-only
+		// R1-RR5 (ledger SI-319, SI-320): the API handler held in an
+		// interface value, captured (H6, and H6b through a module function
+		// type) or read from an interface-typed field (Publish comes only
+		// through the flow); a struct behind the same interface is
+		// dispatched by class-hierarchy analysis alone.
+		{"/iface/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/ifacemod/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/ifield/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/ifacestruct", "Mutate"}, // a struct behind http.Handler: CHA dispatches every module implementation (app's handler mutates); nothing more, no error
+		{"/thing/{name}", ""},      // table row's handler, read-only
 		{"/health", ""},
 	}
 	for _, tt := range tests {
@@ -320,9 +333,17 @@ func testRouteEntriesFailClosedOnUnfollowableFunctionValues(t *testing.T, prog *
 		{"/hole/deref", "*p"},           // a dereference of a pointer loaded from a local map
 		{"/hole/element", "s.handlers"}, // an element of a field-held container
 		{"/hole/switch", "switches"},    // R1-RR6: a type switch to a function type
-		{"/control/packagederef", ""},   // a pointer loaded from a package-level variable
-		{"/control/benign", ""},         // a field-held container's length, keys, and nil comparison
-		{"/control/capturednil", ""},    // a captured function compared to nil, then called (resolved)
+		{"/hole/ifacechan", "<-s.hch"},  // SI-319: a channel of http.Handler
+		{"/hole/ifaceslice", "s.hs"},    // SI-319: a field-held slice of http.Handler
+		// SI-320: a function laundered through the empty interface or a
+		// type parameter fails closed where it surfaces.
+		{"/launder/assert", "anyH.(http.Handler)"},    // (i) a captured any asserted to http.Handler and called
+		{"/launder/map", `m["k"].(http.HandlerFunc)`}, // (ii) a captured map[string]any's element asserted to a function type
+		{"/launder/helper", "v.(http.Handler)"},       // (iii) a captured any handed to a helper that asserts it
+		{"/launder/typeparam", "captured"},            // (iv) a captured ~func type parameter passed on as an argument
+		{"/control/packagederef", ""},                 // a pointer loaded from a package-level variable
+		{"/control/benign", ""},                       // a field-held container's length, keys, and nil comparison
+		{"/control/capturednil", ""},                  // a captured function compared to nil, then called (resolved)
 	}
 	for _, tt := range tests {
 		t.Run(tt.route, func(t *testing.T) {

@@ -342,14 +342,16 @@ func (p *Program) rowArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root
 }
 
 // wrapperArgs roots every function-typed argument of a registration's
-// handler call that is not a route-table row's value (ledger SI-318): the
+// handler call, and every argument of an interface type a function type
+// implements (ledger SI-319), that is not a route-table row's value
+// (ledger SI-318): the
 // wrapped handler is named by the registration, outside the route's own
 // code, so the route starts there too. A value the flow cannot follow
 // fails closed.
 func (p *Program) wrapperArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root, error) {
 	var out []Root
 	for _, arg := range call.Args {
-		if !isFuncTyped(pkg, arg) {
+		if t := pkg.Info.TypeOf(arg); !isFuncTyped(pkg, arg) && (t == nil || !isCarryingIface(p, t)) {
 			continue
 		}
 		if _, isRow := env.rowField(pkg, arg); isRow {
@@ -376,6 +378,14 @@ func (p *Program) wrapperArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]
 		}
 	}
 	return out, nil
+}
+
+// isCarryingIface reports whether t is an interface a named function type
+// with methods implements (ledger SI-319): a wrapper argument of that type
+// may hold the wrapped handler.
+func isCarryingIface(p *Program, t types.Type) bool {
+	iface, ok := t.Underlying().(*types.Interface)
+	return ok && p.ifaceCarries(iface)
 }
 
 // rowValue resolves one function-typed row field's value; a value that is
