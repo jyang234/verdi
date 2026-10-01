@@ -130,9 +130,9 @@ test.describe("chrome-and-tokens", () => {
     // A wall carrying every card kind: the fixture's object cards (acceptance
     // criteria, constraints, decisions, open questions) and stub cards, a
     // pinned reference card (pinned here when the wall carries none), and
-    // a story sticky parked in the stubs band — a fresh sticky lands in the
-    // scratch corner, so the position API parks it in the band, exactly as
-    // a drag would.
+    // a story sticky parked in the stubs band — the position API parks it
+    // by the band's own geometry, exactly as a drag would, and the server
+    // marks it sticky--parked.
     let pinnedHere = false;
     if ((await page.locator(".refcard").count()) === 0) {
       await pinArtifact(page, SHOWCASE.PIN_ADR, SHOWCASE.PIN_ADR);
@@ -158,6 +158,7 @@ test.describe("chrome-and-tokens", () => {
     const parked = page.getByTestId("sticky-" + id);
     await expect(parked).toBeVisible();
     await expect(parked).toHaveClass(/sticky--story/);
+    await expect(parked).toHaveClass(/sticky--parked/);
     const x = await parked.evaluate((el) => parseFloat((el as HTMLElement).style.left));
     expect(x).toBeGreaterThanOrEqual(band.left);
     expect(x).toBeLessThan(band.left + band.width);
@@ -180,6 +181,7 @@ test.describe("chrome-and-tokens", () => {
         expect(h.sticky, `${h.what} wears the hand face outside a parked story or spike sticky`).toMatch(
           /sticky--(story|spike)/,
         );
+        expect(h.sticky, `${h.what} wears the hand face outside the stubs band`).toMatch(/sticky--parked/);
       }
       const body = await stylesOf(parked.locator(".sticky-body"));
       expect(body.font, "the parked sticky's body").toMatch(/bradley hand|marker felt|cursive/i);
@@ -190,6 +192,33 @@ test.describe("chrome-and-tokens", () => {
           expect(s.font, `${other} #${i} uses the body or monospace face`).not.toMatch(/bradley hand|marker felt|cursive/i);
         }
       }
+
+      // The draft composer, never parked, writes in serif.
+      await page.getByRole("button", { name: "Add sticky" }).click();
+      const draft = page.locator(".sticky-draft");
+      await expect(draft).toBeVisible();
+      await draft.getByRole("button", { name: "Story" }).click();
+      await expect(draft).toHaveClass(/sticky--story/);
+      const editor = await stylesOf(draft.locator(".sticky-editor"));
+      expect(editor.font, "the draft composer's editor").not.toMatch(/bradley hand|marker felt|cursive/i);
+      await page.keyboard.press("Escape");
+      await expect(draft).toHaveCount(0);
+
+      // Moved out of the band, the same story sticky is typeset like every
+      // other: the server's parked mark is gone with the region swap the
+      // move triggers, and its body is serif (ac-3, read literally).
+      const scratch = await page.getByTestId("zone-label-scratch").evaluate((el) => ({
+        left: parseFloat((el as HTMLElement).style.left),
+      }));
+      const out = await page.request.post(wall + "/api/sticky-position", { data: { id, x: scratch.left + 8, y: 420 } });
+      expect(out.status(), await out.text()).toBe(200);
+      await page.reload();
+      await expect(parked).toBeVisible();
+      await expect(parked).not.toHaveClass(/sticky--parked/);
+      const moved = await stylesOf(parked.locator(".sticky-body"));
+      expect(moved.font, "a story sticky moved out of the band").not.toMatch(/bradley hand|marker felt|cursive/i);
+      expect(moved.font, "a story sticky moved out of the band").toMatch(/georgia|palatino|iowan|serif/i);
+      expect(await handElements(page), "no hand face remains once the sticky has left the band").toEqual([]);
     } finally {
       await dragToTrash(page, parked);
       await expectAutosaved(page);

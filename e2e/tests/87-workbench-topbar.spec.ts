@@ -18,9 +18,11 @@ import {
 // every width, with the full posture one activation away — a native
 // <details> disclosure, so it opens before any script runs; and the bar
 // holds at 320 px and 200 % zoom, by keyboard in reading order, under the
-// existing axe check and the Wave 6 page budget.
+// existing axe check and the Wave 6 page budget. A fourth case proves the
+// posture popover's enhancement (dc-2; ledger SI-331) and the live swap of
+// the posture group (SI-323 (3)).
 //
-// Each test here is the producer its obligation names
+// The first three tests are the producers their obligations name
 // (.verdi/obligations/chrome-and-tokens-v2/), titled exactly as the
 // obligation's claim spells it, and the file passes when run alone
 // (BL-98). Every case drives the REAL `verdi serve` subprocess; state
@@ -35,6 +37,16 @@ const OLD_ROWS = [".site-head", ".board-head", ".asd-posture"];
 // it by this same key); SI-323 (4): it is a page verdi serve renders, so
 // it gets the bar too.
 const V0_BOARD = "/board/STORY-1482";
+
+// The fixtures' page titles, as cmd/e2eharness provisions them
+// (provision_board.go, provision_showcase_draft.go, provision_diagram.go)
+// and as the handlers title their pages (matrix.go, verdict.go,
+// disclosures.go, specimportrender.go, readinessrender.go, index.go).
+const TITLES = {
+  design: "Refinancing decline flow",
+  draft: "Payoff quote portal",
+  diagram: "Editor proposal",
+};
 
 // The readiness page lives on the readiness-pilot fixture's isolated
 // serve (49-readiness-pilot.spec.ts's own path to it): started lazily by
@@ -65,10 +77,16 @@ interface WorkbenchPage {
   path: (page: Page) => string | Promise<string>;
   // spec: a page about one spec (class and mode chips, displayed bytes).
   spec: boolean;
-  // title: the bar's page title, when the fixture pins it.
-  title?: string | RegExp;
+  // title: the bar's page title, pinned from the fixtures.
+  title: string;
   // status: the response status the page is served with (404, 400).
   status?: number;
+  // overflow: the page body's own horizontal overflow before this story,
+  // in CSS px at 320 px and at 200 % zoom (ledger SI-332 (1): the 320 px
+  // figures at base 4cbe1073, the readiness and 200 % figures from the
+  // review's base probe at the same commit). A body that overflowed
+  // before this story is the next story's to fix; it may not grow here.
+  overflow?: { at320: number; at200: number };
 }
 
 // ac-1's page list, each over the fixture stores: the wall on the default
@@ -77,25 +95,53 @@ interface WorkbenchPage {
 // verdict, disclosures, spec import, corpus, not found, error — plus the
 // v0 board (SI-323 (4)).
 const PAGES: WorkbenchPage[] = [
-  { name: "wall on the default branch", path: () => boardPath(SHOWCASE.DESIGN_SPEC), spec: true },
+  { name: "wall on the default branch", path: () => boardPath(SHOWCASE.DESIGN_SPEC), spec: true, title: TITLES.design },
   {
     name: "wall on a design branch",
     path: () => branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC),
     spec: true,
+    title: TITLES.draft,
   },
-  { name: "Document page", path: () => boardPath(SHOWCASE.DESIGN_SPEC) + "/document", spec: true },
-  { name: "diagram editor", path: () => diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL), spec: false },
-  { name: "readiness page", path: (page) => readinessPageURL(page), spec: false, title: "Readiness" },
-  { name: "index", path: () => "/", spec: false, title: "Workbench" },
-  { name: "matrix", path: () => `/matrix/spec/${SHOWCASE.SLOT_WALL_SPEC}`, spec: false },
-  { name: "verdict", path: () => `/verdict/spec/${SHOWCASE.READONLY_SPEC}`, spec: false },
-  { name: "disclosures", path: () => "/disclosures", spec: false },
-  { name: "spec import", path: () => importPagePath(), spec: false },
+  {
+    name: "Document page",
+    path: () => boardPath(SHOWCASE.DESIGN_SPEC) + "/document",
+    spec: true,
+    title: TITLES.design,
+    overflow: { at320: 354, at200: 99 },
+  },
+  { name: "diagram editor", path: () => diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL), spec: false, title: TITLES.diagram },
+  {
+    name: "readiness page",
+    path: (page) => readinessPageURL(page),
+    spec: false,
+    title: "Readiness",
+    overflow: { at320: 8, at200: 18 },
+  },
+  { name: "index", path: () => "/", spec: false, title: "Workbench", overflow: { at320: 129, at200: 0 } },
+  {
+    name: "matrix",
+    path: () => `/matrix/spec/${SHOWCASE.SLOT_WALL_SPEC}`,
+    spec: false,
+    // matrix.go titles the page by the story's tracker ref: the slot
+    // wall's story field, as cmd/e2eharness provisions it.
+    title: "Advisory preview matrix: jira:LOAN-2204",
+    overflow: { at320: 114, at200: 0 },
+  },
+  {
+    name: "verdict",
+    path: () => `/verdict/spec/${SHOWCASE.READONLY_SPEC}`,
+    spec: false,
+    title: `Verdict viewer: spec/${SHOWCASE.READONLY_SPEC}`,
+    overflow: { at320: 106, at200: 0 },
+  },
+  { name: "disclosures", path: () => "/disclosures", spec: false, title: "Disclosures" },
+  { name: "spec import", path: () => importPagePath(), spec: false, title: "Import existing spec", overflow: { at320: 373, at200: 138 } },
   {
     name: "corpus",
     path: () => `/a/spec/${SHOWCASE.READONLY_SPEC}`,
     spec: false,
     title: "Stale decline handling (fixture)",
+    overflow: { at320: 52, at200: 0 },
   },
   { name: "not found", path: () => "/no-such-page-87", spec: false, title: "Not found", status: 404 },
   // A commit pin in ?spec= is refused before any store read (readiness.go):
@@ -103,19 +149,6 @@ const PAGES: WorkbenchPage[] = [
   { name: "error", path: () => "/readiness?spec=no-such-spec@deadbeef", spec: false, title: "Error", status: 400 },
   { name: "v0 board", path: () => V0_BOARD, spec: false, title: `Board: STORY-1482` },
 ];
-
-// The pages on the shared store the ac-5 sweep covers at 320 px, at 200 %
-// zoom, without script, under axe, and within budget.
-const SWEEP: WorkbenchPage[] = PAGES.filter((p) => p.name !== "readiness page");
-
-// The board pages, whose bodies fit the viewport at 320 px and at 200 %
-// zoom today (50-design-workbench proves the wall): there the whole page
-// is held to no horizontal scroll. The shared-layout pages' bodies
-// overflow at 320 px before this story (long unbroken code, tables, the
-// index's glance grid), which is not the bar's doing and not this story's
-// to change; there the proof is differential — the bar adds no overflow —
-// and the body's own overflow is logged as a disclosure.
-const BODY_FITS = new Set(["wall on the default branch", "wall on a design branch", "diagram editor", "v0 board"]);
 
 async function gotoPage(page: Page, p: WorkbenchPage): Promise<void> {
   const resp = await page.goto(await p.path(page));
@@ -145,11 +178,12 @@ async function pageOverflow(page: Page): Promise<number> {
   });
 }
 
-// expectBarFits: the bar sits inside the viewport, scrolls nothing
-// inside itself, and adds no horizontal overflow to the page (measured
-// with the bar shown and hidden); on a page whose body fits, the whole
-// page has no horizontal scroll.
-async function expectBarFits(page: Page, p: WorkbenchPage, what: string): Promise<void> {
+// expectBarFits (SI-332 (1)): the bar sits inside the viewport, scrolls
+// nothing inside itself, and adds no horizontal overflow to the page
+// (measured with the bar shown and hidden); the page body's own overflow
+// does not exceed its figure before this story, and a page whose body had
+// none has no horizontal scroll at all.
+async function expectBarFits(page: Page, p: WorkbenchPage, zoom: "at320" | "at200", what: string): Promise<void> {
   const box = await bar(page).evaluate((el) => {
     const r = el.getBoundingClientRect();
     return { left: r.left, right: r.right, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, viewport: document.documentElement.clientWidth };
@@ -162,10 +196,12 @@ async function expectBarFits(page: Page, p: WorkbenchPage, what: string): Promis
   const withoutBar = await pageOverflow(page);
   await bar(page).evaluate((el) => ((el as HTMLElement).style.display = ""));
   expect(withBar, `${what}: the bar adds horizontal overflow (page ${withoutBar} px without it)`).toBeLessThanOrEqual(Math.max(withoutBar, 0) + 1);
-  if (BODY_FITS.has(p.name)) {
+  const base = p.overflow?.[zoom] ?? 0;
+  expect(withoutBar, `${what}: the page body overflows past its base figure ${base} px`).toBeLessThanOrEqual(base + 1);
+  if (base === 0) {
     expect(withBar, `${what}: horizontal overflow`).toBeLessThanOrEqual(1);
   } else if (withoutBar > 1) {
-    console.log(`disclosed: ${what}: the page body overflows by ${withoutBar} px without the bar (pre-existing, not the bar's)`);
+    console.log(`disclosed: ${what}: the page body overflows by ${withoutBar} px without the bar (pre-existing; base ${base} px)`);
   }
 }
 
@@ -181,12 +217,27 @@ async function expectBarControlsVisible(page: Page, what: string): Promise<void>
   }
 }
 
-// postureFact reads one fact row of the opened posture: its text and the
-// three-valued state its data attribute carries.
+// postureFact reads one fact of the opened posture: its test-id element's
+// text — exactly today's row's — and the state its data attribute carries.
 async function postureFact(page: Page, slug: string): Promise<{ text: string; state: string | null }> {
   const dd = page.getByTestId(`asd-posture-${slug}`);
   await expect(dd).toBeVisible();
   return { text: (await dd.textContent())?.trim() ?? "", state: await dd.getAttribute("data-state") };
+}
+
+// postureWhy reads a fact's disclosed reason, the sibling element beside
+// its test-id element (SI-332 (2)), or null when the fact carries none.
+async function postureWhy(page: Page, slug: string): Promise<string | null> {
+  const why = page.getByTestId(`asd-posture-${slug}-why`);
+  if ((await why.count()) === 0) return null;
+  await expect(why).toBeVisible();
+  return (await why.textContent())?.trim() ?? "";
+}
+
+async function checkoutOf(page: Page, path: string): Promise<string> {
+  const snap = await (await page.request.get(path + "/snapshot")).json();
+  expect(typeof snap.expected?.checkout, `${path}: the snapshot names its checkout`).toBe("string");
+  return snap.expected.checkout as string;
 }
 
 async function expectBytesAndTree(
@@ -198,16 +249,49 @@ async function expectBytesAndTree(
   const bytesEl = bar(page).getByTestId("asd-posture-bytes");
   await expect(bytesEl, `${what}: bytes`).toBeVisible();
   await expect(bytesEl, `${what}: bytes state`).toHaveAttribute("data-state", bytes.state);
-  await expect(bytesEl, `${what}: bytes text`).toContainText(`displayed bytes: ${bytes.word}`);
+  await expect(bytesEl, `${what}: bytes text`).toHaveText(`displayed bytes: ${bytes.word} (${bytes.state})`);
   const treeEl = bar(page).getByTestId("asd-posture-tree");
   await expect(treeEl, `${what}: tree`).toBeVisible();
   await expect(treeEl, `${what}: tree state`).toHaveAttribute("data-dirty", tree.state);
-  await expect(treeEl, `${what}: tree text`).toContainText(`working tree: ${tree.text}`);
+  await expect(treeEl, `${what}: tree text`).toHaveText(`working tree: ${tree.text}`);
+}
+
+// postTypedEdit posts one typed edit-ac on the design wall from outside
+// the page, against the wall's current base — what 50-design-workbench's
+// postMutate does.
+async function postTypedEdit(page: Page, text: string): Promise<void> {
+  const design = boardPath(SHOWCASE.DESIGN_SPEC);
+  const snap = await (await page.request.get(design + "/snapshot")).json();
+  const resp = await page.request.post(design + "/api/mutate_draft", {
+    data: {
+      request: {
+        schema: "verdi.draftmutation/v1",
+        spec: "spec/" + SHOWCASE.DESIGN_SPEC,
+        base_digest: snap.base_digest,
+        base_spec_b64: snap.base_spec_b64,
+        expected: snap.expected,
+        operations: [
+          { op: "edit-ac", id: SHOWCASE.AC_IDS[1], text, evidence: ["attestation"], anchor: "#" + SHOWCASE.AC_IDS[1] },
+        ],
+      },
+    },
+  });
+  expect(resp.status(), await resp.text()).toBe(200);
+  expect((await resp.json()).result, "the typed mutation landed").toBeTruthy();
+}
+
+// activeKey names the focused element by test id, id, or tag; "BODY"
+// when focus is nowhere.
+async function activeKey(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return el && el !== document.body ? el.getAttribute("data-testid") || el.id || el.tagName : "BODY";
+  });
 }
 
 test.describe("chrome-and-tokens", () => {
   test("One top bar on every workbench page, and none of the old header rows", async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(150_000);
     for (const p of PAGES) {
       await gotoPage(page, p);
       const topbar = bar(page);
@@ -220,11 +304,10 @@ test.describe("chrome-and-tokens", () => {
       await expect(wordmark, `${p.name}: wordmark`).toBeVisible();
       await expect(wordmark, `${p.name}: wordmark href`).toHaveAttribute("href", "/");
       await expect(wordmark, `${p.name}: wordmark text`).toContainText("verdi");
-      // The page title.
+      // The page title, pinned from the fixtures.
       const title = topbar.getByTestId("topbar-title");
       await expect(title, `${p.name}: title`).toBeVisible();
-      await expect(title, `${p.name}: title text`).not.toHaveText("");
-      if (p.title) await expect(title, `${p.name}: title`).toHaveText(p.title);
+      await expect(title, `${p.name}: title text`).toHaveText(p.title);
       // The branch and posture text, as two controls.
       await expect(topbar.getByTestId("topbar-branch"), `${p.name}: branch`).toBeVisible();
       await expect(topbar.getByTestId("topbar-posture"), `${p.name}: posture`).toBeVisible();
@@ -239,6 +322,13 @@ test.describe("chrome-and-tokens", () => {
         await expect(classChip, `${p.name}: no class chip`).toHaveCount(0);
         await expect(topbar.getByTestId("asd-posture-bytes"), `${p.name}: no bytes`).toHaveCount(0);
       }
+      // No literal dot text nodes between the bar's links (its nav and tabs).
+      const dots = await topbar.evaluate((el) =>
+        Array.from(el.querySelectorAll(".topbar-nav, .topbar-tabs")).flatMap((group) =>
+          Array.from(group.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE && /[·•]/.test(n.textContent ?? "")).map((n) => n.textContent),
+        ),
+      );
+      expect(dots, `${p.name}: dot text nodes`).toEqual([]);
     }
 
     // The diagram editor's bar carries its explicit exit, distinct from the
@@ -258,13 +348,36 @@ test.describe("chrome-and-tokens", () => {
     await expect(topbar.locator(".topbar-nav")).not.toContainText("no originating board");
     expect(await exit.evaluate((el) => !!el.closest(".topbar-nav"))).toBe(false);
     await expect(topbar.locator(".board-mode-tag")).toBeVisible();
+
+    // The controls slot (dc-3): Commit & push on the authoring wall, inside
+    // the slot and nowhere else; absent in the other modes. The Wall and
+    // Document switch in the slot too, on both pages, with the same labels.
+    const design = boardPath(SHOWCASE.DESIGN_SPEC);
+    await page.goto(design);
+    await expect(page.locator("#commit-push-btn")).toHaveCount(1);
+    await expect(page.locator('[data-testid="topbar-controls"] #commit-push-btn')).toHaveCount(1);
+    const wallTabs = bar(page).locator('[data-testid="topbar-controls"] .topbar-tabs');
+    await expect(wallTabs.locator(".current")).toHaveText("Wall");
+    await expect(wallTabs.getByTestId("board-tab-document")).toHaveText("Document");
+    await expect(wallTabs.getByTestId("board-tab-document")).toHaveAttribute("href", design + "/document");
+    await page.goto(design + "/document");
+    const docTabs = bar(page).locator('[data-testid="topbar-controls"] .topbar-tabs');
+    await expect(docTabs.getByTestId("document-tab-board")).toHaveText("Wall");
+    await expect(docTabs.getByTestId("document-tab-board")).toHaveAttribute("href", design);
+    await expect(docTabs.getByTestId("document-tab-document")).toHaveText("Document");
+    await expect(docTabs.locator(".current")).toHaveText("Document");
+    for (const spec of [SHOWCASE.READONLY_SPEC, SHOWCASE.REVIEW_SPEC]) {
+      await page.goto(boardPath(spec));
+      await expect(page.getByTestId("board"), spec).not.toHaveAttribute("data-board-mode", "authoring");
+      await expect(page.locator("#commit-push-btn"), `${spec}: no Commit & push`).toHaveCount(0);
+    }
   });
 
   test("The bar keeps the displayed bytes and clean or dirty state, with the full posture one action away", async ({
     page,
     browser,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(150_000);
     // A clean working tree, on a fixture whose default branch cannot be
     // resolved: the wall and its Document page, at 1440 px and at 320 px.
     const unproven = await unprovenWallURL(page);
@@ -284,29 +397,7 @@ test.describe("chrome-and-tokens", () => {
     // A dirty working tree: one typed mutation on the design wall leaves
     // the spec file uncommitted; the wall and its Document page say so.
     const design = boardPath(SHOWCASE.DESIGN_SPEC);
-    const snap = await (await page.request.get(design + "/snapshot")).json();
-    const mutate = await page.request.post(design + "/api/mutate_draft", {
-      data: {
-        request: {
-          schema: "verdi.draftmutation/v1",
-          spec: "spec/" + SHOWCASE.DESIGN_SPEC,
-          base_digest: snap.base_digest,
-          base_spec_b64: snap.base_spec_b64,
-          expected: snap.expected,
-          operations: [
-            {
-              op: "edit-ac",
-              id: SHOWCASE.AC_IDS[1],
-              text: "the bar states the tree's state honestly [87-dirty]",
-              evidence: ["attestation"],
-              anchor: "#" + SHOWCASE.AC_IDS[1],
-            },
-          ],
-        },
-      },
-    });
-    expect(mutate.status(), await mutate.text()).toBe(200);
-    expect((await mutate.json()).result, "the typed mutation landed").toBeTruthy();
+    await postTypedEdit(page, "the bar states the tree's state honestly [87-dirty]");
     for (const width of [1440, 320]) {
       await page.setViewportSize({ width, height: 900 });
       for (const path of [design, design + "/document"]) {
@@ -329,28 +420,7 @@ test.describe("chrome-and-tokens", () => {
     await page.goto(design);
     await page.getByTestId("topbar-posture").click();
     await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
-    const refreshSnap = await (await page.request.get(design + "/snapshot")).json();
-    const refreshMutate = await page.request.post(design + "/api/mutate_draft", {
-      data: {
-        request: {
-          schema: "verdi.draftmutation/v1",
-          spec: "spec/" + SHOWCASE.DESIGN_SPEC,
-          base_digest: refreshSnap.base_digest,
-          base_spec_b64: refreshSnap.base_spec_b64,
-          expected: refreshSnap.expected,
-          operations: [
-            {
-              op: "edit-ac",
-              id: SHOWCASE.AC_IDS[1],
-              text: "a background refresh keeps the open posture open [87-refresh]",
-              evidence: ["attestation"],
-              anchor: "#" + SHOWCASE.AC_IDS[1],
-            },
-          ],
-        },
-      },
-    });
-    expect(refreshMutate.status(), await refreshMutate.text()).toBe(200);
+    await postTypedEdit(page, "a background refresh keeps the open posture open [87-refresh]");
     await expect(page.getByTestId("card-" + SHOWCASE.AC_IDS[1])).toContainText("[87-refresh]", { timeout: 8_000 });
     await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
     await expect(bar(page).getByTestId("asd-posture-tree")).toHaveAttribute("data-dirty", "dirty");
@@ -358,7 +428,15 @@ test.describe("chrome-and-tokens", () => {
 
     // With JavaScript disabled, one activation of the posture text reveals
     // the full posture: a native <details>, so the summary click is the
-    // browser's own toggle, no script involved.
+    // browser's own toggle, no script involved. Each fact's test-id
+    // element carries exactly the text today's row showed; a disclosed
+    // reason the row did not print sits beside it (SI-332 (2)).
+    // The checkout fact's text: on the authoring wall, the checkout the
+    // snapshot's expected identity names; on the read-only fixture, whose
+    // snapshot names no expected checkout, the isolated store the
+    // fixture's serve runs on — an absolute path ending in its store.
+    const designCheckout = await checkoutOf(page, design);
+    expect(designCheckout, "the authoring wall's snapshot names its checkout").toMatch(/^\//);
     const noJS = await browser.newContext({ javaScriptEnabled: false });
     try {
       const quiet = await noJS.newPage();
@@ -368,30 +446,31 @@ test.describe("chrome-and-tokens", () => {
       await expect(details).not.toHaveAttribute("open", "");
       await quiet.getByTestId("topbar-posture").click();
       await expect(details).toHaveAttribute("open", "");
-      // Proven facts carry their text; the facts this store cannot prove
-      // are disclosed-unproven with the row's own reason.
-      expect((await postureFact(quiet, "checkout")).state).toBe("proven");
+      const unprovenCheckout = await postureFact(quiet, "checkout");
+      expect(unprovenCheckout.state).toBe("proven");
+      expect(unprovenCheckout.text).toMatch(/^\/.+\/store$/);
       const branch = await postureFact(quiet, "branch");
       expect(branch.state).toBe("proven");
       expect(branch.text).not.toBe("");
       const head = await postureFact(quiet, "worktree-head");
       expect(head.state).toBe("proven");
       expect(head.text).toMatch(/^[0-9a-f]{40}$/);
-      const acceptedBranch = await postureFact(quiet, "accepted-branch");
-      expect(acceptedBranch.state).toBe("unproven");
-      expect(acceptedBranch.text).toBe("unproven: the default branch could not be resolved");
-      const acceptedHead = await postureFact(quiet, "accepted-head");
-      expect(acceptedHead.state).toBe("unproven");
-      expect(acceptedHead.text).toMatch(/^unproven: /);
-      const aheadBehind = await postureFact(quiet, "ahead-behind");
-      expect(aheadBehind.state).toBe("unproven");
-      expect(aheadBehind.text).toMatch(/^unproven: the accepted branch could not be resolved/);
+      expect(await postureFact(quiet, "accepted-branch")).toEqual({ text: "unproven", state: "unproven" });
+      expect(await postureWhy(quiet, "accepted-branch")).toBe("the default branch could not be resolved");
+      expect(await postureFact(quiet, "accepted-head")).toEqual({ text: "unproven", state: "unproven" });
+      expect(await postureWhy(quiet, "accepted-head")).toMatch(/could not be resolved/);
+      // Today's row printed ahead/behind's reason itself; no sibling repeats it.
+      expect(await postureFact(quiet, "ahead-behind")).toEqual({
+        text: "unproven: the accepted branch could not be resolved",
+        state: "unproven",
+      });
+      expect(await postureWhy(quiet, "ahead-behind")).toBeNull();
 
       // The design wall proves every one of them.
       await quiet.goto(WORKBENCH + design);
       await quiet.getByTestId("topbar-posture").click();
       await expect(quiet.locator(".asd-posture-tech")).toHaveAttribute("open", "");
-      expect((await postureFact(quiet, "checkout")).state).toBe("proven");
+      expect(await postureFact(quiet, "checkout")).toEqual({ text: designCheckout, state: "proven" });
       expect(await postureFact(quiet, "branch")).toEqual({ text: SHOWCASE.DESIGN_BRANCH, state: "proven" });
       expect((await postureFact(quiet, "worktree-head")).text).toMatch(/^[0-9a-f]{40}$/);
       expect(await postureFact(quiet, "accepted-branch")).toEqual({ text: SHOWCASE.MAIN_BRANCH, state: "proven" });
@@ -399,6 +478,9 @@ test.describe("chrome-and-tokens", () => {
       const ab = await postureFact(quiet, "ahead-behind");
       expect(ab.state).toBe("proven");
       expect(ab.text).toMatch(new RegExp(`^\\d+ ahead, \\d+ behind ${SHOWCASE.MAIN_BRANCH}$`));
+      for (const slug of ["checkout", "branch", "worktree-head", "accepted-branch", "accepted-head", "ahead-behind"]) {
+        expect(await postureWhy(quiet, slug), `${slug}: a proven fact carries no reason`).toBeNull();
+      }
     } finally {
       await noJS.close();
     }
@@ -408,29 +490,38 @@ test.describe("chrome-and-tokens", () => {
     page,
     browser,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
     // 320 px: no horizontal scroll from the bar, every bar control visible.
     await page.setViewportSize({ width: 320, height: 800 });
-    for (const p of SWEEP) {
+    for (const p of PAGES) {
       await gotoPage(page, p);
-      await expectBarFits(page, p, `${p.name} @320`);
+      await expectBarFits(page, p, "at320", `${p.name} @320`);
       await expectBarControlsVisible(page, `${p.name} @320`);
     }
     // 200 % zoom at a laptop width: the same.
     await page.setViewportSize({ width: 1280, height: 800 });
-    for (const p of SWEEP) {
+    for (const p of PAGES) {
       await gotoPage(page, p);
       await page.evaluate(() => {
         (document.body.style as unknown as { zoom: string }).zoom = "200%";
       });
-      await expectBarFits(page, p, `${p.name} @200%`);
+      await expectBarFits(page, p, "at200", `${p.name} @200%`);
       await expectBarControlsVisible(page, `${p.name} @200%`);
+    }
+
+    // The bar is one row at desktop widths (handoff "Global chrome").
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const p of PAGES) {
+      await gotoPage(page, p);
+      const h = await bar(page).locator(".topbar-row").evaluate((el) => el.getBoundingClientRect().height);
+      console.log(`bar height: ${p.name} @1440 = ${h} px`);
+      expect(h, `${p.name} @1440: one 52 px row`).toBeLessThanOrEqual(56);
     }
 
     // Without JavaScript: the bar is in the initial server response, and a
     // script-less browser renders it.
     const sizes: Record<string, number> = {};
-    for (const p of SWEEP) {
+    for (const p of PAGES) {
       const resp = await page.request.get(await p.path(page));
       const body = await resp.text();
       sizes[p.name] = body.length;
@@ -474,7 +565,7 @@ test.describe("chrome-and-tokens", () => {
     // that predates this story (the index's badge contrast and
     // link-in-text-block, the v0 board's optional label) is logged as a
     // disclosure, never hidden.
-    for (const p of SWEEP) {
+    for (const p of PAGES) {
       await gotoPage(page, p);
       const scan = async (scope: (b: AxeBuilder) => AxeBuilder) =>
         (await scope(new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"])).analyze()).violations.map((v) => ({
@@ -502,10 +593,104 @@ test.describe("chrome-and-tokens", () => {
       console.log(`budget: ${name} html=${size} bytes`);
       expect(size, `${name}: page budget`).toBeLessThanOrEqual(512 * 1024);
     }
-    for (const asset of ["/assets/boardspecasd.js", "/assets/specdocument.js"]) {
+    for (const asset of ["/assets/boardspecasd.js", "/assets/specdocument.js", "/assets/topbar.js"]) {
       const size = (await (await page.request.get(asset)).text()).length;
       console.log(`budget: ${asset} js=${size} bytes`);
       expect(size, `${asset}: asset budget`).toBeLessThanOrEqual(64 * 1024);
     }
+  });
+
+  test("The posture popover closes by Escape or an outside press, keeps its focus, and survives the wall's refresh", async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    const design = boardPath(SHOWCASE.DESIGN_SPEC);
+    const details = page.locator(".asd-posture-tech");
+    const summary = page.getByTestId("topbar-posture");
+    const mark = () => page.evaluate(() => document.getElementById("asd-posture")!.setAttribute("data-probe", "before-swap"));
+    const marked = page.locator("#asd-posture[data-probe]");
+
+    await page.setViewportSize({ width: 1280, height: 500 });
+    await page.goto(design);
+    // Opened by keyboard, the summary keeps focus.
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(details).toHaveAttribute("open", "");
+    expect(await activeKey(page)).toBe("topbar-posture");
+
+    // A snapshot refresh not caused by a click swaps the posture group in
+    // whole (SI-323 (3)): the mark set on the group is gone, the group is
+    // current (the tree reads dirty), the disclosure stays open, and the
+    // focused summary stays focused across the swap.
+    await mark();
+    await expect(marked).toHaveCount(1);
+    await postTypedEdit(page, "the posture group is swapped by a background refresh [87-swap]");
+    await expect(page.getByTestId("card-" + SHOWCASE.AC_IDS[1])).toContainText("[87-swap]", { timeout: 8_000 });
+    await expect(marked).toHaveCount(0);
+    await expect(bar(page).getByTestId("asd-posture-tree")).toHaveAttribute("data-dirty", "dirty");
+    await expect(details).toHaveAttribute("open", "");
+    expect(await activeKey(page)).toBe("topbar-posture");
+
+    // A press on Refresh — inside the posture group — keeps it open; with
+    // a fresh change to fetch, the refresh it asks for (or the poll tick
+    // that races it) swaps the group again, and it is still open after.
+    // (An unchanged wall answers a manual Refresh with 304 and swaps
+    // nothing, so the change comes first.)
+    await mark();
+    await postTypedEdit(page, "a press on Refresh keeps the open posture open [87-refresh-press]");
+    await page.getByTestId("asd-refresh").click();
+    await expect(page.getByTestId("card-" + SHOWCASE.AC_IDS[1])).toContainText("[87-refresh-press]", { timeout: 8_000 });
+    await expect(marked).toHaveCount(0, { timeout: 8_000 });
+    await expect(details).toHaveAttribute("open", "");
+
+    // Escape closes it and returns focus to the summary.
+    await page.keyboard.press("Escape");
+    await expect(details).not.toHaveAttribute("open", "");
+    expect(await activeKey(page)).toBe("topbar-posture");
+
+    // An outside press on something that is not focusable closes it and
+    // returns focus to the summary, and the page does not scroll for it
+    // (SI-331): the shell's step text, in view, on a scrolled page.
+    await summary.click();
+    await expect(details).toHaveAttribute("open", "");
+    await page.evaluate(() => window.scrollTo(0, 200));
+    const y0 = await page.evaluate(() => window.scrollY);
+    const step = page.getByTestId("asd-step");
+    const box = await step.boundingBox();
+    expect(box, "the shell's step text is on screen").not.toBeNull();
+    await page.mouse.click(box!.x + 4, box!.y + box!.height / 2);
+    await expect(details).not.toHaveAttribute("open", "");
+    await expect.poll(() => activeKey(page)).toBe("topbar-posture");
+    expect(Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThanOrEqual(1);
+
+    // A press on a focusable control closes it and keeps that control's
+    // focus: a disclosure summary in the shell (focusable, and its press
+    // navigates nowhere).
+    await summary.click();
+    await expect(details).toHaveAttribute("open", "");
+    const control = page.locator("#asd-shell details > summary").first();
+    await expect(control).toBeVisible();
+    await control.click();
+    await expect(details).not.toHaveAttribute("open", "");
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.tagName + "." + (document.activeElement?.closest("#asd-shell") ? "shell" : "")))
+      .toBe("SUMMARY.shell");
+
+    // On the diagram editor, whose page-level Escape is its exit
+    // (tool-view-exit ac-1), the first Escape closes only the popover and
+    // stays on the editor; a second Escape exits.
+    await page.goto(diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL));
+    await expect(page.getByTestId("diagram-editor")).toBeVisible();
+    await expect(page.locator("#diagram-preview svg")).toBeVisible();
+    await summary.click();
+    await expect(details).toHaveAttribute("open", "");
+    await page.keyboard.press("Escape");
+    await expect(details).not.toHaveAttribute("open", "");
+    await page.waitForTimeout(500);
+    await expect(page).toHaveURL(new RegExp(`${diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL)}$`));
+    expect(await activeKey(page)).toBe("topbar-posture");
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator(".home-directory")).toBeVisible();
   });
 });
