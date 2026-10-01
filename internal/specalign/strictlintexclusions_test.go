@@ -19,7 +19,7 @@
 // 2.5.0 searches a rule's path, an excluded path, and a rule's text with
 // unanchored, case-sensitive regular expressions, so the witness measures
 // each pattern against what it could exclude: a path pattern against every
-// Go file `golangci-lint run ./...` lints, a text pattern against every
+// Go file `golangci-lint run ./...` lints for linux/amd64, a text pattern against every
 // message each gated linter the rule applies to is known to report (the
 // committed baseline's and the strict fixture module's). A path pattern that
 // matches every Go file excludes wholesale; so does a text pattern that
@@ -39,6 +39,7 @@ package specalign
 import (
 	"errors"
 	"fmt"
+	"go/build"
 	"io/fs"
 	"maps"
 	"os"
@@ -201,8 +202,8 @@ const strictFixtureReportFile = "internal/lintratchet/testdata/reports/strictfix
 // strictLintUniverse is what an exclusion's patterns are measured against to
 // tell a wholesale exclusion from a narrow one (review finding S1-B1).
 type strictLintUniverse struct {
-	// goFiles are the Go files `golangci-lint run ./...` lints, relative to
-	// the repository root (the configuration's directory, which
+	// goFiles are the Go files `golangci-lint run ./...` lints for
+	// linux/amd64, relative to the repository root (the configuration's directory, which
 	// golangci-lint matches path patterns relative to) and slash-separated.
 	goFiles []string
 	// messages are, per gated linter, the distinct messages it is known to
@@ -210,12 +211,25 @@ type strictLintUniverse struct {
 	messages map[string][]string
 }
 
+// strictLintBuildContext is the platform make lint-strict lints for,
+// GOOS=linux GOARCH=amd64, with go/build's other defaults (the toolchain's
+// release and tool tags).
+func strictLintBuildContext() build.Context {
+	ctx := build.Default
+	ctx.GOOS, ctx.GOARCH = "linux", "amd64"
+	return ctx
+}
+
 // moduleGoFiles returns, sorted, the Go files under root that `./...`
-// visits: it skips directories named testdata, vendor, or node_modules, or
-// beginning with "." or "_" (guideClaimCorpusSkipDir), directories holding
-// their own go.mod (another module), and files beginning with "." or "_".
-// Build constraints are not evaluated.
+// visits and golangci-lint lints for linux/amd64: it skips directories named
+// testdata, vendor, or node_modules, or beginning with "." or "_"
+// (guideClaimCorpusSkipDir), directories holding their own go.mod (another
+// module), files beginning with "." or "_", and files whose build
+// constraints (a _GOOS or _GOARCH name suffix, a //go:build line) exclude
+// them for linux/amd64 (review finding S1-RR1: a file golangci-lint never
+// lints cannot keep a path pattern from excluding wholesale).
 func moduleGoFiles(root string) ([]string, error) {
+	ctx := strictLintBuildContext()
 	var files []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -238,6 +252,12 @@ func moduleGoFiles(root string) ([]string, error) {
 			return nil
 		}
 		if !strings.HasSuffix(name, ".go") || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			return nil
+		}
+		switch match, err := ctx.MatchFile(filepath.Dir(p), name); {
+		case err != nil:
+			return fmt.Errorf("reading %s's build constraints: %w", p, err)
+		case !match:
 			return nil
 		}
 		rel, err := filepath.Rel(root, p)
@@ -317,7 +337,7 @@ func (u strictLintUniverse) everyPath(re *regexp.Regexp) string {
 	if slices.ContainsFunc(u.goFiles, func(f string) bool { return !re.MatchString(f) }) {
 		return ""
 	}
-	return fmt.Sprintf("matches every one of the module's %d Go files", len(u.goFiles))
+	return fmt.Sprintf("matches every one of the module's %d Go files golangci-lint lints for linux/amd64", len(u.goFiles))
 }
 
 // everyMessage reports how re, the text pattern of a rule naming linters
@@ -558,6 +578,13 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 			return mutate(t, `path: \.pb\.go$`, "path: \\.go$\n        text: \"is a global variable\"")
 		}, pinned: 2, want: `excludes wholesale: its path "\\.go$" matches every one of the module's`},
 		{name: "an excluded path matching every Go file", config: func(t *testing.T) string { return mutate(t, "      - ^third_party/\n", "      - \\.go$\n") }, pinned: 2, want: `excluded path 0 "\\.go$" matches every one of the module's`},
+		// Review finding S1-RR1 (the re-reviewer's mutant OWN2): a path
+		// pattern matching every file golangci-lint lints for linux/amd64,
+		// but not a darwin-only file it never lints, excludes wholesale all
+		// the same.
+		{name: "a path pattern matching every linux/amd64 file but not a darwin-only one", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, `path: '(?:[^n]|[^i]n|[^w]in|[^r]win|[^a]rwin|[^d]arwin|[^_]darwin)\.go$'`)
+		}, pinned: 2, want: `excludes wholesale: its path "(?:[^n]|[^i]n|[^w]in|[^r]win|[^a]rwin|[^d]arwin|[^_]darwin)\\.go$" matches every one of the module's`},
 		// A narrow pattern beside one that matches everything is not
 		// wholesale: the rule still leaves the linter findings to report.
 		{name: "a narrow path beside a text matching everything", config: func(t *testing.T) string {
@@ -628,16 +655,23 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 // walked is an error, never an empty universe.
 func TestModuleGoFiles(t *testing.T) {
 	root := t.TempDir()
-	for _, f := range []string{
-		"a.go", "b_test.go", "doc.md", "pkg/z.go", "pkg/_x.go", "pkg/.y.go",
-		".hidden/x.go", "_scratch/x.go", "testdata/x.go", "pkg/testdata/x.go",
-		"vendor/x.go", "node_modules/x.go", "nested/go.mod", "nested/x.go",
+	const pkg = "package p\n"
+	for f, content := range map[string]string{
+		"a.go": pkg, "b_test.go": pkg, "doc.md": "", "pkg/z.go": pkg, "pkg/_x.go": pkg, "pkg/.y.go": pkg,
+		".hidden/x.go": pkg, "_scratch/x.go": pkg, "testdata/x.go": pkg, "pkg/testdata/x.go": pkg,
+		"vendor/x.go": pkg, "node_modules/x.go": pkg, "nested/go.mod": "module nested\n", "nested/x.go": pkg,
+		// Build constraints, for linux/amd64 (review finding S1-RR1): file
+		// name suffixes and //go:build lines.
+		"pkg/r_linux.go": pkg, "pkg/r_darwin.go": pkg, "pkg/s_windows_test.go": pkg, "pkg/s_arm64.go": pkg,
+		"pkg/tagged_unix.go":        "//go:build unix\n\n" + pkg,
+		"pkg/tagged_darwin_only.go": "//go:build darwin\n\n" + pkg,
+		"pkg/tagged_not_linux.go":   "//go:build !linux\n\n" + pkg,
 	} {
 		p := filepath.Join(root, filepath.FromSlash(f))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, nil, 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -647,7 +681,7 @@ func TestModuleGoFiles(t *testing.T) {
 		want    []string
 		wantErr bool
 	}{
-		{name: "a module tree", root: root, want: []string{"a.go", "b_test.go", "pkg/z.go"}},
+		{name: "a module tree", root: root, want: []string{"a.go", "b_test.go", "pkg/r_linux.go", "pkg/tagged_unix.go", "pkg/z.go"}},
 		{name: "a root that does not exist", root: filepath.Join(root, "absent"), wantErr: true},
 	}
 	for _, tc := range cases {
