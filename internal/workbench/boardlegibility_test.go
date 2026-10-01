@@ -316,7 +316,7 @@ func TestBoardLegibility_ModeChrome(t *testing.T) {
 		{modeReadOnly, "unproven", "lifecycle unproven"},
 		{modeReadOnly, "draft", "not yet accepted"},
 	} {
-		page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: tc.mode, Status: tc.status}, &boardGitState{}, testASDView())
+		page, err := renderBoardSpecPage(t.Context(), &BoardProjection{Spec: "s", Title: "S", Mode: tc.mode, Status: tc.status}, &boardGitState{}, testASDView())
 		if err != nil {
 			t.Fatalf("rendering %s page: %v", tc.mode, err)
 		}

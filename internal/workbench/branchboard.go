@@ -204,8 +204,7 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 		_, _ = w.Write([]byte(renderBoardRegion(proj, git, asd)))
 		return
 	}
-	observeBar(r.Context(), specBarFacts(proj, asd))
-	out, err := renderBoardSpecPage(proj, git, asd)
+	out, err := renderBoardSpecPage(r.Context(), proj, git, asd)
 	if err != nil {
 		renderError(r.Context(), w, b.root, http.StatusInternalServerError, err)
 		return

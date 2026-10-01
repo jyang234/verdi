@@ -260,7 +260,7 @@ func TestObjectSupersession_Render(t *testing.T) {
 		Cards:    []cardView{{ID: "dc-1", Kind: "decision", Text: "grouped by owner"}},
 		RefCards: []refCardView{{Ref: obsFeatureObject}},
 	}
-	plain, err := renderBoardSpecPage(base, &boardGitState{}, testASDView())
+	plain, err := renderBoardSpecPage(t.Context(), base, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestObjectSupersession_Render(t *testing.T) {
 			{Kind: "since", Text: obsSinceF, Links: []supersessionLinkView{{Ref: "spec/successor#dc-1", Href: "#obj-dc-1"}}, Trailing: []supersessionLinkView{{Ref: obsConflictF, Href: "/a/" + obsConflictF}}},
 		},
 	}}}}
-	out, err := renderBoardSpecPage(&with, &boardGitState{}, testASDView())
+	out, err := renderBoardSpecPage(t.Context(), &with, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatal(err)
 	}

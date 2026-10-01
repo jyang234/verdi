@@ -3,6 +3,8 @@ package workbench
 import (
 	"fmt"
 	stdhtml "html"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -99,12 +101,14 @@ func TestASDPosture_RendersFromBarFactsByteIdentically(t *testing.T) {
 		"closed spike, labels": {Spec: "s", Mode: modeReadOnly, Status: "closed", Class: "story", Spike: true, ClassLabel: "Probe"},
 	}
 	states := []string{"proposed", "draft", "accepted-pending-build", "closed", "superseded", "unproven", "", `odd"state`}
+	// Paired in sorted order, so every run renders the same pairs of
+	// projection, posture, and state.
 	i := 0
-	for pn, p := range projections {
-		for bn, bp := range postures {
+	for _, pn := range slices.Sorted(maps.Keys(projections)) {
+		for _, bn := range slices.Sorted(maps.Keys(postures)) {
 			state := states[i%len(states)]
 			i++
-			cases = append(cases, wallCase{name: pn + " / " + bn + " / " + state, p: p, asd: &asdView{branchPosture: bp, StateFormal: state, BaseDigest: "sha256:" + pn}})
+			cases = append(cases, wallCase{name: pn + " / " + bn + " / " + state, p: projections[pn], asd: &asdView{branchPosture: postures[bn], StateFormal: state, BaseDigest: "sha256:" + pn}})
 		}
 	}
 

@@ -90,3 +90,36 @@ func TestSnapshotRevision_HashesTheBarPosture(t *testing.T) {
 		}
 	}
 }
+
+// TestMutationResponse_CarriesThePosture (F1A-B2): a mutation response's
+// fresh projection carries the posture fragment from the same snapshot
+// as its revision, so a client adopting that revision also has the
+// posture it covers — equal to what /snapshot serves for the same state.
+func TestMutationResponse_CarriesThePosture(t *testing.T) {
+	root := newBoardFixture(t)
+	h := newBoardTestHandler(root)
+	rec, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "a declined applicant sees the current reason, today", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mutate_draft = %d\n%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Projection *mutationProjection `json:"projection"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Projection == nil {
+		t.Fatalf("decoding the mutation response: %v\n%s", err, rec.Body.String())
+	}
+	snapRec := httptest.NewRecorder()
+	h.ServeHTTP(snapRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/board/spec/"+boardFixtureName+"/snapshot", nil))
+	var snap asdSnapshot
+	if err := artifact.DecodeStrictJSON(snapRec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("strict-decoding the snapshot: %v", err)
+	}
+	if out.Projection.Posture == "" || out.Projection.Posture != snap.Posture {
+		t.Fatalf("mutation posture =\n%q\n/snapshot posture =\n%q", out.Projection.Posture, snap.Posture)
+	}
+	if out.Projection.Revision != snap.Revision || !strings.Contains(out.Projection.Posture, `data-dirty="dirty"`) {
+		t.Fatalf("mutation revision %s vs snapshot %s; posture %q, want the fresh, dirty working tree", out.Projection.Revision, snap.Revision, out.Projection.Posture)
+	}
+}

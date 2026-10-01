@@ -7,6 +7,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -219,7 +220,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 // state mirrors exactly what /snapshot serves, so the initial page needs
 // no bootstrap fetch and the first conditional poll compares against a
 // genuine revision token.
-func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
+func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
 	snap := newASDSnapshot(p, git, asd)
 	region, revision := snap.HTML, snap.Revision
 	payload := boardClientPayload{
@@ -283,6 +284,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		StateJSON:        template.JS(stateJSON),
 		Bar:              snap.bar,
 	}
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering board page: %w", err)

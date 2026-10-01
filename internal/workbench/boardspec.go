@@ -564,7 +564,7 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 // spec.md bytes loadBoard read. The fragment, which carries no git state
 // of its own, renders from this and never pays for the summary.
 func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, []byte, error) {
-	proj, git, _, extras, err := s.loadBoard(ctx, name)
+	proj, git, reviewNotice, extras, err := s.loadBoard(ctx, name)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -572,6 +572,7 @@ func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardP
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	asd.reviewNotice = reviewNotice
 	return proj, git, asd, extras.raw, nil
 }
 
@@ -747,8 +748,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			return
 		}
 		proj.DocumentHref = r.URL.EscapedPath() + "/document"
-		observeBar(r.Context(), specBarFacts(proj, asd))
-		out, err := renderBoardSpecPage(proj, git, asd)
+		out, err := renderBoardSpecPage(r.Context(), proj, git, asd)
 		if err != nil {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return

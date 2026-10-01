@@ -93,8 +93,7 @@ func boardHandler(root string, mdl *model.Model) http.HandlerFunc {
 		}
 
 		bar := branchBarFacts(r.Context(), root, boardPageTitle(key))
-		observeBar(r.Context(), bar)
-		out, err := renderBoardPage(clientState, classWords{m: mdl}, bar)
+		out, err := renderBoardPage(r.Context(), clientState, classWords{m: mdl}, bar)
 		if err != nil {
 			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
@@ -166,7 +165,7 @@ func boardPageTitle(key string) string {
 // renderBoardPage renders the v0 board page; bar is its top bar's facts
 // (SI-323 (4): the v0 board is a page verdi serve renders), not yet drawn
 // by the template.
-func renderBoardPage(state boardClientState, words classWords, bar barFacts) ([]byte, error) {
+func renderBoardPage(ctx context.Context, state boardClientState, words classWords, bar barFacts) ([]byte, error) {
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
@@ -189,6 +188,7 @@ func renderBoardPage(state boardClientState, words classWords, bar barFacts) ([]
 		KeyJSON:   template.JS(keyJSON),
 		Bar:       bar,
 	}
+	observeBar(ctx, data.Bar)
 
 	var buf bytes.Buffer
 	if err := boardPageTemplate.Execute(&buf, data); err != nil {

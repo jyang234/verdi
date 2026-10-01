@@ -282,8 +282,7 @@ func (s *boardDiagramServer) boardDiagramPageHandler() http.HandlerFunc {
 		}
 		v.Exit = resolveDiagramExit(s.root, r.URL.Query().Get("board"))
 		v.Bar = branchBarFactsFor(r.Context(), s.root, v.pageTitle(), v.Git)
-		observeBar(r.Context(), v.Bar)
-		out, err := renderDiagramEditorPage(v)
+		out, err := renderDiagramEditorPage(r.Context(), v)
 		if err != nil {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return

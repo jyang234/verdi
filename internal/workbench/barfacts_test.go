@@ -1,6 +1,8 @@
 package workbench
 
 import (
+	"context"
+	"errors"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -258,6 +260,45 @@ func TestBranchBarFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("an authoritative origin/main ahead of the local main (F1A-B4)", func(t *testing.T) {
+		root := newBoardFixture(t)
+		// The ordinary cloned shape with acceptance advanced on the
+		// remote-tracking ref only (asdcorrection_test.go's shape): the
+		// local main is a stale shadow, and every accepted-head fact must
+		// ride origin/main.
+		gitOut(t, root, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
+		advanceRef(t, root, "refs/remotes/origin/main")
+		origin, local := gitOut(t, root, "rev-parse", "origin/main"), gitOut(t, root, "rev-parse", "main")
+		if origin == local {
+			t.Fatal("origin/main did not move ahead of main: the case would be vacuous")
+		}
+		got := branchBarFacts(t.Context(), root, "x").Posture
+		if got.AcceptedHead != provenFact(origin) || got.AheadBehind != provenFact("1 ahead, 1 behind main") {
+			t.Fatalf("accepted head %v, ahead/behind %v; want origin/main %s, 1 ahead, 1 behind", got.AcceptedHead, got.AheadBehind, origin)
+		}
+		proj, _, asd, err := (&boardSpecServer{root: root}).loadASD(t.Context(), boardFixtureName)
+		if err != nil {
+			t.Fatalf("loadASD: %v", err)
+		}
+		wall := specBarFacts(proj, asd).Posture
+		wall.BaseDigest = nil
+		if !reflect.DeepEqual(got, wall) {
+			t.Fatalf("branch-level posture =\n%+v\nwall's\n%+v", got, wall)
+		}
+	})
+
+	t.Run("a detached HEAD is marked, its branch text unchanged (F1A-B7)", func(t *testing.T) {
+		root := newBoardFixture(t)
+		if attached := branchBarFacts(t.Context(), root, "x").Posture; attached.Detached {
+			t.Fatal("a checkout on a branch is marked detached")
+		}
+		gitOut(t, root, "checkout", "-q", "--detach")
+		got := branchBarFacts(t.Context(), root, "x").Posture
+		if !got.Detached || got.Branch != provenFact("") {
+			t.Fatalf("detached posture: detached %t, branch %v; want detached with today's empty branch text", got.Detached, got.Branch)
+		}
+	})
+
 	t.Run("no store root: every fact disclosed-unproven", func(t *testing.T) {
 		got := branchBarFacts(t.Context(), "", "Error")
 		checkBarFacts(t, got)
@@ -288,4 +329,34 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// failingAheadBehind resolves every head but fails ahead/behind.
+type failingAheadBehind struct{ gitPostureReader }
+
+func (failingAheadBehind) AheadBehind(context.Context, string, string, string) (int, int, error) {
+	return 0, 0, errors.New("rev-list exploded")
+}
+
+// TestBranchPosture_AheadBehindFailureKeepsItsReason: an ahead/behind
+// count git refuses keeps today's row words and carries git's own error as
+// its reason; an unresolved accepted HEAD carries that reason instead.
+func TestBranchPosture_AheadBehindFailureKeepsItsReason(t *testing.T) {
+	git := &boardGitState{Branch: "design/x", DefaultBranch: "main"}
+	for _, tc := range []struct {
+		name  string
+		heads postureHeads
+		want  string
+	}{
+		{name: "git refuses the count", heads: postureHeads{worktree: "h", accepted: "a"}, want: "rev-list exploded"},
+		{name: "the accepted HEAD is unresolved", heads: postureHeads{worktree: "h", acceptedWhy: "the accepted HEAD (main) could not be resolved: gone"}, want: "gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := branchPostureFrom(t.Context(), "/c", git, tc.heads, failingAheadBehind{})
+			f := got.facts().AheadBehind
+			if f.Text != "unproven: the accepted branch could not be resolved" || !strings.Contains(f.Unproven, tc.want) {
+				t.Fatalf("ahead/behind = %+v, want today's words and a reason naming %q", f, tc.want)
+			}
+		})
+	}
 }

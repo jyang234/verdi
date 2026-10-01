@@ -546,6 +546,11 @@ type asdView struct {
 	StubSlugs        []string
 	EdgeFacts        map[string][]asdEdgeFact
 
+	// reviewNotice is the review feed's disclosure for this render, when
+	// the feed is configured but could not be consulted (consultReview):
+	// the mode the posture states was derived without review state.
+	reviewNotice string
+
 	// baseDigestWhy, when set, says why BaseDigest is unresolved: a
 	// remote-only branch's sealed wall has no working-tree spec bytes to
 	// digest (sealedASDView).
@@ -565,14 +570,15 @@ func asdEdgeKey(from, edgeType, to string) string {
 }
 
 // postureView is the posture model for one served spec (design §4.2):
-// the branch-level Git facts (resolveBranchPosture — the page's one
-// accepted-HEAD resolution, Wave 6 §5.3) plus the spec's displayed-bytes
-// state and base digest. The wall's asdView starts from it and the
-// Document page's top bar reads it, so both pages state one posture for
-// the same spec and branch (SI-323 (2)).
-func (s *boardSpecServer) postureView(ctx context.Context, proj *BoardProjection, git *boardGitState, raw []byte, st specstate.Result) *asdView {
+// the branch-level Git facts completed from the page's heads
+// (branchPostureFrom) plus the spec's displayed-bytes state and base
+// digest. The wall's asdView starts from it over heads it resolves
+// itself; the Document page's top bar builds it over the heads, state,
+// and bytes its document load already resolved — one path, so both pages
+// state one posture for the same spec and branch (SI-323 (2)).
+func (s *boardSpecServer) postureView(ctx context.Context, proj *BoardProjection, git *boardGitState, raw []byte, st specstate.Result, heads postureHeads) *asdView {
 	return &asdView{
-		branchPosture:    resolveBranchPosture(ctx, s.root, git, s.posture),
+		branchPosture:    branchPostureFrom(ctx, s.root, git, heads, s.posture),
 		StateFormal:      string(st.State),
 		StateLabel:       s.model.DisplayState(proj.Class, string(st.ArtifactStatus())),
 		RelationDiverged: st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged,
@@ -586,7 +592,7 @@ func (s *boardSpecServer) postureView(ctx context.Context, proj *BoardProjection
 // fact reads; everything else is a pure function of the already-decoded
 // inputs.
 func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *BoardProjection, git *boardGitState, raw []byte, fm *artifact.SpecFrontmatter, st specstate.Result) (*asdView, error) {
-	v := s.postureView(ctx, proj, git, raw, st)
+	v := s.postureView(ctx, proj, git, raw, st, resolvePostureHeads(ctx, s.root, git, s.posture))
 	v.BaseSpecB64 = base64.StdEncoding.EncodeToString(raw)
 	v.SlugPattern = specNameRe.String()
 	v.ImportRecordHref = specImportRecordHrefFor(s.root, git.Branch, name)
@@ -758,11 +764,14 @@ func (s *boardSpecServer) loadSnapshot(ctx context.Context, name string) (*asdSn
 	return newASDSnapshot(proj, git, asd), nil
 }
 
-// newASDSnapshot is the one snapshot of a loaded wall — the /snapshot
-// route's, the mutation response's, and the one whose revision the page
-// embeds: the region, the top bar's facts (specBarFacts, the same pure
-// function of p and asd the region's posture header renders from), the
-// posture fragment rendered from them, and the revision over all of it.
+// newASDSnapshot builds one snapshot of a loaded wall: the region, the top
+// bar's facts (specBarFacts, the same pure function of p and asd the
+// region's posture header renders from), the posture fragment rendered
+// from them, and the revision over all of it. Three callers each build
+// their own from their own load: the /snapshot route (loadSnapshot), the
+// mutation response's fresh projection (writeMutationOutcome, which
+// carries its HTML, posture, and revision), and the page, which embeds
+// its revision and puts its facts in the template's view data.
 func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSnapshot {
 	bar := specBarFacts(p, asd)
 	snap := &asdSnapshot{

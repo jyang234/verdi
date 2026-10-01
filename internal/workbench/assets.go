@@ -29,11 +29,13 @@ func mermaidHandler() http.HandlerFunc {
 	}
 }
 
-// styleCSSHandler serves internal/dex's composed stylesheet — the same
-// bytes dex writes to its static site, chroma light/dark palettes and all
-// (dex.StyleCSS) — so the workbench's shared class-based code rendering is
-// coloured and equally dark-mode-correct without owning a second stylesheet
-// (the same one-copy-two-surfaces pattern as the vendored mermaid.min.js).
+// styleCSSHandler serves internal/dex's composed stylesheet, chroma
+// light/dark palettes and all (dex.StyleCSS) — the docs site's copy is the
+// same composition with the workbench-only blocks stripped (SI-322), so
+// these bytes keep those blocks — so the workbench's shared class-based
+// code rendering is coloured and equally dark-mode-correct without owning
+// a second stylesheet (the same one-copy-two-surfaces pattern as the
+// vendored mermaid.min.js).
 func styleCSSHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

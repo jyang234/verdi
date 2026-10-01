@@ -600,7 +600,7 @@ func TestBoardPage_LinksToDocumentTab(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), want) {
 		t.Fatalf("branch board nav lacks %q\n%s", want, rec.Body.String())
 	}
-	page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly}, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), &BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly}, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatal(err)
 	}

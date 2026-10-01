@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"html/template"
 	"strings"
@@ -76,7 +77,7 @@ type documentPageData struct {
 // deliberate newline right after the <pre> tag: the HTML parser drops
 // exactly one newline there, so without it a Markdown that began with
 // "\n" would lose that byte on the way to the clipboard.
-func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
+func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
 	boardHref := strings.TrimSuffix(requestPath, "/document")
 	kinds := []documentKindLink{
 		{Kind: "spec", Label: "Spec"},
@@ -100,6 +101,7 @@ func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot, ba
 		Markdown:     snap.Markdown,
 		Bar:          bar,
 	}
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering document page: %w", err)

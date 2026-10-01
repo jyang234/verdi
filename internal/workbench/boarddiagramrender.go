@@ -16,6 +16,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -93,7 +94,7 @@ window.__DIAGRAM__ = {{.StateJSON}};
 `))
 
 // renderDiagramEditorPage renders the full editor page.
-func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
+func renderDiagramEditorPage(ctx context.Context, v *diagramEditorView) ([]byte, error) {
 	available, _, nodes, edges := opsStateOf(v)
 	payload := diagramClientPayload{
 		Name:         v.Name,
@@ -136,6 +137,7 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		StateJSON: template.JS(stateJSON),
 		Bar:       v.Bar,
 	}
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := diagramEditorPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering diagram editor page: %w", err)

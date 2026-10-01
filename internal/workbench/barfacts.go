@@ -49,9 +49,13 @@ type barSpec struct {
 	Class      string `json:"class,omitempty"`
 	ClassLabel string `json:"classLabel,omitempty"`
 	// Mode is the room's id and ModeLabel its stamp's words
-	// (modeStampLabel).
-	Mode      string `json:"mode,omitempty"`
-	ModeLabel string `json:"modeLabel,omitempty"`
+	// (modeStampLabel). ModeDisclosure, when non-empty, is the review
+	// feed's disclosure: the feed is configured but could not be
+	// consulted, so the mode is stated without the review state it would
+	// have read (SI-323 (2); the wall's board notice says the same).
+	Mode           string `json:"mode,omitempty"`
+	ModeLabel      string `json:"modeLabel,omitempty"`
+	ModeDisclosure string `json:"modeDisclosure,omitempty"`
 	// StatusBadge is the terminal status badge's id (terminalStatusBadge),
 	// empty when the posture row draws none; StatusBadgeLabel is its words.
 	StatusBadge      string   `json:"statusBadge,omitempty"`
@@ -87,8 +91,11 @@ type barTree struct {
 // ahead/behind, divergence when both sides carry commits, and — on a page
 // about one spec, where today's row has it — the base digest.
 type barPosture struct {
-	Checkout       barFact  `json:"checkout"`
+	Checkout barFact `json:"checkout"`
+	// Branch is the checked-out branch; on a detached HEAD its Text is
+	// empty, as today's row prints it, and Detached says so.
 	Branch         barFact  `json:"branch"`
+	Detached       bool     `json:"detached,omitempty"`
 	Tree           barTree  `json:"tree"`
 	WorktreeHead   barFact  `json:"worktreeHead"`
 	AcceptedBranch barFact  `json:"acceptedBranch"`
@@ -103,6 +110,9 @@ const (
 	unprovenWord = "unproven"
 	// aheadBehindUnresolved is the row's ahead/behind reason, verbatim.
 	aheadBehindUnresolved = "the accepted branch could not be resolved"
+	// defaultBranchUnresolved is the reason an unresolved default branch
+	// leaves the accepted branch and HEAD unproven.
+	defaultBranchUnresolved = "the default branch could not be resolved"
 )
 
 func provenFact(text string) barFact { return barFact{Text: text} }
@@ -131,7 +141,17 @@ type branchPosture struct {
 	defaultBranchWhy string
 	worktreeHeadWhy  string
 	acceptedHeadWhy  string
+	aheadBehindWhy   string
 	treeWhy          string
+}
+
+// postureHeads is one page's resolution of the worktree HEAD and the
+// accepted HEAD, each empty with the reason when unresolved. The wall
+// resolves them itself (resolvePostureHeads); the Document page takes
+// the ones its document load already made (SI-323 (2)).
+type postureHeads struct {
+	worktree, worktreeWhy string
+	accepted, acceptedWhy string
 }
 
 // postureReader is the posture model's Git port (04 §port pattern:
@@ -155,60 +175,96 @@ func (gitPostureReader) AheadBehind(ctx context.Context, dir, left, right string
 }
 
 // resolveBranchPosture resolves the posture's Git facts for the checkout
-// at root whose gitState is git: the worktree HEAD, then — when the
-// default branch resolved — the accepted HEAD at its AUTHORITATIVE rev
+// at root whose gitState is git (resolvePostureHeads, then
+// branchPostureFrom). A nil rd reads through gitx.
+func resolveBranchPosture(ctx context.Context, root string, git *boardGitState, rd postureReader) branchPosture {
+	return branchPostureFrom(ctx, root, git, resolvePostureHeads(ctx, root, git, rd), rd)
+}
+
+// resolvePostureHeads resolves the worktree HEAD and — when the default
+// branch resolved — the accepted HEAD at its AUTHORITATIVE rev
 // (acceptedRef: origin/<name> when it exists, the same rev the state
 // projector reads accepted bytes at; keying on the display NAME would
 // ride a possibly-stale local shadow while acceptance moves on the
 // remote-tracking ref — Codex correction round 1, finding 1, closure
-// reopen) and ahead/behind against it. It is the page's one accepted-HEAD
-// resolution (Wave 6 §5.3). A nil rd reads through gitx.
-func resolveBranchPosture(ctx context.Context, root string, git *boardGitState, rd postureReader) branchPosture {
+// reopen). It is the page's one accepted-HEAD resolution (Wave 6 §5.3).
+// A nil rd reads through gitx.
+func resolvePostureHeads(ctx context.Context, root string, git *boardGitState, rd postureReader) postureHeads {
+	if rd == nil {
+		rd = gitPostureReader{}
+	}
+	var h postureHeads
+	if head, err := rd.RevParse(ctx, root, "HEAD"); err == nil {
+		h.worktree = head
+	} else {
+		h.worktreeWhy = "the worktree HEAD could not be resolved: " + err.Error()
+	}
+	if git.DefaultBranch == "" {
+		h.acceptedWhy = defaultBranchUnresolved
+		return h
+	}
+	ref := git.acceptedRef()
+	if accepted, err := rd.RevParse(ctx, root, ref); err == nil {
+		h.accepted = accepted
+	} else {
+		h.acceptedWhy = fmt.Sprintf("the accepted HEAD (%s) could not be resolved: %v", ref, err)
+	}
+	return h
+}
+
+// branchPostureFrom completes the branch-level posture from git and the
+// heads the page resolved: ahead/behind is counted against that very
+// accepted HEAD, so the two facts can never describe different commits.
+// A nil rd reads through gitx.
+func branchPostureFrom(ctx context.Context, root string, git *boardGitState, heads postureHeads, rd postureReader) branchPosture {
 	if rd == nil {
 		rd = gitPostureReader{}
 	}
 	bp := branchPosture{
-		Checkout:      root,
-		Branch:        git.Branch,
-		DefaultBranch: git.DefaultBranch,
-		Dirty:         git.Dirty,
+		Checkout:        root,
+		Branch:          git.Branch,
+		DefaultBranch:   git.DefaultBranch,
+		Dirty:           git.Dirty,
+		WorktreeHead:    heads.worktree,
+		worktreeHeadWhy: heads.worktreeWhy,
+		AcceptedHead:    heads.accepted,
+		acceptedHeadWhy: heads.acceptedWhy,
 	}
-	if head, err := rd.RevParse(ctx, root, "HEAD"); err == nil {
-		bp.WorktreeHead = head
-	} else {
-		bp.worktreeHeadWhy = "the worktree HEAD could not be resolved: " + err.Error()
-	}
-	if git.DefaultBranch == "" {
-		bp.defaultBranchWhy = "the default branch could not be resolved"
-		bp.acceptedHeadWhy = bp.defaultBranchWhy
-		return bp
-	}
-	ref := git.acceptedRef()
-	if accepted, err := rd.RevParse(ctx, root, ref); err == nil {
-		bp.AcceptedHead = accepted
-	} else {
-		bp.acceptedHeadWhy = fmt.Sprintf("the accepted HEAD (%s) could not be resolved: %v", ref, err)
-	}
-	if ahead, behind, err := rd.AheadBehind(ctx, root, "HEAD", ref); err == nil {
-		bp.Ahead, bp.Behind, bp.AheadBehindKnown = ahead, behind, true
+	switch {
+	case git.DefaultBranch == "":
+		bp.defaultBranchWhy = defaultBranchUnresolved
+		bp.aheadBehindWhy = aheadBehindUnresolved
+	case heads.accepted == "":
+		bp.aheadBehindWhy = aheadBehindUnresolved + ": " + heads.acceptedWhy
+	default:
+		if ahead, behind, err := rd.AheadBehind(ctx, root, "HEAD", heads.accepted); err == nil {
+			bp.Ahead, bp.Behind, bp.AheadBehindKnown = ahead, behind, true
+		} else {
+			bp.aheadBehindWhy = aheadBehindUnresolved + ": " + err.Error()
+		}
 	}
 	return bp
 }
 
 // facts states bp as the bar's posture, with today's row's words: a fact
-// with no value reads "unproven" (the row's former orUnproven) with the reason resolution
-// recorded, ahead/behind reads the row's own unresolved sentence, and the
-// divergence fact exists only when both sides carry commits. Checkout and
-// branch print as they are, as the row prints them.
+// with no value reads "unproven" (the row's former orUnproven) with the
+// reason resolution recorded, ahead/behind reads the row's own unresolved
+// sentence with its reason, and the divergence fact exists only when both
+// sides carry commits. Checkout and branch print as they are, as the row
+// prints them; an empty branch is a detached HEAD, which Detached marks.
 func (bp *branchPosture) facts() barPosture {
 	p := barPosture{
 		Checkout:       provenFact(bp.Checkout),
 		Branch:         provenFact(bp.Branch),
+		Detached:       bp.Branch == "",
 		Tree:           barTree{State: "clean", barFact: provenFact("clean")},
 		WorktreeHead:   valueOr(bp.WorktreeHead, bp.worktreeHeadWhy, "the worktree HEAD could not be resolved"),
-		AcceptedBranch: valueOr(bp.DefaultBranch, bp.defaultBranchWhy, "the default branch could not be resolved"),
+		AcceptedBranch: valueOr(bp.DefaultBranch, bp.defaultBranchWhy, defaultBranchUnresolved),
 		AcceptedHead:   valueOr(bp.AcceptedHead, bp.acceptedHeadWhy, "the accepted HEAD could not be resolved"),
 		AheadBehind:    barFact{Text: unprovenWord + ": " + aheadBehindUnresolved, Unproven: aheadBehindUnresolved},
+	}
+	if bp.aheadBehindWhy != "" {
+		p.AheadBehind.Unproven = bp.aheadBehindWhy
 	}
 	switch {
 	case bp.treeWhy != "":
@@ -244,10 +300,11 @@ func valueOr(v, why, fallback string) barFact {
 // resolved here.
 func specBarFacts(p *BoardProjection, asd *asdView) barFacts {
 	spec := &barSpec{
-		Name:      p.Spec,
-		Mode:      string(p.Mode),
-		ModeLabel: modeStampLabel(p),
-		Bytes:     barBytes{State: asd.StateFormal, Word: postureByteWord(asd.StateFormal)},
+		Name:           p.Spec,
+		Mode:           string(p.Mode),
+		ModeLabel:      modeStampLabel(p),
+		ModeDisclosure: asd.reviewNotice,
+		Bytes:          barBytes{State: asd.StateFormal, Word: postureByteWord(asd.StateFormal)},
 	}
 	if p.Class != "" {
 		spec.Class = p.classChipID()
