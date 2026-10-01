@@ -18,6 +18,7 @@ func TestExportedFuncs_ListsFunctionsAndExportedMethods(t *testing.T) {
 		"gitx.CommonDir",
 		"gitx.Mutate",
 		"gitx.Other",
+		"gitx.Prune",
 		"gitx.Publish",
 		"gitx.Read",
 	}

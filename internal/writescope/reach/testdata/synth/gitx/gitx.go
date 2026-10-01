@@ -12,6 +12,9 @@ func Mutate(ctx context.Context, dir string) error { return nil }
 // actions reach it, so a test can tell an action's work from its route's.
 func Publish(ctx context.Context, dir string) error { return nil }
 
+// Prune is mutating; only a value-only package-level variable names it.
+func Prune(ctx context.Context) error { return nil }
+
 // Read is the synthetic read-only primitive.
 func Read(ctx context.Context, dir string) (string, error) { return dir, nil }
 

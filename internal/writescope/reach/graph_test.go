@@ -38,12 +38,13 @@ func lookupFunc(t *testing.T, prog *reach.Program, pkgPath, name string) *types.
 }
 
 // synthTargets is the synthetic mutating set: gitx.Mutate, gitx.Publish,
-// and gitx.Other.
+// gitx.Prune, and gitx.Other.
 func synthTargets(t *testing.T, prog *reach.Program) map[*types.Func]bool {
 	t.Helper()
 	return map[*types.Func]bool{
 		lookupFunc(t, prog, "example.com/synth/gitx", "Mutate"):  true,
 		lookupFunc(t, prog, "example.com/synth/gitx", "Publish"): true,
+		lookupFunc(t, prog, "example.com/synth/gitx", "Prune"):   true,
 		lookupFunc(t, prog, "example.com/synth/gitx", "Other"):   true,
 	}
 }

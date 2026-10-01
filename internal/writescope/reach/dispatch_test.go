@@ -90,6 +90,62 @@ func TestCLIEntries_Errors(t *testing.T) {
 	}
 }
 
+// TestPreDispatchEntry_ReachesWhatRunsForEveryVerb pins R1-A2 (ledger
+// SI-314 (3)): main, the dispatcher outside its arms, every init function
+// and every package-level variable initializer that runs code, in the
+// packages the binary links, form one pseudo-entry, and what it reaches is
+// visible; a variable that only names a function runs nothing.
+func TestPreDispatchEntry_ReachesWhatRunsForEveryVerb(t *testing.T) {
+	prog := loadSynth(t)
+	tests := []struct {
+		name, pkg string
+		want      string
+		verbs     map[string]string
+	}{
+		{"a clean dispatcher", "example.com/synth/cli", "", nil},
+		{"a preamble, an initializer that runs code, and another package's init", "example.com/synth/precli",
+			"Mutate,Other,Publish", map[string]string{"lint": "", "later": "Prune"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pre, err := reach.PreDispatchEntry(prog, tt.pkg, "Run", "cli")
+			if err != nil {
+				t.Fatalf("PreDispatchEntry: %v", err)
+			}
+			if pre.Name != reach.PreDispatch {
+				t.Fatalf("pre-dispatch entry is named %q, want %q", pre.Name, reach.PreDispatch)
+			}
+			verbs, err := reach.CLIEntries(prog, tt.pkg, "Run", "cli")
+			if err != nil {
+				t.Fatalf("CLIEntries: %v", err)
+			}
+			got := reachByName(t, prog, append(verbs, pre))
+			if got[reach.PreDispatch] != tt.want {
+				t.Fatalf("pre-dispatch reaches %q, want %q", got[reach.PreDispatch], tt.want)
+			}
+			for verb, want := range tt.verbs {
+				if got[verb] != want {
+					t.Fatalf("%s reaches %q, want %q", verb, got[verb], want)
+				}
+			}
+		})
+	}
+}
+
+func TestPreDispatchEntry_Errors(t *testing.T) {
+	prog := loadSynth(t)
+	for _, tt := range []struct{ name, pkg, fn string }{
+		{"unknown package", "example.com/synth/nope", "Run"},
+		{"unknown dispatcher", "example.com/synth/cli", "Nope"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := reach.PreDispatchEntry(prog, tt.pkg, tt.fn, "cli"); err == nil {
+				t.Fatalf("PreDispatchEntry(%s, %s) succeeded, want an error", tt.pkg, tt.fn)
+			}
+		})
+	}
+}
+
 func TestSwitchEntries_MatchTheInventorysOneSwitch(t *testing.T) {
 	prog := loadSynth(t)
 	entries, err := reach.SwitchEntries(prog, "example.com/synth/tools", "mcp", []string{"write_tool", "read_tool"})

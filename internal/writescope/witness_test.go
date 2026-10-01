@@ -58,9 +58,9 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 			mutating++
 		}
 	}
-	t.Logf("%d of %d verbs reach a mutating function; %d declarations; %d gitx exports; %d git-directory writers; union of %d targets; %v",
+	t.Logf("%d of %d verbs reach a mutating function; %d declarations; %d gitx exports; %d git-directory writers; pre-dispatch code (%d roots) reaches %d; union of %d targets; %v",
 		mutating, len(facts.Verbs), len(ws.Registry()), len(facts.GitxExports), len(facts.GitDirWriters),
-		len(reach.Targets()), time.Since(start).Round(time.Millisecond))
+		facts.PreDispatchRoots, len(facts.PreDispatch), len(reach.Targets()), time.Since(start).Round(time.Millisecond))
 
 	// The falsifiers, on these same facts: each mutation of the registry,
 	// its awaiting-fix list, or the classification turns the witness red.
@@ -122,6 +122,7 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 	facts := ws.Facts{GitxPackage: gitxPackage, Functions: map[string]bool{}, Verbs: map[ws.Verb][]ws.Hit{}}
 	exports := map[string]bool{}
 	writers := map[string]ws.Writer{}
+	preSeen := map[string]bool{}
 	for _, target := range reach.Targets() {
 		prog, err := reach.Load(ctx, root, target, "./"+cliPackage)
 		if err != nil {
@@ -156,7 +157,11 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 		}
 
 		entries := deriveEntries(t, prog, target, tools)
-		g, err := reach.Build(prog, entries)
+		pre, err := reach.PreDispatchEntry(prog, mod+cliPackage, cliDispatcher, string(ws.SurfaceCLI))
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		g, err := reach.Build(prog, append(entries, pre))
 		if err != nil {
 			t.Fatalf("%s: %v", target, err)
 		}
@@ -185,6 +190,17 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 			}
 			sort.Slice(merged, func(i, j int) bool { return merged[i].Func < merged[j].Func })
 			facts.Verbs[v] = merged
+		}
+		preHits, err := g.Reach(pre, targets)
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		facts.PreDispatchRoots += len(pre.Roots)
+		for _, h := range preHits {
+			if name := prog.FuncName(h.Func); !preSeen[name] {
+				facts.PreDispatch = append(facts.PreDispatch, ws.Hit{Func: name, Path: h.Path})
+				preSeen[name] = true
+			}
 		}
 		for _, pkg := range prog.Packages() {
 			for _, name := range declaredFuncs(prog, pkg) {

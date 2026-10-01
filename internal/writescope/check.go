@@ -20,6 +20,13 @@ type Facts struct {
 	// inventories define to the mutating functions it reaches (none for a
 	// verb that reaches none).
 	Verbs map[Verb][]Hit
+	// PreDispatch is what the code the binary runs for every verb, outside
+	// any verb's arm, reaches (ledger SI-314 (3)): main, the dispatcher
+	// outside its arms, init functions, and package-level variable
+	// initializers that run code. PreDispatchRoots counts that code's
+	// roots; zero means it was not analyzed, which proves nothing.
+	PreDispatch      []Hit
+	PreDispatchRoots int
 }
 
 // Writer is a function outside gitx that writes under a git directory, and
@@ -40,8 +47,10 @@ type Hit struct {
 // witness holds. It reports: an invalid registry or classification; an
 // exported gitx function or a git-directory writer that is not classified;
 // a classified name that no longer exists; a verb that reaches a mutating
-// function with no declaration naming it; and a declaration naming a verb
-// that no inventory defines or that reaches no mutating function.
+// function with no declaration naming it; a declaration naming a verb that
+// no inventory defines or that reaches no mutating function; and
+// pre-dispatch code that reaches a mutating function, which runs for every
+// verb, so no declaration can own it (ledger SI-314 (3)).
 func Check(decls []Declaration, awaiting []AwaitingFix, classes []Classified, facts Facts) []string {
 	if facts.GitxPackage == "" || len(facts.GitxExports) == 0 || len(facts.Verbs) == 0 {
 		return []string{"no facts: the analysis observed no gitx export or no verb, so nothing can be proven"}
@@ -55,7 +64,20 @@ func Check(decls []Declaration, awaiting []AwaitingFix, classes []Classified, fa
 	}
 	out = append(out, checkClassification(classes, facts)...)
 	out = append(out, checkCoverage(decls, facts)...)
+	out = append(out, checkPreDispatch(facts)...)
 	sort.Strings(out)
+	return out
+}
+
+func checkPreDispatch(facts Facts) []string {
+	if facts.PreDispatchRoots == 0 {
+		return []string{"no pre-dispatch facts: the code every verb runs outside its arm was not analyzed, so nothing proves it mutates nothing"}
+	}
+	var out []string
+	for _, h := range facts.PreDispatch {
+		out = append(out, fmt.Sprintf("pre-dispatch code reaches %s (%s): it runs for every verb, so no declaration can own it (ledger SI-314 (3))",
+			h.Func, strings.Join(h.Path, " -> ")))
+	}
 	return out
 }
 

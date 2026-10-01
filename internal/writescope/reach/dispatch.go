@@ -39,7 +39,7 @@ func CLIEntries(prog *Program, pkgPath, funcName, surface string) ([]Entry, erro
 		return nil, fmt.Errorf("reach: %s.%s has no []string first parameter to dispatch on", pkgPath, funcName)
 	}
 	s := newKeyScan(prog, true)
-	s.scanFunc(fn, scanCtx{args: map[types.Object]bool{params.At(0): true}, keys: map[types.Object]string{}})
+	s.scanFunc(fn, scanCtx{parent: PreDispatch, args: map[types.Object]bool{params.At(0): true}, keys: map[types.Object]string{}})
 	if len(s.arms) == 0 {
 		return nil, fmt.Errorf("reach: %s.%s dispatches no verb", pkgPath, funcName)
 	}

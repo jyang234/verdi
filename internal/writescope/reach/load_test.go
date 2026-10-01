@@ -46,6 +46,8 @@ func TestLoad_TypeChecksEveryModulePackage(t *testing.T) {
 		{"example.com/synth/cli", "Run"},
 		{"example.com/synth/web", "Register"},
 		{"example.com/synth/strictweb", "Register"},
+		{"example.com/synth/precli", "Run"},
+		{"example.com/synth/hooks", "All"},
 		{"example.com/synth/tools", "Server"},
 		{"example.com/synth/gitdir", "Reconcile"},
 		{"example.com/synth/other", "Write"},

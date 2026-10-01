@@ -33,6 +33,7 @@ func checkFixture() ([]ws.Declaration, []ws.Classified, ws.Facts) {
 			ws.MCP("sample_tool"): {{Func: "(*internal/other.R).Write", Path: []string{"tool", "(*internal/other.R).Write"}}},
 			ws.CLI("lint"):        nil,
 		},
+		PreDispatchRoots: 3,
 	}
 	return decls, classes, facts
 }
@@ -82,6 +83,12 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 		{"an invalid classification", func(_ *[]ws.Declaration, c *[]ws.Classified, _ *ws.Facts) {
 			*c = append(*c, ws.Classified{Func: "internal/gitx.Read", Effect: ws.ReadOnly})
 		}, "twice"},
+		{"pre-dispatch code reaches a mutating function (R1-A2)", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
+			f.PreDispatch = []ws.Hit{{Func: "internal/gitx.Commit", Path: []string{"cmd/verdi.run", "cmd/verdi.preflight", "internal/gitx.Commit"}}}
+		}, "pre-dispatch code reaches internal/gitx.Commit (cmd/verdi.run -> cmd/verdi.preflight -> internal/gitx.Commit)"},
+		{"pre-dispatch code was not analyzed", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
+			f.PreDispatchRoots = 0
+		}, "pre-dispatch"},
 		{"no facts at all", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
 			*f = ws.Facts{}
 		}, "no facts"},

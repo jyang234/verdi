@@ -11,12 +11,14 @@ import (
 )
 
 // Root names where an entry's code starts: a declared function or method,
-// a function literal, or a dispatch arm (an *ast.CaseClause, or the body
-// *ast.BlockStmt of an if-arm). Exactly one field is set.
+// a function literal, a dispatch arm (an *ast.CaseClause, or the body
+// *ast.BlockStmt of an if-arm), or a package-level variable whose
+// initializer runs at initialization. Exactly one field is set.
 type Root struct {
 	Func *types.Func
 	Lit  *ast.FuncLit
 	Arm  ast.Node
+	Var  *types.Var
 }
 
 // Entry is one verb: the surface it is reached from, its name there, and
@@ -265,6 +267,8 @@ func (g *Graph) rootIDs(e Entry) ([]int, error) {
 			id, ok = g.byLit[r.Lit]
 		case r.Arm != nil:
 			id, ok = g.byArm[r.Arm]
+		case r.Var != nil:
+			id, ok = g.byVar[r.Var]
 		default:
 			return nil, fmt.Errorf("reach: entry %s %q has an empty root", e.Surface, e.Name)
 		}
