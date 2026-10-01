@@ -68,14 +68,12 @@ func pinnedGolangciLint(t *testing.T, root string) string {
 	return bin
 }
 
-// TestLintStrict_ReportsGroundRuleFindings runs the pinned golangci-lint with
-// .golangci.strict.yml, for linux/amd64 and with --issues-exit-code=0 as make
-// lint-strict runs it, over the committed fixture module, and proves the
-// strict configuration reports exactly one finding per gated linter, each in
-// that linter's own file, and none in the clean file (spec/strict-lint-gate
-// ac-1). A gated linter's violation going unreported, a finding in the clean
-// file, or any extra finding fails it.
-func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
+// lintStrictFixture runs the pinned golangci-lint with .golangci.strict.yml,
+// for linux/amd64 and with --issues-exit-code=0 as make lint-strict runs it,
+// over the committed fixture module, and returns its findings. It skips the
+// test with the reason when the pinned binary is absent.
+func lintStrictFixture(t *testing.T) []Finding {
+	t.Helper()
 	root := repoRoot(t)
 	bin := pinnedGolangciLint(t, root)
 
@@ -102,6 +100,18 @@ func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseReport: %v", err)
 	}
+	return findings
+}
+
+// TestLintStrict_ReportsGroundRuleFindings runs the pinned golangci-lint with
+// .golangci.strict.yml, for linux/amd64 and with --issues-exit-code=0 as make
+// lint-strict runs it, over the committed fixture module, and proves the
+// strict configuration reports exactly one finding per gated linter, each in
+// that linter's own file, and none in the clean file (spec/strict-lint-gate
+// ac-1). A gated linter's violation going unreported, a finding in the clean
+// file, or any extra finding fails it.
+func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
+	findings := lintStrictFixture(t)
 
 	gated := []string{"containedctx", "contextcheck", "errorlint", "gochecknoglobals", "noctx"}
 	byLinter := map[string][]Finding{}
@@ -129,5 +139,24 @@ func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
 	}
 	if len(findings) != len(gated) {
 		t.Errorf("the strict configuration reported %d findings over the fixture module, want exactly %d (one per gated linter): %+v", len(findings), len(gated), findings)
+	}
+}
+
+// TestStrictFixtureReportIsCurrent proves the committed capture of the strict
+// fixture module's report, testdata/reports/strictfixture.json, is what the
+// pinned golangci-lint reports over that module today: the same findings,
+// keys and positions alike. internal/specalign's
+// TestStrictLintExclusionsCounted reads each gated linter's message from that
+// capture to tell a wholesale text exclusion from a narrow one (review finding
+// S1-B1), so a stale capture would measure exclusions against messages the
+// linter no longer prints. capture.sh strictfixture re-captures it.
+func TestStrictFixtureReportIsCurrent(t *testing.T) {
+	live := lintStrictFixture(t)
+	captured, err := ParseReport(mustRead(t, capturedReport("strictfixture")))
+	if err != nil {
+		t.Fatalf("parsing the captured strict fixture report: %v", err)
+	}
+	if !slices.Equal(live, captured) {
+		t.Fatalf("the pinned golangci-lint reports over %s:\n%+v\nbut %s holds:\n%+v\nre-capture it with testdata/capture/capture.sh strictfixture", strictFixtureDir, live, capturedReport("strictfixture"), captured)
 	}
 }

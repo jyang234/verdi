@@ -14,11 +14,22 @@
 // (ledger SI-311 (3); v2's default, `lax`, is an exclusion the configuration
 // never names).
 //
-// A pattern that matches the empty string matches every path or message
-// (golangci-lint searches with an unanchored regular expression), so it
-// excludes wholesale; so does a rule that names neither a path nor a text
-// pattern. A reason is a YAML comment directly above the exclusion's list
-// item: golangci-lint v2's rule schema has no reason field.
+// A wholesale exclusion is one that leaves a gated linter nothing to report,
+// however its patterns are written (review finding S1-B1). golangci-lint
+// 2.5.0 searches a rule's path, an excluded path, and a rule's text with
+// unanchored, case-sensitive regular expressions, so the witness measures
+// each pattern against what it could exclude: a path pattern against every
+// Go file `golangci-lint run ./...` lints, a text pattern against every
+// message each gated linter the rule applies to is known to report (the
+// committed baseline's and the strict fixture module's). A path pattern that
+// matches every Go file excludes wholesale; so does a text pattern that
+// matches every known message of a gated linter the rule applies to; a rule
+// naming both excludes wholesale when both match everything, and a rule that
+// names neither excludes wholesale outright. A pattern that matches the empty
+// string matches everything. A rule's path-except or source does not narrow
+// it here: the witness errs toward a visible refusal. A reason is a YAML
+// comment directly above the exclusion's list item: golangci-lint v2's rule
+// schema has no reason field.
 //
 // Out of this witness's scope, by the obligation's own scope
 // (.golangci.strict.yml): //nolint directives in Go source, which suppress
@@ -26,7 +37,10 @@
 package specalign
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +49,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/lintratchet"
 )
 
 // strictLintConfigFile is the strict lint configuration, at the repository
@@ -177,34 +192,217 @@ func exclusionReasonProblems(lines []string, exLine int, what, label string, n i
 	return out
 }
 
-// wholesalePattern reports why pattern excludes wholesale or cannot be read,
-// or "" when it names a narrower path or text.
-func wholesalePattern(pattern string) string {
-	if strings.TrimSpace(pattern) == "" {
-		return "is empty"
+// strictFixtureReportFile is the committed capture of the strict fixture
+// module's golangci-lint report, one finding per gated linter;
+// internal/lintratchet's TestStrictFixtureReportIsCurrent holds it equal to
+// a live run of the pinned golangci-lint.
+const strictFixtureReportFile = "internal/lintratchet/testdata/reports/strictfixture.json"
+
+// strictLintUniverse is what an exclusion's patterns are measured against to
+// tell a wholesale exclusion from a narrow one (review finding S1-B1).
+type strictLintUniverse struct {
+	// goFiles are the Go files `golangci-lint run ./...` lints, relative to
+	// the repository root (the configuration's directory, which
+	// golangci-lint matches path patterns relative to) and slash-separated.
+	goFiles []string
+	// messages are, per gated linter, the distinct messages it is known to
+	// report: the committed baseline's and the strict fixture module's.
+	messages map[string][]string
+}
+
+// moduleGoFiles returns, sorted, the Go files under root that `./...`
+// visits: it skips directories named testdata, vendor, or node_modules, or
+// beginning with "." or "_" (guideClaimCorpusSkipDir), directories holding
+// their own go.mod (another module), and files beginning with "." or "_".
+// Build constraints are not evaluated.
+func moduleGoFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p == root {
+				return nil
+			}
+			if guideClaimCorpusSkipDir(name) {
+				return filepath.SkipDir
+			}
+			switch _, err := os.Stat(filepath.Join(p, "go.mod")); {
+			case err == nil:
+				return filepath.SkipDir
+			case !errors.Is(err, fs.ErrNotExist):
+				return err
+			}
+			return nil
+		}
+		if !strings.HasSuffix(name, ".go") || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	return files, err
+}
+
+// messagesByLinter returns each linter's distinct messages among keys,
+// sorted.
+func messagesByLinter(keys []lintratchet.Key) map[string][]string {
+	seen := map[string]map[string]bool{}
+	for _, k := range keys {
+		if seen[k.Linter] == nil {
+			seen[k.Linter] = map[string]bool{}
+		}
+		seen[k.Linter][k.Message] = true
 	}
-	re, err := regexp.Compile(pattern)
+	out := map[string][]string{}
+	for linter, msgs := range seen {
+		out[linter] = slices.Sorted(maps.Keys(msgs))
+	}
+	return out
+}
+
+// realStrictLintUniverse measures the universe on this checkout: the
+// module's Go files, and each gated linter's messages in the committed
+// baseline and the strict fixture's captured report.
+func realStrictLintUniverse(t *testing.T) strictLintUniverse {
+	t.Helper()
+	files, err := moduleGoFiles(verdiRepoRoot)
 	if err != nil {
-		return fmt.Sprintf("is not a regular expression (%v)", err)
+		t.Fatalf("listing the module's Go files: %v", err)
 	}
+	baseline, err := lintratchet.ParseBaseline(readRepoFile(t, strictLintBaselineFile))
+	if err != nil {
+		t.Fatalf("%s: %v", strictLintBaselineFile, err)
+	}
+	fixture, err := lintratchet.ParseReport(readRepoFile(t, strictFixtureReportFile))
+	if err != nil {
+		t.Fatalf("%s: %v", strictFixtureReportFile, err)
+	}
+	keys := slices.Collect(maps.Keys(baseline))
+	for _, f := range fixture {
+		keys = append(keys, f.Key)
+	}
+	return strictLintUniverse{goFiles: files, messages: messagesByLinter(keys)}
+}
+
+// universeProblems reports what the universe cannot measure: no Go file to
+// measure a path pattern against, or a gated linter with no known message to
+// measure a text pattern against. Either would let a wholesale exclusion
+// pass unmeasured.
+func (u strictLintUniverse) universeProblems() []string {
+	var out []string
+	if len(u.goFiles) == 0 {
+		out = append(out, "no Go file of the module is known, so no path pattern can be measured for a wholesale exclusion")
+	}
+	for _, l := range strictGatedLinters() {
+		if len(u.messages[l]) == 0 {
+			out = append(out, fmt.Sprintf("no %s message is known (neither %s nor %s holds one), so no text pattern can be measured against it for a wholesale exclusion", l, strictLintBaselineFile, strictFixtureReportFile))
+		}
+	}
+	return out
+}
+
+// everyPath reports how re, a path pattern, matches every Go file
+// golangci-lint lints, or "" when it leaves one out.
+func (u strictLintUniverse) everyPath(re *regexp.Regexp) string {
 	if re.MatchString("") {
-		return "matches the empty string, so it matches every path or message: a wholesale exclusion"
+		return "matches the empty string, so it matches every path"
+	}
+	if slices.ContainsFunc(u.goFiles, func(f string) bool { return !re.MatchString(f) }) {
+		return ""
+	}
+	return fmt.Sprintf("matches every one of the module's %d Go files", len(u.goFiles))
+}
+
+// everyMessage reports how re, the text pattern of a rule naming linters
+// (every gated linter when it names none, as golangci-lint reads a rule
+// without linters), matches every known message of a gated linter the rule
+// applies to, or "" when it leaves one of each out.
+func (u strictLintUniverse) everyMessage(re *regexp.Regexp, linters []string) string {
+	if re.MatchString("") {
+		return "matches the empty string, so it matches every message"
+	}
+	for _, l := range strictGatedLinters() {
+		msgs := u.messages[l]
+		if (len(linters) != 0 && !slices.Contains(linters, l)) || len(msgs) == 0 {
+			continue
+		}
+		if !slices.ContainsFunc(msgs, func(m string) bool { return !re.MatchString(m) }) {
+			return fmt.Sprintf("matches every %s message the witness knows (%d, from the committed baseline and the strict fixture)", l, len(msgs))
+		}
 	}
 	return ""
 }
 
+// compilePattern compiles an exclusion's path or text pattern, or reports
+// why it cannot be read as one: empty, or not a regular expression.
+func compilePattern(pattern string) (*regexp.Regexp, string) {
+	if strings.TrimSpace(pattern) == "" {
+		return nil, "is empty"
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Sprintf("is not a regular expression (%v)", err)
+	}
+	return re, ""
+}
+
+// exclusionRuleProblems reports how rule i departs from ac-3: a key outside
+// golangci-lint v2's rule schema, no path or text pattern, a pattern that
+// cannot be read, or patterns that together exclude a gated linter
+// wholesale (every named path and text pattern matching everything).
+func exclusionRuleProblems(i int, rule map[string]interface{}, u strictLintUniverse) []string {
+	var out []string
+	if extra := keysOutside(sortedKeys(rule), []string{"linters", "path", "path-except", "source", "text"}); len(extra) != 0 {
+		out = append(out, fmt.Sprintf("exclusion rule %d declares %v, which golangci-lint v2's rule schema does not have", i, extra))
+	}
+	pathPattern, hasPath := asStringVal(rule["path"])
+	textPattern, hasText := asStringVal(rule["text"])
+	if !hasPath && !hasText {
+		return append(out, fmt.Sprintf("exclusion rule %d names neither a path nor a text pattern, so it excludes wholesale", i))
+	}
+	named, everything := 0, []string(nil)
+	if hasPath {
+		named++
+		if re, why := compilePattern(pathPattern); why != "" {
+			out = append(out, fmt.Sprintf("exclusion rule %d's path %q %s", i, pathPattern, why))
+		} else if all := u.everyPath(re); all != "" {
+			everything = append(everything, fmt.Sprintf("its path %q %s", pathPattern, all))
+		}
+	}
+	if hasText {
+		named++
+		if re, why := compilePattern(textPattern); why != "" {
+			out = append(out, fmt.Sprintf("exclusion rule %d's text %q %s", i, textPattern, why))
+		} else if all := u.everyMessage(re, asStringSlice(rule["linters"])); all != "" {
+			everything = append(everything, fmt.Sprintf("its text %q %s", textPattern, all))
+		}
+	}
+	if len(everything) == named {
+		out = append(out, fmt.Sprintf("exclusion rule %d excludes wholesale: %s, and it names no narrower pattern", i, strings.Join(everything, ", and ")))
+	}
+	return out
+}
+
 // strictLintExclusionProblems returns every way raw, a strict configuration's
-// source, departs from ac-3: a gated linter disabled or not enabled, an
-// implicit exclusion (presets, or generated other than `disable`), an
-// exclusion that names no path or text pattern, names one that matches
-// everything, or carries no reason, and an exclusion count other than
-// pinned.
-func strictLintExclusionProblems(raw string, pinned int) []string {
+// source, departs from ac-3, measured against u: a gated linter disabled or
+// not enabled, an implicit exclusion (presets, or generated other than
+// `disable`), an exclusion that names no path or text pattern, names one that
+// cannot be read, excludes a gated linter wholesale, or carries no reason, an
+// exclusion count other than pinned, and a universe that cannot measure an
+// exclusion.
+func strictLintExclusionProblems(raw string, pinned int, u strictLintUniverse) []string {
 	top, err := decodeStrictLintConfig(raw)
 	if err != nil {
 		return []string{err.Error()}
 	}
-	var out []string
+	out := u.universeProblems()
 	if v, ok := lookupPath(top, "linters", "disable"); ok && v != nil {
 		out = append(out, fmt.Sprintf("linters.disable is set (%v): the strict configuration disables no linter", v))
 	}
@@ -240,30 +438,19 @@ func strictLintExclusionProblems(raw string, pinned int) []string {
 			out = append(out, fmt.Sprintf("exclusion rule %d is not a mapping", i))
 			continue
 		}
-		if extra := keysOutside(sortedKeys(rule), []string{"linters", "path", "path-except", "source", "text"}); len(extra) != 0 {
-			out = append(out, fmt.Sprintf("exclusion rule %d declares %v, which golangci-lint v2's rule schema does not have", i, extra))
-		}
-		pathPattern, hasPath := asStringVal(rule["path"])
-		textPattern, hasText := asStringVal(rule["text"])
-		if !hasPath && !hasText {
-			out = append(out, fmt.Sprintf("exclusion rule %d names neither a path nor a text pattern, so it excludes wholesale", i))
-		}
-		if hasPath {
-			if why := wholesalePattern(pathPattern); why != "" {
-				out = append(out, fmt.Sprintf("exclusion rule %d's path %q %s", i, pathPattern, why))
-			}
-		}
-		if hasText {
-			if why := wholesalePattern(textPattern); why != "" {
-				out = append(out, fmt.Sprintf("exclusion rule %d's text %q %s", i, textPattern, why))
-			}
-		}
+		out = append(out, exclusionRuleProblems(i, rule, u)...)
 	}
 	paths, _ := asSlice(exMap["paths"])
 	for i, p := range paths {
 		count++
 		pattern, _ := asStringVal(p)
-		if why := wholesalePattern(pattern); why != "" {
+		re, why := compilePattern(pattern)
+		if why == "" {
+			if all := u.everyPath(re); all != "" {
+				why = all + ": a wholesale exclusion"
+			}
+		}
+		if why != "" {
 			out = append(out, fmt.Sprintf("excluded path %d %q %s", i, pattern, why))
 		}
 	}
@@ -318,8 +505,9 @@ issues:
 // excluded wholesale, and the exclusion count equals strictLintExclusionCount;
 // each falsifier shape, applied to a fixture, is reported.
 func TestStrictLintExclusionsCounted(t *testing.T) {
+	universe := realStrictLintUniverse(t)
 	t.Run("the committed configuration", func(t *testing.T) {
-		for _, p := range strictLintExclusionProblems(readStrictLintConfig(t), strictLintExclusionCount) {
+		for _, p := range strictLintExclusionProblems(readStrictLintConfig(t), strictLintExclusionCount, universe) {
 			t.Error(p)
 		}
 	})
@@ -328,14 +516,16 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 		return mutateSource(t, "the exclusion fixture", strictExclusionFixture, from, to)
 	}
 	const (
-		ruleReason = "      # Generated protobuf code is never edited by hand.\n"
-		pathReason = "      # A vendored copy is linted upstream.\n"
+		ruleReason  = "      # Generated protobuf code is never edited by hand.\n"
+		pathReason  = "      # A vendored copy is linted upstream.\n"
+		fixtureRule = "      - path: \\.pb\\.go$\n        linters:\n          - gochecknoglobals\n"
 	)
 	cases := []struct {
-		name   string
-		config func(t *testing.T) string
-		pinned int
-		want   string // a substring of one problem; "" wants none
+		name     string
+		config   func(t *testing.T) string
+		pinned   int
+		universe func(u strictLintUniverse) strictLintUniverse // nil measures against the real one
+		want     string                                        // a substring of one problem; "" wants none
 	}{
 		{name: "the fixture, reasoned and counted", config: func(*testing.T) string { return strictExclusionFixture }, pinned: 2},
 		{name: "a count other than the pin", config: func(*testing.T) string { return strictExclusionFixture }, pinned: 1, want: "holds 2 exclusion(s), but strictLintExclusionCount pins 1"},
@@ -347,6 +537,49 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 		{name: "a rule whose path matches everything", config: func(t *testing.T) string { return mutate(t, `path: \.pb\.go$`, `path: .*`) }, pinned: 2, want: `path ".*" matches the empty string`},
 		{name: "a rule whose text matches everything", config: func(t *testing.T) string { return mutate(t, `path: \.pb\.go$`, `text: "(?:)"`) }, pinned: 2, want: `text "(?:)" matches the empty string`},
 		{name: "an excluded path matching everything", config: func(t *testing.T) string { return mutate(t, "      - ^third_party/\n", "      - \"\"\n") }, pinned: 2, want: `excluded path 0 "" is empty`},
+		// Review finding S1-B1: wholesale exclusions whose patterns do not
+		// match the empty string, measured against the module's Go files and
+		// each gated linter's known messages. The first four are the
+		// reviewer's.
+		{name: "a text pattern matching every noctx message", config: func(t *testing.T) string {
+			return mutate(t, fixtureRule, "      - text: \".\"\n        linters:\n          - noctx\n")
+		}, pinned: 2, want: `its text "." matches every noctx message`},
+		{name: "a path pattern matching every Go file, for one linter", config: func(t *testing.T) string { return mutate(t, `path: \.pb\.go$`, `path: "."`) }, pinned: 2, want: `its path "." matches every one of the module's`},
+		{name: "a path pattern matching every Go file, for every linter", config: func(t *testing.T) string {
+			return mutate(t, fixtureRule, "      - path: \\.go$\n")
+		}, pinned: 2, want: `its path "\\.go$" matches every one of the module's`},
+		{name: "a text pattern matching every gochecknoglobals message", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, `text: "is a global variable"`)
+		}, pinned: 2, want: `its text "is a global variable" matches every gochecknoglobals message`},
+		{name: "a text pattern matching every message of one of the linters a rule names none of", config: func(t *testing.T) string {
+			return mutate(t, fixtureRule, "      - text: \"found a struct\"\n")
+		}, pinned: 2, want: `its text "found a struct" matches every containedctx message`},
+		{name: "a path and a text pattern, both matching everything", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, "path: \\.go$\n        text: \"is a global variable\"")
+		}, pinned: 2, want: `excludes wholesale: its path "\\.go$" matches every one of the module's`},
+		{name: "an excluded path matching every Go file", config: func(t *testing.T) string { return mutate(t, "      - ^third_party/\n", "      - \\.go$\n") }, pinned: 2, want: `excluded path 0 "\\.go$" matches every one of the module's`},
+		// A narrow pattern beside one that matches everything is not
+		// wholesale: the rule still leaves the linter findings to report.
+		{name: "a narrow path beside a text matching everything", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, "path: ^internal/\n        text: \".\"")
+		}, pinned: 2},
+		{name: "a narrow text beside a path matching everything", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, "path: \\.go$\n        text: \"^counter is\"")
+		}, pinned: 2},
+		{name: "a text pattern matching every message of a linter the rule does not name", config: func(t *testing.T) string {
+			return mutate(t, `path: \.pb\.go$`, `text: "must not be called"`)
+		}, pinned: 2},
+		// A universe that cannot measure an exclusion fails rather than
+		// passing it unmeasured.
+		{name: "no Go file to measure a path against", config: func(*testing.T) string { return strictExclusionFixture }, pinned: 2, universe: func(u strictLintUniverse) strictLintUniverse {
+			u.goFiles = nil
+			return u
+		}, want: "no Go file of the module is known"},
+		{name: "no known message of a gated linter", config: func(*testing.T) string { return strictExclusionFixture }, pinned: 2, universe: func(u strictLintUniverse) strictLintUniverse {
+			u.messages = maps.Clone(u.messages)
+			delete(u.messages, "errorlint")
+			return u
+		}, want: "no errorlint message is known"},
 		{name: "a rule key outside the schema", config: func(t *testing.T) string {
 			return mutate(t, "        linters:\n", "        reason: x\n        linters:\n")
 		}, pinned: 2, want: "declares [reason]"},
@@ -371,7 +604,11 @@ func TestStrictLintExclusionsCounted(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			problems := strictLintExclusionProblems(tc.config(t), tc.pinned)
+			u := universe
+			if tc.universe != nil {
+				u = tc.universe(u)
+			}
+			problems := strictLintExclusionProblems(tc.config(t), tc.pinned, u)
 			if tc.want == "" {
 				if len(problems) != 0 {
 					t.Fatalf("problems = %q, want none", problems)

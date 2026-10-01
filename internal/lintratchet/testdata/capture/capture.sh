@@ -26,6 +26,13 @@
 #   editline    the global's flagged line edited (int to int64), its message
 #               unchanged
 #   broken      alpha does not compile (golangci-lint reports typecheck)
+#
+# One more report is not a variant: strictfixture, the strict fixture module
+# (../strictfixture), linted in place with the root configuration exactly as
+# TestLintStrict_ReportsGroundRuleFindings lints it, so its paths are
+# repository-relative. TestStrictFixtureReportIsCurrent holds it equal to a
+# live run, and internal/specalign's TestStrictLintExclusionsCounted reads
+# each gated linter's message from it.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -44,16 +51,23 @@ trap 'rm -rf "$tmp"' EXIT
 
 variants=("$@")
 if [ ${#variants[@]} -eq 0 ]; then
-	variants=(base fixed lineshift movefile movepkg duplicate sameline newfinding editline broken)
+	variants=(base fixed lineshift movefile movepkg duplicate sameline newfinding editline broken strictfixture)
 fi
 
 mkdir -p "$out"
 for v in "${variants[@]}"; do
-	cp -R "$here/variants/$v" "$tmp/$v"
-	cp "$root/.golangci.strict.yml" "$tmp/$v/"
+	if [ "$v" = strictfixture ]; then
+		dir="$root/internal/lintratchet/testdata/strictfixture"
+		config="$root/.golangci.strict.yml"
+	else
+		cp -R "$here/variants/$v" "$tmp/$v"
+		cp "$root/.golangci.strict.yml" "$tmp/$v/"
+		dir="$tmp/$v"
+		config=.golangci.strict.yml
+	fi
 	status=0
-	(cd "$tmp/$v" && GOOS=linux GOARCH=amd64 GOFLAGS= GOWORK=off GOPROXY=off GOTOOLCHAIN=local \
-		golangci-lint run --config .golangci.strict.yml --issues-exit-code=0 --allow-parallel-runners \
+	(cd "$dir" && GOOS=linux GOARCH=amd64 GOFLAGS= GOWORK=off GOPROXY=off GOTOOLCHAIN=local \
+		golangci-lint run --config "$config" --issues-exit-code=0 --allow-parallel-runners \
 		--output.json.path="$tmp/$v.json" ./...) || status=$?
 	if [ "$status" -ne 0 ]; then
 		echo "capture.sh: golangci-lint exited $status for variant $v" >&2
