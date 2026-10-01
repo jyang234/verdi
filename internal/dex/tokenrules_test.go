@@ -46,6 +46,10 @@ func TestTokenRules(t *testing.T) {
 		{name: "the tan() math function", css: block(".x { color: tan(45deg); }")},
 		{name: "a hyphenated identifier holding a colour word", css: block(".x { transition: dark-red 1s; }")},
 		{name: "a named colour as a whole token", css: block(".x { color: tan; }"), refused: "color"},
+		// A CSS system colour is a colour literal too (F1B-A7).
+		{name: "a system colour", css: block(".x { color: CanvasText; }"), refused: "color"},
+		{name: "a system colour in a border", css: block(".x { border: 1px solid ButtonBorder; }"), refused: "border"},
+		{name: "a system colour in accent-color", css: block(".x { accent-color: AccentColor; }"), refused: "accent-color"},
 		// The pushpin is the rule's subject (F1A-A7).
 		{name: "the pushpin's own highlights", css: block(".yarn-handle { background: radial-gradient(#fff, #c33); }")},
 		{name: "the pushpin's hover state inside a card", css: block(".card .yarn-handle:hover { background: #dd9482; }")},

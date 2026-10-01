@@ -732,9 +732,9 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 type asdSnapshot struct {
 	Revision string `json:"revision"`
 	HTML     string `json:"html"`
-	// Posture is the posture row rendered from the top bar's facts, as its
-	// own field (SI-323 (3)): the region still carries the same bytes
-	// today, and the bar takes it over when the row leaves the region.
+	// Posture is the top bar's posture group rendered from the bar's facts,
+	// as its own field (SI-323 (3)): the posture lives in the top bar,
+	// outside the region, and a refresh swaps it from here.
 	Posture     string          `json:"posture"`
 	BaseDigest  string          `json:"base_digest"`
 	BaseSpecB64 string          `json:"base_spec_b64"`

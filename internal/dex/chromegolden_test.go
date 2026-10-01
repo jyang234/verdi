@@ -466,11 +466,17 @@ func colourLiteral(value string) string {
 	return ""
 }
 
-// namedColours is CSS Color Module 4's named colours (transparent,
+// namedColours is CSS Color Module 4's named colours and its system
+// colours (Canvas, CanvasText, ...; F1B-A7), lowercased — transparent,
 // currentColor, and the CSS-wide keywords are no colour literal and are
-// absent).
+// absent.
 func namedColours() map[string]bool {
 	m := map[string]bool{}
+	for _, n := range strings.Fields(`canvas canvastext linktext visitedtext activetext buttonface buttontext
+		buttonborder field fieldtext highlight highlighttext selecteditem selecteditemtext mark marktext
+		graytext accentcolor accentcolortext`) {
+		m[n] = true
+	}
 	for _, n := range strings.Fields(`aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond
 		blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan
 		darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange

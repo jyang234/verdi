@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/topbar.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -91,6 +91,14 @@ func boardDiagramJSHandler() http.HandlerFunc {
 // posture as the board scripts.
 func readinessJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/readiness.js")
+}
+
+// topBarJSHandler serves the top bar's one JS file
+// (spec/chrome-and-tokens-v2), referenced from every workbench page —
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (spec/workbench-redesign co-1; TestTopBarAsset_ServedWithinBudget).
+func topBarJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/topbar.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {
