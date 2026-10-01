@@ -241,6 +241,24 @@ func TestStyleCSSHandler_Happy(t *testing.T) {
 	}
 }
 
+// TestStyleCSSHandler_ServesWorkbenchOnlyBlocks: the workbench serves the
+// whole stylesheet, workbench-only blocks included (SI-322) — only the
+// docs site's copy is stripped (internal/dex's docsStyleCSS).
+func TestStyleCSSHandler_ServesWorkbenchOnlyBlocks(t *testing.T) {
+	h := NewHandler("/store/root")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/style.css", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"/* verdi:workbench-only:begin */", "--wall-edge: #d6cdb6;", "--wall-edge: #3a3325;", "--scrim: rgba(35,41,32,.28);", "--scrim: rgba(0,0,0,.5);", "/* verdi:workbench-only:end */"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the workbench stylesheet lacks %q", want)
+		}
+	}
+}
+
 func TestStyleCSSHandler_Negative(t *testing.T) {
 	h := NewHandler("/store/root")
 	req := httptest.NewRequest(http.MethodPost, "/assets/style.css", nil)

@@ -153,6 +153,25 @@
   }
 }
 
+/* verdi:workbench-only:begin */
+/* Workbench-only tokens (spec/chrome-and-tokens-v2 ac-4; ledger SI-322):
+   this block is served by the workbench and stripped from the docs site's
+   copy, so the docs build stays byte-identical. Values are the redesign
+   handoff's, verbatim: --wall-edge is the canvas border, --scrim the
+   drawer and modal backdrop. */
+:root {
+  --wall-edge: #d6cdb6;
+  --scrim: rgba(35,41,32,.28);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wall-edge: #3a3325;
+    --scrim: rgba(0,0,0,.5);
+  }
+}
+
+/* verdi:workbench-only:end */
 /* ---------- base ---------- */
 
 * { box-sizing: border-box; }

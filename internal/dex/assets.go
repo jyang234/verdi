@@ -94,8 +94,10 @@ func writeStaticAssets(outDir string) error {
 		var err error
 		if a.Name == "style.css" {
 			// The stylesheet is the one asset that is composed, not copied
-			// verbatim: its two chroma palettes are generated (StyleCSS).
-			data, err = StyleCSS()
+			// verbatim: its two chroma palettes are generated (StyleCSS),
+			// and the docs site's copy drops the workbench-only blocks the
+			// workbench serves (docsStyleCSS, SI-322).
+			data, err = docsStyleCSS()
 		} else {
 			data, err = embeddedAssets.ReadFile(a.EmbedPath)
 		}
