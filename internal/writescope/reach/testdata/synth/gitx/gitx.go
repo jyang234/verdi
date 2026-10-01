@@ -32,5 +32,27 @@ func (l Location) String() string { return l.Dir }
 
 type hidden struct{}
 
-// Visible is exported but its receiver type is not.
+// Visible is exported but its receiver type is not: a caller holding a
+// hidden value can still call it.
 func (hidden) Visible() {}
+
+// StageAll is an exported variable of function type: callable API that is
+// no declared function.
+var StageAll = func(ctx context.Context, dir string) error { return Mutate(ctx, dir) }
+
+// Stager is an exported interface.
+type Stager interface {
+	Stage(ctx context.Context) error
+}
+
+type stager struct{}
+
+// Stage is an exported method of an unexported type.
+func (stager) Stage(ctx context.Context) error { return Mutate(ctx, ".") }
+
+// NewStager returns the unexported implementation behind the interface.
+func NewStager() Stager { return stager{} }
+
+// Loc is an exported alias of a type this package declares: its methods
+// are Location's.
+type Loc = Location

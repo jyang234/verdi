@@ -39,9 +39,9 @@ func lookupFunc(t *testing.T, prog *reach.Program, pkgPath, name string) *types.
 
 // synthTargets is the synthetic mutating set: gitx.Mutate, gitx.Publish,
 // gitx.Prune, and gitx.Other.
-func synthTargets(t *testing.T, prog *reach.Program) map[*types.Func]bool {
+func synthTargets(t *testing.T, prog *reach.Program) map[types.Object]bool {
 	t.Helper()
-	return map[*types.Func]bool{
+	return map[types.Object]bool{
 		lookupFunc(t, prog, "example.com/synth/gitx", "Mutate"):  true,
 		lookupFunc(t, prog, "example.com/synth/gitx", "Publish"): true,
 		lookupFunc(t, prog, "example.com/synth/gitx", "Prune"):   true,
@@ -50,7 +50,7 @@ func synthTargets(t *testing.T, prog *reach.Program) map[*types.Func]bool {
 }
 
 // mustReach is Graph.Reach for an entry the test built the graph with.
-func mustReach(t *testing.T, g *reach.Graph, e reach.Entry, targets map[*types.Func]bool) []reach.Hit {
+func mustReach(t *testing.T, g *reach.Graph, e reach.Entry, targets map[types.Object]bool) []reach.Hit {
 	t.Helper()
 	hits, err := g.Reach(e, targets)
 	if err != nil {
@@ -62,7 +62,7 @@ func mustReach(t *testing.T, g *reach.Graph, e reach.Entry, targets map[*types.F
 func hitNames(hits []reach.Hit) []string {
 	var out []string
 	for _, h := range hits {
-		out = append(out, h.Func.Name())
+		out = append(out, h.Target.Name())
 	}
 	sort.Strings(out)
 	return out
@@ -101,6 +101,71 @@ func TestGraph_ReachResolvesEveryCallShape(t *testing.T) {
 	}
 }
 
+// TestGraph_ReachHitsEveryTargetShape pins the reach half of R1-A4: a
+// classified exported variable of function type and a classified interface
+// method are targets a verb reaches by using them.
+func TestGraph_ReachHitsEveryTargetShape(t *testing.T) {
+	prog := loadSynth(t)
+	const app = "example.com/synth/app"
+	targets := map[types.Object]bool{}
+	for _, name := range []string{"gitx.StageAll", "(gitx.Stager).Stage"} {
+		obj := prog.ObjectByName(name)
+		if obj == nil {
+			t.Fatalf("ObjectByName(%s) = nil", name)
+		}
+		targets[obj] = true
+	}
+	tests := []struct {
+		root string
+		want string
+	}{
+		{"ViaExportedVar", "StageAll"},
+		{"ViaExportedInterface", "Stage"},
+		{"Direct", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.root, func(t *testing.T) {
+			entry := reach.Entry{Surface: "test", Name: tt.root, Roots: []reach.Root{{Func: lookupFunc(t, prog, app, tt.root)}}}
+			g, err := reach.Build(prog, []reach.Entry{entry})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if got := strings.Join(hitNames(mustReach(t, g, entry, targets)), ","); got != tt.want {
+				t.Fatalf("Reach(%s) = %q, want %q", tt.root, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGraph_ReachFollowsGitxsOtherExportShapes: through gitx's exported
+// function-typed variable and its interface's unexported implementation,
+// a verb reaches the primitive they call.
+func TestGraph_ReachFollowsGitxsOtherExportShapes(t *testing.T) {
+	prog := loadSynth(t)
+	const app = "example.com/synth/app"
+	tests := []struct {
+		name string
+		root string
+		want []string
+	}{
+		{"exported variable", "ViaExportedVar", []string{"Mutate"}},
+		{"exported interface behind a constructor", "ViaExportedInterface", []string{"Mutate"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := reach.Entry{Surface: "test", Name: tt.root, Roots: []reach.Root{{Func: lookupFunc(t, prog, app, tt.root)}}}
+			g, err := reach.Build(prog, []reach.Entry{entry})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			got := hitNames(mustReach(t, g, entry, synthTargets(t, prog)))
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("Reach(%s) = %v, want %v", tt.root, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
 	prog := loadSynth(t)
 	const app = "example.com/synth/app"
@@ -115,7 +180,7 @@ func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
 	other := lookupFunc(t, prog, "example.com/synth/gitx", "Other")
 	for _, e := range entries {
 		for _, h := range mustReach(t, g, e, synthTargets(t, prog)) {
-			if h.Func == other {
+			if h.Target == other {
 				t.Fatalf("%s reaches gitx.Other, which only the unlisted Unreached calls", e.Name)
 			}
 		}

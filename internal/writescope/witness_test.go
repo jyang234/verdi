@@ -165,10 +165,10 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 		if err != nil {
 			t.Fatalf("%s: %v", target, err)
 		}
-		targets := map[*types.Func]bool{}
+		targets := map[types.Object]bool{}
 		for _, name := range ws.MutatingFuncs(ws.Classification()) {
-			if fn := prog.FuncByName(name); fn != nil {
-				targets[fn] = true
+			if obj := prog.ObjectByName(name); obj != nil {
+				targets[obj] = true
 			}
 		}
 		for _, e := range entries {
@@ -183,7 +183,7 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 				t.Fatalf("%s: %v", target, err)
 			}
 			for _, h := range hits {
-				if name := prog.FuncName(h.Func); !have[name] {
+				if name := prog.ObjectName(h.Target); !have[name] {
 					merged = append(merged, ws.Hit{Func: name, Path: h.Path})
 					have[name] = true
 				}
@@ -197,7 +197,7 @@ func analyzeModule(t *testing.T, root string) ws.Facts {
 		}
 		facts.PreDispatchRoots += len(pre.Roots)
 		for _, h := range preHits {
-			if name := prog.FuncName(h.Func); !preSeen[name] {
+			if name := prog.ObjectName(h.Target); !preSeen[name] {
 				facts.PreDispatch = append(facts.PreDispatch, ws.Hit{Func: name, Path: h.Path})
 				preSeen[name] = true
 			}

@@ -48,11 +48,12 @@ type Entry struct {
 	Bound []*types.Var
 }
 
-// Hit is one target an entry reaches, with one call path from a root of
-// the entry to the target (node names, root first).
+// Hit is one target an entry reaches (a function or method, an interface
+// method, or a package-level variable holding a function), with one call
+// path from a root of the entry to the target (node names, root first).
 type Hit struct {
-	Func *types.Func
-	Path []string
+	Target types.Object
+	Path   []string
 }
 
 // Graph is the module's call graph. Its nodes are the module's declared
@@ -102,7 +103,7 @@ type entryKey struct{ surface, name string }
 
 type node struct {
 	name  string
-	fn    *types.Func
+	obj   types.Object // the function, interface method, or variable the node is; nil for literals and arms
 	out   map[int]bool
 	reads []fieldRead
 }
@@ -195,7 +196,7 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 // delegate reaches. The entry must be one the graph was built for; an
 // entry the graph does not know is an error, never one that reaches
 // nothing.
-func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) {
+func (g *Graph) Reach(entry Entry, targets map[types.Object]bool) ([]Hit, error) {
 	idx, ok := g.byEntry[entryKey{entry.Surface, entry.Name}]
 	if !ok {
 		if _, err := g.rootIDs(entry); err != nil {
@@ -233,7 +234,7 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) 
 // cut node that is not one of its own roots, and returns the nodes it
 // visits and the targets among them. check, when set, vets each visited
 // node.
-func (g *Graph) traverse(idx int, cut map[int]bool, targets map[*types.Func]bool, check func(*node) error) (map[int]bool, []Hit, error) {
+func (g *Graph) traverse(idx int, cut map[int]bool, targets map[types.Object]bool, check func(*node) error) (map[int]bool, []Hit, error) {
 	own := map[int]bool{}
 	parent := map[int]int{}
 	var queue []int
@@ -249,8 +250,8 @@ func (g *Graph) traverse(idx int, cut map[int]bool, targets map[*types.Func]bool
 		id := queue[0]
 		queue = queue[1:]
 		n := g.nodes[id]
-		if n.fn != nil && targets[n.fn] {
-			hits = append(hits, Hit{Func: n.fn, Path: g.path(parent, id)})
+		if n.obj != nil && targets[n.obj] {
+			hits = append(hits, Hit{Target: n.obj, Path: g.path(parent, id)})
 		}
 		if check != nil {
 			if err := check(n); err != nil {
@@ -272,7 +273,7 @@ func (g *Graph) traverse(idx int, cut map[int]bool, targets map[*types.Func]bool
 	for id := range parent {
 		visited[id] = true
 	}
-	sort.Slice(hits, func(i, j int) bool { return hits[i].Func.FullName() < hits[j].Func.FullName() })
+	sort.Slice(hits, func(i, j int) bool { return g.prog.ObjectName(hits[i].Target) < g.prog.ObjectName(hits[j].Target) })
 	return visited, hits, nil
 }
 
@@ -428,23 +429,26 @@ func (g *Graph) position(pos token.Pos) string {
 // declare creates a node for every function, literal, and initialized
 // package-level variable, and collects the module's named types.
 func (g *Graph) declare() {
+	var ifaces []*types.Named
 	for _, pkg := range g.prog.packages {
 		for _, f := range pkg.Files {
 			for _, decl := range f.Decls {
 				switch d := decl.(type) {
 				case *ast.FuncDecl:
 					if fn, ok := pkg.Info.Defs[d.Name].(*types.Func); ok {
-						g.byFunc[fn] = g.add(&node{name: g.prog.FuncName(fn), fn: fn})
+						g.byFunc[fn] = g.add(&node{name: g.prog.FuncName(fn), obj: fn})
 					}
 				case *ast.GenDecl:
+					// Every package-level variable is a node, initialized or
+					// not, so one classified as a target is always found.
 					for _, spec := range d.Specs {
 						vs, ok := spec.(*ast.ValueSpec)
-						if !ok || len(vs.Values) == 0 {
+						if !ok {
 							continue
 						}
 						for _, id := range vs.Names {
 							if v, ok := pkg.Info.Defs[id].(*types.Var); ok {
-								g.byVar[v] = g.add(&node{name: "var " + strings.TrimPrefix(v.Pkg().Path(), g.prog.Module+"/") + "." + v.Name()})
+								g.byVar[v] = g.add(&node{name: "var " + g.prog.ObjectName(v), obj: v})
 							}
 						}
 					}
@@ -463,10 +467,29 @@ func (g *Graph) declare() {
 				continue
 			}
 			named, ok := tn.Type().(*types.Named)
-			if !ok || types.IsInterface(named) || named.TypeParams().Len() > 0 {
+			if !ok {
+				continue
+			}
+			if types.IsInterface(named) {
+				ifaces = append(ifaces, named)
+				continue
+			}
+			if named.TypeParams().Len() > 0 {
 				continue
 			}
 			g.named = append(g.named, named)
+		}
+	}
+	// An interface method is a node too: a call to it is an edge to it as
+	// well as to every implementation, so a classified one is found.
+	sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].Obj().Pos() < ifaces[j].Obj().Pos() })
+	for _, named := range ifaces {
+		iface := named.Underlying().(*types.Interface)
+		for i := 0; i < iface.NumExplicitMethods(); i++ {
+			m := iface.ExplicitMethod(i)
+			if _, ok := g.byFunc[m]; !ok {
+				g.byFunc[m] = g.add(&node{name: g.prog.FuncName(m), obj: m})
+			}
 		}
 	}
 	sort.Slice(g.named, func(i, j int) bool {
@@ -597,6 +620,7 @@ func (g *Graph) use(from int, obj types.Object) {
 			return
 		}
 		if isAbstract(o) {
+			g.edgeFunc(from, o)
 			for _, impl := range g.implementations(o) {
 				g.edgeFunc(from, impl)
 			}

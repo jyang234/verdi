@@ -30,9 +30,11 @@ type Classified struct {
 
 var funcNameRE = regexp.MustCompile(`^(\(\*?)?[a-z][A-Za-z0-9_./-]*\.[A-Za-z_][A-Za-z0-9_]*(\)\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
-// Classification returns every exported internal/gitx function and method,
-// and every function outside gitx that writes under a repository's git
-// directory, each classified mutating or read-only. The gitx half matches
+// Classification returns every exported internal/gitx function and method
+// (with every other shape a caller can run code through: methods of
+// unexported types and of interfaces, and exported variables of function
+// type), and every function outside gitx that writes under a repository's
+// git directory, each classified mutating or read-only. The gitx half matches
 // the census of 2026-09-30 (twenty of gitx's functions mutate; object
 // writes and git apply count, because each is a git write even where its
 // ritual's declaration owns the effect elsewhere). The non-gitx half is
@@ -43,6 +45,10 @@ func Classification() []Classified {
 	ro := func(name string) Classified { return Classified{Func: name, Effect: ReadOnly} }
 	return []Classified{
 		ro("(internal/gitx.DiffEntry).Pure"),
+		// The observer gitx calls before each command it runs: its
+		// implementations live outside gitx, where reachability follows
+		// them like any other code.
+		ro("(internal/gitx.Observer).Observe"),
 		ro("(internal/gitx.Reachability).String"),
 		mut("internal/gitx.AddAll"), // add -A
 		mut("internal/gitx.AddPaths"),

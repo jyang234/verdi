@@ -49,6 +49,7 @@ type Program struct {
 	byPath   map[string]*Package
 	decls    map[*types.Func]funcDecl
 	byName   map[string]*types.Func
+	objects  map[string]types.Object // interface methods and package-level variables, by ObjectName
 	inputs   []string
 }
 
@@ -170,13 +171,27 @@ func Load(ctx context.Context, dir string, target Target, patterns ...string) (*
 			return nil, err
 		}
 	}
-	prog := &Program{Fset: l.fset, Module: l.modulePath, Target: target, byPath: l.module, decls: map[*types.Func]funcDecl{}, byName: map[string]*types.Func{}, inputs: inputs}
+	prog := &Program{Fset: l.fset, Module: l.modulePath, Target: target, byPath: l.module, decls: map[*types.Func]funcDecl{}, byName: map[string]*types.Func{}, objects: map[string]types.Object{}, inputs: inputs}
 	for _, path := range paths {
 		pkg, ok := l.module[path]
 		if !ok {
 			continue
 		}
 		prog.packages = append(prog.packages, pkg)
+		scope := pkg.Types.Scope()
+		for _, name := range scope.Names() {
+			switch obj := scope.Lookup(name).(type) {
+			case *types.Var:
+				prog.objects[prog.ObjectName(obj)] = obj
+			case *types.TypeName:
+				if iface, ok := obj.Type().Underlying().(*types.Interface); ok && !obj.IsAlias() {
+					for i := 0; i < iface.NumExplicitMethods(); i++ {
+						m := iface.ExplicitMethod(i)
+						prog.objects[prog.ObjectName(m)] = m
+					}
+				}
+			}
+		}
 		for _, f := range pkg.Files {
 			for _, d := range f.Decls {
 				if fd, ok := d.(*ast.FuncDecl); ok {

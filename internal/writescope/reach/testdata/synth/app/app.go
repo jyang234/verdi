@@ -67,6 +67,12 @@ func ReadOnly(ctx context.Context) error {
 // Publish reaches the second mutating primitive.
 func Publish(ctx context.Context) error { return gitx.Publish(ctx, ".") }
 
+// ViaExportedVar calls gitx's exported function-typed variable.
+func ViaExportedVar(ctx context.Context) error { return gitx.StageAll(ctx, ".") }
+
+// ViaExportedInterface calls gitx's exported interface.
+func ViaExportedInterface(ctx context.Context) error { return gitx.NewStager().Stage(ctx) }
+
 // Unreached is the only caller of gitx.Other, and no entry reaches it.
 func Unreached(ctx context.Context) error { return gitx.Other(ctx) }
 
