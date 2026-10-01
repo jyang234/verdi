@@ -147,3 +147,18 @@ func TestRegistry_PolicyAdoptStagesOnlyTheStarterPolicy(t *testing.T) {
 	}
 	t.Fatal("no policy_adopt declaration")
 }
+
+func TestHostVerbs_AreServeMcpAndContextMcp(t *testing.T) {
+	var got []string
+	for _, v := range ws.HostVerbs() {
+		got = append(got, v.String())
+	}
+	if strings.Join(got, ",") != "cli:context mcp,cli:mcp,cli:serve" {
+		t.Fatalf("HostVerbs() = %v, want exactly serve, mcp, and context mcp (ledger SI-317 (1))", got)
+	}
+	first := ws.HostVerbs()
+	first[0] = ws.CLI("mutated")
+	if ws.HostVerbs()[0] == ws.CLI("mutated") {
+		t.Fatal("HostVerbs() shares state between calls")
+	}
+}

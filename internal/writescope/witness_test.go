@@ -281,6 +281,19 @@ func deriveEntries(t *testing.T, prog *reach.Program, target reach.Target, tools
 	if err != nil {
 		t.Fatalf("%s: %v", target, err)
 	}
+	hosts := map[string]bool{}
+	for _, v := range ws.HostVerbs() {
+		hosts[v.Name] = true
+	}
+	for i := range cli {
+		if hosts[cli[i].Name] {
+			cli[i].Host = true
+			delete(hosts, cli[i].Name)
+		}
+	}
+	for name := range hosts {
+		t.Fatalf("%s: host verb %q is not a verb the CLI dispatcher defines (ledger SI-317 (1)); the witness cannot know what it serves", target, name)
+	}
 	inventory, err := reach.StringKeyedMap(prog, mod+cliPackage, cliInventory)
 	if err != nil {
 		t.Fatalf("%s: reading the CLI-verb inventory: %v", target, err)

@@ -22,6 +22,15 @@ func CarriedVerbs() []Verb {
 	}
 }
 
+// HostVerbs returns the CLI verbs that host other surfaces' entries:
+// exactly serve, mcp, and context mcp (ledger SI-314 (2a), SI-317 (1)). A
+// host declares nothing of its own for the workbench routes and MCP tools
+// it serves, whose mutations are theirs; every other verb's calls into a
+// hosted entry are its own.
+func HostVerbs() []Verb {
+	return []Verb{CLI("context mcp"), CLI("mcp"), CLI("serve")}
+}
+
 // Registry returns the write-scope declaration of every verb that mutates
 // a git repository, one declaration per ritual. Each declaration states
 // what its ritual does at this story's base, read through parent dc-7,

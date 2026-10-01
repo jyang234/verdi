@@ -11,10 +11,10 @@
 //
 // A verb's reach stops only where the mutation belongs to another entry
 // (ledger SI-314 (2)): at its own descendants (a dispatcher's subcommands,
-// a route's actions) and at the entries of another surface it serves (a
-// verb whose code reaches the workbench's route registrations or the MCP
-// tool switch serves those entries). Every other call, into another verb's
-// code included, is traversed.
+// a route's actions) and, for a host verb the caller names (ledger SI-317
+// (1): serve, mcp, context mcp), at the entries of another surface whose
+// site (route registration, MCP tool switch) its code reaches. Every other
+// call, into another verb's code or a hosted entry included, is traversed.
 //
 // The graph over-approximates: every use of a function, method value, or
 // function literal is an edge from the code that writes it, every

@@ -217,10 +217,12 @@ func testGraphReachCutsOnlyAtItsOwnDescendants(t *testing.T, prog *reach.Program
 	}
 }
 
-// testGraphReachCutsAtTheEntriesAHostServes pins the other half of R1-A3:
-// a verb that reaches the code dispatching another surface's entries (the
-// workbench's route registrations, the MCP tool switch) serves them, and
-// stops at their roots; every other call is traversed.
+// testGraphReachCutsAtTheEntriesAHostServes pins the other half of R1-A3,
+// as ledger SI-317 (1) corrects it: only a verb named a host (serve, mcp,
+// context mcp in the module; here serve and mcp) stops at the entries of
+// another surface whose site its code reaches; any other verb that builds
+// the same server and drives it in process (qc, qi) reaches what the
+// hosted entries do.
 func testGraphReachCutsAtTheEntriesAHostServes(t *testing.T, prog *reach.Program) {
 	cli, err := reach.CLIEntries(prog, "example.com/synth/cli", "Run", "cli")
 	if err != nil {
@@ -238,16 +240,21 @@ func testGraphReachCutsAtTheEntriesAHostServes(t *testing.T, prog *reach.Program
 	if err != nil {
 		t.Fatalf("SwitchEntries: %v", err)
 	}
+	for i := range cli {
+		cli[i].Host = cli[i].Name == "serve" || cli[i].Name == "mcp"
+	}
 	all := append(append(append(cli, pre), routes...), tools...)
 	got := reachByName(t, prog, all)
 	tests := []struct {
 		entry string
 		want  string
 	}{
-		{"serve", "Mutate"}, // the server's construction names app.Direct; every route it registers is served and cut (no Publish)
-		{"mcp", ""},         // reaches the tool switch: every tool is served and cut
-		{"ds", "Mutate"},    // delegation is traversed
-		{"sub", ""},         // its own arms are cut
+		{"serve", "Mutate"},      // the server's construction names app.Direct; every route it registers is served and cut (no Publish)
+		{"mcp", ""},              // reaches the tool switch: every tool is served and cut
+		{"qc", "Mutate,Publish"}, // R1-RR-B1: builds the same workbench but is no host, so the routes' work is its own
+		{"qi", "Mutate"},         // R1-RR-B1: calls the same tool server but is no host
+		{"ds", "Mutate"},         // delegation is traversed
+		{"sub", ""},              // its own arms are cut
 		{reach.PreDispatch, ""},
 		{"/quick/thing/{name}/api/{action}", "Mutate,Publish"},
 		{"/thing/{name}/api/{action}", ""},

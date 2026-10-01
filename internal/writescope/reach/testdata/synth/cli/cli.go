@@ -1,7 +1,9 @@
 // Package cli is a synthetic CLI dispatcher: if-arms on the verb, a
 // switch on args[0], a guarded flag arm, a key handed to a helper, an
 // alias that delegates to another verb's dispatcher with a copy of its
-// arguments, and two host verbs: one serves the workbench, one the tools.
+// arguments, two host verbs (serve serves the workbench, mcp the tools),
+// and two verbs that build the same servers in process without being
+// hosts (qc, qi).
 package cli
 
 import (
@@ -35,6 +37,16 @@ func Run(args []string) int {
 		return 0
 	}
 	if verb == "mcp" {
+		return code((&tools.Server{}).Method(context.Background(), "write_tool"))
+	}
+	if verb == "qc" {
+		// Builds the workbench and drives it in process, as serve's code
+		// would, but qc is no host: what the routes do is its own.
+		web.Register(http.NewServeMux())
+		return 0
+	}
+	if verb == "qi" {
+		// Calls a tool through the tool server in process; no host either.
 		return code((&tools.Server{}).Method(context.Background(), "write_tool"))
 	}
 	switch verb {

@@ -42,6 +42,11 @@ type Entry struct {
 	// analysis cannot resolve: its collaborators were built by code outside
 	// its own reach.
 	Site Root
+	// Host marks a verb that hosts other surfaces' entries (ledger SI-317
+	// (1): exactly serve, mcp, and context mcp, named by the caller): its
+	// reach stops at the entries of another surface whose site its code
+	// reaches. Any other verb's calls into hosted entries are traversed.
+	Host bool
 	// Bound names the route table's function-typed fields whose row values
 	// Roots already holds, because the registration handed the row itself
 	// to the handler it calls (internal/workbench's /b/{branch} mount).
@@ -194,11 +199,12 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 // Reach returns the targets entry reaches, sorted by name, each with one
 // shortest path. Traversal stops only at the roots of entries whose
 // mutations are their own (ledger SI-314 (2)): the entry's descendants (a
-// dispatcher's subcommands, a route's actions), and the entries of another
-// surface it serves, which are those whose site its code reaches (serve's
-// workbench routes; mcp's tools). Every other call, into another verb's
-// code included, is traversed, so a verb that delegates reaches what its
-// delegate reaches. The entry must be one the graph was built for; an
+// dispatcher's subcommands, a route's actions), and, when the entry is a
+// host (ledger SI-317 (1): serve, mcp, context mcp), the entries of
+// another surface whose site its code reaches. Every other call, into
+// another verb's code or a hosted entry included, is traversed, so a verb
+// that delegates, or builds a server and drives it in process, reaches
+// what its delegate reaches. The entry must be one the graph was built for; an
 // entry the graph does not know is an error, never one that reaches
 // nothing.
 func (g *Graph) Reach(entry Entry, targets map[types.Object]bool) ([]Hit, error) {
@@ -219,7 +225,7 @@ func (g *Graph) Reach(entry Entry, targets map[types.Object]bool) ([]Hit, error)
 		return nil, err
 	}
 	for j, e := range g.entries {
-		if e.Surface == entry.Surface {
+		if !entry.Host || e.Surface == entry.Surface {
 			continue
 		}
 		site, _ := g.siteNode(j)

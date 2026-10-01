@@ -37,7 +37,7 @@ func testCLIEntriesDeriveVerbsFromTheDispatcher(t *testing.T, prog *reach.Progra
 	if err != nil {
 		t.Fatalf("CLIEntries: %v", err)
 	}
-	want := []string{"alias", "alias2", "direct", "ds", "mcp", "op", "op a", "op b", "serve", "sub", "sub --fast", "sub read", "sub write"}
+	want := []string{"alias", "alias2", "direct", "ds", "mcp", "op", "op a", "op b", "qc", "qi", "serve", "sub", "sub --fast", "sub read", "sub write"}
 	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("CLI entries = %q, want %q", got, want)
 	}
