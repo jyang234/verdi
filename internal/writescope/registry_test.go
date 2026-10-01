@@ -34,10 +34,13 @@ func TestRegistry_ReturnsAFreshValueEachCall(t *testing.T) {
 	if second[0].Ritual == "mutated" || second[0].Verbs[0].Name == "mutated" {
 		t.Fatal("Registry() shares state between calls; a fixed table must be rebuilt per call")
 	}
-	fixes := ws.AwaitingFixes()
-	fixes[0].Ritual = "mutated"
-	if ws.AwaitingFixes()[0].Ritual == "mutated" {
-		t.Fatal("AwaitingFixes() shares state between calls")
+	// An empty awaiting-fix list (spec/ritual-effect-witness emptied it)
+	// has no element a caller could share; a non-empty one must not.
+	if fixes := ws.AwaitingFixes(); len(fixes) > 0 {
+		fixes[0].Ritual = "mutated"
+		if ws.AwaitingFixes()[0].Ritual == "mutated" {
+			t.Fatal("AwaitingFixes() shares state between calls")
+		}
 	}
 }
 
@@ -170,13 +173,10 @@ func TestHostVerbs_AreServeMcpAndContextMcp(t *testing.T) {
 // declaration that states the scoped fix. The story's intent is that the
 // list only shrinks: spec/ritual-effect-witness removes each path in the
 // same change as the fix that makes its ritual conform (dc-2), until the
-// list is empty, and no path is ever added back. Fixed so far: design
-// start, with its --supersedes path, the commit-to-design ritual, and
-// accept diagram.
+// list is empty, and no path is ever added back. All five are fixed, so
+// the list is empty.
 func TestAwaitingFixes_PinStoryDc3(t *testing.T) {
-	want := []string{
-		"constitution_propose|verdi context constitution propose",
-	}
+	want := []string{}
 	var got []string
 	for _, a := range ws.AwaitingFixes() {
 		got = append(got, a.Ritual+"|"+a.Path)

@@ -33,11 +33,11 @@ func HostVerbs() []Verb {
 
 // Registry returns the write-scope declaration of every verb that mutates
 // a git repository, one declaration per ritual. Each declaration states
-// what its ritual does at this story's base, read through parent dc-7,
-// except the owner-ruled fixes of story dc-3: design start (with
-// --supersedes), the commit-to-design ritual, accept diagram, and
-// constitution propose are declared scoped and sit in AwaitingFixes until
-// spec/ritual-effect-witness fixes them. Paths are store-relative.
+// what its ritual does, read through parent dc-7. The owner-ruled fixes of
+// story dc-3 — design start (with --supersedes), the commit-to-design
+// ritual, accept diagram, and constitution propose committing only their
+// declared paths — have landed (spec/ritual-effect-witness), so
+// AwaitingFixes is empty. Paths are store-relative.
 func Registry() []Declaration {
 	return []Declaration{
 		{
@@ -148,10 +148,10 @@ func Registry() []Declaration {
 		},
 		{
 			// internal/constitutionapp (propose.go): on the branch the
-			// request names, created from HEAD or checked out when it
-			// exists, stages the one proposed policy file and commits with
-			// no pathspec. Awaiting fix (UAT-036; it also stops cutting from
-			// HEAD, a base the write scope does not express).
+			// request names, cut from the resolved default branch's commit
+			// or checked out when it exists, stages the one proposed policy
+			// file and commits naming it (UAT-036 and UAT-023 fixed; the
+			// base is not a write-scope field).
 			Ritual:     "constitution_propose",
 			Verbs:      []Verb{CLI("context constitution propose")},
 			RefsCreate: []RefPattern{"refs/heads/*"},

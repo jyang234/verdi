@@ -81,7 +81,7 @@ type Failure struct {
 // mutating operation. InitialBranch/InitialHead and TargetHeadBefore are the
 // pre-operation branch-ref facts; CurrentBranch/CurrentHead and BranchCreated
 // make checkout and ref effects explicit. LandedCommit is the exact OID
-// returned by a successful CreateCommit, independent of later observation.
+// returned by a successful CreateCommitPaths, independent of later observation.
 // WorktreePaths names operation-owned paths that remain different from
 // CurrentHead. StagedPaths is the complete Git-repository-relative index path
 // set observed after the failure. Unproven names any of the closed dimensions

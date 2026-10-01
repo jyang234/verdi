@@ -44,10 +44,10 @@ type GitReader interface {
 	StatusDirty(ctx context.Context, root string) (bool, error)
 	StagedPaths(ctx context.Context, root string) ([]string, error)
 	HasLocalBranch(ctx context.Context, root, name string) (bool, error)
-	CheckoutNewBranch(ctx context.Context, root, name string) error
+	CheckoutNewBranchFrom(ctx context.Context, root, name, base string) error
 	CheckoutExisting(ctx context.Context, root, branch string) error
 	AddPaths(ctx context.Context, root string, paths ...string) error
-	CreateCommit(ctx context.Context, root, message string) (string, error)
+	CreateCommitPaths(ctx context.Context, root, message string, paths ...string) (string, error)
 	LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error)
 	LsTreeEntriesIncludingTrees(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error)
 	Show(ctx context.Context, root, ref, path string) ([]byte, error)
@@ -74,8 +74,12 @@ func (gitxReader) StagedPaths(ctx context.Context, root string) ([]string, error
 func (gitxReader) HasLocalBranch(ctx context.Context, root, name string) (bool, error) {
 	return gitx.HasLocalBranch(ctx, root, name)
 }
-func (gitxReader) CheckoutNewBranch(ctx context.Context, root, name string) error {
-	return gitx.CheckoutNewBranch(ctx, root, name)
+func (gitxReader) CheckoutNewBranchFrom(ctx context.Context, root, name, base string) error {
+	// gitx.CheckoutNewBranchFrom, never gitx.CheckoutNewBranch: a new
+	// proposal branch is cut from the base Propose resolved (the default
+	// branch's commit), never from whatever HEAD the caller sits on
+	// (UAT-023's shape).
+	return gitx.CheckoutNewBranchFrom(ctx, root, name, base)
 }
 func (gitxReader) CheckoutExisting(ctx context.Context, root, branch string) error {
 	// gitx.Checkout, never gitx.CheckoutExisting: this is a genuine
@@ -93,8 +97,11 @@ func (gitxReader) AddPaths(ctx context.Context, root string, paths ...string) er
 	// prior defect this scoping avoids (D6-33).
 	return gitx.AddPaths(ctx, root, paths...)
 }
-func (gitxReader) CreateCommit(ctx context.Context, root, message string) (string, error) {
-	return gitx.CreateCommit(ctx, root, message)
+func (gitxReader) CreateCommitPaths(ctx context.Context, root, message string, paths ...string) (string, error) {
+	// gitx.CreateCommitPaths, never gitx.CreateCommit: staging one path
+	// does not bound the commit, and a commit with no pathspec records
+	// every entry the caller had staged before Propose ran (UAT-036).
+	return gitx.CreateCommitPaths(ctx, root, message, paths...)
 }
 func (gitxReader) LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error) {
 	return gitx.LsTreeEntries(ctx, root, ref)

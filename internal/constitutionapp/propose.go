@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/atomicfile"
+	"github.com/jyang234/verdi/internal/branchbase"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -182,13 +183,16 @@ type ProposeResult struct {
 // remaining branch/HEAD, worktree, and index state with an uncanceled context,
 // and explicitly marks any dimension it cannot establish as unproven. This
 // includes failures after a commit has landed, such as identity resolution;
-// LandedCommit then preserves CreateCommit's exact returned OID even if the
+// LandedCommit then preserves CreateCommitPaths' exact returned OID even if the
 // later failure also prevents CurrentHead from being observed.
 //
-// It stages and commits exactly the one requested artifact
-// path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
-// file elsewhere in the checkout (a caller's own --request document,
-// another in-progress edit) can never be swept into this commit. It never
+// It stages exactly the one requested artifact path via gitx.AddPaths —
+// never gitx.AddAll — and commits exactly that path via
+// gitx.CreateCommitPaths, so neither an unrelated sibling file elsewhere in
+// the checkout (a caller's own --request document, another in-progress
+// edit) nor an entry the caller had already staged can be swept into this
+// commit (UAT-036). A new proposal branch is cut from the resolved default
+// branch's commit (proposalBase), never from the caller's HEAD. It never
 // merges, approves, or writes anything outside that one path — merge/
 // approval stay the normal Git pull-request boundary (design §7.1).
 //
@@ -280,8 +284,12 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		if req.Expected.Head != "" {
 			return nil, verdict("stale-head", fmt.Sprintf("branch %q does not exist, expected HEAD %s", req.Branch, req.Expected.Head))
 		}
+		base, typedBase := proposalBase(ctx, root)
+		if typedBase != nil {
+			return nil, typedBase
+		}
 		effects.beginCheckout()
-		if err := s.Git.CheckoutNewBranch(ctx, root, req.Branch); err != nil {
+		if err := s.Git.CheckoutNewBranchFrom(ctx, root, req.Branch, base); err != nil {
 			effects.checkoutRefused()
 			return nil, effects.failure(ctx, s, root, operational("io-failure", "creating proposal branch", err))
 		}
@@ -293,7 +301,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	// operation never saw during the pre-mutation proof. Only the branch
 	// selection can have happened in between (the pre-mutation proof already
 	// refused everything else), and that movement is itself the same residual
-	// the CreateCommit failure path already carries.
+	// the CreateCommitPaths failure path already carries.
 	if err := checkNoSymlinkedComponent(root, gitPath); err != nil {
 		return nil, effects.failure(ctx, s, root, verdict("unsafe-path", err.Error()))
 	}
@@ -303,7 +311,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	// path (a brand-new artifact) or Git could not read it at all; both are
 	// resolved in the conservative direction — do the work — never as a
 	// zero-effect success, and a genuinely broken Git surfaces immediately
-	// at the AddPaths/CreateCommit calls below.
+	// at the AddPaths/CreateCommitPaths calls below.
 	//
 	// The converse case — the committed blob already IS req.Content while the
 	// working tree carries some further, uncommitted edit at that path — is
@@ -359,7 +367,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if message == "" {
 		message = fmt.Sprintf("propose %s: %s", req.Kind, artifactID)
 	}
-	commit, err := s.Git.CreateCommit(ctx, root, message)
+	commit, err := s.Git.CreateCommitPaths(ctx, root, message, full)
 	if err != nil {
 		return nil, effects.failure(ctx, s, root, operational("io-failure", "committing proposal artifact", err))
 	}
@@ -370,4 +378,25 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		return nil, effects.failure(ctx, s, root, typedIdentity)
 	}
 	return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, Commit: commit}, nil
+}
+
+// proposalBase returns the commit a new proposal branch is cut from: the
+// resolved default branch's (spec/ritual-effect-witness ac-4, UAT-023; the
+// owner's decision of 2026-09-30), resolved through internal/branchbase
+// exactly as design start's base is (dc-7/I-130). It is the commit, not the
+// ref's name, so the checkout sets no upstream to the default branch. A
+// repository with no origin remote has no default branch to resolve and
+// keeps branchbase's disclosed HEAD fallback, which the result's identity
+// discloses (accepted_known false); a repository whose origin is configured
+// but whose default branch cannot be resolved is refused before any
+// mutation.
+func proposalBase(ctx context.Context, root string) (string, *Error) {
+	res, err := branchbase.Resolve(ctx, root)
+	if err != nil {
+		return "", operational("io-failure", "resolving the proposal branch's base", err)
+	}
+	if res.Kind == branchbase.Unresolvable {
+		return "", operational("accepted-identity-unavailable", "the accepted default branch is unresolved, so a new proposal branch has no base to cut from", nil)
+	}
+	return res.Commit, nil
 }

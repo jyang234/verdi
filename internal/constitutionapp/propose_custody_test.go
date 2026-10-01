@@ -147,7 +147,7 @@ func TestPropose_PostCheckoutUnsafePathDisclosesRepositoryEffects(t *testing.T) 
 
 type commitRefusalGitReader struct{ GitReader }
 
-func (commitRefusalGitReader) CreateCommit(context.Context, string, string) (string, error) {
+func (commitRefusalGitReader) CreateCommitPaths(context.Context, string, string, ...string) (string, error) {
 	return "", errors.New("injected commit refusal")
 }
 
@@ -159,7 +159,7 @@ func (addRefusalGitReader) AddPaths(context.Context, string, ...string) error {
 
 type observationRefusalGitReader struct{ GitReader }
 
-func (observationRefusalGitReader) CreateCommit(context.Context, string, string) (string, error) {
+func (observationRefusalGitReader) CreateCommitPaths(context.Context, string, string, ...string) (string, error) {
 	return "", errors.New("injected commit refusal")
 }
 
@@ -179,8 +179,8 @@ type postCommitHeadRefusalGitReader struct {
 	returnedCommit string
 }
 
-func (g *postCommitHeadRefusalGitReader) CreateCommit(ctx context.Context, root, message string) (string, error) {
-	commit, err := g.GitReader.CreateCommit(ctx, root, message)
+func (g *postCommitHeadRefusalGitReader) CreateCommitPaths(ctx context.Context, root, message string, paths ...string) (string, error) {
+	commit, err := g.GitReader.CreateCommitPaths(ctx, root, message, paths...)
 	if err == nil {
 		g.commitLanded = true
 		g.returnedCommit = commit
