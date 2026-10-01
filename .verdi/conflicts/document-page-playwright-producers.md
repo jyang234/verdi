@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/document-page }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: b7d2df0dfe0eaaffedac86d866fac238f7e3c5f1 }
 ---
 # Conflict: document-page cannot cross verdi build start
 

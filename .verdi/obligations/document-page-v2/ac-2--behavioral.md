@@ -16,7 +16,7 @@ quality:
     rule: "Rerun playwright:e2e/tests/94-document-page.spec.ts:document-page › Id chips open the wall with the card selected in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/document-page-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: b7d2df0dfe0eaaffedac86d866fac238f7e3c5f1 }
 ---
 # Id chips open the wall with the card selected
 
