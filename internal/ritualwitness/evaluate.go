@@ -96,7 +96,10 @@ func Evaluate(decl ws.Declaration, exit int, before, after Snapshot, storeRoot s
 }
 
 func evaluateWith(decl ws.Declaration, exit int, before, after Snapshot, storeRoot string, log CommandLog, fns evalFuncs) []Verdict {
-	checkedOutBefore := before.Head.Branch
+	checkedOutBefore := ""
+	if before.Head.Branch != "" {
+		checkedOutBefore = "refs/heads/" + before.Head.Branch
+	}
 	var out []Verdict
 	out = append(out, evalLocalRefs(decl, before, after, checkedOutBefore, log, fns)...)
 	out = append(out, evalRemoteRefs(decl, before, after, log, fns)...)
@@ -227,7 +230,7 @@ func evalWorktrees(decl ws.Declaration, before, after Snapshot, storeRoot string
 func worktreeVerdict(decl ws.Declaration, path, storeRoot string, registeredBefore bool, log CommandLog, fns evalFuncs, detail string) Verdict {
 	within := false
 	for _, p := range decl.Worktrees {
-		if p.Matches(path, storeRoot, registeredBefore) {
+		if p.Matches(path, ws.WorktreeSite{RepoRoot: storeRoot, StoreRoot: storeRoot, RegisteredBefore: registeredBefore}) {
 			within = true
 			break
 		}

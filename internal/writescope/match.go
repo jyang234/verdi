@@ -5,21 +5,23 @@ import (
 	"strings"
 )
 
-// Matches reports whether ref (a full "refs/heads/..." refname) lies
-// within p: an exact ref, a namespace wildcard ("refs/heads/design/*",
+// Matches reports whether ref, a full refname ("refs/heads/design/x"),
+// lies within p: an exact ref, a namespace wildcard ("refs/heads/design/*",
 // matching every ref one or more segments under the namespace), any local
 // branch ("refs/heads/*"), or RefCheckedOut, which matches only the branch
-// checked out BEFORE the ritual ran — checkedOutBefore, a short branch name
-// as gitx.CurrentBranch returns it — and never matches a detached HEAD
-// (checkedOutBefore == ""), since there is then no checked-out branch for a
-// mutation to be read as moving (parent dc-7). checkedOutBefore is read
-// exactly once per ritual run, at the moment the harness takes its "before"
-// sensor snapshot: a ritual that switches branches mid-run and then moves
-// the NEW branch does not thereby move "the checked-out branch" in this
-// sense, because that was never the branch the ritual started on.
+// checked out BEFORE the ritual ran. checkedOutBefore is that branch's
+// full refname as `git symbolic-ref -q HEAD` reports it, or "" for a
+// detached HEAD; RefCheckedOut never matches a detached HEAD or a HEAD
+// attached outside refs/heads, since there is then no checked-out branch
+// for a mutation to be read as moving (parent dc-7). Every comparison is of
+// full refnames, so a tag or remote-tracking ref sharing a branch's short
+// name never matches. checkedOutBefore is read once per ritual run, from
+// the harness's "before" snapshot: a ritual that switches branches mid-run
+// and then moves the NEW branch does not thereby move "the checked-out
+// branch", because that was never the branch the ritual started on.
 func (p RefPattern) Matches(ref, checkedOutBefore string) bool {
 	if p == RefCheckedOut {
-		return checkedOutBefore != "" && ref == "refs/heads/"+checkedOutBefore
+		return strings.HasPrefix(checkedOutBefore, "refs/heads/") && ref == checkedOutBefore
 	}
 	pattern := string(p)
 	if prefix, ok := strings.CutSuffix(pattern, "*"); ok {
@@ -28,39 +30,43 @@ func (p RefPattern) Matches(ref, checkedOutBefore string) bool {
 	return ref == pattern
 }
 
-// Matches reports whether a worktree at path lies within p: WorktreeTemp,
-// a path git does not consider part of storeRoot's own tree at all;
-// WorktreeRegistered, a path the harness's "before" snapshot had already
-// registered (registeredBefore, computed by the caller from a `git
-// worktree list --porcelain` taken before the ritual ran); or a
-// store-relative directory pattern ("dir/*"), matching a path whose
-// immediate parent, read relative to storeRoot, is exactly dir (parent
-// dc-7). Paths are compared with filepath.Rel, so storeRoot and path may
-// use either OS path separator; a path that cannot be related to storeRoot
-// at all (filepath.Rel error, e.g. mismatched volumes on Windows) matches
-// neither a directory pattern nor WorktreeRegistered's implied containment,
-// and is treated as outside the store for WorktreeTemp.
-func (p WorktreePattern) Matches(path, storeRoot string, registeredBefore bool) bool {
+// WorktreeSite is where a worktree path is judged: the repository's root
+// (its main worktree), the store root its directory patterns are relative
+// to, and whether the worktree was already registered before the ritual
+// ran. Every path is canonical (absolute, symlinks resolved): Matches
+// compares paths lexically and never touches the filesystem.
+type WorktreeSite struct {
+	RepoRoot         string
+	StoreRoot        string
+	RegisteredBefore bool
+}
+
+// Matches reports whether a worktree at path lies within p: WorktreeTemp, a
+// fresh worktree (not registered before the ritual) outside the
+// repository; WorktreeRegistered, a worktree already registered before
+// the ritual, wherever it lies; or a store-relative directory pattern
+// ("dir/*"), matching a path whose immediate parent, read relative to the
+// store root, is exactly dir (parent dc-7). A path that cannot be related
+// to a root (filepath.Rel fails, e.g. mismatched volumes on Windows) is
+// treated as outside it.
+func (p WorktreePattern) Matches(path string, site WorktreeSite) bool {
 	switch p {
 	case WorktreeTemp:
-		return !underDir(storeRoot, path)
+		return !site.RegisteredBefore && !underDir(site.RepoRoot, path)
 	case WorktreeRegistered:
-		return registeredBefore
+		return site.RegisteredBefore
 	}
 	dir, ok := strings.CutSuffix(string(p), "/*")
-	if !ok {
+	if !ok || !underDir(site.StoreRoot, path) {
 		return false
 	}
-	rel, err := filepath.Rel(storeRoot, path)
+	rel, err := filepath.Rel(site.StoreRoot, path)
 	if err != nil {
 		return false
 	}
 	rel = filepath.ToSlash(rel)
-	parent := ""
-	if i := strings.LastIndex(rel, "/"); i >= 0 {
-		parent = rel[:i]
-	}
-	return parent == dir
+	i := strings.LastIndex(rel, "/")
+	return i >= 0 && rel[:i] == dir
 }
 
 // underDir reports whether path lies at or under root.
