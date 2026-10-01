@@ -3,6 +3,7 @@ package specstate
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -372,7 +373,9 @@ body
 	// as though no supersession claim existed at all. The honest shape is
 	// disclosed-unproven: no invented mechanism (never Superseded from one
 	// signal), no silent acceptance — the disclosure names the successor
-	// and the missing proof.
+	// and the missing proof. For a story predecessor that missing proof is
+	// now the rung-3 conflict (SI-290, SI-291): the default branch here
+	// carries the successor's edge and no conflict at all.
 	t.Run("active exact predecessor named by a supersedes link whose successor carries no supersession block: unproven + disclosure naming the successor", func(t *testing.T) {
 		repo := buildResolvableRepo(t)
 		predecessorPath := ".verdi/specs/active/story-v1/spec.md"
@@ -407,8 +410,8 @@ body
 		if result.State != Unproven || result.Relation != RelationUnproven {
 			t.Fatalf("Resolve = %+v, want Unproven/unproven (one-signal supersession is disclosed, never silently accepted or silently superseded)", result)
 		}
-		if len(result.Disclosures) != 1 || !strings.Contains(result.Disclosures[0], successorPath) || !strings.Contains(result.Disclosures[0], "supersession") {
-			t.Fatalf("Resolve disclosures = %v, want exactly one naming the one-signal successor %s and the missing supersession proof", result.Disclosures, successorPath)
+		if len(result.Disclosures) != 1 || !strings.Contains(result.Disclosures[0], successorPath) || !strings.Contains(result.Disclosures[0], "no conflict with status: superseded challenges the whole spec") {
+			t.Fatalf("Resolve disclosures = %v, want exactly one naming the one-signal successor %s and the missing resolved conflict", result.Disclosures, successorPath)
 		}
 
 		// The successor's own resolution is unaffected: nothing names IT as
@@ -1083,7 +1086,7 @@ body
 		}
 		otherContent := []byte("---\nid: spec/other\nkind: spec\nclass: feature\ntitle: Other\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
 
-		var lsTreeCalls int
+		lsTreeCalls := map[string]int{}
 		showCounts := map[string]int{}
 		var allPaths []string
 		allPaths = append(allPaths, otherPaths...)
@@ -1093,7 +1096,7 @@ body
 
 		p := newProjector(stubGit{
 			lsTree: func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
-				lsTreeCalls++
+				lsTreeCalls[prefix]++
 				return allPaths, nil
 			},
 			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
@@ -1118,8 +1121,11 @@ body
 		if len(results) != numCandidates {
 			t.Fatalf("ResolveMany returned %d results, want %d", len(results), numCandidates)
 		}
-		if lsTreeCalls != 1 {
-			t.Fatalf("LsTree called %d times, want exactly 1 per ResolveMany call", lsTreeCalls)
+		// One listing of the spec zones and one of the conflicts
+		// directory (the story-supersession conflict scan, SI-290), each
+		// exactly once per ResolveMany call.
+		if want := map[string]int{specZonesPrefix: 1, ".verdi/conflicts": 1}; !reflect.DeepEqual(lsTreeCalls, want) {
+			t.Fatalf("LsTree calls by prefix = %v, want %v (each exactly once per ResolveMany call)", lsTreeCalls, want)
 		}
 		for _, path := range otherPaths {
 			if showCounts[path] != 1 {
