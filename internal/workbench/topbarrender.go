@@ -13,9 +13,13 @@ package workbench
 // The posture group is one fragment (writeASDPosture, boardshellrender.go),
 // rendered here for the page and by the wall's snapshot for every refresh
 // (SI-323 (3)). The full posture is a native <details>: it opens before
-// any script runs (dc-2), and the bar's small inline script enhances it
-// to the handoff's popover — Escape or an outside click closes it and
-// returns focus to the posture text.
+// any script runs (dc-2), and the bar's own asset, /assets/topbar.js,
+// enhances it to the handoff's popover — Escape or an outside press closes
+// it and returns focus to the posture text (SI-331).
+//
+// The bar is one row (handoff "Global chrome": 52 px, padding 0 20px,
+// full-bleed), wrapping only below the 640 px breakpoint; the wall's last
+// action result is a trailing row of its own under it.
 
 import (
 	stdhtml "html"
@@ -35,14 +39,14 @@ type topBarOptions struct {
 	// Surface adds the WORKBENCH surface word to the wordmark — the index
 	// only (handoff README, "Global chrome").
 	Surface bool
-	// Nav is the page's own links (index, artifact, the Wall and Document
-	// switch), pre-rendered.
+	// Nav is the page's own links (index, artifact), pre-rendered.
 	Nav template.HTML
 	// Chips are page-specific chips drawn after the title: the diagram
 	// editor's mode stamp and status badge.
 	Chips template.HTML
-	// Controls is the page's controls slot (dc-3): Commit & push, the
-	// diagram editor's exit, the autosave status, and the live regions.
+	// Controls is the page's controls slot (dc-3): the Wall and Document
+	// switch, Commit & push, the diagram editor's exit, the autosave
+	// status, and the live regions.
 	Controls template.HTML
 	// Tail is a full-width trailing row: the wall's last action result,
 	// which lives outside the swapped region and survives every refresh.
@@ -52,27 +56,23 @@ type topBarOptions struct {
 	Refresh bool
 }
 
-// topBarScript enhances the posture disclosure to the handoff's popover
-// (dc-2; ledger SI-331): Escape closes an open posture and returns focus
-// to its summary; a pointer down outside the posture group closes it
-// and returns focus to the summary when the press leaves focus nowhere
-// (the pressed thing is not focusable), so a press on a card or a
-// control keeps the focus it earns. A press on the group's own controls
-// (its Refresh) is inside, so the open disclosure survives a refresh the
-// user asks for, as a snapshot refresh keeps it (SI-323 (3)). It finds
-// the disclosure at event time, so the wall's refresh can replace the
-// posture group underneath it. The tag names what it enhances, so a
-// page's guard against raw source markup (a literal <script> tag from
-// imported text) keeps its meaning.
-const topBarScript = `<script data-enhances="topbar-posture">(function(){"use strict";var bar=document.querySelector('[data-testid="topbar"]');if(!bar)return;function shown(){return bar.querySelector("details.topbar-posture[open]");}function dismiss(d,refocus){d.removeAttribute("open");if(!refocus)return;var s=d.querySelector("summary");if(s)s.focus();}document.addEventListener("keydown",function(e){if(e.key!=="Escape")return;var d=shown();if(!d)return;e.preventDefault();dismiss(d,true);});document.addEventListener("pointerdown",function(e){var d=shown();if(!d)return;var g=d.closest("#asd-posture")||d;if(g.contains(e.target))return;dismiss(d,false);setTimeout(function(){if(!document.activeElement||document.activeElement===document.body)dismiss(d,true);},0);});})();</script>`
+// topBarScriptTag loads the bar's script, /assets/topbar.js (parent co-1:
+// new behavior ships in a new asset within 64 KiB, never in boardspec.js),
+// deferred, so the bar — and its native posture disclosure — is complete
+// and usable before the script enhances the disclosure to the handoff's
+// popover (dc-2; SI-331). A page's own scripts register their listeners
+// first, which the diagram editor's Escape guard relies on alongside the
+// keystroke's defaultPrevented mark (boarddiagram.js).
+const topBarScriptTag = `<script src="/assets/topbar.js" defer></script>`
 
-// renderTopBar draws the bar for one page from its facts and options.
+// renderTopBar draws the bar for one page from its facts and options:
+// one row (.topbar-row), then any trailing row, then the script tag.
 // Every fact is escaped here; the option fragments arrive pre-rendered by
 // the page's own renderer.
 func renderTopBar(f *barFacts, o topBarOptions) template.HTML {
 	esc := stdhtml.EscapeString
 	var b strings.Builder
-	b.WriteString(`<header class="topbar" data-testid="topbar">`)
+	b.WriteString(`<header class="topbar" data-testid="topbar"><div class="topbar-row">`)
 	b.WriteString(`<a class="wordmark topbar-wordmark" data-testid="topbar-wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi`)
 	if o.Surface {
 		b.WriteString(`<span class="wordmark-surface">workbench</span>`)
@@ -92,8 +92,9 @@ func renderTopBar(f *barFacts, o topBarOptions) template.HTML {
 	if o.Controls != "" {
 		b.WriteString(`<div class="topbar-controls" data-testid="topbar-controls">` + string(o.Controls) + `</div>`)
 	}
+	b.WriteString(`</div>`)
 	b.WriteString(string(o.Tail))
-	b.WriteString(topBarScript)
+	b.WriteString(topBarScriptTag)
 	b.WriteString(`</header>`)
 	return template.HTML(b.String()) //nolint:gosec // every fact is escaped above; the option fragments are the page's own rendered markup
 }

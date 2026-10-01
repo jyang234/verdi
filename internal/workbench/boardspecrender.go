@@ -246,12 +246,14 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 	// and the autosave status and live region; the last action result is
 	// the bar's trailing row, outside the swapped region.
 	nav := `<a href="/">index</a>`
-	if p.DocumentHref != "" {
-		nav += ` <span class="current" aria-current="page">Wall</span> <a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a>`
-	}
 	controls := ""
+	if p.DocumentHref != "" {
+		// The Wall and Document switch, in the controls slot (dc-3), with
+		// the same two labels the Document page's switch carries.
+		controls += `<nav class="topbar-tabs" aria-label="Wall or Document"><span class="current" aria-current="page">Wall</span><a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a></nav>`
+	}
 	if p.Mode == modeAuthoring {
-		controls = `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
+		controls += `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
 	}
 	controls += `<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
 		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`
@@ -271,8 +273,8 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 		Mode:  string(p.Mode),
 		TopBar: renderTopBar(&snap.bar, topBarOptions{
 			Heading:  true,
-			Nav:      template.HTML(nav),      //nolint:gosec // the index link and the escaped document href
-			Controls: template.HTML(controls), //nolint:gosec // fixed control markup
+			Nav:      template.HTML(nav),      //nolint:gosec // the index link
+			Controls: template.HTML(controls), //nolint:gosec // fixed control markup and the escaped document href
 			Tail:     `<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>`,
 			Refresh:  true,
 		}),
@@ -660,7 +662,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if proto {
 			typeLabel = p.words.word(s.Type)
 		}
-		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
+		cls := "sticky sticky--" + stickyTypeClass(s.Type)
+		if proto && inStubsBand(s.X) {
+			// A story or spike sticky parked in the stubs band (dc-6) wears
+			// the hand (spec/chrome-and-tokens-v2 ac-3, read literally);
+			// moved out, it is typeset like every other sticky. The mark is
+			// the server's, by the band's own rule, and the region swap
+			// every move triggers re-draws it.
+			cls += " sticky--parked"
+		}
+		b.WriteString(`<div class="` + cls + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
@@ -963,6 +974,25 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`</div>`)
 }
 
+// overlapsColumn reports whether a card whose left edge is x overlaps
+// col: the band is occupied by geometry, so a dragged-away sticky stops
+// counting.
+func overlapsColumn(col boardlayout.ZoneColumn, x float64) bool {
+	return x < float64(col.X+col.Width) && float64(col.X) < x+boardlayout.CardWidth
+}
+
+// inStubsBand reports whether a sticky whose left edge is x sits in the
+// stubs band — the one rule the zone labels count the band occupied by
+// and the parked sticky's hand voice keys on, so the two never disagree.
+func inStubsBand(x float64) bool {
+	for _, col := range boardlayout.ZoneColumns() {
+		if col.Kind == boardlayout.ZoneStub {
+			return overlapsColumn(col, x)
+		}
+	}
+	return false
+}
+
 // writeCaseClassTag stamps the spec's class on the case-file lockup
 // (owner directive: a wall must say whether it is a feature or a story —
 // 02 §Kind registry's split is invisible without it). "feature" for the
@@ -1168,20 +1198,11 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 	// whose footprint currently sits in the band (a dragged-away sticky
 	// stops counting — the label follows the paper, not its history).
 	sc := boardlayout.ScratchColumn()
-	inBand := func(col boardlayout.ZoneColumn, x float64) bool {
-		return x < float64(col.X+col.Width) && float64(col.X) < x+boardlayout.CardWidth
-	}
-	var stubCol boardlayout.ZoneColumn
-	for _, col := range boardlayout.ZoneColumns() {
-		if col.Kind == boardlayout.ZoneStub {
-			stubCol = col
-		}
-	}
 	for _, st := range p.Stickies {
-		if inBand(sc, st.X) {
+		if overlapsColumn(sc, st.X) {
 			occupied[boardlayout.ZoneScratch] = true
 		}
-		if inBand(stubCol, st.X) {
+		if inStubsBand(st.X) {
 			occupied[boardlayout.ZoneStub] = true
 		}
 	}

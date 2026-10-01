@@ -3936,22 +3936,50 @@ button.yarn-chip-type {
    shared rule above rather than editing it in place, and names colours
    and faces by token only (SI-326; shadows keep their literal rgba). */
 
-/* ---- the top bar: one 52px row, wrapping at narrow widths. It spans the
-   page's content box, as the site head did (the body's gutter narrows
-   with the viewport), so it never widens the page. ---- */
+/* ---- the top bar: one 52 px row at desktop widths (handoff "Global
+   chrome": padding 0 20px, full-bleed), wrapping only below 640 px. The
+   board pages' body keeps its 2rem gutter, which the bar overhangs; the
+   shared shell and the Document page give up the body's gutter and
+   max-width, which their content wrappers take back below, so the bar
+   spans the viewport without a viewport unit (a vertical scrollbar would
+   otherwise widen the page). ---- */
 .topbar {
   position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 14px;
-  min-height: 52px;
-  margin: 0 0 1.25rem;
-  padding: 6px 0;
+  margin: 0 -2rem 1.25rem;
+  padding: 0 20px;
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
+  /* the bar is its own size container: the narrow layout below keys on
+     the bar's width, so it answers a narrow viewport and a zoomed page
+     alike (a page zoomed to 200 % halves the bar's width without moving
+     the viewport a media query would read) */
+  container-type: inline-size;
+  container-name: topbar;
+}
+.topbar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 52px;
 }
 .board-page .topbar { margin-bottom: 0.9rem; }
+body:not(.board-page) { max-width: none; padding-left: 0; padding-right: 0; }
+body:not(.board-page) .topbar { margin-left: 0; margin-right: 0; }
+body:not(.board-page) > .page-body,
+body:not(.board-page) > footer.site-foot,
+.document-page > .document-head,
+.document-page > .document-region {
+  margin-left: max(2rem, calc((100% - 74rem) / 2 + 2rem));
+  margin-right: max(2rem, calc((100% - 74rem) / 2 + 2rem));
+}
+.document-page > .document-region { margin-right: 2rem; }
+@media (max-width: 60rem) {
+  body:not(.board-page) > .page-body,
+  body:not(.board-page) > footer.site-foot,
+  .document-page > .document-head,
+  .document-page > .document-region { margin-left: 1rem; margin-right: 1rem; }
+}
 .topbar-wordmark {
   flex: none;
   align-items: center;
@@ -4024,11 +4052,19 @@ button.yarn-chip-type {
 .topbar-posture-group {
   display: flex;
   flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 10px;
   min-width: 0;
 }
+/* the shared .asd-posture-tech rule's flex-basis: 100% would break the
+   row; here the disclosure is one shrinkable item among the group's */
+.topbar-posture-group .asd-posture-tech { flex: 0 1 auto; flex-basis: auto; min-width: 0; }
+.topbar-posture-group > .board-mode-tag,
+.topbar-posture-group > .badge,
+.topbar-posture-group > .topbar-chip,
+.topbar-posture-group > .asd-refresh { flex: none; }
+.topbar-branch { flex: 0 1 auto; }
 .topbar-branch,
 .topbar-posture > summary {
   font-family: var(--mono);
@@ -4056,7 +4092,10 @@ button.yarn-chip-type {
   cursor: pointer;
 }
 .topbar-posture > summary::-webkit-details-marker { display: none; }
-.topbar-posture > summary::after { content: "\25BE"; font-size: 10px; }
+/* the arrow is decoration: no alternative text, so the summary's
+   accessible name is the posture words alone */
+.topbar-posture > summary::after { content: "\25BE" / ""; font-size: 10px; }
+.topbar-fact-why { color: var(--st-pending); overflow-wrap: anywhere; }
 .topbar-posture > summary:hover { color: var(--accent); border-color: var(--rule); }
 .topbar-posture[open] > summary { color: var(--ink); background: var(--card); border-color: var(--rule); }
 .topbar-dot { color: var(--rule); }
@@ -4138,15 +4177,54 @@ button.yarn-chip-type {
 }
 .topbar-nav a:hover,
 .topbar-nav a:focus-visible { color: var(--accent); }
+/* the controls slot never shrinks (handoff: every right-side control is
+   flex: none, nowrap); the title, branch, and posture text give way, and
+   below the bar's 640 px the row wraps (the container query below) */
 .topbar-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px 10px;
   margin-left: auto;
-  min-width: 0;
 }
+.topbar-controls .btn-primary { flex: none; white-space: nowrap; }
+/* the rail sized Commit & push to its panel (#commit-push-btn: block,
+   width 100%); in the slot it is one control among the tabs, as wide as
+   its words — a full-width button would fill the slot and push the tabs
+   out over the posture group */
+.topbar-controls #commit-push-btn { display: inline-block; width: auto; margin: 0; }
+/* the Wall and Document switch: the handoff's two tabs, in the controls
+   slot (dc-3), the same on the wall and the Document page */
+.topbar-tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.topbar-tabs a,
+.topbar-tabs .current {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted-solid);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar-tabs .current {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--card);
+  border-color: var(--rule);
+}
+.topbar-tabs a:hover,
+.topbar-tabs a:focus-visible { color: var(--accent); }
+/* the drawer and modal backdrop take the scrim token (handoff tokens) */
+.modal-backdrop { background: var(--scrim); }
 .topbar-controls #autosave-status { margin-left: 0; }
 .topbar-controls .btn-primary {
   font-family: var(--mono);
@@ -4160,10 +4238,18 @@ button.yarn-chip-type {
 .topbar > .asd-last-result { flex-basis: 100%; font-size: 0.8rem; }
 .topbar > .asd-last-result:empty { display: none; }
 
+/* below 640 px of the bar's own width — a narrow viewport, or a page
+   zoomed to 200 % — the row wraps; a container cannot style itself, so
+   the bar's narrow padding is the media query's */
 @media (max-width: 640px) {
-  .topbar { gap: 4px 10px; padding: 8px 0; }
+  .topbar { padding: 8px 20px; }
+}
+@container topbar (max-width: 640px) {
+  .topbar-row { flex-wrap: wrap; gap: 4px 10px; }
+  .topbar-posture-group { flex-wrap: wrap; }
   .topbar-title { white-space: normal; }
-  .topbar-controls { margin-left: 0; justify-content: flex-start; }
+  .topbar-controls { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; margin-left: 0; justify-content: flex-start; }
+  .topbar-controls .diagram-exit-link { min-width: 0; }
 }
 
 /* ---- no rotation, and the hand voice only on a parked sticky ---- */
@@ -4176,14 +4262,15 @@ button.yarn-chip-type {
 .panel-tab { transform: none; }
 .case-stamp { border-radius: 3px; }
 /* stickies keep their paper and folded corner; their body is serif
-   italic — the hand stays only on the story and spike proto-stickies
-   parked in the stubs band (ac-3) */
+   italic — the hand stays only on a story or spike proto-sticky parked in
+   the stubs band (ac-3), which the server marks sticky--parked by the
+   band's own rule; the draft composer, never parked, writes in serif */
 .sticky-body,
 .sticky-editor { font-family: var(--serif); font-style: italic; font-size: 14px; }
 .mode-authoring .board-empty-lead { font-family: var(--serif); font-style: italic; }
 .expand-dialog--hand .expand-text { font-family: var(--serif); font-style: italic; }
-.sticky--story .sticky-body,
-.sticky--spike .sticky-body,
-.sticky--story .sticky-editor,
-.sticky--spike .sticky-editor { font-family: var(--hand); font-style: normal; font-size: 0.98rem; }
+.sticky--parked.sticky--story .sticky-body,
+.sticky--parked.sticky--spike .sticky-body,
+.sticky--parked.sticky--story .sticky-editor,
+.sticky--parked.sticky--spike .sticky-editor { font-family: var(--hand); font-style: normal; font-size: 0.98rem; }
 /* verdi:workbench-only:end */

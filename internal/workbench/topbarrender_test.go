@@ -31,14 +31,20 @@ func postureSlugs() map[string]string {
 	}
 }
 
-// wantFactRow is the panel row writeBarFact draws for one fact in its
-// state: proven, its text; unproven, "unproven: <reason>".
-func wantFactRow(slug string, f barFact, attrs string) string {
-	state, text := "proven", f.Text
+// wantFactRow is the panel row writeBarFact draws for one fact: its
+// test-id element carrying exactly today's row's text in its state, then
+// — when the text does not already carry the reason — the reason as a
+// sibling row (SI-332 (2)).
+func wantFactRow(slug string, f barFact) string {
+	state := "proven"
 	if f.Unproven != "" {
-		state, text = unprovenWord, unprovenWord+": "+f.Unproven
+		state = unprovenWord
 	}
-	return `<dd data-testid="asd-posture-` + slug + `" data-state="` + state + `"` + attrs + `><code>` + stdhtml.EscapeString(text) + `</code></dd>`
+	row := `<dd data-testid="asd-posture-` + slug + `" data-state="` + state + `"><code>` + stdhtml.EscapeString(f.Text) + `</code></dd>`
+	if f.Unproven != "" && !strings.Contains(f.Text, f.Unproven) {
+		row += `<dd class="topbar-fact-why" data-testid="asd-posture-` + slug + `-why">` + stdhtml.EscapeString(f.Unproven) + `</dd>`
+	}
+	return row
 }
 
 // expectPostureGroup asserts html — one rendering of writeASDPosture —
@@ -80,26 +86,28 @@ func expectPostureGroup(t *testing.T, html string, f *barFacts) {
 		}
 		switch v := rv.Field(i).Interface().(type) {
 		case barFact:
-			attrs := ""
+			row := wantFactRow(slug, v)
 			if name == "Branch" && p.Detached && v.Unproven == "" {
-				v.Text, attrs = "detached HEAD (no branch is checked out)", ` data-detached="true"`
+				// Today's row printed an empty branch; the bar says why beside it.
+				row += `<dd class="topbar-fact-why" data-testid="asd-posture-branch-why" data-detached="true">detached HEAD (no branch is checked out)</dd>`
 			}
-			once(wantFactRow(slug, v, attrs), name)
+			once(row, name)
 		case *barFact:
 			if v == nil {
 				absent(`data-testid="asd-posture-`+slug+`"`, name+" (nil)")
 			} else {
-				once(wantFactRow(slug, *v, ""), name)
+				once(wantFactRow(slug, *v), name)
 			}
 		default:
 			t.Fatalf("barPosture.%s has type %T, which this test does not read", name, v)
 		}
 	}
-	tree := `<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + esc(p.Tree.State) + `"><span class="topbar-sr">working tree: ` + esc(p.Tree.Text)
+	once(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="`+esc(p.Tree.State)+`">working tree: `+esc(p.Tree.Text)+`</span>`, "Tree")
 	if p.Tree.Unproven != "" {
-		tree += `: ` + esc(p.Tree.Unproven)
+		once(`<dt>Working tree</dt><dd class="topbar-fact-why" data-testid="asd-posture-tree-why">`+esc(p.Tree.Unproven)+`</dd>`, "Tree (why)")
+	} else {
+		absent(`asd-posture-tree-why`, "Tree (why, none)")
 	}
-	once(tree+`</span><span aria-hidden="true">`+esc(p.Tree.Text)+`</span></span>`, "Tree")
 	if !p.Detached {
 		absent(`data-detached="true"`, "Detached (false)")
 	}
@@ -138,14 +146,11 @@ func expectPostureGroup(t *testing.T, html string, f *barFacts) {
 	} else {
 		absent(`board-status-badge`, "status badge (none)")
 	}
-	bytes := `<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(spec.Bytes.State) + `"><span class="topbar-sr">displayed bytes: ` + esc(spec.Bytes.Word) + ` (` + esc(spec.Bytes.State) + `)</span><span aria-hidden="true">` + esc(spec.Bytes.Word) + `</span>`
-	if spec.Bytes.State != spec.Bytes.Word {
-		bytes += `<span class="asd-posture-formal" aria-hidden="true"> (` + esc(spec.Bytes.State) + `)</span>`
+	formal := "asd-posture-formal"
+	if spec.Bytes.State == spec.Bytes.Word {
+		formal += " topbar-sr"
 	}
-	once(bytes+`</span>`, "displayed bytes")
-	// The row's own words survive as contiguous text, for every assertion
-	// that reads them.
-	once(`displayed bytes: `+esc(spec.Bytes.Word)+` (`, "the row's displayed-bytes words")
+	once(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="`+esc(spec.Bytes.State)+`">displayed bytes: `+esc(spec.Bytes.Word)+` <span class="`+formal+`">(`+esc(spec.Bytes.State)+`)</span></span>`, "displayed bytes")
 }
 
 // TestTopBar_RendersEveryFactWithItsState (spec/chrome-and-tokens-v2 ac-2;
@@ -273,7 +278,7 @@ func TestTopBar_PagesNotAboutOneSpec(t *testing.T) {
 				`<span class="topbar-title" data-testid="topbar-title">` + f.Title + `</span>`,
 				`<nav class="topbar-nav workbench-nav" aria-label="Workbench pages"><a href="/">index</a></nav>`,
 				group,
-				`<script data-enhances="topbar-posture">`,
+				`<script src="/assets/topbar.js" defer></script></header>`,
 			} {
 				if !strings.Contains(page, want) {
 					t.Errorf("bar lacks %q:\n%s", want, page)

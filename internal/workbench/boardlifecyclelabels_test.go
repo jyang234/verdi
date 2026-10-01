@@ -259,7 +259,7 @@ func TestWriteASDPosture_DisplayedBytesWordByStateFormal(t *testing.T) {
 		asd.StateFormal = tc.state
 		bar := specBarFacts(proj, asd)
 		body := asdPostureHTML(&bar)
-		if want := `displayed bytes: ` + tc.want + ` (` + tc.state + `)`; !strings.Contains(body, want) {
+		if want := `displayed bytes: ` + tc.want + ` <span class="asd-posture-formal`; !strings.Contains(body, want) {
 			t.Errorf("StateFormal %q: posture group missing %q in %s", tc.state, want, body)
 		}
 	}
@@ -269,7 +269,7 @@ func TestWriteASDPosture_DisplayedBytesWordByStateFormal(t *testing.T) {
 	asd := testASDView()
 	asd.StateFormal = "proposed"
 	bar := specBarFacts(proj, asd)
-	if body := asdPostureHTML(&bar); !strings.Contains(body, "displayed bytes: proposed (") {
+	if body := asdPostureHTML(&bar); !strings.Contains(body, "displayed bytes: proposed <span") {
 		t.Errorf("authoring wall's proposed bytes not read as proposed")
 	}
 }

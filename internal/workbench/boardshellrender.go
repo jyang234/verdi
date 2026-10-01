@@ -53,12 +53,13 @@ func writeASDState(b *strings.Builder, state string) {
 // branchBarFacts), the one model the bar and the wall's snapshot share
 // (SI-323 (3)), so the group is the fragment every refresh replaces.
 //
-// Each fact speaks its three states: a proven value as its text, or
-// "unproven: <reason>" with data-state="unproven" (three-valued honesty;
-// the row's "unproven" word kept). The summary keeps the row's words —
-// "displayed bytes: <word> (<state>)" and "working tree: <state>" — as
-// its text, the labels visually hidden so the bar reads
-// "<word> · <state>" (handoff README, "Global chrome").
+// Each fact's test-id element carries exactly the text today's row showed
+// for it, with its state (data-state proven|unproven); a disclosed reason
+// today's row did not print sits in a sibling element, so the reason
+// stays visible and ac-2's "same text" holds literally (ledger SI-332
+// (2)). The summary is the row's own words — "displayed bytes: <word>
+// (<state>)" and "working tree: <state>" — with the formal state hidden
+// from the eye only when it repeats the word.
 func writeASDPosture(b *strings.Builder, f *barFacts, refresh bool) {
 	esc := stdhtml.EscapeString
 	p := &f.Posture
@@ -81,35 +82,39 @@ func writeASDPosture(b *strings.Builder, f *barFacts, refresh bool) {
 	if spec != nil {
 		// What the displayed bytes ARE (design §4.2): the plain word is
 		// derived from the formal state alone, never from the mode. The
-		// row's full words are the text (visually hidden) for assistive
-		// technology and every text assertion; the terse word — and the
-		// formal state only when it differs — is what the eye reads.
-		b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(spec.Bytes.State) + `"><span class="topbar-sr">displayed bytes: ` + esc(spec.Bytes.Word) + ` (` + esc(spec.Bytes.State) + `)</span><span aria-hidden="true">` + esc(spec.Bytes.Word) + `</span>`)
-		if spec.Bytes.State != spec.Bytes.Word {
-			b.WriteString(`<span class="asd-posture-formal" aria-hidden="true"> (` + esc(spec.Bytes.State) + `)</span>`)
+		// text is today's row's, verbatim; the formal state hides from the
+		// eye when it only repeats the word.
+		formal := "asd-posture-formal"
+		if spec.Bytes.State == spec.Bytes.Word {
+			formal += " topbar-sr"
 		}
-		b.WriteString(`</span><span class="topbar-dot" aria-hidden="true">·</span>`)
+		b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(spec.Bytes.State) + `">displayed bytes: ` + esc(spec.Bytes.Word) + ` <span class="` + formal + `">(` + esc(spec.Bytes.State) + `)</span></span>`)
+		b.WriteString(`<span class="topbar-dot" aria-hidden="true">·</span>`)
 	}
-	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + esc(p.Tree.State) + `"><span class="topbar-sr">working tree: ` + esc(p.Tree.Text))
-	if p.Tree.Unproven != "" {
-		b.WriteString(`: ` + esc(p.Tree.Unproven))
+	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + esc(p.Tree.State) + `">working tree: ` + esc(p.Tree.Text) + `</span>`)
+	b.WriteString(`</summary><div class="topbar-posture-panel"><dl class="readiness-tech-facts">`)
+	writeBarFact(b, "Checkout", "checkout", p.Checkout)
+	writeBarFact(b, "Branch", "branch", p.Branch)
+	if p.Detached && p.Branch.Unproven == "" {
+		// Today's row printed an empty branch for a detached HEAD; the
+		// bar says so beside it.
+		writeBarWhy(b, "branch", "detached HEAD (no branch is checked out)", ` data-detached="true"`)
 	}
-	b.WriteString(`</span><span aria-hidden="true">` + esc(p.Tree.Text) + `</span></span></summary><div class="topbar-posture-panel"><dl class="readiness-tech-facts">`)
-	writeBarFact(b, "Checkout", "checkout", p.Checkout, "")
-	branch, branchAttrs := p.Branch, ""
-	if p.Detached && branch.Unproven == "" {
-		branch.Text, branchAttrs = "detached HEAD (no branch is checked out)", ` data-detached="true"`
-	}
-	writeBarFact(b, "Branch", "branch", branch, branchAttrs)
-	writeBarFact(b, "Worktree HEAD", "worktree-head", p.WorktreeHead, "")
-	writeBarFact(b, "Accepted branch", "accepted-branch", p.AcceptedBranch, "")
-	writeBarFact(b, "Accepted HEAD", "accepted-head", p.AcceptedHead, "")
-	writeBarFact(b, "Ahead/behind", "ahead-behind", p.AheadBehind, "")
+	writeBarFact(b, "Worktree HEAD", "worktree-head", p.WorktreeHead)
+	writeBarFact(b, "Accepted branch", "accepted-branch", p.AcceptedBranch)
+	writeBarFact(b, "Accepted HEAD", "accepted-head", p.AcceptedHead)
+	writeBarFact(b, "Ahead/behind", "ahead-behind", p.AheadBehind)
 	if p.Divergence != nil {
-		writeBarFact(b, "Divergence", "divergence", *p.Divergence, "")
+		writeBarFact(b, "Divergence", "divergence", *p.Divergence)
 	}
 	if p.BaseDigest != nil {
-		writeBarFact(b, "Base digest", "base-digest", *p.BaseDigest, "")
+		writeBarFact(b, "Base digest", "base-digest", *p.BaseDigest)
+	}
+	if p.Tree.Unproven != "" {
+		// The summary's tree text is today's row's ("working tree:
+		// unproven"); the reason is a row of the panel.
+		b.WriteString(`<dt>Working tree</dt>`)
+		writeBarWhy(b, "tree", p.Tree.Unproven, "")
 	}
 	b.WriteString(`</dl></div></details>`)
 	if refresh {
@@ -134,14 +139,25 @@ func writeTopBarBranch(b *strings.Builder, p *barPosture) {
 }
 
 // writeBarFact writes one row of the full posture: the label, then the
-// fact in its state — proven, its text; unproven, "unproven: <reason>" —
-// addressable by its slug (asd-posture-<slug>), with any extra attributes.
-func writeBarFact(b *strings.Builder, label, slug string, f barFact, attrs string) {
-	state, text := "proven", f.Text
+// fact's text exactly as today's row printed it, with its state
+// (data-state proven|unproven), addressable by its slug
+// (asd-posture-<slug>). A disclosed reason the text does not already
+// carry follows as a sibling row (asd-posture-<slug>-why; SI-332 (2)).
+func writeBarFact(b *strings.Builder, label, slug string, f barFact) {
+	state := "proven"
 	if f.Unproven != "" {
-		state, text = unprovenWord, unprovenWord+": "+f.Unproven
+		state = unprovenWord
 	}
-	b.WriteString(`<dt>` + label + `</dt><dd data-testid="asd-posture-` + slug + `" data-state="` + state + `"` + attrs + `><code>` + stdhtml.EscapeString(text) + `</code></dd>`)
+	b.WriteString(`<dt>` + label + `</dt><dd data-testid="asd-posture-` + slug + `" data-state="` + state + `"><code>` + stdhtml.EscapeString(f.Text) + `</code></dd>`)
+	if f.Unproven != "" && !strings.Contains(f.Text, f.Unproven) {
+		writeBarWhy(b, slug, f.Unproven, "")
+	}
+}
+
+// writeBarWhy writes a fact's disclosed reason as the row beside its
+// test-id element, with any extra attributes.
+func writeBarWhy(b *strings.Builder, slug, why, attrs string) {
+	b.WriteString(`<dd class="topbar-fact-why" data-testid="asd-posture-` + slug + `-why"` + attrs + `>` + stdhtml.EscapeString(why) + `</dd>`)
 }
 
 // asdPostureHTML is the wall's posture group as its own fragment — what

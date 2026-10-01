@@ -101,8 +101,10 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		Markdown:     snap.Markdown,
 		Bar:          bar,
 	}
-	nav := `<a href="/">index</a> · <a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Board</a> · <span class="current" aria-current="page" data-testid="document-tab-document">Document</span>`
-	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: template.HTML(nav)}) //nolint:gosec // the index link, the escaped board href, and the current marker
+	// The Wall and Document switch, in the bar's controls slot (dc-3), with
+	// the wall's own two labels; the ids stay the page's.
+	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>`
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // the escaped board href and the current marker
 	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
