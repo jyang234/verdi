@@ -30,10 +30,12 @@
 # Each e2e shard job installs Node before `make e2e-N`, which is a HARD
 # FAILURE without Node (wave 7: CLAUDE.md's testing regime made e2e a merge
 # blocker), keeping local/CI parity real rather than nominal. The static job
-# caches and installs golangci-lint at the Makefile's pin before `make lint`,
-# so the lint step gates for real (the lint target hard-fails when CI=true and
-# the binary is absent). pages.yml only builds the dex site (no lint), so it
-# needs no linter.
+# caches and installs golangci-lint at the Makefile's pin before `make lint`
+# and `make lint-strict`, so both lint steps gate for real (each target
+# hard-fails when CI=true and the binary is absent). The evidence job copies
+# those two steps exactly (SI-309), because the strict lint gate's named
+# tests, which `verdi sync --produce` runs there, need the pinned binary.
+# pages.yml only builds the dex site (no lint), so it needs no linter.
 #
 # What internal/specalign enforces here (verifyworkflow_test.go, SI-267). The
 # gate jobs must equal merge-gate.yml's in every key and value: the guard
@@ -96,8 +98,9 @@
 # scripts/merge-gate-verdict.sh, the same call merge-gate.yml's `merge-gate`
 # job makes. That step is defense in depth and a legible in-log witness of
 # the results the evidence binds; it needs no canary, because the job cannot
-# run over a failed need. Only then does it build the binary, run `verdi
-# sync --produce`, and upload the bundle. GitHub's "Re-run failed jobs"
+# run over a failed need. Only then does it set up Node (SI-293) and the
+# pinned golangci-lint (the static job's two steps, copied exactly; SI-309),
+# build the binary, run `verdi sync --produce`, and upload the bundle. GitHub's "Re-run failed jobs"
 # makes a new attempt of the same run: it re-runs only the failed jobs and
 # their dependents (so `verify`) and keeps the earlier attempt's successful
 # gate jobs. Evidence produced then binds gate jobs that each succeeded at
@@ -183,6 +186,12 @@ on:
       - "testdata/**"
       - "scripts/**"
       - "verdi.bindings.yaml"
+      # The lint configurations and the strict baseline: a push changing
+      # only one of them still runs make lint and make lint-strict
+      # (spec/strict-lint-gate dc-2).
+      - ".golangci.yml"
+      - ".golangci.strict.yml"
+      - ".golangci.strict-baseline.json"
   workflow_call: {}
 
 jobs:
@@ -213,6 +222,7 @@ jobs:
       - run: make fmt-check
       - run: make vet
       - run: make lint
+      - run: make lint-strict
       - run: make lint-store
       - run: make lint-showcase
       - run: make showcase-coverage
@@ -361,6 +371,23 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: e2e/package-lock.json
+      # The static job's two golangci-lint steps, copied exactly (SI-309):
+      # `verdi sync --produce` runs the strict lint gate's named tests, which
+      # run the pinned golangci-lint and skip where it is absent, and a skip
+      # here would record abstain. This job runs after the static job, so the
+      # cache step restores the binary that job cached under the same key and
+      # the install step builds it only on a cache miss; CI still installs the
+      # pinned version once per version.
+      - name: Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+      - name: Install golangci-lint (pinned)
+        run: |
+          test -x "$(go env GOPATH)/bin/golangci-lint" || \
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: go build -o .build/verdi ./cmd/verdi
       - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
         run: ./.build/verdi sync --produce

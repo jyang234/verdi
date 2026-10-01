@@ -911,13 +911,14 @@ var mergeGatePostVerifyCommands = []string{
 
 // verifyGateFloor is every gate `make verify` runs since SI-268 split the Go
 // tests and the Playwright suite once more, with `test` expanded to its
-// shards. The gate grows and never shrinks, so expanded VERIFY_STEPS must keep
-// every one of these; adding a gate needs no edit here, and removing one
-// fails. The e2e shards replace the single `e2e` step, which is now a
-// convenience target outside the gate; e2eshards_test.go proves the three
-// shards together run every spec file exactly once.
+// shards, and the strict lint gate joined (spec/strict-lint-gate). The gate
+// grows and never shrinks, so expanded VERIFY_STEPS must keep every one of
+// these; adding a gate needs no edit here, and removing one fails. The e2e
+// shards replace the single `e2e` step, which is now a convenience target
+// outside the gate; e2eshards_test.go proves the three shards together run
+// every spec file exactly once.
 var verifyGateFloor = []string{
-	"build", "fmt-check", "vet", "lint",
+	"build", "fmt-check", "vet", "lint", "lint-strict",
 	"test-cmd", "test-cross", "test-slow", "test-rest",
 	"fixture", "lint-store", "spec-align", "lint-showcase", "showcase-coverage",
 	"e2e-1", "e2e-2", "e2e-3",
@@ -1212,7 +1213,8 @@ func runsPlaywright(cmd string) bool {
 // action outside the pinned set, passes each action exactly its pinned
 // inputs, finishes setup before its first gate command, installs Node 22
 // wherever an e2e shard runs, and caches and installs the pinned
-// golangci-lint wherever `make lint` runs — which must be the static job.
+// golangci-lint wherever `make lint` or `make lint-strict` runs — which must
+// be the static job.
 func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 	pin := makefileGolangciPin(t)
@@ -1251,12 +1253,15 @@ func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 		if slices.ContainsFunc(runs, runsPlaywright) && findStep(steps, "actions/setup-node@v4") == nil {
 			t.Errorf("merge-gate.yml: job %q runs an e2e shard without actions/setup-node@v4 (Node 22)", key)
 		}
-		if slices.Contains(runs, "make lint") {
+		for _, lint := range []string{"make lint", "make " + strictLintStep} {
+			if !slices.Contains(runs, lint) {
+				continue
+			}
 			if findCacheStep(steps, "golangci-lint") == nil || !slices.Contains(runs, install) {
-				t.Errorf("merge-gate.yml: job %q runs make lint without the pinned golangci-lint cache and install steps", key)
+				t.Errorf("merge-gate.yml: job %q runs %s without the pinned golangci-lint cache and install steps", key, lint)
 			}
 			if key != mergeGateLintJob {
-				t.Errorf("merge-gate.yml: make lint runs in job %q, want %q (TestGolangciLintPinIsLockstepWithMakefile reads that job)", key, mergeGateLintJob)
+				t.Errorf("merge-gate.yml: %s runs in job %q, want %q (TestGolangciLintPinIsLockstepWithMakefile reads that job)", lint, key, mergeGateLintJob)
 			}
 		}
 	}
