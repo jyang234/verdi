@@ -6,7 +6,9 @@
 // verify's VERIFY_STEPS and runs in the static job of merge-gate.yml and
 // verify.yml; and `make -n lint-strict` shows golangci-lint run with --config
 // .golangci.strict.yml for GOOS=linux GOARCH=amd64, with --issues-exit-code=0,
-// then the baseline check.
+// over the whole module (./...), its own exit status captured as status=$?
+// with nothing masking it, then the baseline check passed that status and the
+// committed baseline, .golangci.strict-baseline.json.
 package specalign
 
 import (
@@ -191,11 +193,94 @@ type strictWiring struct {
 // whatever sits before it on its line.
 var golangciRunRE = regexp.MustCompile(`(?m)^.*golangci-lint run\b.*$`)
 
+// strictRunStatusRE matches a golangci-lint run followed directly by the
+// capture of its own exit status: its arguments, then `; status=$?;`, with
+// no `|` or `&` between, so no `|| true`, pipe, or `&&` stands between
+// golangci-lint and the status the baseline check is passed.
+var strictRunStatusRE = regexp.MustCompile(`golangci-lint run [^;|&\n]*; status=\$\?;`)
+
+// lintratchetCheckRE finds each baseline-check invocation in a dry run, with
+// the rest of its line.
+var lintratchetCheckRE = regexp.MustCompile(`(?m)lintratchet check\b.*$`)
+
+// strictLintBaselineFile is the committed baseline, at the repository root
+// (spec/strict-lint-gate ac-2).
+const strictLintBaselineFile = ".golangci.strict-baseline.json"
+
+// strictCheckExitArg is what the baseline check's -lint-exit must be passed:
+// the shell variable the recipe captures golangci-lint's own exit status in.
+const strictCheckExitArg = `"$status"`
+
+// flagValue returns the token after flag in fields, without a trailing `;`,
+// and whether flag is there.
+func flagValue(fields []string, flag string) (string, bool) {
+	at := slices.Index(fields, flag)
+	if at < 0 || at+1 >= len(fields) {
+		return "", false
+	}
+	return strings.TrimSuffix(fields[at+1], ";"), true
+}
+
+// strictRunProblems returns every way one golangci-lint run line r of the
+// lint-strict dry run departs from ac-1 and dc-1: a missing explicit
+// configuration, platform, or --issues-exit-code=0; a package pattern other
+// than the whole module (./...); and golangci-lint's own exit status not
+// captured as status=$? right after it, or masked with || (review finding
+// S1-B3).
+func strictRunProblems(r string) []string {
+	var out []string
+	line := strings.TrimSpace(r)
+	for _, want := range []string{"GOOS=linux GOARCH=amd64 golangci-lint run", "--config .golangci.strict.yml", "--issues-exit-code=0"} {
+		if !strings.Contains(r, want) {
+			out = append(out, fmt.Sprintf("make -n lint-strict runs %q, which lacks %q", line, want))
+		}
+	}
+	args := r[strings.Index(r, "golangci-lint run")+len("golangci-lint run"):]
+	if cut := strings.IndexAny(args, ";|&"); cut >= 0 {
+		args = args[:cut]
+	}
+	if !slices.Contains(strings.Fields(args), "./...") {
+		out = append(out, fmt.Sprintf("make -n lint-strict runs %q, which does not lint the whole module (./...): the baseline check would pass a run that never analyzed the rest", line))
+	}
+	if !strictRunStatusRE.MatchString(r) {
+		out = append(out, fmt.Sprintf("make -n lint-strict runs %q, which does not capture golangci-lint's own exit status as status=$? right after it: the check must see that status to exit 2 on a failed run (dc-1)", line))
+	}
+	if strings.Contains(r, "||") {
+		out = append(out, fmt.Sprintf("make -n lint-strict runs %q, which masks golangci-lint's exit status with ||", line))
+	}
+	return out
+}
+
+// strictCheckProblems returns every way one baseline-check line of the
+// lint-strict dry run departs from the wiring: -lint-exit not passed the
+// captured status (review finding S1-B3), or -baseline not the committed
+// baseline, whose absence at the merge base would turn the growth comparison
+// into a bootstrap disclosure (review finding S1-A2).
+func strictCheckProblems(line string) []string {
+	var out []string
+	fields := strings.Fields(line)
+	for _, f := range []struct{ flag, want, why string }{
+		{"-lint-exit", strictCheckExitArg, "golangci-lint's own exit status, captured right after the run"},
+		{"-baseline", strictLintBaselineFile, "the committed baseline, which the growth comparison reads at the merge base"},
+	} {
+		got, ok := flagValue(fields, f.flag)
+		switch {
+		case !ok:
+			out = append(out, fmt.Sprintf("make -n lint-strict's baseline check %q passes no %s, want %q: %s", strings.TrimSpace(line), f.flag, f.want, f.why))
+		case got != f.want:
+			out = append(out, fmt.Sprintf("make -n lint-strict's baseline check passes %s %q, want %q: %s", f.flag, got, f.want, f.why))
+		}
+	}
+	return out
+}
+
 // strictWiringProblems returns every way the wiring departs from ac-1: a
 // changed parity configuration, lint-strict outside VERIFY_STEPS or either
-// workflow's static job, and a recipe whose golangci-lint run lacks the
-// explicit configuration, the platform, or --issues-exit-code=0, or that does
-// not run the baseline check after it.
+// workflow's static job, a recipe whose golangci-lint run lacks the explicit
+// configuration, the platform, or --issues-exit-code=0, lints less than the
+// whole module, or does not pass its own exit status to the baseline check,
+// and a recipe that does not run the baseline check after it over the
+// committed baseline.
 func strictWiringProblems(w strictWiring) []string {
 	var out []string
 	sum := sha256.Sum256(w.parity)
@@ -215,16 +300,15 @@ func strictWiringProblems(w strictWiring) []string {
 		out = append(out, "make -n lint-strict runs no golangci-lint run")
 	}
 	for _, r := range runs {
-		for _, want := range []string{"GOOS=linux GOARCH=amd64 golangci-lint run", "--config .golangci.strict.yml", "--issues-exit-code=0"} {
-			if !strings.Contains(r, want) {
-				out = append(out, fmt.Sprintf("make -n lint-strict runs %q, which lacks %q", strings.TrimSpace(r), want))
-			}
-		}
+		out = append(out, strictRunProblems(r)...)
 	}
 	lintAt := strings.Index(w.dryRun, "golangci-lint run")
-	checkAt := strings.Index(w.dryRun, "lintratchet check -lint-exit")
+	checkAt := strings.Index(w.dryRun, "lintratchet check ")
 	if checkAt < 0 || checkAt < lintAt {
 		out = append(out, "make -n lint-strict does not run the baseline check (lintratchet check -lint-exit ...) after golangci-lint")
+	}
+	for _, line := range lintratchetCheckRE.FindAllString(w.dryRun, -1) {
+		out = append(out, strictCheckProblems(line)...)
 	}
 	return out
 }
@@ -274,8 +358,10 @@ func realStrictWiring(t *testing.T) strictWiring {
 // and that each falsifier is reported: a linter added, dropped, or
 // misconfigured; a comment quoting no ground-rules sentence, or the wrong
 // one; a nonzero cap; a changed .golangci.yml; lint-strict missing from
-// VERIFY_STEPS or from either workflow's static job; and a recipe lacking the
-// explicit configuration or the platform.
+// VERIFY_STEPS or from either workflow's static job; a recipe lacking the
+// explicit configuration or the platform; and a recipe linting less than the
+// whole module, masking or dropping golangci-lint's exit status, or checking
+// another baseline (review findings S1-A2 and S1-B3).
 func TestStrictLintTargetIsWired(t *testing.T) {
 	sentences := groundRuleSentences(string(readRepoFile(t, "docs/ground-rules.md")))
 	config := readStrictLintConfig(t)
@@ -360,6 +446,41 @@ func TestStrictLintTargetIsWired(t *testing.T) {
 			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "lintratchet check -lint-exit", "lintratchet version")
 			return w
 		}, "does not run the baseline check"},
+		// Review finding S1-A2: a renamed baseline is absent at the merge
+		// base, so the growth comparison would pass under the bootstrap
+		// disclosure.
+		{"the check reads another baseline", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "-baseline .golangci.strict-baseline.json;", "-baseline .golangci.strict-baseline.v2.json;")
+			return w
+		}, `passes -baseline ".golangci.strict-baseline.v2.json", want ".golangci.strict-baseline.json"`},
+		{"the check reads a baseline whose name extends the committed one", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "-baseline .golangci.strict-baseline.json;", "-baseline .golangci.strict-baseline.json.new;")
+			return w
+		}, `passes -baseline ".golangci.strict-baseline.json.new", want ".golangci.strict-baseline.json"`},
+		// Review finding S1-B3, the reviewer's mutant B1: the check never
+		// sees golangci-lint's own exit status.
+		{"the check is passed a constant exit status (mutant B1)", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, `-lint-exit "$status"`, "-lint-exit 0")
+			return w
+		}, `passes -lint-exit "0", want "\"$status\""`},
+		// Review finding S1-B3, the reviewer's mutant B3: part of the module
+		// is linted and golangci-lint's exit status is masked.
+		{"the run lints part of the module and masks its exit (mutant B3)", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "./...; status=$?;", "./cmd/... || true; status=$?;")
+			return w
+		}, "does not lint the whole module (./...)"},
+		{"the run's exit status is masked with ||", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "./...; status=$?;", "./... || true; status=$?;")
+			return w
+		}, "masks golangci-lint's exit status with ||"},
+		{"the run's exit status is not captured", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "./...; status=$?;", "./...; status=0;")
+			return w
+		}, "does not capture golangci-lint's own exit status as status=$? right after it"},
+		{"the run lints only part of the module", func(t *testing.T, w strictWiring) strictWiring {
+			w.dryRun = mutateSource(t, "the lint-strict dry run", w.dryRun, "./...; status=$?;", "./internal/...; status=$?;")
+			return w
+		}, "does not lint the whole module (./...)"},
 	}
 	for _, tc := range wiringCases {
 		t.Run("wiring: "+tc.name, func(t *testing.T) {
