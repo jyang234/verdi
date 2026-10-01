@@ -69,6 +69,7 @@ func (g GitEarlier) ReadEarlierBaseline(ctx context.Context) (EarlierBaseline, e
 		if msg == "" {
 			msg = "the default branch did not resolve"
 		}
+		// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 		return EarlierBaseline{}, fmt.Errorf("the growth comparison needs the merge base with the default branch: %s", msg)
 	}
 	head, err := gitx.RevParse(ctx, g.Dir, "HEAD")
@@ -77,11 +78,14 @@ func (g GitEarlier) ReadEarlierBaseline(ctx context.Context) (EarlierBaseline, e
 	}
 	base, found, err := gitx.MergeBaseCommit(ctx, g.Dir, "HEAD", branch.Ref)
 	if err != nil {
+		// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 		return EarlierBaseline{}, fmt.Errorf("resolving the merge base of HEAD with %s: %w", branch.Ref, err)
 	}
 	if !found {
+		// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 		return EarlierBaseline{}, fmt.Errorf("HEAD and %s have no merge base in this clone (a shallow clone cuts the history the growth comparison needs), so the baseline cannot be checked for growth", branch.Ref)
 	}
+	// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 	commit, where := base, "the merge base of HEAD with "+branch.Ref
 	if base == head {
 		parent, err := gitx.RevParse(ctx, g.Dir, "HEAD^1")
