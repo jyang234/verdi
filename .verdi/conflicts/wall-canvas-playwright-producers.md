@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/wall-canvas }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: ab64413fd48345dc5ee87d71f8151a0d1288869d }
 ---
 # Conflict: wall-canvas cannot cross verdi build start
 

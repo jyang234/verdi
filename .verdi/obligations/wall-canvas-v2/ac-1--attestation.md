@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/wall-canvas-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: ab64413fd48345dc5ee87d71f8151a0d1288869d }
 ---
 # The owner accepts the wall canvas's visual fidelity
 
