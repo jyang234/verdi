@@ -22,7 +22,6 @@ type AwaitingFix struct {
 func AwaitingFixes() []AwaitingFix {
 	const carries = "commits every pre-staged index entry: git add -- <declared path> then a commit with no pathspec (UAT-036)"
 	return []AwaitingFix{
-		{Ritual: "design_start", Path: "verdi design start --supersedes", Defect: carries},
 		{Ritual: "commit_to_design", Path: "verdi board commit, and the workbench's POST /board/{key}/commit", Defect: carries},
 		{Ritual: "accept_diagram", Path: "verdi accept diagram/<name>", Defect: carries},
 		{Ritual: "constitution_propose", Path: "verdi context constitution propose", Defect: carries + "; also cuts a new branch from HEAD rather than the resolved default branch (parent dc-11)"},

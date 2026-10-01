@@ -284,7 +284,10 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		return 2
 	}
 	msg := fmt.Sprintf("design start: supersede spec/%s as spec/%s", predName, newName)
-	headCommit, err := gitx.CreateCommit(ctx, root, msg)
+	// UAT-036: commit exactly the staged successor directory, as
+	// runDesignStart does — a commit with no pathspec would record every
+	// entry the operator had staged before the run.
+	headCommit, err := gitx.CreateCommitPaths(ctx, root, msg, specDir)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start --supersedes:", err)
 		return 2
