@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -45,17 +46,25 @@ func makefileLintPin(t *testing.T, root string) string {
 	return string(m[1])
 }
 
+// What each test that needs the pinned golangci-lint cannot show without
+// it, as its skip reason says (re-review finding S1-RR3).
+const (
+	findingsUnshown = "this run cannot show that the strict configuration reports each gated linter's violation"
+	captureUnshown  = "this run cannot check that the committed capture testdata/reports/strictfixture.json is still what that golangci-lint reports over the strict fixture module"
+)
+
 // pinnedGolangciLint returns the path of golangci-lint at the Makefile's
-// pinned version, and skips the test with the reason when that binary is
-// absent: not on PATH, or on PATH at another version. CI's test jobs do not
-// install it; CI job verify does (ledger SI-309), where a skip is recorded as
-// abstain, never as a pass (spec/strict-lint-gate dc-3).
-func pinnedGolangciLint(t *testing.T, root string) string {
+// pinned version, and skips the test when that binary is absent (not on
+// PATH, or on PATH at another version), with a reason ending in unshown, the
+// claim the run therefore cannot show. CI's test jobs do not install it; CI
+// job verify does (ledger SI-309), where a skip is recorded as abstain,
+// never as a pass (spec/strict-lint-gate dc-3).
+func pinnedGolangciLint(t *testing.T, root, unshown string) string {
 	t.Helper()
 	pin := makefileLintPin(t, root)
 	bin, err := exec.LookPath("golangci-lint")
 	if err != nil {
-		t.Skipf("SKIP (disclosed, not a pass): the Makefile's pinned golangci-lint v%s is absent (%v), so this run cannot show that the strict configuration reports each gated linter's violation", pin, err)
+		t.Skipf("SKIP (disclosed, not a pass): the Makefile's pinned golangci-lint v%s is absent (%v), so %s", pin, err, unshown)
 	}
 	out, err := exec.CommandContext(t.Context(), bin, "version").CombinedOutput()
 	if err != nil {
@@ -63,7 +72,7 @@ func pinnedGolangciLint(t *testing.T, root string) string {
 	}
 	m := regexp.MustCompile(`version v?(\d+\.\d+\.\d+)`).FindSubmatch(out)
 	if m == nil || string(m[1]) != pin {
-		t.Skipf("SKIP (disclosed, not a pass): the Makefile's pinned golangci-lint v%s is absent: %s reports %q, so this run cannot show that the strict configuration reports each gated linter's violation", pin, bin, bytes.TrimSpace(out))
+		t.Skipf("SKIP (disclosed, not a pass): the Makefile's pinned golangci-lint v%s is absent: %s reports %q, so %s", pin, bin, bytes.TrimSpace(out), unshown)
 	}
 	return bin
 }
@@ -71,11 +80,12 @@ func pinnedGolangciLint(t *testing.T, root string) string {
 // lintStrictFixture runs the pinned golangci-lint with .golangci.strict.yml,
 // for linux/amd64 and with --issues-exit-code=0 as make lint-strict runs it,
 // over the committed fixture module, and returns its findings. It skips the
-// test with the reason when the pinned binary is absent.
-func lintStrictFixture(t *testing.T) []Finding {
+// test when the pinned binary is absent, saying the run cannot show
+// unshown.
+func lintStrictFixture(t *testing.T, unshown string) []Finding {
 	t.Helper()
 	root := repoRoot(t)
-	bin := pinnedGolangciLint(t, root)
+	bin := pinnedGolangciLint(t, root, unshown)
 
 	report := filepath.Join(t.TempDir(), "report.json")
 	cmd := exec.CommandContext(t.Context(), bin, "run",
@@ -111,7 +121,7 @@ func lintStrictFixture(t *testing.T) []Finding {
 // ac-1). A gated linter's violation going unreported, a finding in the clean
 // file, or any extra finding fails it.
 func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
-	findings := lintStrictFixture(t)
+	findings := lintStrictFixture(t, findingsUnshown)
 
 	gated := []string{"containedctx", "contextcheck", "errorlint", "gochecknoglobals", "noctx"}
 	byLinter := map[string][]Finding{}
@@ -151,12 +161,45 @@ func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
 // S1-B1), so a stale capture would measure exclusions against messages the
 // linter no longer prints. capture.sh strictfixture re-captures it.
 func TestStrictFixtureReportIsCurrent(t *testing.T) {
-	live := lintStrictFixture(t)
+	live := lintStrictFixture(t, captureUnshown)
 	captured, err := ParseReport(mustRead(t, capturedReport("strictfixture")))
 	if err != nil {
 		t.Fatalf("parsing the captured strict fixture report: %v", err)
 	}
 	if !slices.Equal(live, captured) {
 		t.Fatalf("the pinned golangci-lint reports over %s:\n%+v\nbut %s holds:\n%+v\nre-capture it with testdata/capture/capture.sh strictfixture", strictFixtureDir, live, capturedReport("strictfixture"), captured)
+	}
+}
+
+// TestPinnedLintSkipReasons re-runs, in this test binary and with no
+// golangci-lint on PATH, each test that needs the pinned golangci-lint, and
+// proves each skips naming its own claim the run then cannot show, never the
+// other's (re-review finding S1-RR3).
+func TestPinnedLintSkipReasons(t *testing.T) {
+	const (
+		findingsReason = "so this run cannot show that the strict configuration reports each gated linter's violation"
+		captureReason  = "so this run cannot check that the committed capture testdata/reports/strictfixture.json is still what that golangci-lint reports over the strict fixture module"
+	)
+	noLint := t.TempDir()
+	cases := []struct{ test, want, notWant string }{
+		{test: "TestLintStrict_ReportsGroundRuleFindings", want: findingsReason, notWant: captureReason},
+		{test: "TestStrictFixtureReportIsCurrent", want: captureReason, notWant: findingsReason},
+	}
+	for _, tc := range cases {
+		t.Run(tc.test, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+tc.test+"$", "-test.v", "-test.count=1")
+			cmd.Env = append(os.Environ(), "PATH="+noLint)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("re-running %s: %v\n%s", tc.test, err, out)
+			}
+			got := string(out)
+			if !strings.Contains(got, "--- SKIP: "+tc.test) {
+				t.Fatalf("%s did not skip without golangci-lint on PATH:\n%s", tc.test, got)
+			}
+			if !strings.Contains(got, tc.want) || strings.Contains(got, tc.notWant) {
+				t.Fatalf("%s's skip reason does not say %q alone:\n%s", tc.test, tc.want, got)
+			}
+		})
 	}
 }
