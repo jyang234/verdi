@@ -165,6 +165,18 @@ type defaultHistory struct {
 	head     string // a full commit id, or unresolvedHead
 	resolved bool
 	shallow  bool // shallow, or unknowable (treated as shallow: unproven)
+	// branch is the default branch the head was resolved from (zero when
+	// it could not be resolved) — never part of the key.
+	branch specstate.Branch
+}
+
+// accepted is h as the AcceptedHead a Result exposes.
+func (h defaultHistory) accepted() AcceptedHead {
+	a := AcceptedHead{Branch: h.branch.Name, Ref: h.branch.Ref}
+	if h.resolved {
+		a.Commit = h.head
+	}
+	return a
 }
 
 // key is the history's component of a cache key — never a git revision.
@@ -179,6 +191,7 @@ func (h defaultHistory) key() string {
 func resolveDefaultHistory(ctx context.Context, root string) defaultHistory {
 	h := defaultHistory{head: unresolvedHead}
 	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		h.branch = branch
 		if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
 			h.head, h.resolved = sha, true
 		}
@@ -219,11 +232,20 @@ func repoKey(ctx context.Context, root string) string {
 // resolves; it is resolved to its full id for the key) in root's
 // repository, against the default branch's history at root.
 func CommitViews(ctx context.Context, root, commit string) (*Views, error) {
+	v, _, err := commitViewsWithHistory(ctx, root, commit)
+	return v, err
+}
+
+// commitViewsWithHistory is CommitViews plus the default history it was
+// computed against, which Load exposes (Result.Accepted).
+func commitViewsWithHistory(ctx context.Context, root, commit string) (*Views, defaultHistory, error) {
 	full, err := gitx.RevParse(ctx, root, commit)
 	if err != nil {
-		return nil, fmt.Errorf("specdocload: resolving %q: %w", commit, err)
+		return nil, defaultHistory{}, fmt.Errorf("specdocload: resolving %q: %w", commit, err)
 	}
-	return commitViews(ctx, root, full, resolveDefaultHistory(ctx, root).key())
+	h := resolveDefaultHistory(ctx, root)
+	v, err := commitViews(ctx, root, full, h.key())
+	return v, h, err
 }
 
 // commitViews is CommitViews with the commit and the history key resolved.
@@ -242,13 +264,22 @@ func commitViews(ctx context.Context, root, full, historyKey string) (*Views, er
 // moved head, is a new key; an unchanged tree under an unchanged head a
 // hit.
 func WorkTreeViews(ctx context.Context, root string) (*Views, error) {
+	v, _, err := workTreeViewsWithHistory(ctx, root)
+	return v, err
+}
+
+// workTreeViewsWithHistory is WorkTreeViews plus the default history it
+// was computed against, which Load exposes (Result.Accepted).
+func workTreeViewsWithHistory(ctx context.Context, root string) (*Views, defaultHistory, error) {
 	snap, digest, err := snapshotRecords(ctx, objsupersede.WorkTree{Root: root})
 	if err != nil {
-		return nil, err
+		return nil, defaultHistory{}, err
 	}
-	return views.get(ctx, viewKey(root, "tree", digest, resolveDefaultHistory(ctx, root).key()), func(ctx context.Context) (*Views, error) {
+	h := resolveDefaultHistory(ctx, root)
+	v, err := views.get(ctx, viewKey(root, "tree", digest, h.key()), func(ctx context.Context) (*Views, error) {
 		return buildViews(ctx, root, snap, digest)
 	})
+	return v, h, err
 }
 
 // BoardViews are the two views a board reads (SI-278 as clarified):
