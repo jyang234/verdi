@@ -27,12 +27,20 @@ type Entry struct {
 	Surface string
 	Name    string
 	Roots   []Root
+	// Parent names the entry on the same surface whose dispatch derives
+	// this one: a CLI subcommand's verb (PreDispatch for a top-level verb),
+	// a route action's route. Empty when nothing on the surface dispatches
+	// it. Traversal stops at the roots of an entry's own descendants, whose
+	// mutations are theirs (ledger SI-314 (2)).
+	Parent string
 	// Site is the code that dispatches the entry from a host: the function
 	// or function literal holding a route's ServeMux registration (a route
-	// action carries its route's). Zero for a verb no host serves. An entry
-	// with a site fails closed, in Reach, on a call through a
-	// function-typed field the analysis cannot resolve: its collaborators
-	// were built by code outside its own reach.
+	// action carries its route's) or the MCP tool switch. Zero for a verb no
+	// host serves. A verb of another surface whose code reaches the site
+	// serves the entry. An entry with a site (its own or an ancestor's)
+	// fails closed, in Reach, on a read of a function-typed field the
+	// analysis cannot resolve: its collaborators were built by code outside
+	// its own reach.
 	Site Root
 	// Bound names the route table's function-typed fields whose row values
 	// Roots already holds, because the registration handed the row itself
@@ -81,8 +89,16 @@ type Graph struct {
 	bound     map[*types.Var]bool
 	stores    map[ast.Expr]bool
 
-	cut map[int]bool
+	// entries are the entries the graph was built for, by surface and
+	// name; children lists each entry's direct descendants (its Parent's
+	// inverse); roots are each entry's root nodes.
+	entries  []Entry
+	byEntry  map[entryKey]int
+	children map[int][]int
+	roots    [][]int
 }
+
+type entryKey struct{ surface, name string }
 
 type node struct {
 	name  string
@@ -97,8 +113,10 @@ type fieldRead struct {
 	pos   token.Pos
 }
 
-// Build builds the graph for prog, with every root of entries as a node
-// and every entry's roots as the boundary other entries' reach stops at.
+// Build builds the graph for prog, with every root of entries as a node.
+// The entries are the ones Reach may be asked about: their Parent and Site
+// relations decide where each one's traversal stops, so each surface and
+// name may appear once.
 func Build(prog *Program, entries []Entry) (*Graph, error) {
 	g := &Graph{
 		prog:   prog,
@@ -107,16 +125,23 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 		byArm:  map[ast.Node]int{},
 		byVar:  map[*types.Var]int{},
 		impls:  map[*types.Func][]*types.Func{},
-		cut:    map[int]bool{},
+
+		byEntry:  map[entryKey]int{},
+		children: map[int][]int{},
 
 		fieldVals: map[*types.Var]fieldValue{},
 		bound:     map[*types.Var]bool{},
 		stores:    map[ast.Expr]bool{},
 	}
-	for _, e := range entries {
+	for i, e := range entries {
 		if len(e.Roots) == 0 {
 			return nil, fmt.Errorf("reach: entry %s %q has no roots", e.Surface, e.Name)
 		}
+		key := entryKey{e.Surface, e.Name}
+		if _, dup := g.byEntry[key]; dup {
+			return nil, fmt.Errorf("reach: entry %s %q is given twice", e.Surface, e.Name)
+		}
+		g.byEntry[key] = i
 		for _, r := range e.Roots {
 			if r.Arm != nil {
 				switch r.Arm.(type) {
@@ -138,45 +163,86 @@ func Build(prog *Program, entries []Entry) (*Graph, error) {
 	g.declare()
 	g.flow = newFieldFlow(prog)
 	g.connect()
-	for _, e := range entries {
+	g.entries = entries
+	for i, e := range entries {
 		ids, err := g.rootIDs(e)
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range ids {
-			g.cut[id] = true
+		g.roots = append(g.roots, ids)
+		if e.Parent == "" {
+			continue
+		}
+		if p, ok := g.byEntry[entryKey{e.Surface, e.Parent}]; ok && p != i {
+			g.children[p] = append(g.children[p], i)
+		}
+	}
+	for i := range entries {
+		if _, err := g.siteNode(i); err != nil {
+			return nil, err
 		}
 	}
 	return g, nil
 }
 
 // Reach returns the targets entry reaches, sorted by name, each with one
-// shortest path. Traversal never enters a root of another entry: the
-// mutation behind it is that entry's, the most specific verb that reaches
-// it (a server verb hosts the workbench's and MCP's entries; a dispatcher
-// hosts its subcommands' arms). An entry whose roots the graph has no
-// node for is an error, never an entry that reaches nothing.
+// shortest path. Traversal stops only at the roots of entries whose
+// mutations are their own (ledger SI-314 (2)): the entry's descendants (a
+// dispatcher's subcommands, a route's actions), and the entries of another
+// surface it serves, which are those whose site its code reaches (serve's
+// workbench routes; mcp's tools). Every other call, into another verb's
+// code included, is traversed, so a verb that delegates reaches what its
+// delegate reaches. The entry must be one the graph was built for; an
+// entry the graph does not know is an error, never one that reaches
+// nothing.
 func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) {
-	own, err := g.rootIDs(entry)
+	idx, ok := g.byEntry[entryKey{entry.Surface, entry.Name}]
+	if !ok {
+		if _, err := g.rootIDs(entry); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("reach: entry %s %q is not one the graph was built for", entry.Surface, entry.Name)
+	}
+	entry = g.entries[idx]
+	cut := map[int]bool{}
+	for _, d := range g.descendants(idx) {
+		g.cutAt(cut, d)
+	}
+	visited, _, err := g.traverse(idx, cut, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	ownSet := map[int]bool{}
-	for _, id := range own {
-		ownSet[id] = true
+	for j, e := range g.entries {
+		if e.Surface == entry.Surface {
+			continue
+		}
+		site, _ := g.siteNode(j)
+		if site < 0 || !visited[site] {
+			continue
+		}
+		g.cutAt(cut, j)
+		for _, d := range g.descendants(j) {
+			g.cutAt(cut, d)
+		}
 	}
+	_, hits, err := g.traverse(idx, cut, targets, g.readChecker(idx))
+	return hits, err
+}
+
+// traverse walks breadth-first from entry idx's roots, never entering a
+// cut node that is not one of its own roots, and returns the nodes it
+// visits and the targets among them. check, when set, vets each visited
+// node.
+func (g *Graph) traverse(idx int, cut map[int]bool, targets map[*types.Func]bool, check func(*node) error) (map[int]bool, []Hit, error) {
+	own := map[int]bool{}
 	parent := map[int]int{}
-	queue := []int{}
-	for _, id := range own {
+	var queue []int
+	for _, id := range g.roots[idx] {
+		own[id] = true
 		if _, seen := parent[id]; !seen {
 			parent[id] = -1
 			queue = append(queue, id)
 		}
-	}
-	hosted := entry.Site != (Root{})
-	boundHere := map[*types.Var]bool{}
-	for _, f := range entry.Bound {
-		boundHere[f.Origin()] = true
 	}
 	var hits []Hit
 	for len(queue) > 0 {
@@ -186,24 +252,92 @@ func (g *Graph) Reach(entry Entry, targets map[*types.Func]bool) ([]Hit, error) 
 		if n.fn != nil && targets[n.fn] {
 			hits = append(hits, Hit{Func: n.fn, Path: g.path(parent, id)})
 		}
-		if hosted {
-			if err := g.checkReads(entry, n, boundHere); err != nil {
-				return nil, err
+		if check != nil {
+			if err := check(n); err != nil {
+				return nil, nil, err
 			}
 		}
 		for _, next := range sortedKeys(n.out) {
 			if _, seen := parent[next]; seen {
 				continue
 			}
-			if g.cut[next] && !ownSet[next] {
+			if cut[next] && !own[next] {
 				continue
 			}
 			parent[next] = id
 			queue = append(queue, next)
 		}
 	}
+	visited := make(map[int]bool, len(parent))
+	for id := range parent {
+		visited[id] = true
+	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].Func.FullName() < hits[j].Func.FullName() })
-	return hits, nil
+	return visited, hits, nil
+}
+
+// cutAt adds entry i's roots to cut.
+func (g *Graph) cutAt(cut map[int]bool, i int) {
+	for _, id := range g.roots[i] {
+		cut[id] = true
+	}
+}
+
+// descendants returns every entry whose Parent chain leads to entry i.
+func (g *Graph) descendants(i int) []int {
+	var out []int
+	seen := map[int]bool{i: true}
+	stack := append([]int(nil), g.children[i]...)
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+		stack = append(stack, g.children[c]...)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// siteNode returns the node of entry i's site (its own, else its nearest
+// ancestor's), or -1 when it has none.
+func (g *Graph) siteNode(i int) (int, error) {
+	seen := map[int]bool{}
+	for i >= 0 && !seen[i] {
+		seen[i] = true
+		e := g.entries[i]
+		if e.Site != (Root{}) {
+			ids, err := g.rootIDs(Entry{Surface: e.Surface, Name: e.Name, Roots: []Root{e.Site}})
+			if err != nil {
+				return -1, fmt.Errorf("reach: entry %s %q: its site: %w", e.Surface, e.Name, err)
+			}
+			return ids[0], nil
+		}
+		p, ok := g.byEntry[entryKey{e.Surface, e.Parent}]
+		if e.Parent == "" || !ok {
+			return -1, nil
+		}
+		i = p
+	}
+	return -1, nil
+}
+
+// readChecker returns the fail-closed check for entry i's traversal: an
+// entry a host dispatches (one with a site) must resolve every
+// function-typed field it reads; any other entry needs none.
+func (g *Graph) readChecker(i int) func(*node) error {
+	if site, _ := g.siteNode(i); site < 0 {
+		return nil
+	}
+	entry := g.entries[i]
+	boundHere := map[*types.Var]bool{}
+	for _, f := range entry.Bound {
+		boundHere[f.Origin()] = true
+	}
+	return func(n *node) error { return g.checkReads(entry, n, boundHere) }
 }
 
 // checkReads fails closed on a hosted entry's read of a function-typed

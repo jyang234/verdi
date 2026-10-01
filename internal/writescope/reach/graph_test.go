@@ -122,20 +122,92 @@ func TestGraph_UnreachedTargetStaysUnreached(t *testing.T) {
 	}
 }
 
-func TestGraph_ReachStopsAtAnotherEntrysRoot(t *testing.T) {
+// TestGraph_ReachCutsOnlyAtItsOwnDescendants pins R1-A3 (ledger SI-314
+// (2)): traversal stops at the roots of the traversing entry's own
+// descendants, never at an unrelated entry's root, so a verb that
+// delegates to another verb's code reaches what that code reaches.
+func TestGraph_ReachCutsOnlyAtItsOwnDescendants(t *testing.T) {
 	prog := loadSynth(t)
 	const app = "example.com/synth/app"
-	outer := reach.Entry{Surface: "test", Name: "outer", Roots: []reach.Root{{Func: lookupFunc(t, prog, app, "ViaInterface")}}}
-	inner := reach.Entry{Surface: "test", Name: "inner", Roots: []reach.Root{{Func: lookupFunc(t, prog, app, "mutator.Do")}}}
-	g, err := reach.Build(prog, []reach.Entry{outer, inner})
+	tests := []struct {
+		name      string
+		parent    string
+		wantOuter string
+	}{
+		{"an unrelated entry's root is traversed", "", "Mutate"},
+		{"a descendant's root is cut", "outer", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outer := reach.Entry{Surface: "test", Name: "outer", Roots: []reach.Root{{Func: lookupFunc(t, prog, app, "ViaInterface")}}}
+			inner := reach.Entry{Surface: "test", Name: "inner", Parent: tt.parent, Roots: []reach.Root{{Func: lookupFunc(t, prog, app, "mutator.Do")}}}
+			g, err := reach.Build(prog, []reach.Entry{outer, inner})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if got := strings.Join(hitNames(mustReach(t, g, outer, synthTargets(t, prog))), ","); got != tt.wantOuter {
+				t.Fatalf("outer reaches %q, want %q", got, tt.wantOuter)
+			}
+			if got := strings.Join(hitNames(mustReach(t, g, inner, synthTargets(t, prog))), ","); got != "Mutate" {
+				t.Fatalf("inner reaches %q, want Mutate", got)
+			}
+		})
+	}
+}
+
+// TestGraph_ReachCutsAtTheEntriesAHostServes pins the other half of R1-A3:
+// a verb that reaches the code dispatching another surface's entries (the
+// workbench's route registrations, the MCP tool switch) serves them, and
+// stops at their roots; every other call is traversed.
+func TestGraph_ReachCutsAtTheEntriesAHostServes(t *testing.T) {
+	prog := loadSynth(t)
+	cli, err := reach.CLIEntries(prog, "example.com/synth/cli", "Run", "cli")
 	if err != nil {
-		t.Fatalf("Build: %v", err)
+		t.Fatalf("CLIEntries: %v", err)
 	}
-	if got := hitNames(mustReach(t, g, outer, synthTargets(t, prog))); len(got) != 0 {
-		t.Fatalf("outer reaches %v through inner's root; the most specific entry owns the mutation", got)
+	pre, err := reach.PreDispatchEntry(prog, "example.com/synth/cli", "Run", "cli")
+	if err != nil {
+		t.Fatalf("PreDispatchEntry: %v", err)
 	}
-	if got := hitNames(mustReach(t, g, inner, synthTargets(t, prog))); strings.Join(got, ",") != "Mutate" {
-		t.Fatalf("inner reaches %v, want [Mutate]", got)
+	routes, err := reach.RouteEntries(prog, "example.com/synth/web", "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	tools, err := reach.SwitchEntries(prog, "example.com/synth/tools", "mcp", []string{"write_tool", "read_tool"})
+	if err != nil {
+		t.Fatalf("SwitchEntries: %v", err)
+	}
+	all := append(append(append(cli, pre), routes...), tools...)
+	got := reachByName(t, prog, all)
+	tests := []struct {
+		entry string
+		want  string
+	}{
+		{"serve", "Mutate"}, // the server's construction names app.Direct; every route it registers is served and cut (no Publish)
+		{"mcp", ""},         // reaches the tool switch: every tool is served and cut
+		{"ds", "Mutate"},    // delegation is traversed
+		{"sub", ""},         // its own arms are cut
+		{reach.PreDispatch, ""},
+		{"/quick/thing/{name}/api/{action}", "Mutate,Publish"},
+		{"/thing/{name}/api/{action}", ""},
+		{"write_tool", "Mutate"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.entry, func(t *testing.T) {
+			if got[tt.entry] != tt.want {
+				t.Fatalf("%s reaches %q, want %q", tt.entry, got[tt.entry], tt.want)
+			}
+		})
+	}
+}
+
+// TestBuild_RejectsAnEntryNamedTwice: descendants and hosts are found by
+// name, so a name must mean one entry per surface.
+func TestBuild_RejectsAnEntryNamedTwice(t *testing.T) {
+	prog := loadSynth(t)
+	e := reach.Entry{Surface: "test", Name: "twice", Roots: []reach.Root{{Func: lookupFunc(t, prog, "example.com/synth/app", "Direct")}}}
+	if _, err := reach.Build(prog, []reach.Entry{e, e}); err == nil {
+		t.Fatal("Build accepted two entries with one surface and name")
 	}
 }
 
@@ -173,6 +245,7 @@ func TestGraph_ReachFailsOnRootsOutsideTheGraph(t *testing.T) {
 		entry reach.Entry
 	}{
 		{"an arm the graph was not built with", reach.Entry{Surface: "test", Name: "stranger", Roots: []reach.Root{{Arm: &ast.CaseClause{}}}}},
+		{"an entry the graph was not built for", reach.Entry{Surface: "test", Name: "stranger", Roots: built.Roots}},
 		{"an empty root", reach.Entry{Surface: "test", Name: "empty", Roots: []reach.Root{{}}}},
 		{"no roots", reach.Entry{Surface: "test", Name: "bare"}},
 	}

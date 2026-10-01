@@ -38,7 +38,7 @@ func TestCLIEntries_DeriveVerbsFromTheDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CLIEntries: %v", err)
 	}
-	want := []string{"alias", "alias2", "direct", "op", "op a", "op b", "sub", "sub --fast", "sub read", "sub write"}
+	want := []string{"alias", "alias2", "direct", "ds", "mcp", "op", "op a", "op b", "serve", "sub", "sub --fast", "sub read", "sub write"}
 	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("CLI entries = %q, want %q", got, want)
 	}
@@ -54,6 +54,7 @@ func TestCLIEntries_DeriveVerbsFromTheDispatcher(t *testing.T) {
 	}{
 		{"direct", "Mutate"},     // if-arm on the verb
 		{"alias", ""},            // one arm of an || condition
+		{"ds", "Mutate"},         // R1-A3: delegates into sub's arms, which are not its own, so they are traversed
 		{"sub", ""},              // a dispatcher's own code: its arms are cut
 		{"sub write", "Mutate"},  // switch on args[0] one level down
 		{"sub read", ""},         // sibling arm, read-only
@@ -199,6 +200,7 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 		"/legacy/{key}/commit",
 		"/legacy/{key}/save",
 		"/legacy/{key}/{action}",
+		"/quick/thing/{name}/api/{action}",
 		"/static",
 		"/thing/{name}",
 		"/thing/{name}/api/look",
@@ -215,18 +217,19 @@ func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
 		route string
 		want  string
 	}{
-		{"/thing/{name}/api/push", "Publish"},               // switch arm in the handler closure
-		{"/thing/{name}/api/mutate", "Mutate"},              // arm of a helper the key is handed to
-		{"/thing/{name}/api/look", ""},                      // read-only arm
-		{"/thing/{name}/api/{action}", ""},                  // the route itself: its arms are cut
-		{"/legacy/{key}/commit", "Mutate"},                  // switch directly on r.PathValue
-		{"/b/{branch}/thing/{name}", "Mutate"},              // prefix mount's own work only, from a route table
-		{"/b/{branch}/thing/{name}/api/{action}", "Mutate"}, // the prefix's own work; the row's actions are cut
-		{"/b/{branch}/thing/{name}/api/push", "Publish"},    // R1-A1: the row's handler, split on {action} under the prefix
-		{"/b/{branch}/thing/{name}/api/mutate", "Mutate"},   // the row's helper arm under the prefix
-		{"/b/{branch}/thing/{name}/api/look", ""},           // read-only arm under the prefix
-		{"/audit", "Mutate"},                                // a function-typed field Register filled, through a parameter and a second field
-		{"/thing/{name}", ""},                               // table row's handler, read-only
+		{"/thing/{name}/api/push", "Publish"},                  // switch arm in the handler closure
+		{"/thing/{name}/api/mutate", "Mutate"},                 // arm of a helper the key is handed to
+		{"/thing/{name}/api/look", ""},                         // read-only arm
+		{"/thing/{name}/api/{action}", ""},                     // the route itself: its arms are cut
+		{"/legacy/{key}/commit", "Mutate"},                     // switch directly on r.PathValue
+		{"/b/{branch}/thing/{name}", "Mutate"},                 // prefix mount's own work only, from a route table
+		{"/b/{branch}/thing/{name}/api/{action}", "Mutate"},    // the prefix's own work; the row's actions are cut
+		{"/b/{branch}/thing/{name}/api/push", "Publish"},       // R1-A1: the row's handler, split on {action} under the prefix
+		{"/b/{branch}/thing/{name}/api/mutate", "Mutate"},      // the row's helper arm under the prefix
+		{"/b/{branch}/thing/{name}/api/look", ""},              // read-only arm under the prefix
+		{"/audit", "Mutate"},                                   // a function-typed field Register filled, through a parameter and a second field
+		{"/quick/thing/{name}/api/{action}", "Mutate,Publish"}, // R1-A3: wraps the API handler; its actions are another route's, so they are traversed
+		{"/thing/{name}", ""},                                  // table row's handler, read-only
 		{"/health", ""},
 	}
 	for _, tt := range tests {

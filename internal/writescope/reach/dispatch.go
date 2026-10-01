@@ -47,7 +47,9 @@ func CLIEntries(prog *Program, pkgPath, funcName, surface string) ([]Entry, erro
 }
 
 // SwitchEntries returns one entry per name, rooted at its clause of the one
-// switch statement in pkgPath whose string cases are exactly names.
+// switch statement in pkgPath whose string cases are exactly names. Each
+// entry's site is the function holding that switch: a verb whose code
+// reaches it serves the entries (ledger SI-314 (2)).
 func SwitchEntries(prog *Program, pkgPath, surface string, names []string) ([]Entry, error) {
 	pkg := prog.Package(pkgPath)
 	if pkg == nil {
@@ -64,7 +66,9 @@ func SwitchEntries(prog *Program, pkgPath, surface string, names []string) ([]En
 		want[n] = true
 	}
 	var matches []map[string]*ast.CaseClause
+	var sites []Root
 	for _, f := range pkg.Files {
+		var ferr error
 		ast.Inspect(f, func(n ast.Node) bool {
 			sw, ok := n.(*ast.SwitchStmt)
 			if !ok || sw.Tag == nil {
@@ -89,9 +93,18 @@ func SwitchEntries(prog *Program, pkgPath, surface string, names []string) ([]En
 					return true
 				}
 			}
+			site, err := enclosingFunc(pkg, f, sw)
+			if err != nil {
+				ferr = err
+				return false
+			}
 			matches = append(matches, clauses)
+			sites = append(sites, site)
 			return true
 		})
+		if ferr != nil {
+			return nil, ferr
+		}
 	}
 	if len(matches) != 1 {
 		return nil, fmt.Errorf("reach: %d switch statements in %s have exactly the inventory's %d names as cases, want 1", len(matches), pkgPath, len(names))
@@ -100,7 +113,7 @@ func SwitchEntries(prog *Program, pkgPath, surface string, names []string) ([]En
 	sort.Strings(sorted)
 	out := make([]Entry, 0, len(sorted))
 	for _, n := range sorted {
-		out = append(out, Entry{Surface: surface, Name: n, Roots: []Root{{Arm: matches[0][n]}}})
+		out = append(out, Entry{Surface: surface, Name: n, Roots: []Root{{Arm: matches[0][n]}}, Site: sites[0]})
 	}
 	return out, nil
 }
@@ -201,7 +214,7 @@ func (s *keyScan) entries(surface string) []Entry {
 		for _, a := range s.arms[n] {
 			roots = append(roots, Root{Arm: a})
 		}
-		out = append(out, Entry{Surface: surface, Name: n, Roots: roots})
+		out = append(out, Entry{Surface: surface, Name: n, Roots: roots, Parent: s.parent[n]})
 	}
 	return out
 }

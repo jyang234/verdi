@@ -1,11 +1,16 @@
 // Package cli is a synthetic CLI dispatcher: if-arms on the verb, a
-// switch on args[0], a guarded flag arm, and a key handed to a helper.
+// switch on args[0], a guarded flag arm, a key handed to a helper, an
+// alias that delegates to another verb's dispatcher with a copy of its
+// arguments, and two host verbs: one serves the workbench, one the tools.
 package cli
 
 import (
 	"context"
+	"net/http"
 
 	"example.com/synth/app"
+	"example.com/synth/tools"
+	"example.com/synth/web"
 )
 
 // Run dispatches args the way cmd/verdi's run does.
@@ -19,6 +24,18 @@ func Run(args []string) int {
 	}
 	if verb == "alias" || verb == "alias2" {
 		return code(app.ReadOnly(context.Background()))
+	}
+	if verb == "ds" {
+		// Delegates to sub's dispatch with a copy of its arguments, so no
+		// "ds ..." subcommand is derived: sub's arms are not ds's own.
+		return sub(append([]string(nil), args[1:]...))
+	}
+	if verb == "serve" {
+		web.Register(http.NewServeMux())
+		return 0
+	}
+	if verb == "mcp" {
+		return code((&tools.Server{}).Method(context.Background(), "write_tool"))
 	}
 	switch verb {
 	case "sub":

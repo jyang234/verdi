@@ -52,6 +52,11 @@ func Register(mux *http.ServeMux) {
 	for _, rt := range routes() {
 		mux.HandleFunc("/b/{branch}"+rt.suffix, s.prefixed(rt))
 	}
+	// A second address for the API handler that wraps it in a literal: no
+	// action is derived for it, so the API's actions are not its own.
+	mux.HandleFunc("/quick/thing/{name}/api/{action}", func(w http.ResponseWriter, r *http.Request) {
+		s.api()(w, r)
+	})
 	mux.HandleFunc("/legacy/{key}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
 		case "commit":
