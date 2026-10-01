@@ -220,10 +220,13 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // Story-wall render digests captured at BASE e9ae7a0f (the commit before
 // attachObligations lost its story-only guard). Both walls take the exact
 // paths a story wall took then; a changed digest means the story render
-// moved, which R-RR2-7 forbids.
+// moved, which R-RR2-7 forbids. Re-pinned once by spec/chrome-and-tokens-v2
+// (lane F1b): the posture row left renderBoardRegion for the top bar's
+// posture group — the region's one change since BASE, on every wall alike
+// — and every other byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "9a1e8b19538c39a43262612b4c5ac047785ad28f0bebd7108657a68bb10dc424"
-	slotStoryWallDigestBase = "067adca9779a68c6710c04c9dac5b008a29432b134ef589061b9c8752216799e"
+	storyWallDigestBase     = "049270cb26925ef88ba9aeb8755edaf3056945079e569ac74f47fb0c7f2768c8"
+	slotStoryWallDigestBase = "56914144e7f1ef6cb15dc3a827fc62ee90b1f5e7b5ee22ea5741738257b5e0e4"
 )
 
 func renderDigest(body string) string {

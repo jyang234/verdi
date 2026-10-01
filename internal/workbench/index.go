@@ -129,6 +129,7 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 
 	return renderPage(ctx, root, pageData{
 		Title:    "Workbench",
+		Surface:  true, // the one page whose wordmark wears WORKBENCH (handoff "Global chrome")
 		BodyHTML: template.HTML(body.String()),
 	})
 }

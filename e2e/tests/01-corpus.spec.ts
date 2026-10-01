@@ -16,7 +16,7 @@ test("corpus page renders title, frontmatter, and the dispositions table", async
   await page.locator(".home-directory").locator(`a[href="/a/spec/${SHOWCASE.READONLY_SPEC}"]`).click();
 
   await expect(page).toHaveTitle(/Stale decline handling \(fixture\)/);
-  await expect(page.locator(".page-header h1")).toHaveText("Stale decline handling (fixture)");
+  await expect(page.getByTestId("topbar-title")).toHaveText("Stale decline handling (fixture)");
 
   // Frontmatter card.
   const meta = page.locator(".metadata-card");

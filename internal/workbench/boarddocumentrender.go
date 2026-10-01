@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	stdhtml "html"
 	"html/template"
 	"strings"
 )
@@ -24,10 +25,7 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 </head>
 <body class="document-page">
 <a class="skip-link" href="#document-region">Skip to the document</a>
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a> · <a href="{{.BoardHref}}" data-testid="document-tab-board">Board</a> · <span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>
-</header>
+{{.TopBar}}
 <header class="document-head">
 <p class="eyebrow"><code>{{.Ref}}</code> · document</p>
 <nav class="document-kinds" aria-label="Document kind">{{range .Kinds}}{{if .Current}}<span class="current" aria-current="page" data-testid="document-kind-{{.Kind}}">{{.Label}}</span>{{else}}<a href="{{.Href}}" data-testid="document-kind-{{.Kind}}">{{.Label}}</a>{{end}}{{end}}</nav>
@@ -63,9 +61,11 @@ type documentPageData struct {
 	SnapshotHref string
 	HTML         template.HTML
 	Markdown     string
-	// Bar is the top bar's facts (SI-323 (2)), not yet drawn by the
-	// template.
-	Bar barFacts
+	// Bar is the top bar's facts (SI-323 (2)), which TopBar draws: the
+	// spec's title as plain text (the rendered document carries the
+	// page's one h1), and the index, Board, and Document links in its nav.
+	Bar    barFacts
+	TopBar template.HTML
 }
 
 // renderBoardDocumentPage builds the Document tab. Every sibling link is
@@ -101,6 +101,8 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		Markdown:     snap.Markdown,
 		Bar:          bar,
 	}
+	nav := `<a href="/">index</a> · <a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Board</a> · <span class="current" aria-current="page" data-testid="document-tab-document">Document</span>`
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: template.HTML(nav)}) //nolint:gosec // the index link, the escaped board href, and the current marker
 	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {

@@ -33,12 +33,12 @@ test("home clicks through to a spec page", async ({ page }) => {
   await page.goto("/");
   await page.locator(".home-directory").locator('a[href="/a/spec/stale-decline"]').click();
   await expect(page).toHaveTitle(/Stale decline handling \(fixture\)/);
-  await expect(page.locator(".page-header h1")).toHaveText("Stale decline handling (fixture)");
+  await expect(page.getByTestId("topbar-title")).toHaveText("Stale decline handling (fixture)");
 });
 
 test("home clicks through to the board", async ({ page }) => {
   await page.goto("/");
   await page.locator('a[href="/board/STORY-1482"]').click();
-  await expect(page.locator(".page-header h1")).toHaveText("Board: STORY-1482");
+  await expect(page.getByTestId("topbar-title")).toHaveText("Board: STORY-1482");
   await expect(page.locator(".card")).toContainText("spec/stale-decline");
 });

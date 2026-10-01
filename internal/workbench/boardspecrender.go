@@ -192,16 +192,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellF
 </head>
 <body class="board-page boardv2-page mode-{{.Mode}}">
 <a class="skip-link" href="#boardv2-region">Skip to the board</a>
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a>{{if .DocumentHref}} · <a href="{{.DocumentHref}}" data-testid="board-tab-document">Document</a>{{end}}</nav>
-</header>
-<header class="page-header board-head">
-<h1>{{.Title}}</h1>
-<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
-<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>
-<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>
-</header>
+{{.TopBar}}
 <main id="boardv2-region">
 {{.Region}}
 </main>
@@ -248,41 +239,47 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 		return nil, fmt.Errorf("workbench: board state: %w", err)
 	}
 
-	// StatusBadge stays the bare state id (it addresses the badge's CSS
-	// class and testid); StatusBadgeLabel is the model's display word for
-	// it (spec/vocabulary-surfaces ac-2), falling back to the id when the
-	// projection carries no rename.
-	badge := terminalStatusBadge(p.Status)
-	badgeLabel := badge
-	if badge != "" && p.StatusLabel != "" {
-		badgeLabel = p.StatusLabel
+	// The top bar (spec/chrome-and-tokens-v2 ac-1; SI-323 (5)): its nav
+	// keeps the index link and the Wall and Document switch; its controls
+	// slot carries Commit & push in authoring mode — the page's one write
+	// to the record, moved from the rail with its id unchanged (dc-3) —
+	// and the autosave status and live region; the last action result is
+	// the bar's trailing row, outside the swapped region.
+	nav := `<a href="/">index</a>`
+	if p.DocumentHref != "" {
+		nav += ` <span class="current" aria-current="page">Wall</span> <a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a>`
 	}
+	controls := ""
+	if p.Mode == modeAuthoring {
+		controls = `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
+	}
+	controls += `<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
+		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`
 	data := struct {
-		Name             string
-		Title            string
-		Mode             string
-		ModeLabel        string
-		StatusBadge      string
-		StatusBadgeLabel string
-		DocumentHref     string
-		Region           template.HTML
-		Dialogs          template.HTML
-		StateJSON        template.JS
-		// Bar is the top bar's facts (SI-323), not yet drawn by the
-		// template.
+		Name      string
+		Title     string
+		Mode      string
+		TopBar    template.HTML
+		Region    template.HTML
+		Dialogs   template.HTML
+		StateJSON template.JS
+		// Bar is the top bar's facts (SI-323), which TopBar draws.
 		Bar barFacts
 	}{
-		Name:             p.Spec,
-		Title:            p.Title,
-		Mode:             string(p.Mode),
-		ModeLabel:        modeStampLabel(p),
-		StatusBadge:      badge,
-		StatusBadgeLabel: badgeLabel,
-		DocumentHref:     p.DocumentHref,
-		Region:           template.HTML(region),
-		Dialogs:          template.HTML(renderBoardDialogs(p)),
-		StateJSON:        template.JS(stateJSON),
-		Bar:              snap.bar,
+		Name:  p.Spec,
+		Title: p.Title,
+		Mode:  string(p.Mode),
+		TopBar: renderTopBar(&snap.bar, topBarOptions{
+			Heading:  true,
+			Nav:      template.HTML(nav),      //nolint:gosec // the index link and the escaped document href
+			Controls: template.HTML(controls), //nolint:gosec // fixed control markup
+			Tail:     `<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>`,
+			Refresh:  true,
+		}),
+		Region:    template.HTML(region),
+		Dialogs:   template.HTML(renderBoardDialogs(p)),
+		StateJSON: template.JS(stateJSON),
+		Bar:       snap.bar,
 	}
 	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
@@ -311,15 +308,12 @@ func terminalStatusBadge(status string) string {
 	return ""
 }
 
-// renderBoardRegion renders the posture header, four-area shell,
-// placards, canvas, and side rail — the one projection region the page,
-// the fragment, the snapshot, and every mutation response share.
-//
-// The posture header renders from the top bar's facts, built from p and
-// asd (specBarFacts, a pure function — the snapshot builds the same facts
-// for its posture fragment and revision).
+// renderBoardRegion renders the four-area shell, placards, canvas, and
+// side rail — the one projection region the page, the fragment, the
+// snapshot, and every mutation response share. The posture is not here:
+// it is the top bar's posture group, which the snapshot carries as its
+// own fragment (asdPostureHTML; SI-323 (3)).
 func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
-	bar := specBarFacts(p, asd)
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
@@ -364,7 +358,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		b.WriteString(`</div>`)
 	}
 
-	writeASDPosture(&b, &bar)
 	writeASDShell(&b, asd)
 	// .asd-main wraps the board half (case file + canvas + rail) so the
 	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside
@@ -1352,8 +1345,9 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 }
 
 // writeGitPanel renders the board-owned git affordance (05 §Workbench:
-// commit/push button, persistent uncommitted-changes indicator,
-// branch switcher behind the guard).
+// the persistent uncommitted-changes indicator and the branch switcher
+// behind the guard). The commit/push button is the top bar's
+// (renderBoardSpecPage; spec/chrome-and-tokens-v2 dc-3).
 func writeGitPanel(b *strings.Builder, git *boardGitState) {
 	esc := stdhtml.EscapeString
 	b.WriteString(`<section class="git-panel" id="asd-git"><h2>Working tree</h2>`)
@@ -1362,8 +1356,6 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 		b.WriteString(` hidden`)
 	}
 	b.WriteString(`>uncommitted changes</span>`)
-	// The page's most consequential action wears primary weight.
-	b.WriteString(`<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`)
 	b.WriteString(`<div class="branch-row"><span class="branch-label">branch</span>`)
 	b.WriteString(`<button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu">` + esc(git.Branch) + `</button></div>`)
 	b.WriteString(`<div role="menu" class="branch-menu" id="branch-menu" hidden aria-label="Switch branch">`)

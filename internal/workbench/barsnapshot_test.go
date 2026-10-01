@@ -11,9 +11,9 @@ import (
 )
 
 // TestWallSnapshot_CarriesThePostureFragment (SI-323 (3)): the wall's
-// snapshot carries the posture row rendered from the bar's facts as its
-// own field — the same bytes the region still carries (no visible change
-// yet) — and the page's embedded revision is the snapshot's.
+// snapshot carries the bar's posture group rendered from the bar's facts
+// as its own field — the one posture, which the region no longer carries
+// — and the page's embedded revision is the snapshot's.
 func TestWallSnapshot_CarriesThePostureFragment(t *testing.T) {
 	root := newBoardFixture(t)
 	h := newBoardTestHandler(root)
@@ -27,11 +27,11 @@ func TestWallSnapshot_CarriesThePostureFragment(t *testing.T) {
 	if err := artifact.DecodeStrictJSON(rec.Body.Bytes(), &snap); err != nil {
 		t.Fatalf("strict-decoding the snapshot: %v", err)
 	}
-	if !strings.HasPrefix(snap.Posture, `<section class="asd-posture" id="asd-posture"`) || !strings.HasSuffix(snap.Posture, `</section>`) {
-		t.Fatalf("snapshot posture = %q, want the posture row fragment", snap.Posture)
+	if !strings.HasPrefix(snap.Posture, `<section class="topbar-posture-group" id="asd-posture"`) || !strings.HasSuffix(snap.Posture, `</section>`) {
+		t.Fatalf("snapshot posture = %q, want the bar's posture group fragment", snap.Posture)
 	}
-	if !strings.Contains(snap.HTML, snap.Posture) {
-		t.Fatal("the region no longer carries the snapshot's posture fragment byte for byte")
+	if strings.Contains(snap.HTML, `id="asd-posture"`) {
+		t.Fatal("the region carries a posture of its own: the bar's group is the one posture (SI-323 (3))")
 	}
 	for _, want := range []string{"Accepted HEAD", "Ahead/behind", gitOut(t, root, "rev-parse", "main"), "1 ahead, 0 behind main"} {
 		if !strings.Contains(snap.Posture, want) {

@@ -71,9 +71,14 @@ type pageData struct {
 	HasMermaid bool
 	// Bar is the top bar's facts (spec/chrome-and-tokens-v2; SI-323 (1)):
 	// every page on this shell is a page not about one spec, so renderPage
-	// fills it from the branch-level builder. Not yet drawn by the
-	// template.
+	// fills it from the branch-level builder and draws TopBar from it.
 	Bar barFacts
+	// Surface marks the index, the one page whose wordmark wears the
+	// WORKBENCH surface word (handoff README, "Global chrome").
+	Surface bool
+	// TopBar is the rendered top bar (renderTopBar), the one header row
+	// every page opens with (ac-1).
+	TopBar template.HTML
 }
 
 var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<!doctype html>
@@ -85,11 +90,7 @@ var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav">{{.Nav}}</nav>
-</header>
-<header class="page-header"><h1>{{.Title}}</h1></header>
+{{.TopBar}}
 <div class="page-body">
 <main class="content">
 {{if .MetaRows}}<aside class="metadata-card"><dl>
@@ -115,10 +116,12 @@ var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<
 // page's top bar facts for the checkout at root (branchBarFacts): its
 // branch, working tree, and branch-level posture, each fact it cannot
 // obtain disclosed-unproven — a root of "" (a page that knows none)
-// included.
+// included — and draws the bar from them, the page's title as its h1 and
+// the page's nav links in the bar's nav.
 func renderPage(ctx context.Context, root string, data pageData) ([]byte, error) {
 	data.Bar = branchBarFacts(ctx, root, data.Title)
 	observeBar(ctx, data.Bar)
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Heading: true, Surface: data.Surface, Nav: data.Nav})
 	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {

@@ -29,7 +29,7 @@ test("commit-to-design from the board produces the three artifacts", async ({ pa
   // Artifact 1 + 3: the draft spec skeleton, with its dispositions block
   // (every sticky open-question — commit-to-design's mechanical promise).
   await page.goto(`/a/spec/${specName}`);
-  await expect(page.locator(".page-header h1")).toBeVisible();
+  await expect(page.getByTestId("topbar-title")).toBeVisible();
   await expect(page.locator(".metadata-card")).toContainText(storyRef);
   // Merge-signaled acceptance: the scaffold persists NO status field —
   // lifecycle state is git-derived — so the metadata card carries no
