@@ -45,7 +45,9 @@ type Hit struct {
 // Check returns every way the registry, its awaiting-fix list, and the
 // classification fail to describe facts, sorted; none means the static
 // witness holds. It reports: an invalid registry or classification; an
-// exported gitx function or a git-directory writer that is not classified;
+// exported gitx function or a git-directory writer that is not classified,
+// a git-directory writer classified read-only, and a census mutating gitx
+// function (CensusMutatingGitx) classified read-only;
 // a classified name that no longer exists; a verb that reaches a mutating
 // function with no declaration naming it; a declaration naming a verb that
 // no inventory defines or that reaches no mutating function; an
@@ -138,8 +140,10 @@ func checkPreDispatch(facts Facts) []string {
 func checkClassification(classes []Classified, facts Facts) []string {
 	var out []string
 	classified := map[string]bool{}
+	effect := map[string]Effect{}
 	for _, c := range classes {
 		classified[c.Func] = true
+		effect[c.Func] = c.Effect
 	}
 	exports := map[string]bool{}
 	for _, e := range facts.GitxExports {
@@ -149,8 +153,16 @@ func checkClassification(classes []Classified, facts Facts) []string {
 		}
 	}
 	for _, w := range facts.GitDirWriters {
-		if !classified[w.Func] {
+		switch {
+		case !classified[w.Func]:
 			out = append(out, fmt.Sprintf("unclassified git-directory writer %s (writes at %s): classify it mutating or read-only", w.Func, w.At))
+		case effect[w.Func] != Mutating:
+			out = append(out, fmt.Sprintf("git-directory writer %s (writes at %s) is classified %s; a function that writes under a git directory is mutating", w.Func, w.At, effect[w.Func]))
+		}
+	}
+	for _, name := range CensusMutatingGitx() {
+		if exports[name] && effect[name] != Mutating {
+			out = append(out, fmt.Sprintf("%s is classified %s, but the census of 2026-09-30 found it mutating", name, effect[name]))
 		}
 	}
 	for _, c := range classes {

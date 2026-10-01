@@ -23,12 +23,13 @@ func checkFixture() ([]ws.Declaration, []ws.AwaitingFix, []ws.Classified, ws.Fac
 	awaiting := []ws.AwaitingFix{{Ritual: "sample_commit", Path: "verdi sample", Defect: "commits every pre-staged entry"}}
 	classes := []ws.Classified{
 		{Func: "internal/gitx.CreateCommit", Effect: ws.Mutating},
+		{Func: "internal/gitx.Push", Effect: ws.Mutating},
 		{Func: "internal/gitx.Read", Effect: ws.ReadOnly},
 		{Func: "(*internal/other.R).Write", Effect: ws.Mutating},
 	}
 	facts := ws.Facts{
 		GitxPackage:   "internal/gitx",
-		GitxExports:   []string{"internal/gitx.CreateCommit", "internal/gitx.Read"},
+		GitxExports:   []string{"internal/gitx.CreateCommit", "internal/gitx.Push", "internal/gitx.Read"},
 		GitDirWriters: []ws.Writer{{Func: "(*internal/other.R).Write", At: "other.go:9"}},
 		Functions:     map[string]bool{"(*internal/other.R).Write": true, "cmd/verdi.run": true},
 		Verbs: map[ws.Verb][]ws.Hit{
@@ -83,8 +84,15 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 			f.GitDirWriters = append(f.GitDirWriters, ws.Writer{Func: "internal/x.Hook", At: "x.go:3"})
 		}, "unclassified git-directory writer internal/x.Hook"},
 		{"a stale gitx name", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
-			f.GitxExports = []string{"internal/gitx.CreateCommit"}
+			f.GitxExports = []string{"internal/gitx.CreateCommit", "internal/gitx.Push"}
 		}, "internal/gitx.Read no longer exists"},
+		// R1-B4 / mutants BM11 and BM12.
+		{"a census mutating gitx function classified read-only", func(_ *[]ws.Declaration, c *[]ws.Classified, _ *ws.Facts) {
+			setEffect(*c, "internal/gitx.Push", ws.ReadOnly)
+		}, "internal/gitx.Push is classified read_only, but the census of 2026-09-30 found it mutating"},
+		{"a detected git-directory writer classified read-only", func(_ *[]ws.Declaration, c *[]ws.Classified, _ *ws.Facts) {
+			setEffect(*c, "(*internal/other.R).Write", ws.ReadOnly)
+		}, "git-directory writer (*internal/other.R).Write (writes at other.go:9) is classified read_only"},
 		{"a stale non-gitx name", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
 			delete(f.Functions, "(*internal/other.R).Write")
 			f.GitDirWriters = nil
@@ -115,5 +123,14 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 				t.Fatalf("Check findings =\n%s\nwant one mentioning %q", strings.Join(got, "\n"), tt.wantErr)
 			}
 		})
+	}
+}
+
+// setEffect reclassifies name in list.
+func setEffect(list []ws.Classified, name string, e ws.Effect) {
+	for i := range list {
+		if list[i].Func == name {
+			list[i].Effect = e
+		}
 	}
 }

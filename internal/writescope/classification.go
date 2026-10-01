@@ -135,6 +135,37 @@ func Classification() []Classified {
 	}
 }
 
+// CensusMutatingGitx returns, sorted, the twenty internal/gitx functions
+// the census of 2026-09-30 found mutating (RWS fact pack, section 1a; the
+// census counts DeleteBranch and DeleteMergedBranch as two). Check holds
+// the classification to it: a census function gitx still exports must be
+// classified mutating, so reclassifying one read-only (Push, say) is a
+// finding, not a silent narrowing of the witness's targets.
+func CensusMutatingGitx() []string {
+	return []string{
+		"internal/gitx.AddAll",
+		"internal/gitx.AddPaths",
+		"internal/gitx.ApplyPatch",
+		"internal/gitx.BuildTreeWithFile",
+		"internal/gitx.Checkout",
+		"internal/gitx.CheckoutExisting",
+		"internal/gitx.CheckoutNewBranch",
+		"internal/gitx.CheckoutNewBranchFrom",
+		"internal/gitx.CommitTree",
+		"internal/gitx.CreateCommit",
+		"internal/gitx.CreateCommitPaths",
+		"internal/gitx.DeleteBranch",
+		"internal/gitx.DeleteMergedBranch",
+		"internal/gitx.FastForwardOnly",
+		"internal/gitx.Push",
+		"internal/gitx.UpdateRef",
+		"internal/gitx.WorktreeAdd",
+		"internal/gitx.WorktreeAddDetached",
+		"internal/gitx.WorktreeRemove",
+		"internal/gitx.WriteBlob",
+	}
+}
+
 // MutatingFuncs returns the names list classifies mutating, sorted.
 func MutatingFuncs(list []Classified) []string {
 	var out []string

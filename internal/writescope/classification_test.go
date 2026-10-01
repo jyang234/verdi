@@ -69,3 +69,22 @@ func TestValidateClassification_AcceptsEveryNameForm(t *testing.T) {
 		t.Fatalf("ValidateClassification = %v, want nil", err)
 	}
 }
+
+// TestClassification_PinsTheCensusMutatingSet pins R1-B4: the gitx
+// functions classified mutating are exactly the census's twenty, so a
+// reclassification either way is a deliberate change to both lists.
+func TestClassification_PinsTheCensusMutatingSet(t *testing.T) {
+	var gitx []string
+	for _, name := range ws.MutatingFuncs(ws.Classification()) {
+		if strings.HasPrefix(name, "internal/gitx.") {
+			gitx = append(gitx, name)
+		}
+	}
+	census := ws.CensusMutatingGitx()
+	if len(census) != 20 {
+		t.Fatalf("the census names %d mutating gitx functions, want 20 (RWS fact pack 2026-09-30, section 1a)", len(census))
+	}
+	if strings.Join(gitx, ",") != strings.Join(census, ",") {
+		t.Fatalf("gitx functions classified mutating =\n%v\nwant the census's\n%v", gitx, census)
+	}
+}

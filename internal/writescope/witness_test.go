@@ -122,6 +122,21 @@ func liveMutants() []liveMutant {
 			}
 			*a = fixes
 		}, "accept_diagram is scoped, but cli:accept reaches internal/gitx.CreateCommit"},
+		{"BM11: Push reclassified read-only (R1-B4)", func(_ *[]ws.Declaration, _ *[]ws.AwaitingFix, c *[]ws.Classified) {
+			reclassify(*c, "internal/gitx.Push", ws.ReadOnly)
+		}, "internal/gitx.Push is classified read_only"},
+		{"BM12: the reconciler's git-directory writer classified read-only (R1-B4)", func(_ *[]ws.Declaration, _ *[]ws.AwaitingFix, c *[]ws.Classified) {
+			reclassify(*c, "(*internal/execworkspace.GitReconciler).ReconcileUnit", ws.ReadOnly)
+		}, "git-directory writer (*internal/execworkspace.GitReconciler).ReconcileUnit"},
+	}
+}
+
+// reclassify sets name's effect in list.
+func reclassify(list []ws.Classified, name string, e ws.Effect) {
+	for i := range list {
+		if list[i].Func == name {
+			list[i].Effect = e
+		}
 	}
 }
 
