@@ -2,6 +2,7 @@ package lintratchet
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path"
@@ -77,6 +78,28 @@ func pinnedGolangciLint(t *testing.T, root, unshown string) string {
 	return bin
 }
 
+// strictLintRun returns the command that runs the pinned golangci-lint bin
+// as make lint-strict runs it: with the strict configuration at config, for
+// linux/amd64, and with --issues-exit-code=0, so a reported finding is data.
+// It lints patterns from dir, offline (GOPROXY=off, GOTOOLCHAIN=local), and
+// writes its JSON report to report. golangci-lint reports paths relative to
+// config's directory.
+func strictLintRun(ctx context.Context, bin, dir, config, report string, patterns ...string) *exec.Cmd {
+	args := append([]string{"run",
+		"--config", config,
+		"--issues-exit-code=0",
+		// Another golangci-lint holding its lock (a concurrent make lint)
+		// would otherwise end this run with exit 3; this flag changes no
+		// finding.
+		"--allow-parallel-runners",
+		"--output.json.path=" + report,
+	}, patterns...)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "GOFLAGS=", "GOWORK=off", "GOPROXY=off", "GOTOOLCHAIN=local")
+	return cmd
+}
+
 // lintStrictFixture runs the pinned golangci-lint with .golangci.strict.yml,
 // for linux/amd64 and with --issues-exit-code=0 as make lint-strict runs it,
 // over the committed fixture module, and returns its findings. It skips the
@@ -88,17 +111,7 @@ func lintStrictFixture(t *testing.T, unshown string) []Finding {
 	bin := pinnedGolangciLint(t, root, unshown)
 
 	report := filepath.Join(t.TempDir(), "report.json")
-	cmd := exec.CommandContext(t.Context(), bin, "run",
-		"--config", filepath.Join(root, ".golangci.strict.yml"),
-		"--issues-exit-code=0",
-		// Another golangci-lint holding its lock (a concurrent make lint)
-		// would otherwise end this run with exit 3; this flag changes no
-		// finding.
-		"--allow-parallel-runners",
-		"--output.json.path="+report,
-		"./...")
-	cmd.Dir = filepath.Join(root, filepath.FromSlash(strictFixtureDir))
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "GOFLAGS=", "GOWORK=off", "GOPROXY=off", "GOTOOLCHAIN=local")
+	cmd := strictLintRun(t.Context(), bin, filepath.Join(root, filepath.FromSlash(strictFixtureDir)), filepath.Join(root, ".golangci.strict.yml"), report, "./...")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("golangci-lint run over %s: %v\n%s", strictFixtureDir, err, out)
 	}
