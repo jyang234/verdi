@@ -7,9 +7,10 @@
 // ledger SI-325, corrected by SI-329, does.
 //
 // Like internal/fixturegit, this is a Go test helper, not a production
-// package (PLAN.md §4). The pieces: Build (fixture.go) seeds a fixture;
-// Capture (sensor.go) takes a Snapshot; Driver and InProcess (driver.go)
-// run a ritual and report its exit and git command log; Evaluate
+// package (PLAN.md §4). The pieces: Build and BuildWith (fixture.go) seed
+// a fixture; Capture (sensor.go) takes a Snapshot; Driver and its
+// InProcess, Binary, and Workbench implementations (driver*.go) run a
+// ritual and report its exit and git command log; Evaluate
 // (evaluate*.go) judges a before/after pair and the log against a
 // Declaration; Run and RunOn (harness.go) compose them; Outcome
 // (outcome.go) folds a run's verdicts into pass, fail, or unproven.

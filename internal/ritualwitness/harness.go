@@ -31,7 +31,10 @@ func Run(t testing.TB, ctx context.Context, d Driver, decl ws.Declaration, state
 
 // RunOn snapshots fx, drives one ritual through d, snapshots fx again,
 // and evaluates the pair against decl. A test that needs more seeding than
-// a SeedState gives adds it to fx before calling RunOn.
+// a SeedState gives adds it to fx before calling RunOn. A driver that
+// reports no verb's exit class (verbExit) — a binary that never started, a
+// request never answered — fails the test: the run is judged neither a
+// clean run nor a refusal.
 func RunOn(t testing.TB, ctx context.Context, fx *Fixture, d Driver, decl ws.Declaration) Result {
 	t.Helper()
 	before, err := Capture(ctx, fx.Dir, fx.Bare)
@@ -39,6 +42,9 @@ func RunOn(t testing.TB, ctx context.Context, fx *Fixture, d Driver, decl ws.Dec
 		t.Fatalf("ritualwitness: RunOn: the before snapshot: %v", err)
 	}
 	exit, log, driverErr := d.Run(ctx, fx.Dir)
+	if !verbExit(exit) {
+		t.Fatalf("ritualwitness: RunOn: the driver reported exit %d, which is no verb's exit class (0, 1, or 2): %v", exit, driverErr)
+	}
 	if driverErr != nil && exit == 0 {
 		t.Fatalf("ritualwitness: RunOn: the driver reported exit 0 alongside an error: %v", driverErr)
 	}
@@ -51,4 +57,10 @@ func RunOn(t testing.TB, ctx context.Context, fx *Fixture, d Driver, decl ws.Dec
 		t.Fatalf("ritualwitness: RunOn: %v", err)
 	}
 	return Result{Exit: exit, Err: driverErr, Log: log, Before: before, After: after, Verdicts: verdicts}
+}
+
+// verbExit reports whether exit is a verb's exit classification: 0 clean,
+// 1 verdict failure, 2 operational refusal.
+func verbExit(exit int) bool {
+	return exit >= 0 && exit <= 2
 }
