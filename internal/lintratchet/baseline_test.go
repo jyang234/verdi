@@ -8,7 +8,9 @@ import (
 // TestEncodeBaseline proves the committed baseline's canonical form: one
 // entry per key with its count, sorted by (linter, package, message,
 // source), object keys sorted, no HTML escaping, and a trailing newline, so
-// regenerating it from the same findings always writes the same bytes.
+// regenerating it from the same findings always writes the same bytes; each
+// entry sits on its own line, so a changed allowance is a one-line diff and
+// changes to different allowances merge.
 func TestEncodeBaseline(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -17,6 +19,7 @@ func TestEncodeBaseline(t *testing.T) {
 	}{
 		{name: "empty", counts: Counts{}, want: "{\"findings\":[]}\n"},
 		{name: "nil", counts: nil, want: "{\"findings\":[]}\n"},
+		{name: "one entry", counts: Counts{{Linter: "noctx", Package: "a", Message: "m", Source: "s"}: 2}, want: "{\"findings\":[\n{\"count\":2,\"linter\":\"noctx\",\"message\":\"m\",\"package\":\"a\",\"source\":\"s\"}\n]}\n"},
 		{
 			name: "sorted by linter, package, message, then source, unescaped",
 			counts: Counts{
@@ -26,12 +29,13 @@ func TestEncodeBaseline(t *testing.T) {
 				{Linter: "errorlint", Package: "a", Message: "m", Source: "\tx := a < b && c"}: 3,
 				{Linter: "errorlint", Package: "a", Message: "m", Source: "\tw"}:               1,
 			},
-			want: `{"findings":[` +
-				`{"count":1,"linter":"errorlint","message":"m","package":"a","source":"\tw"},` +
-				`{"count":3,"linter":"errorlint","message":"m","package":"a","source":"\tx := a < b && c"},` +
-				`{"count":1,"linter":"errorlint","message":"n","package":"a","source":"s"},` +
-				`{"count":2,"linter":"errorlint","message":"m","package":"b","source":"s"},` +
-				`{"count":1,"linter":"noctx","message":"m","package":"a","source":"s"}]}` + "\n",
+			want: `{"findings":[` + "\n" +
+				`{"count":1,"linter":"errorlint","message":"m","package":"a","source":"\tw"},` + "\n" +
+				`{"count":3,"linter":"errorlint","message":"m","package":"a","source":"\tx := a < b && c"},` + "\n" +
+				`{"count":1,"linter":"errorlint","message":"n","package":"a","source":"s"},` + "\n" +
+				`{"count":2,"linter":"errorlint","message":"m","package":"b","source":"s"},` + "\n" +
+				`{"count":1,"linter":"noctx","message":"m","package":"a","source":"s"}` + "\n" +
+				`]}` + "\n",
 		},
 	}
 	for _, tc := range cases {

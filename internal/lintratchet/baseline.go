@@ -1,6 +1,7 @@
 package lintratchet
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -70,24 +71,37 @@ func (e baselineEntry) key() (Key, int, error) {
 	return Key{Linter: *e.Linter, Package: *e.Package, Message: *e.Message, Source: *e.Source}, *e.Count, nil
 }
 
-// EncodeBaseline renders counts as the committed baseline's canonical JSON:
-// entries sorted by (linter, package, message, source), object keys sorted,
-// no HTML escaping, and a trailing newline.
+// EncodeBaseline renders counts as the committed baseline: entries sorted by
+// (linter, package, message, source), each entry canonical JSON (canonjson:
+// object keys sorted, no HTML escaping) on a line of its own, and a trailing
+// newline. The bytes are a deterministic function of counts, and one entry
+// per line makes a changed allowance a one-line diff, so changes to different
+// allowances in concurrent branches merge instead of conflicting on one
+// line.
 func EncodeBaseline(counts Counts) ([]byte, error) {
 	keys := sortedKeys(counts)
-	entries := make([]baselineEntry, 0, len(keys))
-	for _, k := range keys {
+	var buf bytes.Buffer
+	buf.WriteString(`{"findings":[`)
+	for i, k := range keys {
 		n := counts[k]
 		if n < 1 {
 			return nil, fmt.Errorf("baseline: key %+v has count %d, below one", k, n)
 		}
-		entries = append(entries, baselineEntry{Count: &n, Linter: &k.Linter, Package: &k.Package, Message: &k.Message, Source: &k.Source})
+		line, err := canonjson.Marshal(baselineEntry{Count: &n, Linter: &k.Linter, Package: &k.Package, Message: &k.Message, Source: &k.Source})
+		if err != nil {
+			return nil, fmt.Errorf("baseline: %w", err)
+		}
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteByte('\n')
+		buf.Write(bytes.TrimSuffix(line, []byte("\n")))
 	}
-	data, err := canonjson.Marshal(baselineFile{Findings: &entries})
-	if err != nil {
-		return nil, fmt.Errorf("baseline: %w", err)
+	if len(keys) > 0 {
+		buf.WriteByte('\n')
 	}
-	return data, nil
+	buf.WriteString("]}\n")
+	return buf.Bytes(), nil
 }
 
 // sortedKeys returns counts' keys in (linter, package, message, source)
