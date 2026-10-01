@@ -7,10 +7,12 @@ import (
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
 
-// checkFixture is a small consistent world: one mutating gitx function,
-// one read-only one, one git-directory writer, and three verbs, two of
-// which reach a mutating function and are declared.
-func checkFixture() ([]ws.Declaration, []ws.Classified, ws.Facts) {
+// checkFixture is a small consistent world: one mutating gitx function
+// (the whole-index commit), one read-only one, one git-directory writer,
+// three verbs, two of which reach a mutating function and are declared,
+// and the scoped declaration's awaiting-fix entry (it reaches the
+// whole-index commit).
+func checkFixture() ([]ws.Declaration, []ws.AwaitingFix, []ws.Classified, ws.Facts) {
 	decls := []ws.Declaration{
 		{
 			Ritual: "sample_commit", Verbs: []ws.Verb{ws.CLI("sample"), ws.MCP("sample_tool")},
@@ -18,29 +20,30 @@ func checkFixture() ([]ws.Declaration, []ws.Classified, ws.Facts) {
 			IndexCarry: ws.CarryScoped,
 		},
 	}
+	awaiting := []ws.AwaitingFix{{Ritual: "sample_commit", Path: "verdi sample", Defect: "commits every pre-staged entry"}}
 	classes := []ws.Classified{
-		{Func: "internal/gitx.Commit", Effect: ws.Mutating},
+		{Func: "internal/gitx.CreateCommit", Effect: ws.Mutating},
 		{Func: "internal/gitx.Read", Effect: ws.ReadOnly},
 		{Func: "(*internal/other.R).Write", Effect: ws.Mutating},
 	}
 	facts := ws.Facts{
 		GitxPackage:   "internal/gitx",
-		GitxExports:   []string{"internal/gitx.Commit", "internal/gitx.Read"},
+		GitxExports:   []string{"internal/gitx.CreateCommit", "internal/gitx.Read"},
 		GitDirWriters: []ws.Writer{{Func: "(*internal/other.R).Write", At: "other.go:9"}},
 		Functions:     map[string]bool{"(*internal/other.R).Write": true, "cmd/verdi.run": true},
 		Verbs: map[ws.Verb][]ws.Hit{
-			ws.CLI("sample"):      {{Func: "internal/gitx.Commit", Path: []string{"cmd/verdi.sample", "internal/gitx.Commit"}}},
+			ws.CLI("sample"):      {{Func: "internal/gitx.CreateCommit", Path: []string{"cmd/verdi.sample", "internal/gitx.CreateCommit"}}},
 			ws.MCP("sample_tool"): {{Func: "(*internal/other.R).Write", Path: []string{"tool", "(*internal/other.R).Write"}}},
 			ws.CLI("lint"):        nil,
 		},
 		PreDispatchRoots: 3,
 	}
-	return decls, classes, facts
+	return decls, awaiting, classes, facts
 }
 
 func TestCheck_ConsistentWorldHasNoFindings(t *testing.T) {
-	decls, classes, facts := checkFixture()
-	if got := ws.Check(decls, nil, classes, facts); len(got) != 0 {
+	decls, awaiting, classes, facts := checkFixture()
+	if got := ws.Check(decls, awaiting, classes, facts); len(got) != 0 {
 		t.Fatalf("Check = %v, want no findings", got)
 	}
 }
@@ -51,12 +54,22 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 		mutate  func(*[]ws.Declaration, *[]ws.Classified, *ws.Facts)
 		wantErr string
 	}{
+		// R1-B3 / mutant BM10: the list is checked against what reaches
+		// the whole-index commit, in both directions.
+		{"a scoped declaration reaching the whole-index commit with no awaiting-fix entry", func(d *[]ws.Declaration, _ *[]ws.Classified, _ *ws.Facts) {
+			(*d)[0].Ritual = "renamed_commit"
+		}, "renamed_commit is scoped, but cli:sample reaches internal/gitx.CreateCommit"},
+		{"an awaiting-fix entry whose ritual reaches no whole-index commit", func(_ *[]ws.Declaration, c *[]ws.Classified, f *ws.Facts) {
+			*c = append(*c, ws.Classified{Func: "internal/gitx.CreateCommitPaths", Effect: ws.Mutating})
+			f.GitxExports = append(f.GitxExports, "internal/gitx.CreateCommitPaths")
+			f.Verbs[ws.CLI("sample")] = []ws.Hit{{Func: "internal/gitx.CreateCommitPaths", Path: []string{"cmd/verdi.sample", "internal/gitx.CreateCommitPaths"}}}
+		}, "no verb of sample_commit reaches internal/gitx.CreateCommit"},
 		{"declaration dropped: a verb reaches a mutating function with no declaration", func(d *[]ws.Declaration, _ *[]ws.Classified, _ *ws.Facts) {
 			*d = nil
-		}, "cli:sample reaches internal/gitx.Commit"},
+		}, "cli:sample reaches internal/gitx.CreateCommit"},
 		{"a new verb reaches a mutating function", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
-			f.Verbs[ws.CLI("zap")] = []ws.Hit{{Func: "internal/gitx.Commit", Path: []string{"zap", "internal/gitx.Commit"}}}
-		}, "cli:zap reaches internal/gitx.Commit"},
+			f.Verbs[ws.CLI("zap")] = []ws.Hit{{Func: "internal/gitx.CreateCommit", Path: []string{"zap", "internal/gitx.CreateCommit"}}}
+		}, "cli:zap reaches internal/gitx.CreateCommit"},
 		{"a declaration names a verb that reaches none", func(d *[]ws.Declaration, _ *[]ws.Classified, _ *ws.Facts) {
 			(*d)[0].Verbs = append((*d)[0].Verbs, ws.CLI("lint"))
 		}, "cli:lint, which reaches no mutating function"},
@@ -70,7 +83,7 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 			f.GitDirWriters = append(f.GitDirWriters, ws.Writer{Func: "internal/x.Hook", At: "x.go:3"})
 		}, "unclassified git-directory writer internal/x.Hook"},
 		{"a stale gitx name", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
-			f.GitxExports = []string{"internal/gitx.Commit"}
+			f.GitxExports = []string{"internal/gitx.CreateCommit"}
 		}, "internal/gitx.Read no longer exists"},
 		{"a stale non-gitx name", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
 			delete(f.Functions, "(*internal/other.R).Write")
@@ -84,8 +97,8 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 			*c = append(*c, ws.Classified{Func: "internal/gitx.Read", Effect: ws.ReadOnly})
 		}, "twice"},
 		{"pre-dispatch code reaches a mutating function (R1-A2)", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
-			f.PreDispatch = []ws.Hit{{Func: "internal/gitx.Commit", Path: []string{"cmd/verdi.run", "cmd/verdi.preflight", "internal/gitx.Commit"}}}
-		}, "pre-dispatch code reaches internal/gitx.Commit (cmd/verdi.run -> cmd/verdi.preflight -> internal/gitx.Commit)"},
+			f.PreDispatch = []ws.Hit{{Func: "internal/gitx.CreateCommit", Path: []string{"cmd/verdi.run", "cmd/verdi.preflight", "internal/gitx.CreateCommit"}}}
+		}, "pre-dispatch code reaches internal/gitx.CreateCommit (cmd/verdi.run -> cmd/verdi.preflight -> internal/gitx.CreateCommit)"},
 		{"pre-dispatch code was not analyzed", func(_ *[]ws.Declaration, _ *[]ws.Classified, f *ws.Facts) {
 			f.PreDispatchRoots = 0
 		}, "pre-dispatch"},
@@ -95,9 +108,9 @@ func TestCheck_FindsEveryFalsifier(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decls, classes, facts := checkFixture()
+			decls, awaiting, classes, facts := checkFixture()
 			tt.mutate(&decls, &classes, &facts)
-			got := ws.Check(decls, nil, classes, facts)
+			got := ws.Check(decls, awaiting, classes, facts)
 			if !strings.Contains(strings.Join(got, "\n"), tt.wantErr) {
 				t.Fatalf("Check findings =\n%s\nwant one mentioning %q", strings.Join(got, "\n"), tt.wantErr)
 			}

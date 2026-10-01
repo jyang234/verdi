@@ -48,9 +48,11 @@ type Hit struct {
 // exported gitx function or a git-directory writer that is not classified;
 // a classified name that no longer exists; a verb that reaches a mutating
 // function with no declaration naming it; a declaration naming a verb that
-// no inventory defines or that reaches no mutating function; and
-// pre-dispatch code that reaches a mutating function, which runs for every
-// verb, so no declaration can own it (ledger SI-314 (3)).
+// no inventory defines or that reaches no mutating function; an
+// awaiting-fix list that disagrees with what reaches gitx's whole-index
+// commit (checkAwaiting); and pre-dispatch code that reaches a mutating
+// function, which runs for every verb, so no declaration can own it
+// (ledger SI-314 (3)).
 func Check(decls []Declaration, awaiting []AwaitingFix, classes []Classified, facts Facts) []string {
 	if facts.GitxPackage == "" || len(facts.GitxExports) == 0 || len(facts.Verbs) == 0 {
 		return []string{"no facts: the analysis observed no gitx export or no verb, so nothing can be proven"}
@@ -64,8 +66,60 @@ func Check(decls []Declaration, awaiting []AwaitingFix, classes []Classified, fa
 	}
 	out = append(out, checkClassification(classes, facts)...)
 	out = append(out, checkCoverage(decls, facts)...)
+	out = append(out, checkAwaiting(decls, awaiting, facts)...)
 	out = append(out, checkPreDispatch(facts)...)
 	sort.Strings(out)
+	return out
+}
+
+// checkAwaiting holds the awaiting-fix list to the facts (story dc-3). A
+// scoped declaration states the fix its ritual is owed; while one of its
+// verbs still reaches gitx's whole-index commit (CreateCommit, which
+// records every pre-staged entry), the ritual does not meet it, so the
+// declaration must sit in the list. And every listed ritual must still
+// reach that commit: an entry whose ritual no longer does is stale.
+func checkAwaiting(decls []Declaration, awaiting []AwaitingFix, facts Facts) []string {
+	whole := facts.GitxPackage + ".CreateCommit"
+	reaching := func(d Declaration) (Verb, bool) {
+		for _, v := range d.Verbs {
+			for _, h := range facts.Verbs[v] {
+				if h.Func == whole {
+					return v, true
+				}
+			}
+		}
+		return Verb{}, false
+	}
+	listed := map[string]bool{}
+	for _, a := range awaiting {
+		listed[a.Ritual] = true
+	}
+	var out []string
+	byRitual := map[string]Declaration{}
+	for _, d := range decls {
+		byRitual[d.Ritual] = d
+		if d.IndexCarry != CarryScoped || listed[d.Ritual] {
+			continue
+		}
+		if v, ok := reaching(d); ok {
+			out = append(out, fmt.Sprintf("declaration %s is scoped, but %s reaches %s, a commit of the whole index, and %s sits in no awaiting-fix entry (spec/write-scope-registry dc-3)",
+				d.Ritual, v, whole, d.Ritual))
+		}
+	}
+	rituals := make([]string, 0, len(listed))
+	for r := range listed {
+		rituals = append(rituals, r)
+	}
+	sort.Strings(rituals)
+	for _, r := range rituals {
+		d, ok := byRitual[r]
+		if !ok {
+			continue // ValidateRegistry reports an unknown ritual
+		}
+		if _, ok := reaching(d); !ok {
+			out = append(out, fmt.Sprintf("awaiting fix in %s is stale: no verb of %s reaches %s, the whole-index commit its fix replaces", r, r, whole))
+		}
+	}
 	return out
 }
 

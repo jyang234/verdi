@@ -113,6 +113,15 @@ func liveMutants() []liveMutant {
 			}
 			*a = fixes
 		}, "cli:accept"},
+		{"BM10: accept's awaiting-fix entry dropped (R1-B3)", func(_ *[]ws.Declaration, a *[]ws.AwaitingFix, _ *[]ws.Classified) {
+			var fixes []ws.AwaitingFix
+			for _, f := range *a {
+				if f.Ritual != "accept_diagram" {
+					fixes = append(fixes, f)
+				}
+			}
+			*a = fixes
+		}, "accept_diagram is scoped, but cli:accept reaches internal/gitx.CreateCommit"},
 	}
 }
 
