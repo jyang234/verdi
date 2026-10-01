@@ -41,9 +41,9 @@
 //     ground rules forbid) are still attributed to the code that stored
 //     them;
 //   - generic types are not candidates for interface dispatch; Build
-//     refuses a module where a generic type with methods has the methods
-//     of a module interface (the tripwire), so the gap cannot pass
-//     silently. A generic type converted to a dependency's interface is
+//     refuses a module where a generic type's method set (methods promoted
+//     from embedded fields included) has the methods of a module
+//     interface (the tripwire), so the gap cannot pass silently. A generic type converted to a dependency's interface is
 //     followed (internal/governanceprincipal's byContent[T], a
 //     sort.Interface, is);
 //   - each Program is one build target; the witness loads every target in

@@ -485,7 +485,7 @@ func (g *Graph) declare() {
 				continue
 			}
 			if named.TypeParams().Len() > 0 {
-				if named.NumMethods() > 0 {
+				if types.NewMethodSet(types.NewPointer(named)).Len() > 0 {
 					g.generics = append(g.generics, named)
 				}
 				continue
@@ -514,8 +514,9 @@ func (g *Graph) declare() {
 	})
 }
 
-// genericTripwire refuses a module where a generic type with methods could
-// implement a module interface. Class-hierarchy analysis here considers
+// genericTripwire refuses a module where a generic type whose method set
+// (its own methods and those promoted from embedded fields) is not empty
+// could implement a module interface. Class-hierarchy analysis here considers
 // only non-generic types (types.Implements is unspecified for an
 // uninstantiated generic type), so a call through such an interface could
 // reach the generic type's methods unseen. "Could implement" is judged by
@@ -523,9 +524,14 @@ func (g *Graph) declare() {
 // a false alarm is visible, a missed dispatch would not be.
 func (g *Graph) genericTripwire() error {
 	for _, gen := range g.generics {
+		// The full method set: methods promoted from embedded fields count,
+		// since they too can complete an interface.
 		have := map[string]bool{}
-		for i := 0; i < gen.NumMethods(); i++ {
-			have[methodShape(gen.Method(i))] = true
+		mset := types.NewMethodSet(types.NewPointer(gen))
+		for i := 0; i < mset.Len(); i++ {
+			if fn, ok := mset.At(i).Obj().(*types.Func); ok {
+				have[methodShape(fn)] = true
+			}
 		}
 		for _, in := range g.ifaces {
 			iface := in.Underlying().(*types.Interface)

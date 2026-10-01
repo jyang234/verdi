@@ -348,17 +348,29 @@ func testBuildRejectsRootsOutsideTheModule(t *testing.T, prog *reach.Program) {
 // module where a generic type with methods implements a module interface
 // is refused rather than analyzed with the call missing.
 func TestBuild_FailsOnAGenericImplementationOfAModuleInterface(t *testing.T) {
-	prog, err := reach.Load(context.Background(), filepath.Join("testdata", "generic"), reach.Targets()[0], "./...")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	tests := []struct {
+		name, pkg, use, generic, iface string
+	}{
+		{"its own methods cover the interface", "./g", "g.Use", "box", "Sizer"},
+		// R1-RR2 (re-review N4): a method promoted from an embedded field
+		// completes the interface; the generic type's own methods do not.
+		{"a promoted method completes the interface", "./e", "e.Use", "gen", "Stager"},
 	}
-	use := prog.FuncByName("g.Use")
-	if use == nil {
-		t.Fatal("no g.Use")
-	}
-	_, err = reach.Build(prog, []reach.Entry{{Surface: "test", Name: "use", Roots: []reach.Root{{Func: use}}}})
-	if err == nil || !strings.Contains(err.Error(), "box") || !strings.Contains(err.Error(), "Sizer") {
-		t.Fatalf("Build = %v, want an error naming the generic type box and the interface Sizer", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prog, err := reach.Load(context.Background(), filepath.Join("testdata", "generic"), reach.Targets()[0], tt.pkg)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			use := prog.FuncByName(tt.use)
+			if use == nil {
+				t.Fatalf("no %s", tt.use)
+			}
+			_, err = reach.Build(prog, []reach.Entry{{Surface: "test", Name: "use", Roots: []reach.Root{{Func: use}}}})
+			if err == nil || !strings.Contains(err.Error(), tt.generic) || !strings.Contains(err.Error(), tt.iface) {
+				t.Fatalf("Build = %v, want an error naming the generic type %s and the interface %s", err, tt.generic, tt.iface)
+			}
+		})
 	}
 }
 
