@@ -43,7 +43,63 @@ func closureCases() []harnessCase {
 			return err
 		}
 	}
+	tempDecl := ws.Declaration{Ritual: "test_gone", Verbs: []ws.Verb{ws.CLI("test gone")},
+		RefsCreate: []ws.RefPattern{"refs/heads/ritual/*"}, RefsDelete: []ws.RefPattern{"refs/heads/ritual/*"},
+		HeadSwitch: true, Worktrees: []ws.WorktreePattern{ws.WorktreeTemp}, IndexCarry: ws.CarryNoCommit}
+	// goneWorktree adds a @temp worktree at the base commit, runs inside,
+	// runs then, and removes the worktree, all through gitx.
+	goneWorktree := func(t *testing.T, inside, then []func(context.Context, string) error) Ritual {
+		tmp := filepath.Join(t.TempDir(), "evaluation")
+		fns := []func(context.Context, string) error{func(ctx context.Context, dir string) error {
+			base, err := gitx.RevParse(ctx, dir, "HEAD")
+			if err != nil {
+				return err
+			}
+			return gitx.WorktreeAddDetached(ctx, dir, tmp, base)
+		}}
+		for _, f := range inside {
+			fns = append(fns, func(ctx context.Context, _ string) error { return f(ctx, tmp) })
+		}
+		fns = append(fns, then...)
+		fns = append(fns, func(ctx context.Context, dir string) error { return gitx.WorktreeRemove(ctx, dir, tmp) })
+		return steps(fns...)
+	}
 	return []harnessCase{
+		{
+			name: "a gone worktree owns nothing once a commit was logged in the fixture (SI-329 (5′)(ii))", states: both(),
+			decl: tempDecl,
+			driver: func(t *testing.T, _ *Fixture) Driver {
+				return InProcess{Fn: goneWorktree(t,
+					[]func(context.Context, string) error{stage("eval.txt", "evaluated\n"), commitIndex},
+					[]func(context.Context, string) error{newBranch("ritual/tmp"), stage("owned/t.txt", "t\n"), commitPaths("owned/t.txt"),
+						checkout("main"), plain("branch", "-D", "ritual/tmp")})}
+			},
+			want: func(t *testing.T, _ *Fixture, res Result) ([]Verdict, RunOutcome) {
+				return []Verdict{
+					v("stage_paths", Outside, "commit "+commitRecording(t, res, "eval.txt")+" recorded eval.txt"),
+					v("stage_paths", Outside, "commit "+commitRecording(t, res, "owned/t.txt")+" recorded owned/t.txt"),
+					v("index_carry", Outside, "declares no_commit; observed scoped"),
+				}, Fail
+			},
+		},
+		{
+			name: "a gone worktree that made no commit owns none, not even an unreferenced one (SI-329 (5′)(ii))", states: both(),
+			decl: tempDecl,
+			driver: func(t *testing.T, _ *Fixture) Driver {
+				scratch := filepath.Join(t.TempDir(), "index")
+				return InProcess{Fn: goneWorktree(t, nil, []func(context.Context, string) error{
+					func(ctx context.Context, dir string) error {
+						_, err := scratchCommit(ctx, dir, scratch, "outside.txt")
+						return err
+					}})}
+			},
+			want: func(t *testing.T, _ *Fixture, res Result) ([]Verdict, RunOutcome) {
+				return []Verdict{
+					v("stage_paths", Outside, "commit "+onlyCommit(t, res)+" recorded outside.txt"),
+					v("index_carry", Outside, "declares no_commit; observed scoped"),
+				}, Fail
+			},
+		},
 		{
 			name: "a gone worktree never owns a commit the fixture reaches, not even by a logged fast-forward (CC-B1, CC P10)", states: []SeedState{SeedClean},
 			decl: decl, setup: cleanRunway,
