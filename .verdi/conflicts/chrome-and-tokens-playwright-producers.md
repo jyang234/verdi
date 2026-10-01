@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/chrome-and-tokens }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 05bdbebd01ba11c2348fb4c4e5ec8d2195274131 }
 ---
 # Conflict: chrome-and-tokens cannot cross verdi build start
 

@@ -16,7 +16,7 @@ quality:
     rule: "The owner re-attests on a running verdi serve at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/chrome-and-tokens-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 05bdbebd01ba11c2348fb4c4e5ec8d2195274131 }
 ---
 # The owner accepts the top bar's visual fidelity on a running workbench
 
