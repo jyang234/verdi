@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/new-story-dialog }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 68c057eb24281c3382baab695234da382f5984ec }
 ---
 # Conflict: new-story-dialog cannot cross verdi build start
 

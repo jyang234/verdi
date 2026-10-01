@@ -16,7 +16,7 @@ quality:
     rule: "Rerun playwright:e2e/tests/95-new-story-dialog.spec.ts:new-story-dialog › Criteria listed with their coverage, claimable in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/new-story-dialog-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 68c057eb24281c3382baab695234da382f5984ec }
 ---
 # Criteria listed with their coverage, claimable
 
