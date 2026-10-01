@@ -1,31 +1,31 @@
 package ritualwitness
 
 import (
+	"errors"
 	"fmt"
-	"reflect"
+	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/jyang234/verdi/internal/gitx"
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
 
-// Status is one effect's verdict against a Declaration (parent ac-1): it
-// lies within the declaration, outside it, or the sensors cannot attribute
-// it to anything the ritual itself did — and an unattributable effect
-// never counts as within scope (obligation/ritual-effect-witness--ac-1).
+// Status is one effect's verdict against a Declaration: within it,
+// outside it, or unattributable — and an unattributable effect never
+// counts as within scope (story ac-1).
 type Status string
 
+// The three verdicts.
 const (
 	Within         Status = "within"
 	Outside        Status = "outside"
 	Unattributable Status = "unattributable"
 )
 
-// Verdict is one observed effect's classification: the Declaration field it
-// was checked against, its Status, and a legible Detail naming the effect
-// (RED/GREEN and failure output read Detail directly, never a field+status
-// pair alone — the obligation requires failures to "name the effect").
+// Verdict is one observed effect's classification: the field it was
+// judged against (a Declaration field, or the effect class no field
+// admits: index, working_tree, config, git_dir, exit, command_log), its
+// Status, and a Detail naming the effect.
 type Verdict struct {
 	Field  string
 	Status Status
@@ -36,416 +36,296 @@ func (v Verdict) String() string {
 	return fmt.Sprintf("%s: %s (%s)", v.Field, v.Status, v.Detail)
 }
 
-// evalFuncs is the small set of decision functions Evaluate's own
-// correctness rests on. Production code always gets defaultEvalFuncs();
-// harness_test.go substitutes one function at a time to prove each is
-// load-bearing (the four mutants spec/ritual-effect-witness ac-1's GREEN
-// list requires), mirroring how internal/writescope's own witness_test.go
-// mutates registry DATA to prove Check catches it — here the thing under
-// test is behavior, so the swapped unit is a function instead.
-type evalFuncs struct {
-	// classify turns (attributable, within) into a Status. The real
-	// implementation never reports Within when !attributable (mutant:
-	// "treat unattributable as within").
-	classify func(attributable, within bool) Status
-	// matchRef is writescope.RefPattern.Matches, indirected so a test can
-	// substitute a version that ignores checkedOutBefore (mutant: "match
-	// RefCheckedOut against any branch").
-	matchRef func(p ws.RefPattern, ref, checkedOutBefore string) bool
-	// noMutation reports whether before and after are identical across
-	// every sensor. The real implementation compares all of them,
-	// including the index and working-tree sensors (mutant: "skip the
-	// index sensor" substitutes a version that ignores Index/Working/
-	// Hashes — and, separately, "let refused pass with a mutation"
-	// substitutes a version that always returns true, never checking any
-	// sensor at all).
-	noMutation func(before, after Snapshot) bool
-}
-
-func defaultEvalFuncs() evalFuncs {
-	return evalFuncs{
-		classify:   classify,
-		matchRef:   func(p ws.RefPattern, ref, checkedOutBefore string) bool { return p.Matches(ref, checkedOutBefore) },
-		noMutation: snapshotsEqual,
+// classify is every attributable effect's verdict (doc.go, "Precedence"):
+// an effect no declared field admits is outside, whoever made it — the
+// state diff alone witnesses it; an admitted effect is within only when
+// attributed, and unattributable otherwise.
+func classify(admitted, attributed bool) Status {
+	if !admitted {
+		return Outside
 	}
-}
-
-// classify is the real, production decision: an effect the log cannot
-// attribute is always Unattributable, regardless of whether it happens to
-// fall inside a declared pattern.
-func classify(attributable, within bool) Status {
-	if !attributable {
+	if !attributed {
 		return Unattributable
 	}
-	if within {
-		return Within
-	}
-	return Outside
+	return Within
 }
 
-// Evaluate compares before and after Snapshots — taken immediately before
-// and after a Driver ran one ritual with exit classification exit and
-// command log log — against decl, and returns one Verdict per observed
-// effect. storeRoot relates a worktree's absolute path to a
-// writescope.WorktreePattern's store-relative directory form (parent dc-7).
-// No effect is reported for a sensor dimension that did not change: ac-1
-// classifies OBSERVED effects, and a ritual that touched nothing in a given
-// dimension left nothing there to classify.
-func Evaluate(decl ws.Declaration, exit int, before, after Snapshot, storeRoot string, log CommandLog) []Verdict {
-	return evaluateWith(decl, exit, before, after, storeRoot, log, defaultEvalFuncs())
-}
-
-func evaluateWith(decl ws.Declaration, exit int, before, after Snapshot, storeRoot string, log CommandLog, fns evalFuncs) []Verdict {
-	checkedOutBefore := ""
-	if before.Head.Branch != "" {
-		checkedOutBefore = "refs/heads/" + before.Head.Branch
+// Evaluate compares before and after — Snapshots taken immediately before
+// and after a Driver ran one ritual, which exited with exit and logged
+// log — against decl, and returns one Verdict per observed effect,
+// ordered by effect class and then by detail. It validates decl first,
+// and refuses a snapshot pair from different repositories. Evaluate reads
+// the filesystem only to canonicalize the log's paths.
+func Evaluate(decl ws.Declaration, exit int, before, after Snapshot, log CommandLog) ([]Verdict, error) {
+	if err := decl.Validate(); err != nil {
+		return nil, fmt.Errorf("ritualwitness: Evaluate: %w", err)
 	}
+	if before.Root != after.Root || before.StoreRoot != after.StoreRoot || before.CommonDir != after.CommonDir {
+		return nil, errors.New("ritualwitness: Evaluate: the before and after snapshots are of different repositories")
+	}
+	e := newEvaluation(decl, exit, before, after, log)
 	var out []Verdict
-	out = append(out, evalLocalRefs(decl, before, after, checkedOutBefore, log, fns)...)
-	out = append(out, evalRemoteRefs(decl, before, after, log, fns)...)
-	out = append(out, evalHeadSwitch(decl, before, after)...)
-	out = append(out, evalWorktrees(decl, before, after, storeRoot, log, fns)...)
-	out = append(out, evalCommitsAndCarry(decl, exit, before, after, fns)...)
-	return out
-}
-
-// evalLocalRefs classifies every refs/heads/* create, move, and delete
-// between before and after against decl's RefsCreate/RefsMove/RefsDelete.
-//
-// Attribution: a create or delete is attributable only when the log
-// mentions the ref's short name — the token every ref-naming gitx call
-// (checkout -b, branch -d, update-ref, branch) carries. A move is
-// attributable the same way, OR when the moved ref is the branch checked
-// out when the ritual finished and the log shows any commit-shaped call:
-// `git commit` moves the checked-out branch without ever naming it in argv
-// (parent dc-2's "a mutation made outside gitx" concern is what this
-// attribution step exists to catch — not an ordinary commit).
-func evalLocalRefs(decl ws.Declaration, before, after Snapshot, checkedOutBefore string, log CommandLog, fns evalFuncs) []Verdict {
-	var out []Verdict
-	for _, ref := range sortedKeys(after.LocalRefs) {
-		sha := after.LocalRefs[ref]
-		beforeSHA, existed := before.LocalRefs[ref]
-		if !existed {
-			out = append(out, refVerdict("refs_create", ref, log.Mentions(shortRef(ref)), decl.RefsCreate, checkedOutBefore, fns,
-				fmt.Sprintf("ref %s created at %s", ref, short(sha))))
-			continue
-		}
-		if beforeSHA != sha {
-			attributable := log.Mentions(shortRef(ref)) || (ref == "refs/heads/"+after.Head.Branch && log.HasVerb("commit"))
-			out = append(out, refVerdict("refs_move", ref, attributable, decl.RefsMove, checkedOutBefore, fns,
-				fmt.Sprintf("ref %s moved from %s to %s", ref, short(beforeSHA), short(sha))))
-		}
-	}
-	for _, ref := range sortedKeys(before.LocalRefs) {
-		if _, stillThere := after.LocalRefs[ref]; stillThere {
-			continue
-		}
-		out = append(out, refVerdict("refs_delete", ref, log.Mentions(shortRef(ref)), decl.RefsDelete, checkedOutBefore, fns,
-			fmt.Sprintf("ref %s deleted (was %s)", ref, short(before.LocalRefs[ref]))))
-	}
-	return out
-}
-
-func refVerdict(field, ref string, attributable bool, patterns []ws.RefPattern, checkedOutBefore string, fns evalFuncs, detail string) Verdict {
-	within := false
-	for _, p := range patterns {
-		if fns.matchRef(p, ref, checkedOutBefore) {
-			within = true
-			break
-		}
-	}
-	return Verdict{Field: field, Status: fns.classify(attributable, within), Detail: detail}
-}
-
-// evalRemoteRefs classifies every change to the bare remote's own refs
-// against decl.MayPush (parent dc-7: a remote-tracking ref a push moves
-// belongs to may-push). Attribution is log.HasVerb("push"): gitx.Push's
-// argv ("push --set-upstream origin HEAD") never names the branch it
-// pushes, so token matching on the ref name cannot work here.
-func evalRemoteRefs(decl ws.Declaration, before, after Snapshot, log CommandLog, fns evalFuncs) []Verdict {
-	var out []Verdict
-	for _, ref := range sortedKeys(after.RemoteRefs) {
-		sha := after.RemoteRefs[ref]
-		if beforeSHA, existed := before.RemoteRefs[ref]; existed && beforeSHA == sha {
-			continue
-		}
-		attributable := log.HasVerb("push")
-		out = append(out, Verdict{
-			Field:  "may_push",
-			Status: fns.classify(attributable, decl.MayPush),
-			Detail: fmt.Sprintf("the remote's ref %s changed to %s", ref, short(sha)),
+	for _, section := range []func() []Verdict{
+		e.commandLog,
+		e.localRefs,
+		e.remoteRefs,
+		e.headSwitch,
+		e.index,
+		e.workingTree,
+		e.worktrees,
+		e.commits,
+		e.config,
+		e.gitDir,
+		e.refusal,
+	} {
+		vs := section()
+		sort.SliceStable(vs, func(i, j int) bool {
+			if vs[i].Field != vs[j].Field {
+				return vs[i].Field < vs[j].Field
+			}
+			return vs[i].Detail < vs[j].Detail
 		})
+		out = append(out, vs...)
 	}
-	return out
+	return out, nil
 }
 
-// evalHeadSwitch reports HEAD's change, if any, against decl.HeadSwitch.
-// Directly state-diff-provable (symbolic-ref before vs. after), so this
-// needs no log attribution.
-func evalHeadSwitch(decl ws.Declaration, before, after Snapshot) []Verdict {
-	if before.Head == after.Head {
-		return nil
-	}
-	status := Outside
-	if decl.HeadSwitch {
-		status = Within
-	}
-	return []Verdict{{
-		Field:  "head_switch",
-		Status: status,
-		Detail: fmt.Sprintf("HEAD moved from %s to %s", headLabel(before.Head), headLabel(after.Head)),
-	}}
+// evaluation is one Evaluate call's inputs and derived facts.
+type evaluation struct {
+	decl     ws.Declaration
+	exit     int
+	b, a     Snapshot
+	at       attribution
+	linkedB  map[string]Worktree
+	linkedA  map[string]Worktree
+	addedWT  map[string]bool // linked worktrees the ritual added (present after, or named by a logged add)
+	switched bool            // the main worktree's HEAD switched (SI-325 (4))
 }
 
-func headLabel(h Head) string {
-	if h.Detached {
-		return "detached@" + short(h.Commit)
+func newEvaluation(decl ws.Declaration, exit int, b, a Snapshot, log CommandLog) *evaluation {
+	e := &evaluation{decl: decl, exit: exit, b: b, a: a, linkedB: byPath(b.Worktrees), linkedA: byPath(a.Worktrees)}
+	roots := []string{a.Root}
+	for p := range e.linkedB {
+		roots = append(roots, p)
 	}
-	return h.Branch
-}
-
-// evalWorktrees classifies every linked-worktree add and remove against
-// decl.Worktrees. Attribution is token matching on the worktree's absolute
-// path, which every gitx worktree call (add, add --detach, remove) carries
-// literally.
-func evalWorktrees(decl ws.Declaration, before, after Snapshot, storeRoot string, log CommandLog, fns evalFuncs) []Verdict {
-	beforeSet := worktreeSet(before.Worktrees)
-	afterSet := worktreeSet(after.Worktrees)
-	var out []Verdict
-	for _, path := range sortedWorktreePaths(afterSet) {
-		if _, existed := beforeSet[path]; existed {
-			continue
-		}
-		out = append(out, worktreeVerdict(decl, path, storeRoot, false, log, fns, fmt.Sprintf("worktree added at %s", path)))
+	for p := range e.linkedA {
+		roots = append(roots, p)
 	}
-	for _, path := range sortedWorktreePaths(beforeSet) {
-		if _, stillThere := afterSet[path]; stillThere {
-			continue
-		}
-		out = append(out, worktreeVerdict(decl, path, storeRoot, true, log, fns, fmt.Sprintf("worktree removed from %s", path)))
-	}
-	return out
-}
-
-func worktreeVerdict(decl ws.Declaration, path, storeRoot string, registeredBefore bool, log CommandLog, fns evalFuncs, detail string) Verdict {
-	within := false
-	for _, p := range decl.Worktrees {
-		if p.Matches(path, ws.WorktreeSite{RepoRoot: storeRoot, StoreRoot: storeRoot, RegisteredBefore: registeredBefore}) {
-			within = true
-			break
+	e.at = newAttribution(log, roots)
+	e.addedWT = map[string]bool{}
+	for p := range e.linkedA {
+		if _, existed := e.linkedB[p]; !existed {
+			e.addedWT[p] = true
 		}
 	}
-	return Verdict{Field: "worktrees", Status: fns.classify(log.Mentions(path), within), Detail: detail}
+	for _, c := range e.at.in("", primWorktreeAdd) {
+		if p := c.worktreePath(); p != "" {
+			if _, existed := e.linkedB[p]; !existed {
+				e.addedWT[p] = true
+			}
+		}
+	}
+	e.switched = headSwitched(b.Head, a.Head)
+	return e
 }
 
-func worktreeSet(list []gitx.WorktreeEntry) map[string]gitx.WorktreeEntry {
-	m := make(map[string]gitx.WorktreeEntry, len(list))
-	for _, w := range list {
+func byPath(wts []Worktree) map[string]Worktree {
+	m := make(map[string]Worktree, len(wts))
+	for _, w := range wts {
 		m[w.Path] = w
 	}
 	return m
 }
 
-func sortedWorktreePaths(m map[string]gitx.WorktreeEntry) []string {
-	out := make([]string, 0, len(m))
-	for p := range m {
-		out = append(out, p)
+// headSwitched is SI-325 (4): HEAD switches when its branch changes, when
+// it moves between attached and detached, or when a detached HEAD moves.
+// A commit on the checked-out branch moves that branch, not HEAD.
+func headSwitched(b, a Head) bool {
+	if b.Ref != a.Ref || b.Detached != a.Detached {
+		return true
 	}
-	sort.Strings(out)
-	return out
+	return b.Detached && b.Commit != a.Commit
 }
 
-// carryFacts are the raw, declaration-independent facts an index-carry
-// check needs.
-type carryFacts struct {
-	refused        bool     // exit 2 and no mutation at all (noMutation held)
-	commits        int      // new commits the ritual created
-	hadForeign     bool     // the index already differed from HEAD before the ritual ran
-	carriesForeign bool     // a new commit recorded a path that was already staged before the ritual ran
-	carriedPaths   []string // the specific paths carriesForeign names, sorted
+// site is where a worktree path is judged against a WorktreePattern.
+func (e *evaluation) site(registeredBefore bool) ws.WorktreeSite {
+	return ws.WorktreeSite{RepoRoot: e.a.Root, StoreRoot: e.a.StoreRoot, RegisteredBefore: registeredBefore}
 }
 
-// label is what facts actually show, for Detail text — not what the
-// declaration said, which conforms checks separately.
-func (f carryFacts) label() ws.IndexCarry {
-	switch {
-	case f.refused:
-		return ws.CarryRefused
-	case f.commits == 0:
-		return ws.CarryNoCommit
-	case f.carriesForeign:
-		return ws.CarryCarried
-	default:
-		return ws.CarryScoped
-	}
-}
-
-// conforms reports whether facts is consistent with declared (parent
-// dc-3's four states, read per-run rather than as one flat label):
-//
-//   - refused promises a refusal only when there was a foreign entry to
-//     refuse over; parent ac-2 runs a refusing ritual in the clean state
-//     too precisely so it is ALSO observed completing, so a refused
-//     declaration is not held to refusing when nothing was there to refuse.
-//   - no_commit promises no commit object exists, in either state.
-//   - scoped promises it neither refuses nor carries a foreign entry into
-//     a commit: a ritual that silently refuses instead of completing its
-//     declared scoped commit is itself a defect this must catch
-//     (obligation: "refuses while declaring scoped fails").
-//   - carried permits (never requires) a foreign entry to enter, so it is
-//     never falsified by this check alone.
-func (f carryFacts) conforms(declared ws.IndexCarry) bool {
-	switch declared {
-	case ws.CarryRefused:
-		if !f.hadForeign {
+// worktreeAdmitted reports whether a declared worktree pattern covers the
+// worktree at path.
+func (e *evaluation) worktreeAdmitted(path string, registeredBefore bool) bool {
+	for _, p := range e.decl.Worktrees {
+		if p.Matches(path, e.site(registeredBefore)) {
 			return true
 		}
-		return f.refused
-	case ws.CarryNoCommit:
-		return f.commits == 0
-	case ws.CarryScoped:
-		return !f.refused && !f.carriesForeign
-	case ws.CarryCarried:
-		return true
-	default:
+	}
+	return false
+}
+
+// stagePathAdmits reports whether a repository-relative path lies in the
+// store and matches a declared stage path.
+func (e *evaluation) stagePathAdmits(repoPath string) bool {
+	rel, ok := storeRelative(e.a.Prefix, repoPath)
+	if !ok {
 		return false
 	}
+	for _, p := range e.decl.StagePaths {
+		if p.Matches(rel) {
+			return true
+		}
+	}
+	return false
 }
 
-// evalCommitsAndCarry classifies every file every new commit recorded
-// against decl.StagePaths/UntrackedMayEnter, and asserts decl.IndexCarry
-// exactly (parent ac-1: "asserts the declared index carry exactly").
-// Commits are state-diff-provable by construction — a snapshot pair always
-// brackets exactly one ritual run, so any commit reachable after and not
-// before is unambiguously this run's — so, unlike refs and worktrees, no
-// log attribution applies here.
-func evalCommitsAndCarry(decl ws.Declaration, exit int, before, after Snapshot, fns evalFuncs) []Verdict {
-	var newCommits []string
-	for sha := range after.Commits {
-		if !before.Commits[sha] {
-			newCommits = append(newCommits, sha)
+// staged reports whether s's index differed from HEAD at path.
+func staged(s Snapshot, path string) bool {
+	for _, st := range s.Status {
+		if (st.Path == path || st.OrigPath == path) && st.X != ' ' && st.X != '?' && st.X != '!' {
+			return true
 		}
 	}
-	sort.Strings(newCommits)
-
-	foreign := preStagedBefore(before)
-	beforeUntracked := map[string]bool{}
-	for _, w := range before.Working {
-		if w.Index == '?' {
-			beforeUntracked[w.Path] = true
-		}
-	}
-
-	var out []Verdict
-	for _, sha := range newCommits {
-		for _, path := range after.CommitFiles[sha] {
-			if foreign[path] {
-				continue // reported once, via the index-carry verdict below
-			}
-			within := false
-			for _, p := range decl.StagePaths {
-				if p.Matches(path) {
-					within = true
-					break
-				}
-			}
-			switch {
-			case within:
-				out = append(out, Verdict{Field: "stage_paths", Status: Within, Detail: fmt.Sprintf("commit %s recorded %s", short(sha), path)})
-			case beforeUntracked[path] && decl.UntrackedMayEnter:
-				out = append(out, Verdict{Field: "untracked_may_enter", Status: Within, Detail: fmt.Sprintf("commit %s recorded previously-untracked %s", short(sha), path)})
-			default:
-				out = append(out, Verdict{Field: "stage_paths", Status: Outside, Detail: fmt.Sprintf("commit %s recorded %s, which is not a declared stage path", short(sha), path)})
-			}
-		}
-	}
-
-	facts := observeCarryFacts(fns, exit, before, after, newCommits, foreign)
-	status := Within
-	if !facts.conforms(decl.IndexCarry) {
-		status = Outside
-	}
-	out = append(out, Verdict{
-		Field:  "index_carry",
-		Status: status,
-		Detail: fmt.Sprintf("declares %s; observed %s (new commits=%d, refused=%v, carried foreign entries=%v)",
-			decl.IndexCarry, facts.label(), facts.commits, facts.refused, facts.carriedPaths),
-	})
-	return out
+	return false
 }
 
-func observeCarryFacts(fns evalFuncs, exit int, before, after Snapshot, newCommits []string, foreign map[string]bool) carryFacts {
-	cf := carryFacts{
-		refused:    exit == 2 && fns.noMutation(before, after),
-		commits:    len(newCommits),
-		hadForeign: len(foreign) > 0,
+// listed reports whether path appears in s's status at all: dirty,
+// staged, or untracked.
+func listed(s Snapshot, path string) bool {
+	for _, st := range s.Status {
+		if (st.Path == path || st.OrigPath == path) && st.X != '!' {
+			return true
+		}
 	}
-	carried := map[string]bool{}
-	for _, sha := range newCommits {
-		for _, path := range after.CommitFiles[sha] {
-			if foreign[path] {
-				cf.carriesForeign = true
-				carried[path] = true
+	return false
+}
+
+// untracked reports whether path was untracked in s.
+func untracked(s Snapshot, path string) bool {
+	for _, st := range s.Status {
+		if st.Path == path && st.X == '?' {
+			return true
+		}
+	}
+	return false
+}
+
+// foreign is SI-325 (6): an index entry that differed from HEAD before the
+// ritual and lies outside every declared stage path.
+func (e *evaluation) foreign(path string) bool {
+	return staged(e.b, path) && !e.stagePathAdmits(path)
+}
+
+// hadForeign reports whether any foreign entry existed before the ritual.
+func (e *evaluation) hadForeign() bool {
+	for _, st := range e.b.Status {
+		for _, p := range []string{st.Path, st.OrigPath} {
+			if p != "" && e.foreign(p) {
+				return true
 			}
 		}
 	}
-	for path := range carried {
-		cf.carriedPaths = append(cf.carriedPaths, path)
-	}
-	sort.Strings(cf.carriedPaths)
-	return cf
+	return false
 }
 
-// preStagedBefore returns the paths whose index entry already differed
-// from HEAD before the ritual ran: git status's index column is anything
-// other than ' ' (unchanged), '?' (untracked), or '!' (ignored). This is
-// the fixture's "pre-staged unrelated index entry" generalized: whatever
-// the operator had already staged, by any name, that a scoped ritual must
-// never let ride into its own commit (parent dc-3, dc-7).
-func preStagedBefore(before Snapshot) map[string]bool {
-	staged := map[string]bool{}
-	for _, w := range before.Working {
-		if w.Index != ' ' && w.Index != '?' && w.Index != '!' {
-			staged[w.Path] = true
-			if w.OrigPath != "" {
-				staged[w.OrigPath] = true
-			}
+// checkedOutBefore is the main worktree's branch before the ritual, as a
+// full refname, or "" when HEAD was detached.
+func (e *evaluation) checkedOutBefore() string {
+	if e.b.Head.Detached {
+		return ""
+	}
+	return e.b.Head.Ref
+}
+
+// checkedOutMoved reports a move of @checked-out: HEAD stayed attached to
+// the branch it started on, and that branch moved.
+func (e *evaluation) checkedOutMoved() bool {
+	ref := e.checkedOutBefore()
+	return ref != "" && !e.switched && e.b.Refs[ref].Object != e.a.Refs[ref].Object
+}
+
+// declaresCheckedOutMove reports whether decl's refs_move names
+// @checked-out.
+func (e *evaluation) declaresCheckedOutMove() bool {
+	for _, r := range e.decl.RefsMove {
+		if r == ws.RefCheckedOut {
+			return true
 		}
 	}
-	return staged
+	return false
 }
 
-// snapshotsEqual reports whether before and after are identical across
-// every sensor — refs, HEAD, the index, the working tree and its content
-// hashes, the linked-worktree list, and the commit set — the "no mutation
-// at all" half of a refusal's exact assertion (parent ac-1).
-func snapshotsEqual(before, after Snapshot) bool {
-	return reflect.DeepEqual(before.LocalRefs, after.LocalRefs) &&
-		reflect.DeepEqual(before.RemoteRefs, after.RemoteRefs) &&
-		before.Head == after.Head &&
-		reflect.DeepEqual(before.Index, after.Index) &&
-		reflect.DeepEqual(before.Working, after.Working) &&
-		reflect.DeepEqual(before.Hashes, after.Hashes) &&
-		reflect.DeepEqual(worktreeSet(before.Worktrees), worktreeSet(after.Worktrees)) &&
-		reflect.DeepEqual(before.Commits, after.Commits)
-}
-
-func short(sha string) string {
-	if len(sha) > 8 {
-		return sha[:8]
+// reachable reports whether commit is reachable from start in the after
+// snapshot's commit graph.
+func (e *evaluation) reachable(commit, start string) bool {
+	seen := map[string]bool{}
+	stack := []string{start}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if c == "" || seen[c] {
+			continue
+		}
+		if c == commit {
+			return true
+		}
+		seen[c] = true
+		stack = append(stack, e.a.Commits[c].Parents...)
 	}
-	return sha
+	return false
 }
 
-func shortRef(ref string) string {
-	return strings.TrimPrefix(ref, "refs/heads/")
-}
-
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// firstParent returns commit's first parent in the after snapshot, or "".
+func (e *evaluation) firstParent(commit string) string {
+	if ps := e.a.Commits[commit].Parents; len(ps) > 0 {
+		return ps[0]
 	}
-	sort.Strings(out)
-	return out
+	return ""
+}
+
+func short(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+func headLabel(h Head) string {
+	if h.Detached {
+		return "detached at " + short(h.Commit)
+	}
+	return h.Ref
+}
+
+// changeVerb names a change from present-before to present-after.
+func changeVerb(before, after bool) string {
+	switch {
+	case !before:
+		return "created"
+	case !after:
+		return "deleted"
+	default:
+		return "changed"
+	}
+}
+
+// repoPathOf returns the absolute path of a repository-relative path in
+// the main worktree.
+func (e *evaluation) repoPathOf(p string) string {
+	return filepath.Join(e.a.Root, filepath.FromSlash(p))
+}
+
+// inAddedWorktree reports whether an absolute path lies in a worktree the
+// ritual added.
+func (e *evaluation) inAddedWorktree(abs string) bool {
+	for w := range e.addedWT {
+		if within(w, abs) {
+			return true
+		}
+	}
+	return false
+}
+
+func joinSorted(items []string) string {
+	sort.Strings(items)
+	return strings.Join(items, ", ")
 }

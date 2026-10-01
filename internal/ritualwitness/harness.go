@@ -7,49 +7,48 @@ import (
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
 
-// Result is one harness run's outcome: the ritual's exit classification,
-// its command log, its before/after Snapshots, the store root Evaluate
-// related every worktree path to, and its Verdicts against decl.
+// Result is one harness run: the ritual's exit classification and error,
+// its command log, the before and after Snapshots, and its Verdicts.
 type Result struct {
-	Exit      int
-	Log       CommandLog
-	Before    Snapshot
-	After     Snapshot
-	StoreRoot string
-	Verdicts  []Verdict
+	Exit     int
+	Err      error
+	Log      CommandLog
+	Before   Snapshot
+	After    Snapshot
+	Verdicts []Verdict
 }
 
-// Run is the harness's one composition point (parent ac-1): it seeds a
-// fresh Fixture to state, snapshots it, drives the ritual through d,
-// snapshots it again, and evaluates the result against decl. Every git
-// invocation involved — the fixture's own setup, d's driving of the
-// ritual, and Capture's sensing — stays within the fixture's own temp
-// directories and its local bare remote (co-3: hermetic, no network).
-func Run(t *testing.T, ctx context.Context, d Driver, decl ws.Declaration, state SeedState) Result {
+// Run validates decl, seeds a fresh Fixture to state, and runs d on it
+// (RunOn). Every git invocation involved stays within the fixture's own
+// temporary directories and its local bare remote (no network).
+func Run(t testing.TB, ctx context.Context, d Driver, decl ws.Declaration, state SeedState) Result {
 	t.Helper()
-	fx := Build(t, ctx, state)
+	if err := decl.Validate(); err != nil {
+		t.Fatalf("ritualwitness: Run: %v", err)
+	}
+	return RunOn(t, ctx, Build(t, ctx, state), d, decl)
+}
 
+// RunOn snapshots fx, drives one ritual through d, snapshots fx again,
+// and evaluates the pair against decl. A test that needs more seeding than
+// a SeedState gives adds it to fx before calling RunOn.
+func RunOn(t testing.TB, ctx context.Context, fx *Fixture, d Driver, decl ws.Declaration) Result {
+	t.Helper()
 	before, err := Capture(ctx, fx.Dir, fx.Bare)
 	if err != nil {
-		t.Fatalf("ritualwitness: Run: capturing the before snapshot: %v", err)
+		t.Fatalf("ritualwitness: RunOn: the before snapshot: %v", err)
 	}
-
 	exit, log, driverErr := d.Run(ctx, fx.Dir)
 	if driverErr != nil && exit == 0 {
-		t.Fatalf("ritualwitness: Run: driver reported exit 0 alongside an error: %v", driverErr)
+		t.Fatalf("ritualwitness: RunOn: the driver reported exit 0 alongside an error: %v", driverErr)
 	}
-
 	after, err := Capture(ctx, fx.Dir, fx.Bare)
 	if err != nil {
-		t.Fatalf("ritualwitness: Run: capturing the after snapshot: %v", err)
+		t.Fatalf("ritualwitness: RunOn: the after snapshot: %v", err)
 	}
-
-	return Result{
-		Exit:      exit,
-		Log:       log,
-		Before:    before,
-		After:     after,
-		StoreRoot: fx.Dir,
-		Verdicts:  Evaluate(decl, exit, before, after, fx.Dir, log),
+	verdicts, err := Evaluate(decl, exit, before, after, log)
+	if err != nil {
+		t.Fatalf("ritualwitness: RunOn: %v", err)
 	}
+	return Result{Exit: exit, Err: driverErr, Log: log, Before: before, After: after, Verdicts: verdicts}
 }
