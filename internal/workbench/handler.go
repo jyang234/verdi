@@ -98,6 +98,9 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 		home.Model = deps.Model
 	}
 	mux.HandleFunc("/healthz", healthHandler())
+	// The browser asks for /favicon.ico on every page view; answer it
+	// without rendering a not-found page (faviconHandler).
+	mux.HandleFunc("/favicon.ico", faviconHandler())
 	mux.HandleFunc("/", indexHandler(root, home, deps.Disclosures))
 
 	// Corpus artifact pages (05 §Workbench: server-rendered, goldmark +

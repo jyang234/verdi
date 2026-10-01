@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // probedGet serves one GET through h with a bar probe on the request and
@@ -162,5 +165,50 @@ func TestErrorPage_BeforeTheStoreIsRead(t *testing.T) {
 	checkBarFacts(t, seen[0])
 	if seen[0].Title != "Error" || seen[0].Posture.Checkout.Unproven == "" || seen[0].Posture.Branch.Unproven == "" {
 		t.Fatalf("facts = %+v, want the title and every Git fact disclosed-unproven", seen[0])
+	}
+}
+
+// gitExecs counts every git exec through gitx's observer.
+type gitExecs struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (g *gitExecs) Observe(string, []string) {
+	g.mu.Lock()
+	g.n++
+	g.mu.Unlock()
+}
+
+// TestFavicon_RendersNoPageAndRunsNoGit (F1A-B6): the browser's automatic
+// /favicon.ico request answers 204 with no body — no not-found page, no
+// top bar facts, and so no git — instead of a full 404 page per view.
+func TestFavicon_RendersNoPageAndRunsNoGit(t *testing.T) {
+	root := newBarFixture(t)
+	h := NewHandler(root)
+	execs := &gitExecs{}
+	var bars []barFacts
+	ctx := withBarProbe(gitx.WithObserver(t.Context(), execs), func(f barFacts) { bars = append(bars, f) })
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, method, "/favicon.ico", nil))
+		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+			t.Fatalf("%s /favicon.ico = %d with %d body bytes, want 204 and none", method, rec.Code, rec.Body.Len())
+		}
+	}
+	if execs.n != 0 || len(bars) != 0 {
+		t.Fatalf("/favicon.ico ran %d git execs and rendered %d pages, want none", execs.n, len(bars))
+	}
+	// Any other unserved path still renders the disclosed 404 page.
+	if status, seen := probedGet(t, h, "/favicon.png"); status != http.StatusNotFound || len(seen) != 1 {
+		t.Fatalf("GET /favicon.png = %d with %d pages, want the 404 page", status, len(seen))
+	}
+}
+
+func TestFavicon_RefusesOtherMethods(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(t.TempDir()).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/favicon.ico", nil))
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("POST /favicon.ico = %d (Allow %q), want 405", rec.Code, rec.Header().Get("Allow"))
 	}
 }
