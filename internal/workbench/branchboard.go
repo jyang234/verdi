@@ -204,6 +204,7 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 		_, _ = w.Write([]byte(renderBoardRegion(proj, git, asd)))
 		return
 	}
+	observeBar(r.Context(), specBarFacts(proj, asd))
 	out, err := renderBoardSpecPage(proj, git, asd)
 	if err != nil {
 		renderError(w, http.StatusInternalServerError, err)
@@ -217,11 +218,19 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 // sealed render: no working tree exists, so there is no base to mutate
 // against, no expected identity, and no capabilities consultation — each
 // disclosed honestly (the shell's context row carries the exact reason)
-// rather than fabricated.
+// rather than fabricated. Its worktree HEAD, default branch, and accepted
+// HEAD are unresolved for the same reason, which the posture model
+// records so the top bar discloses them (SI-323 (1)).
 func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
+	noWorktree := fmt.Sprintf("branch %s exists only as remote-tracking ref %s: this remote-only render reads that ref's committed content and resolves no working tree, worktree HEAD, or default branch", branch, ref)
 	v := &asdView{
-		Checkout:       ref + " (remote-tracking ref; read-only render of committed content, no working tree)",
-		Branch:         branch,
+		branchPosture: branchPosture{
+			Checkout:         ref + " (remote-tracking ref; read-only render of committed content, no working tree)",
+			Branch:           branch,
+			defaultBranchWhy: noWorktree,
+			worktreeHeadWhy:  noWorktree,
+			acceptedHeadWhy:  noWorktree,
+		},
 		StateFormal:    proj.Status,
 		SlugPattern:    specNameRe.String(),
 		NextIDs:        map[string]string{},

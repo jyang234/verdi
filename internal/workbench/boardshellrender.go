@@ -12,7 +12,6 @@ package workbench
 // response carry one identical projection.
 
 import (
-	"fmt"
 	stdhtml "html"
 	"strconv"
 	"strings"
@@ -45,44 +44,49 @@ func writeASDState(b *strings.Builder, state string) {
 // checkout, branch, worktree HEAD, accepted HEAD, clean/dirty,
 // ahead/behind when resolvable, and whether the displayed bytes are
 // proposed or accepted — with the mode stamp and terminal status badge
-// riding here so every posture fact refreshes with the projection.
-func writeASDPosture(b *strings.Builder, p *BoardProjection, git *boardGitState, asd *asdView) {
+// riding here so every posture fact refreshes with the projection. It
+// renders from the top bar's facts (specBarFacts), the one model the row,
+// the bar, and the wall's snapshot share (SI-323 (3)); f must carry spec
+// facts, as every wall's do.
+func writeASDPosture(b *strings.Builder, f *barFacts) {
 	esc := stdhtml.EscapeString
+	spec, p := f.Spec, &f.Posture
+	if spec == nil {
+		spec = &barSpec{}
+	}
 	b.WriteString(`<section class="asd-posture" id="asd-posture" data-testid="asd-posture" aria-label="Repository posture">`)
-	b.WriteString(`<span class="board-mode-tag board-mode-tag--` + esc(string(p.Mode)) + `">` + esc(modeStampLabel(p)) + `</span>`)
-	if badge := terminalStatusBadge(p.Status); badge != "" {
-		label := badge
-		if p.StatusLabel != "" {
-			label = p.StatusLabel
-		}
-		b.WriteString(`<span class="badge badge-` + esc(badge) + ` board-status-badge" data-testid="board-status-badge">` + esc(label) + `</span>`)
+	b.WriteString(`<span class="board-mode-tag board-mode-tag--` + esc(spec.Mode) + `">` + esc(spec.ModeLabel) + `</span>`)
+	if spec.StatusBadge != "" {
+		b.WriteString(`<span class="badge badge-` + esc(spec.StatusBadge) + ` board-status-badge" data-testid="board-status-badge">` + esc(spec.StatusBadgeLabel) + `</span>`)
 	}
 	// What the displayed bytes ARE (design §4.2): the plain word is derived
 	// from the formal state alone, never from the mode.
-	b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(asd.StateFormal) + `">displayed bytes: ` + esc(postureByteWord(asd.StateFormal)) + ` <span class="asd-posture-formal">(` + esc(asd.StateFormal) + `)</span></span>`)
-	dirtyWord, dirtyState := "clean", "clean"
-	if asd.Dirty {
-		dirtyWord, dirtyState = "uncommitted changes", "dirty"
-	}
-	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + dirtyState + `">working tree: ` + dirtyWord + `</span>`)
+	b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(spec.Bytes.State) + `">displayed bytes: ` + esc(spec.Bytes.Word) + ` <span class="asd-posture-formal">(` + esc(spec.Bytes.State) + `)</span></span>`)
+	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + esc(p.Tree.State) + `">working tree: ` + esc(p.Tree.Text) + `</span>`)
 	b.WriteString(`<button type="button" class="asd-refresh" id="asd-refresh" data-testid="asd-refresh">Refresh</button>`)
 	b.WriteString(`<details class="readiness-tech asd-posture-tech" data-testid="asd-posture-tech"><summary>Repository details</summary><dl class="readiness-tech-facts">`)
-	writeReadinessFact(b, "Checkout", asd.Checkout)
-	writeReadinessFact(b, "Branch", asd.Branch)
-	writeReadinessFact(b, "Worktree HEAD", orUnproven(asd.WorktreeHead))
-	writeReadinessFact(b, "Accepted branch", orUnproven(asd.DefaultBranch))
-	writeReadinessFact(b, "Accepted HEAD", orUnproven(asd.AcceptedHead))
-	if asd.AheadBehindKnown {
-		writeReadinessFact(b, "Ahead/behind", fmt.Sprintf("%d ahead, %d behind %s", asd.Ahead, asd.Behind, asd.DefaultBranch))
-		if asd.Ahead > 0 && asd.Behind > 0 {
-			writeReadinessFact(b, "Divergence", "diverged: both sides carry commits the other lacks")
-		}
-	} else {
-		writeReadinessFact(b, "Ahead/behind", "unproven: the accepted branch could not be resolved")
+	writeReadinessFact(b, "Checkout", p.Checkout.Text)
+	writeReadinessFact(b, "Branch", p.Branch.Text)
+	writeReadinessFact(b, "Worktree HEAD", p.WorktreeHead.Text)
+	writeReadinessFact(b, "Accepted branch", p.AcceptedBranch.Text)
+	writeReadinessFact(b, "Accepted HEAD", p.AcceptedHead.Text)
+	writeReadinessFact(b, "Ahead/behind", p.AheadBehind.Text)
+	if p.Divergence != nil {
+		writeReadinessFact(b, "Divergence", p.Divergence.Text)
 	}
-	writeReadinessFact(b, "Base digest", asd.BaseDigest)
+	if p.BaseDigest != nil {
+		writeReadinessFact(b, "Base digest", p.BaseDigest.Text)
+	}
 	b.WriteString(`</dl></details>`)
 	b.WriteString(`</section>`)
+}
+
+// asdPostureHTML is the posture row as its own fragment — what the wall's
+// snapshot carries beside the region (SI-323 (3)).
+func asdPostureHTML(f *barFacts) string {
+	var b strings.Builder
+	writeASDPosture(&b, f)
+	return b.String()
 }
 
 // postureByteWord is the posture header's plain word for the displayed
@@ -106,13 +110,6 @@ func postureByteWord(stateFormal string) string {
 	default:
 		return "unproven"
 	}
-}
-
-func orUnproven(v string) string {
-	if v == "" {
-		return "unproven"
-	}
-	return v
 }
 
 // writeASDShell renders the promoted four-area shell (design §3.1,

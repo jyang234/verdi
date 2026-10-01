@@ -220,14 +220,8 @@ window.__BOARDV2__ = {{.StateJSON}};
 // no bootstrap fetch and the first conditional poll compares against a
 // genuine revision token.
 func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
-	region := renderBoardRegion(p, git, asd)
-	revision := snapshotRevision(&asdSnapshot{
-		HTML:        region,
-		BaseDigest:  asd.BaseDigest,
-		BaseSpecB64: asd.BaseSpecB64,
-		Git:         git,
-		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
-	})
+	snap := newASDSnapshot(p, git, asd)
+	region, revision := snap.HTML, snap.Revision
 	payload := boardClientPayload{
 		Spec:          p.Spec,
 		Mode:          string(p.Mode),
@@ -273,6 +267,9 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		Region           template.HTML
 		Dialogs          template.HTML
 		StateJSON        template.JS
+		// Bar is the top bar's facts (SI-323), not yet drawn by the
+		// template.
+		Bar barFacts
 	}{
 		Name:             p.Spec,
 		Title:            p.Title,
@@ -284,6 +281,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		Region:           template.HTML(region),
 		Dialogs:          template.HTML(renderBoardDialogs(p)),
 		StateJSON:        template.JS(stateJSON),
+		Bar:              snap.bar,
 	}
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
@@ -315,6 +313,15 @@ func terminalStatusBadge(status string) string {
 // placards, canvas, and side rail — the one projection region the page,
 // the fragment, the snapshot, and every mutation response share.
 func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
+	bar := specBarFacts(p, asd)
+	return renderBoardRegionWith(p, git, asd, &bar)
+}
+
+// renderBoardRegionWith is renderBoardRegion over the top bar's facts
+// already built from p and asd (specBarFacts), which the posture header
+// renders from — so the snapshot builds them once for its region, its
+// posture fragment, and its revision token.
+func renderBoardRegionWith(p *BoardProjection, git *boardGitState, asd *asdView, bar *barFacts) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
@@ -359,7 +366,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		b.WriteString(`</div>`)
 	}
 
-	writeASDPosture(&b, p, git, asd)
+	writeASDPosture(&b, bar)
 	writeASDShell(&b, asd)
 	// .asd-main wraps the board half (case file + canvas + rail) so the
 	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside

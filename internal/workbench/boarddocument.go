@@ -101,6 +101,47 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 	return snap, nil
 }
 
+// documentBarFacts is the Document page's top bar facts (SI-323 (2)): the
+// facts the wall shows for the same spec and branch, through the wall's
+// own path (loadSpecPosture) — so the page's one accepted-HEAD
+// resolution is the posture model's, shared rather than added (Wave 6
+// §5.3). The Document page also renders a spec the wall cannot load (one
+// outside the active zone): its spec facts are then disclosed-unproven
+// with the reason, and its posture is the checkout's branch-level one.
+func (s *boardSpecServer) documentBarFacts(ctx context.Context, name string) barFacts {
+	p, asd, err := s.loadSpecPosture(ctx, name)
+	if err != nil {
+		f := branchBarFacts(ctx, s.root, name)
+		f.Spec = &barSpec{Name: name, Unproven: fmt.Sprintf("the wall's facts for spec/%s could not be computed: %v", name, err)}
+		return f
+	}
+	return specBarFacts(p, asd)
+}
+
+// loadSpecPosture loads what the top bar states about one served spec
+// through the wall's own path, without the wall's projection: the active
+// spec read, gitState, the effective-state resolution, the review feed's
+// mode, the projection's identity with the model's display words, and
+// the posture model (postureView).
+func (s *boardSpecServer) loadSpecPosture(ctx context.Context, name string) (*BoardProjection, *asdView, error) {
+	raw, _, fm, err := s.readActiveSpec(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	git, _, err := s.gitState(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := s.resolveState(ctx, name, raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workbench: resolving effective state for %s: %w", name, err)
+	}
+	_, underReview, _ := s.consultReview(ctx, name)
+	p := projectionHead(name, fm, effectiveMode(underReview, st, git), string(st.ArtifactStatus()))
+	p.applyModelVocabulary(s.model)
+	return p, s.postureView(ctx, p, git, raw, st), nil
+}
+
 // documentKindFromQuery reads ?kind=, defaulting to the spec document;
 // an unknown kind is the loader's own refusal (fail closed).
 func documentKindFromQuery(r *http.Request) (specdoc.Kind, error) {
@@ -200,7 +241,9 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		// EscapedPath, not Path: under the /b/{branch} mount the branch
 		// rides one segment with its slashes percent-encoded, and every
 		// sibling link on the page must keep that encoding to resolve.
-		page, err := renderBoardDocumentPage(r.URL.EscapedPath(), name, snap)
+		bar := s.documentBarFacts(r.Context(), name)
+		observeBar(r.Context(), bar)
+		page, err := renderBoardDocumentPage(r.URL.EscapedPath(), name, snap, bar)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return

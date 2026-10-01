@@ -62,6 +62,9 @@ type documentPageData struct {
 	SnapshotHref string
 	HTML         template.HTML
 	Markdown     string
+	// Bar is the top bar's facts (SI-323 (2)), not yet drawn by the
+	// template.
+	Bar barFacts
 }
 
 // renderBoardDocumentPage builds the Document tab. Every sibling link is
@@ -73,7 +76,7 @@ type documentPageData struct {
 // deliberate newline right after the <pre> tag: the HTML parser drops
 // exactly one newline there, so without it a Markdown that began with
 // "\n" would lose that byte on the way to the clipboard.
-func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot) ([]byte, error) {
+func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
 	boardHref := strings.TrimSuffix(requestPath, "/document")
 	kinds := []documentKindLink{
 		{Kind: "spec", Label: "Spec"},
@@ -95,6 +98,7 @@ func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot) ([
 		SnapshotHref: requestPath + "/snapshot?kind=" + snap.Kind,
 		HTML:         template.HTML(snap.HTML), //nolint:gosec // the fragment is our own renderer's output (specdoc.RenderHTML over escaped object text)
 		Markdown:     snap.Markdown,
+		Bar:          bar,
 	}
 	var buf bytes.Buffer
 	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {

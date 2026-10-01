@@ -540,6 +540,18 @@ type BoardProjection struct {
 	words classWords
 }
 
+// projectionHead is a projection's identity: the spec's name, title,
+// mode, effective status, class, tracker ref, and spike flag —
+// buildProjection's first step, and all the top bar names about a spec
+// the Document page states without the wall's full projection
+// (documentBarFacts).
+func projectionHead(specName string, fm *artifact.SpecFrontmatter, mode boardModeKind, status string) *BoardProjection {
+	return &BoardProjection{
+		Spec: specName, Title: fm.Title, Mode: mode, Status: status,
+		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
+	}
+}
+
 // buildProjection computes the deterministic projection of the four
 // inputs. comments is nil outside review mode. body is the spec
 // document's markdown body (post-frontmatter) — used ONLY to resolve the
@@ -557,10 +569,7 @@ type BoardProjection struct {
 // entirely). It arrives as a plain value so this function stays a pure
 // projection of its inputs: no Git execution, no clock, no randomness.
 func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind, status string, heights map[string]float64) (*BoardProjection, error) {
-	p := &BoardProjection{
-		Spec: specName, Title: fm.Title, Mode: mode, Status: status,
-		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
-	}
+	p := projectionHead(specName, fm, mode, status)
 	if fm.Problem != nil {
 		p.Problem = fm.Problem.Text
 	}

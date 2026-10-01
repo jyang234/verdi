@@ -31,7 +31,6 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
 	"github.com/jyang234/verdi/internal/boardlayout"
-	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -514,15 +513,10 @@ type asdEdgeFact struct {
 
 // asdView carries every ASD-specific rendered fact for one page render.
 type asdView struct {
-	// Posture header (design §4.2).
-	Checkout         string
-	Branch           string
-	DefaultBranch    string
-	WorktreeHead     string
-	AcceptedHead     string
-	Ahead, Behind    int
-	AheadBehindKnown bool
-	Dirty            bool
+	// Posture header (design §4.2): the branch-level Git facts every
+	// page's top bar shares (branchPosture, resolved by
+	// resolveBranchPosture), then the spec's own.
+	branchPosture
 	StateFormal      string
 	StateLabel       string
 	RelationDiverged bool
@@ -565,46 +559,33 @@ func asdEdgeKey(from, edgeType, to string) string {
 	return from + "\x00" + edgeType + "\x00" + to
 }
 
+// postureView is the posture model for one served spec (design §4.2):
+// the branch-level Git facts (resolveBranchPosture — the page's one
+// accepted-HEAD resolution, Wave 6 §5.3) plus the spec's displayed-bytes
+// state and base digest. The wall's asdView starts from it and the
+// Document page's top bar reads it, so both pages state one posture for
+// the same spec and branch (SI-323 (2)).
+func (s *boardSpecServer) postureView(ctx context.Context, proj *BoardProjection, git *boardGitState, raw []byte, st specstate.Result) *asdView {
+	return &asdView{
+		branchPosture:    resolveBranchPosture(ctx, s.root, git, s.posture),
+		StateFormal:      string(st.State),
+		StateLabel:       s.model.DisplayState(proj.Class, string(st.ArtifactStatus())),
+		RelationDiverged: st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged,
+		BaseDigest:       digestSpecBytes(raw),
+	}
+}
+
 // buildASDView assembles the complete ASD render facts for one loaded
 // board. It performs the page's one capabilities consultation (a cited
 // designapp predecessor API — SI-168 disclosure) and the header's Git
 // fact reads; everything else is a pure function of the already-decoded
 // inputs.
 func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *BoardProjection, git *boardGitState, raw []byte, fm *artifact.SpecFrontmatter, st specstate.Result) (*asdView, error) {
-	v := &asdView{
-		Checkout:      s.root,
-		Branch:        git.Branch,
-		DefaultBranch: git.DefaultBranch,
-		Dirty:         git.Dirty,
-		StateFormal:   string(st.State),
-		StateLabel:    s.model.DisplayState(proj.Class, string(st.ArtifactStatus())),
-		BaseDigest:    digestSpecBytes(raw),
-		BaseSpecB64:   base64.StdEncoding.EncodeToString(raw),
-		SlugPattern:   specNameRe.String(),
-	}
-	v.RelationDiverged = st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged
+	v := s.postureView(ctx, proj, git, raw, st)
+	v.BaseSpecB64 = base64.StdEncoding.EncodeToString(raw)
+	v.SlugPattern = specNameRe.String()
 	v.ImportRecordHref = specImportRecordHrefFor(s.root, git.Branch, name)
-
-	worktreeHead := ""
-	if head, err := gitx.RevParse(ctx, s.root, "HEAD"); err == nil {
-		worktreeHead = head
-		v.WorktreeHead = head
-	}
-	if git.DefaultBranch != "" {
-		// Accepted-head facts resolve at the AUTHORITATIVE default-branch
-		// rev (specstate.Branch.Ref — origin/<name> when it exists), the
-		// same rev the state projector reads accepted bytes at: keying on
-		// the display NAME would ride a possibly-stale local shadow while
-		// acceptance moves on the remote-tracking ref (Codex correction
-		// round 1, finding 1 — closure reopen).
-		acceptedRef := git.acceptedRef()
-		if accepted, err := gitx.RevParse(ctx, s.root, acceptedRef); err == nil {
-			v.AcceptedHead = accepted
-		}
-		if ahead, behind, err := gitx.AheadBehind(ctx, s.root, "HEAD", acceptedRef); err == nil {
-			v.Ahead, v.Behind, v.AheadBehindKnown = ahead, behind, true
-		}
-	}
+	worktreeHead := v.WorktreeHead
 
 	if s.design != nil {
 		v.DesignWired = true
@@ -736,14 +717,23 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 // exact machine facts the browser's conditional refresh and typed
 // mutations consume. Revision is the deterministic token over every
 // rendered fact (SI-165) — the digest of this snapshot's own canonical
-// content.
+// content, plus the top bar's facts.
 type asdSnapshot struct {
-	Revision    string          `json:"revision"`
-	HTML        string          `json:"html"`
+	Revision string `json:"revision"`
+	HTML     string `json:"html"`
+	// Posture is the posture row rendered from the top bar's facts, as its
+	// own field (SI-323 (3)): the region still carries the same bytes
+	// today, and the bar takes it over when the row leaves the region.
+	Posture     string          `json:"posture"`
 	BaseDigest  string          `json:"base_digest"`
 	BaseSpecB64 string          `json:"base_spec_b64"`
 	Git         *boardGitState  `json:"git"`
 	Expected    asdExpectedWire `json:"expected"`
+
+	// bar is the top bar's facts the region and Posture render from.
+	// Not on the wire: the revision hashes it explicitly, so the accepted
+	// head and ahead/behind move the token wherever the posture renders.
+	bar barFacts
 }
 
 type asdExpectedWire struct {
@@ -760,30 +750,45 @@ func (s *boardSpecServer) loadSnapshot(ctx context.Context, name string) (*asdSn
 	if err != nil {
 		return nil, err
 	}
+	return newASDSnapshot(proj, git, asd), nil
+}
+
+// newASDSnapshot is the one snapshot of a loaded wall — the /snapshot
+// route's, the mutation response's, and the one whose revision the page
+// embeds: the top bar's facts built once (specBarFacts), the region and
+// the posture fragment rendered from them, and the revision over all of
+// it.
+func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSnapshot {
+	bar := specBarFacts(p, asd)
 	snap := &asdSnapshot{
-		HTML:        renderBoardRegion(proj, git, asd),
+		HTML:        renderBoardRegionWith(p, git, asd, &bar),
+		Posture:     asdPostureHTML(&bar),
 		BaseDigest:  asd.BaseDigest,
 		BaseSpecB64: asd.BaseSpecB64,
 		Git:         git,
 		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
+		bar:         bar,
 	}
 	snap.Revision = snapshotRevision(snap)
-	return snap, nil
+	return snap
 }
 
 // snapshotRevision digests every rendered fact of one snapshot (the
-// revision field itself excluded). Deterministic: the render is a pure
-// function of store state, and the machine fields are exact copies of it.
+// revision field itself excluded), and the top bar's facts explicitly
+// (SI-323 (3)). Deterministic: the render is a pure function of store
+// state, and the machine fields are exact copies of it.
 func snapshotRevision(snap *asdSnapshot) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
 	_ = enc.Encode(struct {
 		HTML        string          `json:"html"`
+		Posture     string          `json:"posture"`
+		Bar         barFacts        `json:"bar"`
 		BaseDigest  string          `json:"base_digest"`
 		BaseSpecB64 string          `json:"base_spec_b64"`
 		Git         *boardGitState  `json:"git"`
 		Expected    asdExpectedWire `json:"expected"`
-	}{snap.HTML, snap.BaseDigest, snap.BaseSpecB64, snap.Git, snap.Expected})
+	}{snap.HTML, snap.Posture, snap.bar, snap.BaseDigest, snap.BaseSpecB64, snap.Git, snap.Expected})
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 

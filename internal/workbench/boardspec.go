@@ -172,6 +172,12 @@ type boardSpecServer struct {
 	// not-under-review is legitimate) or a live feed is wired.
 	reviewUnavailable string
 
+	// posture reads the posture model's Git facts (the postureReader port,
+	// barfacts.go). nil means production (gitx) — the same posture the
+	// other nil-meaning-production fields here take; a package test wraps
+	// it to count the page's accepted-HEAD resolutions (Wave 6 §5.3).
+	posture postureReader
+
 	// state resolves the served spec's effective lifecycle state (the
 	// StateResolver port above). nil means production: specstate's real
 	// projector, constructed lazily per load — the same posture the other
@@ -290,23 +296,9 @@ func (g *boardGitState) acceptedRef() string {
 // it as its own field, matching list_annotations' review_unavailable
 // pattern (commit 1348e79) rather than parsing prose notices.
 func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardProjection, *boardGitState, string, *boardLoadExtras, error) {
-	if !specNameRe.MatchString(name) {
-		return nil, nil, "", nil, ErrBoardNotFound
-	}
-	raw, err := os.ReadFile(filepath.Join(s.specDir(name), "spec.md"))
+	raw, bodyBytes, fm, err := s.readActiveSpec(name)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, "", nil, ErrBoardNotFound
-		}
-		return nil, nil, "", nil, fmt.Errorf("workbench: reading spec %s: %w", name, err)
-	}
-	fmBytes, bodyBytes, err := artifact.SplitFrontmatter(raw)
-	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("workbench: spec %s: %w", name, err)
-	}
-	fm, err := artifact.DecodeSpec(fmBytes)
-	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("workbench: spec %s: %w", name, err)
+		return nil, nil, "", nil, err
 	}
 
 	stored, err := boardlayout.ReadFile(s.specDir(name))
@@ -318,30 +310,10 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		return nil, nil, "", nil, err
 	}
 
-	// The review feed is NON-BLOCKING on every render (I-2, 04 §Semantics'
-	// degradation posture: never block rendering). A configured-but-erroring
-	// feed degrades to a disclosed notice and underReview=false — authoring
-	// and read-only boards render fully without a feed; a review board
-	// renders the projection plus the disclosure. The startup-time
-	// disclosure (forge configured but no credentials, s.reviewUnavailable)
-	// seeds the notice; a render-time transport error overrides it with the
-	// live reason. Both are rendered through the same internal/disclosure
-	// seam and the same review-feed source, so the override changes which
-	// cause is named — never the vocabulary a reader has learned
-	// (spec/disclosure-seam-v2 ac-1/ac-2).
-	var comments []MRComment
-	underReview := false
-	reviewNotice := s.reviewUnavailable
-	if s.feed != nil {
-		c, ur, ferr := s.feed.ListMRComments(ctx, name)
-		if ferr != nil {
-			// Configured AND reachable enough to attempt, but the call
-			// failed: disclose, never silence, never a 500 (I-1(b)/I-2).
-			reviewNotice = disclosure.Render(disclosure.ReviewUnavailableTransport(ferr))
-		} else {
-			comments, underReview = c, ur
-		}
-	}
+	// The review feed is NON-BLOCKING on every render (consultReview):
+	// authoring and read-only boards render fully without a feed; a review
+	// board renders the projection plus the disclosure.
+	comments, underReview, reviewNotice := s.consultReview(ctx, name)
 
 	git, gitNotice, err := s.gitState(ctx)
 	if err != nil {
@@ -371,15 +343,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// working tree — which VL-010 refuses at merge; opening an editable
 	// authoring wall over it invites edits no merge can legally accept, so
 	// it renders read-only with a divergence notice instead (below).
-	mode := modeReadOnly
-	switch {
-	case underReview:
-		// A spec with an open spec-MR: the board is a mirror of the MR
-		// (05 §Workbench "Review").
-		mode = modeReview
-	case st.State == specstate.Proposed && st.Relation == specstate.RelationNew && git.Branch != "" && git.Branch != git.DefaultBranch:
-		mode = modeAuthoring
-	}
+	mode := effectiveMode(underReview, st, git)
 	if mode != modeReview {
 		comments = nil // the feed is a review-mode input only
 	}
@@ -506,6 +470,72 @@ type boardLoadExtras struct {
 	raw   []byte
 	fm    *artifact.SpecFrontmatter
 	state specstate.Result
+}
+
+// readActiveSpec reads and decodes the served spec's working-tree
+// spec.md in the active zone (the board serves specs/active/ only): its
+// exact bytes, its Markdown body, and its frontmatter. A name no spec
+// carries, or no such file, is ErrBoardNotFound.
+func (s *boardSpecServer) readActiveSpec(name string) (raw, body []byte, fm *artifact.SpecFrontmatter, err error) {
+	if !specNameRe.MatchString(name) {
+		return nil, nil, nil, ErrBoardNotFound
+	}
+	raw, err = os.ReadFile(filepath.Join(s.specDir(name), "spec.md"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil, ErrBoardNotFound
+		}
+		return nil, nil, nil, fmt.Errorf("workbench: reading spec %s: %w", name, err)
+	}
+	fmBytes, body, err := artifact.SplitFrontmatter(raw)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("workbench: spec %s: %w", name, err)
+	}
+	fm, err = artifact.DecodeSpec(fmBytes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("workbench: spec %s: %w", name, err)
+	}
+	return raw, body, fm, nil
+}
+
+// consultReview consults the review feed for the served spec: its MR
+// comments, whether it is under review, and the review-feed disclosure.
+// NON-BLOCKING on every render (I-2, 04 §Semantics' degradation posture:
+// never block rendering): a configured-but-erroring feed degrades to a
+// disclosed notice and underReview=false. The startup-time disclosure
+// (forge configured but no credentials, s.reviewUnavailable) seeds the
+// notice; a render-time transport error overrides it with the live
+// reason. Both are rendered through the same internal/disclosure seam
+// and the same review-feed source, so the override changes which cause
+// is named — never the vocabulary a reader has learned
+// (spec/disclosure-seam-v2 ac-1/ac-2).
+func (s *boardSpecServer) consultReview(ctx context.Context, name string) (comments []MRComment, underReview bool, notice string) {
+	notice = s.reviewUnavailable
+	if s.feed == nil {
+		return nil, false, notice
+	}
+	c, ur, err := s.feed.ListMRComments(ctx, name)
+	if err != nil {
+		// Configured AND reachable enough to attempt, but the call
+		// failed: disclose, never silence, never a 500 (I-1(b)/I-2).
+		return nil, false, disclosure.Render(disclosure.ReviewUnavailableTransport(err))
+	}
+	return c, ur, notice
+}
+
+// effectiveMode keys the board's mode by EFFECTIVE state plus branch
+// state, never by a persisted status: field (loadBoard's doc comment
+// above the call names the law): an open spec-MR is the review mirror
+// (05 §Workbench "Review"); a NEW proposed spec on a non-default branch
+// is the live authoring wall; everything else fails closed to read-only.
+func effectiveMode(underReview bool, st specstate.Result, git *boardGitState) boardModeKind {
+	switch {
+	case underReview:
+		return modeReview
+	case st.State == specstate.Proposed && st.Relation == specstate.RelationNew && git.Branch != "" && git.Branch != git.DefaultBranch:
+		return modeAuthoring
+	}
+	return modeReadOnly
 }
 
 // loadASD is the wall page projection: loadASDView plus the wall's
@@ -717,6 +747,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			return
 		}
 		proj.DocumentHref = r.URL.EscapedPath() + "/document"
+		observeBar(r.Context(), specBarFacts(proj, asd))
 		out, err := renderBoardSpecPage(proj, git, asd)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
