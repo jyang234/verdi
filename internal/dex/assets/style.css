@@ -3926,3 +3926,264 @@ button.yarn-chip-type {
   .asd-refresh { margin-left: 0; }
   .asd-shell .readiness-rail-list { flex-direction: column; }
 }
+/* verdi:workbench-only:begin */
+/* == Workbench chrome (spec/chrome-and-tokens-v2; ledger SI-322, SI-326) ==
+   The top bar that replaces the site header, the board header, and the
+   posture row on every workbench page (ac-1); the stamps redrawn as
+   chips, the rotations and the hand voice retired (ac-3), as the redesign
+   handoff draws them. Served by the workbench and stripped from the docs
+   site's copy of this stylesheet (SI-322): every rule here OVERRIDES a
+   shared rule above rather than editing it in place, and names colours
+   and faces by token only (SI-326; shadows keep their literal rgba). */
+
+/* ---- the top bar: one 52px row, wrapping at narrow widths. It spans the
+   page's content box, as the site head did (the body's gutter narrows
+   with the viewport), so it never widens the page. ---- */
+.topbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-height: 52px;
+  margin: 0 0 1.25rem;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+.board-page .topbar { margin-bottom: 0.9rem; }
+.topbar-wordmark {
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.topbar-wordmark .leafmark { width: 11px; height: 11px; }
+.topbar-wordmark .wordmark-surface { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; }
+.topbar-sep { flex: none; color: var(--rule); }
+.topbar-title {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- chips: the handoff's one chip, replacing every stamp ---- */
+.topbar-chip,
+.board-mode-tag,
+.case-class-tag,
+.topbar .badge,
+.board-status-badge,
+.mode-readonly .boardv2-canvas::after {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.6;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  margin: 0;
+  border-width: 1px;
+  border-radius: 3px;
+  transform: none;
+  white-space: nowrap;
+}
+.board-status-badge { align-self: auto; }
+/* the class chip: a 1px border in the class colour, no fill */
+.topbar-chip--class { border: 1px solid currentColor; background: transparent; color: var(--muted-solid); }
+.topbar-chip--class-feature { color: var(--accent); }
+.topbar-chip--class-story { color: var(--authored); }
+.topbar-chip--class-spike { color: var(--st-waived); }
+/* a disclosed chip: pending amber, dashed — attention, never a verdict */
+.topbar-chip--disclosed {
+  border: 1px dashed var(--st-pending);
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+/* the mode chip: no border, the mode's tint, the mode's colour */
+.board-mode-tag { border: 0; padding: 3px 8px; }
+.board-mode-tag--authoring { background: var(--st-evidenced-tint); color: var(--accent); }
+.board-mode-tag--review { background: var(--authored-tint); color: var(--authored); }
+.board-mode-tag--readonly { background: var(--frozen-tint); color: var(--frozen); }
+/* the sealed record's stamp on the canvas, as a chip */
+.mode-readonly .boardv2-canvas::after { background: var(--frozen-tint); opacity: 1; }
+
+/* ---- the posture group: chips, branch, the disclosure, Refresh ---- */
+.topbar-posture-group {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.topbar-branch,
+.topbar-posture > summary {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted-solid);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-branch[data-detached="true"],
+.topbar-branch[data-state="unproven"] { color: var(--st-pending); }
+.topbar-posture { position: static; margin: 0; min-width: 0; }
+.topbar-posture > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  list-style: none;
+  cursor: pointer;
+}
+.topbar-posture > summary::-webkit-details-marker { display: none; }
+.topbar-posture > summary::after { content: "\25BE"; font-size: 10px; }
+.topbar-posture > summary:hover { color: var(--accent); border-color: var(--rule); }
+.topbar-posture[open] > summary { color: var(--ink); background: var(--card); border-color: var(--rule); }
+.topbar-dot { color: var(--rule); }
+.topbar-posture-group .asd-posture-tree[data-dirty="dirty"] { color: var(--st-pending); font-weight: 700; }
+.topbar-posture-group .asd-posture-tree[data-dirty="unproven"],
+.topbar-posture-group .asd-posture-bytes[data-state="unproven"] { color: var(--st-pending); }
+/* the full posture: a popover under the bar, the native disclosure's
+   panel — open before any script runs */
+.topbar-posture-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-width: 44rem;
+  margin-top: 2px;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(20, 26, 18, 0.22);
+}
+.topbar-posture-panel .readiness-tech-facts {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border-left: 0;
+  font-size: 12px;
+  gap: 4px 12px;
+}
+.topbar-posture-panel dd[data-state="unproven"] code { color: var(--st-pending); }
+.topbar-posture-group .asd-refresh {
+  margin-left: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: 4px;
+}
+/* visually hidden, read by assistive technology and test text */
+.topbar-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- the page's nav links and controls slot ---- */
+.topbar-nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+}
+.topbar-nav a,
+.topbar-nav .current {
+  padding: 6px 12px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted-solid);
+  text-decoration: none;
+}
+.topbar .workbench-nav .current {
+  margin-left: 0;
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--card);
+  border-color: var(--rule);
+}
+.topbar-nav a:hover,
+.topbar-nav a:focus-visible { color: var(--accent); }
+.topbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+.topbar-controls #autosave-status { margin-left: 0; }
+.topbar-controls .btn-primary {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 7px 14px;
+  border-radius: 4px;
+}
+.topbar-controls .diagram-exit-link { margin-right: 0; max-width: 100%; white-space: normal; text-align: left; }
+.topbar > .asd-last-result { flex-basis: 100%; font-size: 0.8rem; }
+.topbar > .asd-last-result:empty { display: none; }
+
+@media (max-width: 640px) {
+  .topbar { gap: 4px 10px; padding: 8px 0; }
+  .topbar-title { white-space: normal; }
+  .topbar-controls { margin-left: 0; justify-content: flex-start; }
+}
+
+/* ---- no rotation, and the hand voice only on a parked sticky ---- */
+.sticky:nth-of-type(n):not(.dragging),
+.zone-label,
+.mode-authoring .board-empty-lead,
+.refcard--pinned,
+.pin-toolbox-tab,
+.case-stamp,
+.panel-tab { transform: none; }
+.case-stamp { border-radius: 3px; }
+/* stickies keep their paper and folded corner; their body is serif
+   italic — the hand stays only on the story and spike proto-stickies
+   parked in the stubs band (ac-3) */
+.sticky-body,
+.sticky-editor { font-family: var(--serif); font-style: italic; font-size: 14px; }
+.mode-authoring .board-empty-lead { font-family: var(--serif); font-style: italic; }
+.expand-dialog--hand .expand-text { font-family: var(--serif); font-style: italic; }
+.sticky--story .sticky-body,
+.sticky--spike .sticky-body,
+.sticky--story .sticky-editor,
+.sticky--spike .sticky-editor { font-family: var(--hand); font-style: normal; font-size: 0.98rem; }
+/* verdi:workbench-only:end */
