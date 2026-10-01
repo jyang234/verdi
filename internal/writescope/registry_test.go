@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/policyadopt"
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
 
@@ -122,4 +123,27 @@ func TestCarriedVerbs_AreTheBoardsCommitAndPush(t *testing.T) {
 	if ws.CarriedVerbs()[0] == ws.CLI("mutated") {
 		t.Fatal("CarriedVerbs() shares state between calls")
 	}
+}
+
+// TestRegistry_PolicyAdoptStagesOnlyTheStarterPolicy pins R1-B8: policy
+// adopt writes one policy file, the starter, so its declaration names that
+// file rather than every policy (internal/policyadopt is the source).
+func TestRegistry_PolicyAdoptStagesOnlyTheStarterPolicy(t *testing.T) {
+	want := ws.PathPattern(".verdi/policy/policies/" + policyadopt.PolicyName + ".md")
+	for _, d := range ws.Registry() {
+		if d.Ritual != "policy_adopt" {
+			continue
+		}
+		var policies []ws.PathPattern
+		for _, p := range d.StagePaths {
+			if strings.HasPrefix(string(p), ".verdi/policy/policies/") {
+				policies = append(policies, p)
+			}
+		}
+		if len(policies) != 1 || policies[0] != want {
+			t.Fatalf("policy_adopt stages policies %v, want exactly [%s]", policies, want)
+		}
+		return
+	}
+	t.Fatal("no policy_adopt declaration")
 }

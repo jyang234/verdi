@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/types"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	ws "github.com/jyang234/verdi/internal/writescope"
 	"github.com/jyang234/verdi/internal/writescope/reach"
@@ -313,26 +315,48 @@ func liveMCPTools(t *testing.T, root string) []string {
 	if err := mcpserve.ServeConn(context.Background(), strings.NewReader(req), &out, srv); err != nil {
 		t.Fatalf("tools/list: %v", err)
 	}
+	names, err := decodeToolsList(out.Bytes())
+	if err != nil {
+		t.Fatalf("decoding tools/list: %v", err)
+	}
+	return names
+}
+
+// decodeToolsList strictly decodes one tools/list response (the
+// repository's strict JSON seam: unknown fields and trailing data refused)
+// and returns its tool names, each non-empty.
+func decodeToolsList(data []byte) ([]string, error) {
 	var resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id"`
-		Result  struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  *struct {
 			Tools []struct {
-				Name string `json:"name"`
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				InputSchema json.RawMessage `json:"inputSchema"`
 			} `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &resp); err != nil {
-		t.Fatalf("decoding tools/list: %v", err)
+	if err := artifact.DecodeStrictJSON(data, &resp); err != nil {
+		return nil, err
+	}
+	if resp.JSONRPC != "2.0" {
+		return nil, fmt.Errorf("tools/list answered jsonrpc %q, want 2.0", resp.JSONRPC)
+	}
+	if resp.Result == nil {
+		return nil, fmt.Errorf("tools/list returned no result")
 	}
 	var names []string
 	for _, tool := range resp.Result.Tools {
+		if tool.Name == "" {
+			return nil, fmt.Errorf("tools/list returned a tool with no name")
+		}
 		names = append(names, tool.Name)
 	}
 	if len(names) == 0 {
-		t.Fatal("tools/list returned no tools")
+		return nil, fmt.Errorf("tools/list returned no tools")
 	}
-	return names
+	return names, nil
 }
 
 // declaredFuncs returns the FuncName of every function pkg declares.
@@ -347,4 +371,40 @@ func declaredFuncs(prog *reach.Program, pkg *reach.Package) []string {
 		}
 	}
 	return out
+}
+
+// TestDecodeToolsList_IsStrict pins R1-B8's decode half: the tools/list
+// response the witness derives the MCP verbs from is decoded strictly
+// (unknown fields and trailing data refused), never leniently.
+func TestDecodeToolsList_IsStrict(t *testing.T) {
+	const tool = `{"name":"get_board","description":"d","inputSchema":{"type":"object"}}`
+	tests := []struct {
+		name    string
+		data    string
+		want    string
+		wantErr bool
+	}{
+		{"a well-formed response", `{"jsonrpc":"2.0","id":1,"result":{"tools":[` + tool + `]}}` + "\n", "get_board", false},
+		{"an unknown top-level field", `{"jsonrpc":"2.0","id":1,"extra":true,"result":{"tools":[` + tool + `]}}`, "", true},
+		{"an unknown tool field", `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"x","description":"d","inputSchema":{},"hidden":1}]}}`, "", true},
+		{"trailing data", `{"jsonrpc":"2.0","id":1,"result":{"tools":[` + tool + `]}}{}`, "", true},
+		{"an error response", `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"nope"}}`, "", true},
+		{"a wrong protocol version", `{"jsonrpc":"1.0","id":1,"result":{"tools":[` + tool + `]}}`, "", true},
+		{"no tools", `{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}`, "", true},
+		{"a nameless tool", `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"","description":"d","inputSchema":{}}]}}`, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodeToolsList([]byte(tt.data))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("decodeToolsList = %v, nil; want an error", got)
+				}
+				return
+			}
+			if err != nil || strings.Join(got, ",") != tt.want {
+				t.Fatalf("decodeToolsList = %v, %v; want [%s]", got, err, tt.want)
+			}
+		})
+	}
 }

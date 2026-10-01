@@ -112,7 +112,9 @@ func Registry() []Declaration {
 		},
 		{
 			// cmd/verdi/policy.go: cut policy/adopt from the resolved base,
-			// write the starter store, commit with a pathspec.
+			// write the starter store (internal/policyadopt: the
+			// constitution, one profile, the one starter policy, and the
+			// consumer inventory), commit with a pathspec.
 			Ritual:     "policy_adopt",
 			Verbs:      []Verb{CLI("policy")},
 			RefsCreate: []RefPattern{"refs/heads/policy/adopt"},
@@ -120,7 +122,7 @@ func Registry() []Declaration {
 			StagePaths: []PathPattern{
 				".verdi/constitution/consumers.json",
 				".verdi/policy/constitution.md",
-				".verdi/policy/policies/*",
+				".verdi/policy/policies/starter.md",
 				".verdi/policy/profiles/*",
 			},
 			IndexCarry: CarryScoped,
