@@ -1,0 +1,299 @@
+package reach
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// Target is the build configuration a module is analyzed under. Fixing it
+// makes the analysis independent of the host that runs it; a caller that
+// needs every platform-specific file loads once per target.
+type Target struct {
+	GOOS   string
+	GOARCH string
+}
+
+// String renders the target as GOOS/GOARCH.
+func (t Target) String() string { return t.GOOS + "/" + t.GOARCH }
+
+// Targets returns the release platforms verdi is built for: the CI job's
+// Linux and the operators' macOS. Every platform-specific file of the
+// module is built for at least one of them.
+func Targets() []Target {
+	return []Target{{GOOS: "linux", GOARCH: "amd64"}, {GOOS: "darwin", GOARCH: "arm64"}}
+}
+
+// Program is one module's packages, parsed from source and type-checked
+// with the standard library's go/parser and go/types. Only the module's
+// own packages are kept, with full syntax and type information; every
+// dependency is type-checked for its declarations alone.
+type Program struct {
+	Fset   *token.FileSet
+	Module string
+	Target Target
+
+	packages []*Package
+	byPath   map[string]*Package
+	decls    map[*types.Func]funcDecl
+	byName   map[string]*types.Func
+}
+
+// funcDecl is where a module function is declared.
+type funcDecl struct {
+	pkg  *Package
+	decl *ast.FuncDecl
+}
+
+// Package is one type-checked package of the module.
+type Package struct {
+	Path  string
+	Files []*ast.File
+	Types *types.Package
+	Info  *types.Info
+}
+
+// Packages returns the module's packages, sorted by import path.
+func (p *Program) Packages() []*Package { return p.packages }
+
+// Package returns the module package with import path path, or nil.
+func (p *Program) Package(path string) *Package { return p.byPath[path] }
+
+// listedPackage is the subset of `go list -json` this loader reads.
+type listedPackage struct {
+	ImportPath string
+	Dir        string
+	GoFiles    []string
+	ImportMap  map[string]string
+	Standard   bool
+	// Module is go list's module object, whose field set grows with the go
+	// command's version; only its Path and Main members are read (module).
+	Module     map[string]json.RawMessage
+	Error      *listedError
+	DepsErrors []*listedError
+}
+
+// module returns the package's module path and whether it is the main
+// module ("" and false for the standard library).
+func (lp *listedPackage) module() (path string, main bool, err error) {
+	if lp.Module == nil {
+		return "", false, nil
+	}
+	if raw, ok := lp.Module["Path"]; ok {
+		if err := json.Unmarshal(raw, &path); err != nil {
+			return "", false, fmt.Errorf("reach: go list: package %s: module path: %w", lp.ImportPath, err)
+		}
+	}
+	if raw, ok := lp.Module["Main"]; ok {
+		if err := json.Unmarshal(raw, &main); err != nil {
+			return "", false, fmt.Errorf("reach: go list: package %s: module main flag: %w", lp.ImportPath, err)
+		}
+	}
+	return path, main, nil
+}
+
+type listedError struct {
+	Err string
+}
+
+const listFields = "ImportPath,Dir,GoFiles,ImportMap,Standard,Module,Error,DepsErrors"
+
+// Load lists patterns (and every dependency) in the module at dir for
+// target with `go list`, then parses and type-checks each package from
+// source. The go command runs with the proxy off, a read-only module graph,
+// no workspace, and cgo disabled, so it never reaches the network: every
+// dependency must already be in the module cache.
+func Load(ctx context.Context, dir string, target Target, patterns ...string) (*Program, error) {
+	if len(patterns) == 0 {
+		return nil, errors.New("reach: Load needs at least one package pattern")
+	}
+	if target.GOOS == "" || target.GOARCH == "" {
+		return nil, fmt.Errorf("reach: Load needs a complete target, got %q", target)
+	}
+	listed, err := goList(ctx, dir, target, patterns)
+	if err != nil {
+		return nil, err
+	}
+	l := &loader{
+		target:   target,
+		fset:     token.NewFileSet(),
+		listed:   map[string]*listedPackage{},
+		checked:  map[string]*types.Package{},
+		module:   map[string]*Package{},
+		inModule: map[string]bool{},
+	}
+	for _, lp := range listed {
+		l.listed[lp.ImportPath] = lp
+		modPath, main, err := lp.module()
+		if err != nil {
+			return nil, err
+		}
+		if main {
+			l.inModule[lp.ImportPath] = true
+			if l.modulePath == "" {
+				l.modulePath = modPath
+			}
+		}
+	}
+	if l.modulePath == "" {
+		return nil, fmt.Errorf("reach: no package of the main module matched %v in %s", patterns, dir)
+	}
+	paths := make([]string, 0, len(listed))
+	for _, lp := range listed {
+		paths = append(paths, lp.ImportPath)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if _, err := l.check(path); err != nil {
+			return nil, err
+		}
+	}
+	prog := &Program{Fset: l.fset, Module: l.modulePath, Target: target, byPath: l.module, decls: map[*types.Func]funcDecl{}, byName: map[string]*types.Func{}}
+	for _, path := range paths {
+		pkg, ok := l.module[path]
+		if !ok {
+			continue
+		}
+		prog.packages = append(prog.packages, pkg)
+		for _, f := range pkg.Files {
+			for _, d := range f.Decls {
+				if fd, ok := d.(*ast.FuncDecl); ok {
+					if fn, ok := pkg.Info.Defs[fd.Name].(*types.Func); ok {
+						prog.decls[fn] = funcDecl{pkg: pkg, decl: fd}
+						prog.byName[prog.FuncName(fn)] = fn
+					}
+				}
+			}
+		}
+	}
+	return prog, nil
+}
+
+// goList runs `go list -deps -json` hermetically and strict-decodes its
+// stream of package objects.
+func goList(ctx context.Context, dir string, target Target, patterns []string) ([]*listedPackage, error) {
+	args := append([]string{"list", "-deps", "-json=" + listFields, "--"}, patterns...)
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GOFLAGS=-mod=readonly",
+		"GOPROXY=off",
+		"GOWORK=off",
+		"CGO_ENABLED=0",
+		"GOOS="+target.GOOS,
+		"GOARCH="+target.GOARCH,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("reach: go list %v in %s: %w: %s", patterns, dir, err, strings.TrimSpace(stderr.String()))
+	}
+	dec := json.NewDecoder(&stdout)
+	dec.DisallowUnknownFields()
+	var out []*listedPackage
+	for {
+		var lp listedPackage
+		err := dec.Decode(&lp)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reach: decoding go list output: %w", err)
+		}
+		if lp.Error != nil {
+			return nil, fmt.Errorf("reach: go list: package %s: %s", lp.ImportPath, lp.Error.Err)
+		}
+		for _, de := range lp.DepsErrors {
+			return nil, fmt.Errorf("reach: go list: package %s: dependency error: %s", lp.ImportPath, de.Err)
+		}
+		out = append(out, &lp)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("reach: go list %v in %s listed no packages", patterns, dir)
+	}
+	return out, nil
+}
+
+// loader type-checks listed packages on demand, dependencies first.
+type loader struct {
+	target     Target
+	fset       *token.FileSet
+	modulePath string
+	listed     map[string]*listedPackage
+	checked    map[string]*types.Package
+	module     map[string]*Package
+	inModule   map[string]bool
+}
+
+func (l *loader) check(path string) (*types.Package, error) {
+	if path == "unsafe" {
+		return types.Unsafe, nil
+	}
+	if pkg, ok := l.checked[path]; ok {
+		if pkg == nil {
+			return nil, fmt.Errorf("reach: import cycle through %s", path)
+		}
+		return pkg, nil
+	}
+	lp, ok := l.listed[path]
+	if !ok {
+		return nil, fmt.Errorf("reach: package %s was not listed", path)
+	}
+	l.checked[path] = nil // cycle guard
+	inModule := l.inModule[path]
+	files := make([]*ast.File, 0, len(lp.GoFiles))
+	for _, name := range lp.GoFiles {
+		f, err := parser.ParseFile(l.fset, filepath.Join(lp.Dir, name), nil, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, fmt.Errorf("reach: parsing %s: %w", name, err)
+		}
+		files = append(files, f)
+	}
+	conf := types.Config{
+		Importer:         importerFunc(func(imp string) (*types.Package, error) { return l.importFrom(lp, imp) }),
+		IgnoreFuncBodies: !inModule,
+		Sizes:            types.SizesFor("gc", l.target.GOARCH),
+	}
+	var info *types.Info
+	if inModule {
+		info = &types.Info{
+			Types:      map[ast.Expr]types.TypeAndValue{},
+			Defs:       map[*ast.Ident]types.Object{},
+			Uses:       map[*ast.Ident]types.Object{},
+			Selections: map[*ast.SelectorExpr]*types.Selection{},
+		}
+	}
+	pkg, err := conf.Check(path, l.fset, files, info)
+	if err != nil {
+		return nil, fmt.Errorf("reach: type-checking %s: %w", path, err)
+	}
+	l.checked[path] = pkg
+	if inModule {
+		l.module[path] = &Package{Path: path, Files: files, Types: pkg, Info: info}
+	}
+	return pkg, nil
+}
+
+func (l *loader) importFrom(from *listedPackage, imp string) (*types.Package, error) {
+	if mapped, ok := from.ImportMap[imp]; ok {
+		imp = mapped
+	}
+	return l.check(imp)
+}
+
+type importerFunc func(path string) (*types.Package, error)
+
+func (f importerFunc) Import(path string) (*types.Package, error) { return f(path) }

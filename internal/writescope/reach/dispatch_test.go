@@ -1,0 +1,220 @@
+package reach_test
+
+import (
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/writescope/reach"
+)
+
+func entryNames(entries []reach.Entry) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reachByName builds one graph over entries and returns, per entry name,
+// the names of the synthetic targets it reaches.
+func reachByName(t *testing.T, prog *reach.Program, entries []reach.Entry) map[string]string {
+	t.Helper()
+	g, err := reach.Build(prog, entries)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		out[e.Name] = strings.Join(hitNames(g.Reach(e, synthTargets(t, prog))), ",")
+	}
+	return out
+}
+
+func TestCLIEntries_DeriveVerbsFromTheDispatcher(t *testing.T) {
+	prog := loadSynth(t)
+	entries, err := reach.CLIEntries(prog, "example.com/synth/cli", "Run", "cli")
+	if err != nil {
+		t.Fatalf("CLIEntries: %v", err)
+	}
+	want := []string{"alias", "alias2", "direct", "op", "op a", "op b", "sub", "sub --fast", "sub read", "sub write"}
+	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("CLI entries = %q, want %q", got, want)
+	}
+	for _, e := range entries {
+		if e.Surface != "cli" {
+			t.Fatalf("entry %q has surface %q, want cli", e.Name, e.Surface)
+		}
+	}
+	got := reachByName(t, prog, entries)
+	tests := []struct {
+		verb string
+		want string
+	}{
+		{"direct", "Mutate"},     // if-arm on the verb
+		{"alias", ""},            // one arm of an || condition
+		{"sub", ""},              // a dispatcher's own code: its arms are cut
+		{"sub write", "Mutate"},  // switch on args[0] one level down
+		{"sub read", ""},         // sibling arm, read-only
+		{"sub --fast", "Mutate"}, // guarded if-arm: len(args) > 0 && args[0] == "--fast"
+		{"op", ""},               // key held in a variable and validated by an empty-bodied switch
+		{"op a", "Mutate"},       // key handed to a helper whose switch dispatches it
+		{"op b", ""},             // sibling, read-only
+	}
+	for _, tt := range tests {
+		t.Run(tt.verb, func(t *testing.T) {
+			if got[tt.verb] != tt.want {
+				t.Fatalf("%s reaches %q, want %q", tt.verb, got[tt.verb], tt.want)
+			}
+		})
+	}
+}
+
+func TestCLIEntries_Errors(t *testing.T) {
+	prog := loadSynth(t)
+	tests := []struct {
+		name, pkg, fn string
+	}{
+		{"unknown package", "example.com/synth/nope", "Run"},
+		{"unknown function", "example.com/synth/cli", "Nope"},
+		{"function without a []string first parameter", "example.com/synth/cli", "Phase"},
+		{"dispatcher with no arms", "example.com/synth/cli", "code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := reach.CLIEntries(prog, tt.pkg, tt.fn, "cli"); err == nil {
+				t.Fatalf("CLIEntries(%s, %s) succeeded, want an error", tt.pkg, tt.fn)
+			}
+		})
+	}
+}
+
+func TestSwitchEntries_MatchTheInventorysOneSwitch(t *testing.T) {
+	prog := loadSynth(t)
+	entries, err := reach.SwitchEntries(prog, "example.com/synth/tools", "mcp", []string{"write_tool", "read_tool"})
+	if err != nil {
+		t.Fatalf("SwitchEntries: %v", err)
+	}
+	if got := entryNames(entries); strings.Join(got, ",") != "read_tool,write_tool" {
+		t.Fatalf("entries = %v", got)
+	}
+	got := reachByName(t, prog, entries)
+	if got["write_tool"] != "Mutate" || got["read_tool"] != "" {
+		t.Fatalf("reach = %v, want write_tool -> Mutate and read_tool -> nothing", got)
+	}
+}
+
+func TestSwitchEntries_Errors(t *testing.T) {
+	prog := loadSynth(t)
+	tests := []struct {
+		name  string
+		names []string
+	}{
+		{"no names", nil},
+		{"a name no switch carries", []string{"write_tool", "missing_tool"}},
+		{"a subset of a switch's cases", []string{"write_tool"}},
+		{"duplicate name", []string{"write_tool", "write_tool", "read_tool"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := reach.SwitchEntries(prog, "example.com/synth/tools", "mcp", tt.names); err == nil {
+				t.Fatalf("SwitchEntries(%v) succeeded, want an error", tt.names)
+			}
+		})
+	}
+}
+
+func TestRouteEntries_DeriveRoutesAndActions(t *testing.T) {
+	prog := loadSynth(t)
+	entries, err := reach.RouteEntries(prog, "example.com/synth/web", "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	want := []string{
+		"/b/{branch}/thing/{name}",
+		"/b/{branch}/thing/{name}/api/{action}",
+		"/health",
+		"/legacy/{key}/commit",
+		"/legacy/{key}/save",
+		"/legacy/{key}/{action}",
+		"/static",
+		"/thing/{name}",
+		"/thing/{name}/api/look",
+		"/thing/{name}/api/mutate",
+		"/thing/{name}/api/peek",
+		"/thing/{name}/api/push",
+		"/thing/{name}/api/{action}",
+	}
+	if got := entryNames(entries); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("route entries =\n%q\nwant\n%q", got, want)
+	}
+	got := reachByName(t, prog, entries)
+	tests := []struct {
+		route string
+		want  string
+	}{
+		{"/thing/{name}/api/push", "Mutate"},                // switch arm in the handler closure
+		{"/thing/{name}/api/mutate", "Mutate"},              // arm of a helper the key is handed to
+		{"/thing/{name}/api/look", ""},                      // read-only arm
+		{"/thing/{name}/api/{action}", ""},                  // the route itself: its arms are cut
+		{"/legacy/{key}/commit", "Mutate"},                  // switch directly on r.PathValue
+		{"/b/{branch}/thing/{name}", "Mutate"},              // prefix mount's own work, from a route table
+		{"/b/{branch}/thing/{name}/api/{action}", "Mutate"}, // same root, second table row
+		{"/thing/{name}", ""},                               // table row's handler, read-only
+		{"/health", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.route, func(t *testing.T) {
+			if got[tt.route] != tt.want {
+				t.Fatalf("%s reaches %q, want %q", tt.route, got[tt.route], tt.want)
+			}
+		})
+	}
+}
+
+func TestRouteEntries_FailClosedOnAnUnresolvableRegistration(t *testing.T) {
+	prog := loadSynth(t)
+	tests := []struct {
+		name, pkg string
+	}{
+		{"computed pattern", "example.com/synth/badweb"},
+		{"package without registrations", "example.com/synth/app"},
+		{"unknown package", "example.com/synth/nope"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := reach.RouteEntries(prog, tt.pkg, "workbench"); err == nil {
+				t.Fatalf("RouteEntries(%s) succeeded, want an error", tt.pkg)
+			}
+		})
+	}
+}
+
+func TestStringKeyedMap(t *testing.T) {
+	prog := loadSynth(t)
+	got, err := reach.StringKeyedMap(prog, "example.com/synth/cli", "verbs")
+	if err != nil {
+		t.Fatalf("StringKeyedMap: %v", err)
+	}
+	want := map[string]string{"direct": "1", "sub": "2", "op": "3", "gone": "0"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("got[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	for _, tt := range []struct{ name, pkg, v string }{
+		{"not a map literal", "example.com/synth/cli", "notAMap"},
+		{"unknown variable", "example.com/synth/cli", "nope"},
+		{"unknown package", "example.com/synth/nope", "verbs"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := reach.StringKeyedMap(prog, tt.pkg, tt.v); err == nil {
+				t.Fatalf("StringKeyedMap(%s, %s) succeeded, want an error", tt.pkg, tt.v)
+			}
+		})
+	}
+}
