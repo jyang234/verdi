@@ -23,6 +23,8 @@
 #   sameline    fresh starts from a new context, so contextcheck also flags
 #               the line errorlint already flags
 #   newfinding  a second global
+#   editline    the global's flagged line edited (int to int64), its message
+#               unchanged
 #   broken      alpha does not compile (golangci-lint reports typecheck)
 set -euo pipefail
 
@@ -42,7 +44,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 variants=("$@")
 if [ ${#variants[@]} -eq 0 ]; then
-	variants=(base fixed lineshift movefile movepkg duplicate sameline newfinding broken)
+	variants=(base fixed lineshift movefile movepkg duplicate sameline newfinding editline broken)
 fi
 
 mkdir -p "$out"

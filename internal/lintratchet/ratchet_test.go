@@ -138,12 +138,14 @@ func checkIn(t *testing.T, repo *fixturegit.Repo, fromSub bool, report string) (
 // baseline exit 0; a new finding, a stale allowance, or a baseline grown
 // against the merge base, or on the default branch against HEAD's first
 // parent, exits 1; a line shift or a move within a package exits 0; a move
-// across packages exits 1; a fix followed by a later reintroduction fails the
-// later change; and a truncated report, a malformed baseline, a failing
-// golangci-lint, or an unresolvable merge base or parent exits 2. An earlier
-// commit that resolves but holds no baseline makes the growth comparison not
-// applicable, disclosed, while the other two comparisons still apply (ledger
-// SI-311 (1)).
+// across packages, or an edit of the flagged line, exits 1; a fix followed by
+// a later reintroduction fails the later change; and a truncated report, a
+// malformed baseline, a failing golangci-lint, or an unresolvable merge base
+// or parent exits 2. An earlier commit that resolves but holds no baseline
+// makes the growth comparison not applicable, disclosed, while the other two
+// comparisons still apply (ledger SI-311 (1)). Each comparison also holds
+// when the check runs from a directory below the root (review finding
+// S1-A1).
 func TestRatchet_Verdicts(t *testing.T) {
 	// The default branch is origin/main in every repository below, resolved
 	// by specstate's fallback; an ambient CI_DEFAULT_BRANCH must not override
@@ -169,6 +171,7 @@ func TestRatchet_Verdicts(t *testing.T) {
 		{name: "a line shift", mergeBase: "base", head: "base", report: "lineshift", want: 0, wantOut: "lint-strict OK"},
 		{name: "a move within a package", mergeBase: "base", head: "base", report: "movefile", want: 0, wantOut: "lint-strict OK"},
 		{name: "a move across packages", mergeBase: "base", head: "base", report: "movepkg", want: 1, wantOut: "new finding: gochecknoglobals in beta"},
+		{name: "an edited flagged line", mergeBase: "base", head: "base", report: "editline", want: 1, wantOut: `new finding: gochecknoglobals in alpha: Counter is a global variable (flagged line "var Counter int64")`},
 		{name: "an identical finding repeated", mergeBase: "base", head: "base", report: "duplicate", want: 1, wantOut: "reported 2 time(s), the baseline allows 1"},
 		{name: "a repeated finding's count left behind", mergeBase: "duplicate", head: "duplicate", report: "base", want: 1, wantOut: "the baseline allows 2, the run reports 1"},
 		{name: "a second finding on an already-flagged line", mergeBase: "base", head: "base", report: "sameline", want: 1, wantOut: "new finding: contextcheck in alpha"},
