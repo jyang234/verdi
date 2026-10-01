@@ -68,9 +68,15 @@ func retroPackages() []string {
 // and requires gochecknoglobals to report both variables at retroBefore and
 // neither at retroAfter (retroViolations).
 //
-// A clone that lacks either commit, a shallow clone, and a partial clone,
-// whose export could fetch objects over the network, fail it before it looks
-// for the linter, naming the commits, so none of them can pass it or skip it.
+// A clone that lacks either commit, a shallow clone, and a partial clone fail
+// it before it looks for the linter, naming the commits, so none of them can
+// pass it or skip it. A partial clone is one carrying any of its marks, each
+// named in the failure: a remote whose promisor setting is true (what git
+// clone --filter writes), a promisor pack, or extensions.partialClone. Its
+// export could fetch missing objects over the network, so the witness also
+// runs every git command with GIT_NO_LAZY_FETCH=1 and GIT_ALLOW_PROTOCOL=none
+// (noFetchEnv): even a partial clone the marks missed fails the export, and no
+// git command the witness issues fetches.
 // A failed golangci-lint run, or a package that did not type-check, at either
 // commit fails it too. It skips, saying what the run cannot show, only where
 // the pinned golangci-lint is absent, as in CI's test jobs. CI job verify,
@@ -79,6 +85,7 @@ func retroPackages() []string {
 // abstain, never as a pass (dc-2). TestRetroWitnessDisposition proves how it
 // ends in each case.
 func TestRetroWitness_ReadinessLoaderGlobals(t *testing.T) {
+	forbidFetch(t)
 	root := repoRoot(t)
 	if err := retroHistory(t.Context(), root, retroBefore, retroAfter); err != nil {
 		t.Fatalf("the retro-witness fails, and never passes or skips, without both commits in full history: %v", err)
@@ -112,9 +119,10 @@ func TestRetroWitness_ReadinessLoaderGlobals(t *testing.T) {
 
 // TestRetroWitnessDisposition re-runs the retro-witness in this test binary
 // under each condition that must stop it and proves how it ends: a clone
-// that lacks both commits and a shallow clone fail it, naming the commits,
-// although PATH holds no golangci-lint, so neither can pass it or skip it; a
-// full clone without the pinned golangci-lint skips it, saying what the run
+// that lacks both commits, a shallow clone, and a real partial clone fail it,
+// naming the commits, although PATH holds no golangci-lint, so none can pass
+// it or skip it, and none gains a pack, so the run fetched nothing; a full
+// clone without the pinned golangci-lint skips it, saying what the run
 // cannot show. A clone reaches the witness through GIT_DIR, git's own
 // override of the repository it reads, and PATH holds git alone.
 func TestRetroWitnessDisposition(t *testing.T) {
@@ -131,6 +139,7 @@ func TestRetroWitnessDisposition(t *testing.T) {
 		{Files: map[string]string{"README": "two\n"}, Message: "two"},
 	})
 	shallow := fixturegit.ShallowClone(t, unrelated, 1)
+	partial := partialClone(t, unrelated)
 
 	cases := []struct {
 		name   string
@@ -140,17 +149,25 @@ func TestRetroWitnessDisposition(t *testing.T) {
 	}{
 		{name: "a clone that lacks both commits", gitDir: filepath.Join(unrelated.Dir, ".git"), want: []string{"lacks commit", retroBefore, retroAfter}},
 		{name: "a shallow clone", gitDir: filepath.Join(shallow, ".git"), want: []string{"shallow", retroBefore, retroAfter}},
+		{name: "a partial clone", gitDir: filepath.Join(partial, ".git"), want: []string{"partial clone", "remote.origin.promisor is true", "promisor pack", "network", retroBefore, retroAfter}},
 		{name: "a full clone without golangci-lint", skip: true, want: []string{"SKIP (disclosed, not a pass)", retroUnshown}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestRetroWitness_ReadinessLoaderGlobals$", "-test.v", "-test.count=1")
 			cmd.Env = append(os.Environ(), "PATH="+gitOnly)
+			var packs []string
 			if tc.gitDir != "" {
 				cmd.Env = append(cmd.Env, "GIT_DIR="+tc.gitDir)
+				packs = packFiles(t, tc.gitDir)
 			}
 			out, err := cmd.CombinedOutput()
 			got := string(out)
+			if tc.gitDir != "" {
+				if after := packFiles(t, tc.gitDir); !slices.Equal(after, packs) {
+					t.Errorf("the retro-witness changed the clone's packs from %q to %q, so it fetched objects", packs, after)
+				}
+			}
 			ending, exitedZero := "--- FAIL: TestRetroWitness_ReadinessLoaderGlobals", false
 			if tc.skip {
 				ending, exitedZero = "--- SKIP: TestRetroWitness_ReadinessLoaderGlobals", true
@@ -223,8 +240,11 @@ func TestRetroViolations(t *testing.T) {
 
 // TestRetroHistory is retroHistory's happy and negative paths: this
 // repository holds both commits; a clone lacking one, a clone lacking both, a
-// shallow clone, a partial clone, and a directory outside any repository are
-// each refused, naming what they lack.
+// shallow clone, a real partial clone, and a directory outside any repository
+// are each refused, naming what they lack. A repository carrying one mark of a
+// partial clone alone (a promisor remote, a promisor pack, or
+// extensions.partialClone) is refused naming that mark, and a remote whose
+// promisor setting is false is not refused.
 func TestRetroHistory(t *testing.T) {
 	root := repoRoot(t)
 	unrelated := fixturegit.Build(t, []fixturegit.Layer{
@@ -232,24 +252,43 @@ func TestRetroHistory(t *testing.T) {
 		{Files: map[string]string{"README": "two\n"}, Message: "two"},
 	})
 	shallow := fixturegit.ShallowClone(t, unrelated, 1)
-	partial := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"README": "one\n"}, Message: "one"}})
-	git(t, partial.Dir, "config", "core.repositoryformatversion", "1")
-	git(t, partial.Dir, "config", "extensions.partialClone", "origin")
+	partial := partialClone(t, unrelated)
+	marked := func(setup func(dir string)) *fixturegit.Repo {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"README": "one\n"}, Message: "one"}})
+		setup(repo.Dir)
+		return repo
+	}
+	promisorRemote := marked(func(dir string) { git(t, dir, "config", "remote.origin.promisor", "true") })
+	notPromisor := marked(func(dir string) { git(t, dir, "config", "remote.origin.promisor", "false") })
+	promisorPack := marked(func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, ".git", "objects", "pack", "pack-0123.promisor"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	partialExtension := marked(func(dir string) {
+		git(t, dir, "config", "core.repositoryformatversion", "1")
+		git(t, dir, "config", "extensions.partialClone", "origin")
+	})
 
 	cases := []struct {
 		name    string
 		dir     string
 		commits []string
 		want    []string // substrings of the error; nil wants no error
-		notWant string
+		notWant []string
 	}{
 		{name: "this repository holds both commits", dir: root, commits: []string{retroBefore, retroAfter}},
-		{name: "a clone that lacks one commit", dir: root, commits: []string{retroBefore, absentCommit}, want: []string{"lacks commit", absentCommit}, notWant: retroBefore},
+		{name: "a clone that lacks one commit", dir: root, commits: []string{retroBefore, absentCommit}, want: []string{"lacks commit", absentCommit}, notWant: []string{retroBefore}},
 		{name: "a clone that lacks both commits", dir: unrelated.Dir, commits: []string{retroBefore, retroAfter}, want: []string{"lacks commit", retroBefore, retroAfter}},
 		{name: "a shallow clone that holds its commit", dir: shallow, commits: []string{unrelated.Head}, want: []string{"shallow", unrelated.Head}},
-		{name: "a partial clone that holds its commit", dir: partial.Dir, commits: []string{partial.Head}, want: []string{"partial clone", "network", partial.Head}},
+		{name: "a partial clone that holds its commit", dir: partial, commits: []string{unrelated.Head}, want: []string{"partial clone", "remote.origin.promisor is true", "promisor pack pack-", "network", unrelated.Head}},
+		{name: "a promisor remote alone", dir: promisorRemote.Dir, commits: []string{promisorRemote.Head}, want: []string{"partial clone", "remote.origin.promisor is true", promisorRemote.Head}, notWant: []string{"promisor pack", "extensions.partialClone"}},
+		{name: "a promisor pack alone", dir: promisorPack.Dir, commits: []string{promisorPack.Head}, want: []string{"partial clone", "promisor pack pack-0123.promisor", promisorPack.Head}, notWant: []string{"remote.origin.promisor", "extensions.partialClone"}},
+		{name: "extensions.partialClone alone", dir: partialExtension.Dir, commits: []string{partialExtension.Head}, want: []string{"partial clone", `extensions.partialClone is "origin"`, partialExtension.Head}, notWant: []string{"remote.origin.promisor", "promisor pack"}},
+		{name: "a remote whose promisor setting is false", dir: notPromisor.Dir, commits: []string{notPromisor.Head}},
 		{name: "a directory outside any repository", dir: t.TempDir(), commits: []string{retroBefore}, want: []string{"shallow"}},
 	}
+	forbidFetch(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := retroHistory(t.Context(), tc.dir, tc.commits...)
@@ -267,19 +306,45 @@ func TestRetroHistory(t *testing.T) {
 					t.Errorf("retroHistory = %q, want it to contain %q", err, w)
 				}
 			}
-			if tc.notWant != "" && strings.Contains(err.Error(), tc.notWant) {
-				t.Errorf("retroHistory = %q, which names %s, a commit the clone holds", err, tc.notWant)
+			for _, nw := range tc.notWant {
+				if strings.Contains(err.Error(), nw) {
+					t.Errorf("retroHistory = %q, which names %q, which the clone does not lack or carry", err, nw)
+				}
 			}
 		})
 	}
 }
 
 // TestExportCommit is exportCommit's happy and negative paths over a
-// fixturegit repository: the commit's tree, exactly, and a refusal naming a
-// commit the repository lacks.
+// fixturegit repository: the commit's tree, exactly; a refusal naming a
+// commit the repository lacks; and, in a real partial clone, a refusal naming
+// a commit whose blob the clone lacks, with the clone's packs unchanged, so
+// the export fetched nothing (review finding S2-1).
 func TestExportCommit(t *testing.T) {
 	files := map[string]string{"go.mod": "module example.com/x\n", "a/b/c.go": "package b\n", "README": "x\n"}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "one"}})
+
+	t.Run("a partial clone that lacks the commit's blob", func(t *testing.T) {
+		source := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{"README": "one\n"}, Message: "one"},
+			{Files: map[string]string{"README": "two\n"}, Message: "two"},
+		})
+		partial := partialClone(t, source)
+		older := source.Heads[0]
+		// rev-list --missing=print never fetches; it shows the clone truly
+		// lacks a blob of the older commit, so only a fetch could export it.
+		if missing := git(t, partial, "rev-list", "--objects", "--missing=print", older); !strings.Contains(missing, "\n?") && !strings.HasPrefix(missing, "?") {
+			t.Fatalf("the partial clone holds every object of %s, so it cannot show the export never fetches:\n%s", older, missing)
+		}
+		packs := packFiles(t, filepath.Join(partial, ".git"))
+		err := exportCommit(t.Context(), partial, older, t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), older) {
+			t.Fatalf("exportCommit = %v, want an error naming %s, whose blob only a fetch could supply", err, older)
+		}
+		if after := packFiles(t, filepath.Join(partial, ".git")); !slices.Equal(after, packs) {
+			t.Fatalf("exportCommit changed the partial clone's packs from %q to %q, so it fetched objects", packs, after)
+		}
+	})
 
 	t.Run("the commit's tree", func(t *testing.T) {
 		dst := t.TempDir()
@@ -296,6 +361,39 @@ func TestExportCommit(t *testing.T) {
 			t.Fatalf("exportCommit = %v, want an error naming %s", err, absentCommit)
 		}
 	})
+}
+
+// partialClone returns the working directory of a real partial clone of
+// repo, as git clone --filter=blob:none makes it: a promisor remote, promisor
+// packs, and no blob its checkout did not need. It clones through a file://
+// URL, which git needs to apply a filter, from a source that allows filters,
+// so the clone stays on this machine.
+func partialClone(t *testing.T, repo *fixturegit.Repo) string {
+	t.Helper()
+	git(t, repo.Dir, "config", "uploadpack.allowFilter", "true")
+	parent := t.TempDir()
+	dest := filepath.Join(parent, "partial-clone")
+	git(t, parent, "-c", "protocol.file.allow=always", "clone", "--quiet", "--filter=blob:none", "file://"+repo.Dir, dest)
+	// No detached gc or maintenance races the TempDir cleanup.
+	git(t, dest, "config", "gc.autoDetach", "false")
+	git(t, dest, "config", "maintenance.auto", "false")
+	return dest
+}
+
+// packFiles returns the names of the files in the pack directory of the git
+// directory gitDir, sorted: a fetch adds a pack, so an unchanged list shows
+// nothing was fetched.
+func packFiles(t *testing.T, gitDir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(gitDir, "objects", "pack"))
+	if err != nil {
+		t.Fatalf("listing %s's packs: %v", gitDir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
 }
 
 // treeFiles returns every regular file below dir, by slash-separated relative
@@ -468,12 +566,33 @@ func TestLintRetroTree(t *testing.T) {
 	})
 }
 
+// noFetchEnv returns the environment every git command the retro-witness
+// issues runs with, so none can fetch an object: GIT_NO_LAZY_FETCH=1 turns a
+// partial clone's lazy fetch off, and GIT_ALLOW_PROTOCOL=none admits no
+// transport, so a git older than GIT_NO_LAZY_FETCH, which ignores it (2.34.1
+// does), cannot reach a promisor remote either.
+func noFetchEnv() []string {
+	return []string{"GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=none"}
+}
+
+// forbidFetch sets noFetchEnv in this process's environment for the rest of
+// t, so every git command the test issues, internal/gitx's among them, runs
+// with it.
+func forbidFetch(t *testing.T) {
+	t.Helper()
+	for _, kv := range noFetchEnv() {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+}
+
 // retroHistory returns why the repository at dir cannot give the witness
 // commits from full history, or nil when it can, and names the commits: a
 // shallow clone has cut history, a partial clone would fetch a missing object
 // over the network as soon as git read it, and a clone without a commit
-// cannot export it. The shallow and partial checks come first, because
-// looking a commit up in a partial clone is itself such a read.
+// cannot export it. The shallow and partial checks read no object, and come
+// first, because looking a commit up in a partial clone is itself such a
+// read.
 func retroHistory(ctx context.Context, dir string, commits ...string) error {
 	shallow, err := gitx.IsShallow(ctx, dir)
 	if err != nil {
@@ -482,11 +601,12 @@ func retroHistory(ctx context.Context, dir string, commits ...string) error {
 	if shallow {
 		return fmt.Errorf("this clone is shallow, so it cannot be relied on to hold %s; the witness needs a full clone", strings.Join(commits, " and "))
 	}
-	switch promisor, err := gitx.ConfigValue(ctx, dir, "extensions.partialClone"); {
-	case err == nil:
-		return fmt.Errorf("this clone is a partial clone of %q, so reading %s could fetch missing objects over the network, which no test may reach; the witness needs a full clone", promisor, strings.Join(commits, " and "))
-	case !errors.Is(err, gitx.ErrConfigUnset):
+	marks, err := partialCloneMarks(ctx, dir)
+	if err != nil {
 		return fmt.Errorf("checking whether this clone is a partial clone: %w", err)
+	}
+	if len(marks) > 0 {
+		return fmt.Errorf("this clone is a partial clone (%s), so reading %s could fetch missing objects over the network, which no test may reach; the witness needs a full clone", strings.Join(marks, "; "), strings.Join(commits, " and "))
 	}
 	var missing []string
 	for _, c := range commits {
@@ -504,11 +624,104 @@ func retroHistory(ctx context.Context, dir string, commits ...string) error {
 	return nil
 }
 
+// partialCloneMarks returns each mark of a partial clone the repository at dir
+// carries, reading no object: a remote whose promisor setting is true, in any
+// configuration scope git reads; a promisor pack in its object store; and an
+// extensions.partialClone setting. git fetches a missing object lazily from a
+// promisor remote, so any of them means reading history could reach the
+// network.
+func partialCloneMarks(ctx context.Context, dir string) ([]string, error) {
+	marks, err := promisorRemotes(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	packs, err := promisorPacks(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range packs {
+		marks = append(marks, "promisor pack "+p)
+	}
+	switch remote, err := gitx.ConfigValue(ctx, dir, "extensions.partialClone"); {
+	case err == nil:
+		marks = append(marks, fmt.Sprintf("extensions.partialClone is %q", remote))
+	case !errors.Is(err, gitx.ErrConfigUnset):
+		return nil, err
+	}
+	return marks, nil
+}
+
+// promisorRemotes returns, as "remote.<name>.promisor is true", each remote
+// the repository at dir sets as a promisor remote in any configuration scope
+// git reads.
+func promisorRemotes(ctx context.Context, dir string) ([]string, error) {
+	cmd := gitNoFetch(ctx, dir, "config", "--type=bool", "--get-regexp", `^remote\..+\.promisor$`)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		// git config exits 1, saying nothing, when no key matches.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && strings.TrimSpace(stderr.String()) == "" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading the remotes' promisor settings: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	var remotes []string
+	for line := range strings.Lines(stdout.String()) {
+		key, value, ok := strings.Cut(strings.TrimSuffix(line, "\n"), " ")
+		if !ok {
+			return nil, fmt.Errorf("reading the remotes' promisor settings: git config printed %q, which is no key and value", line)
+		}
+		if value == "true" {
+			remotes = append(remotes, key+" is true")
+		}
+	}
+	return remotes, nil
+}
+
+// promisorPacks returns the name of each promisor pack, the *.promisor file
+// git keeps beside a pack fetched from a promisor remote, in the object store
+// of the repository at dir.
+func promisorPacks(ctx context.Context, dir string) ([]string, error) {
+	cmd := gitNoFetch(ctx, dir, "rev-parse", "--git-path", "objects")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("locating the object store: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	objects := strings.TrimSpace(string(out))
+	if objects == "" {
+		return nil, errors.New("locating the object store: git printed no path")
+	}
+	if !filepath.IsAbs(objects) {
+		objects = filepath.Join(dir, objects)
+	}
+	paths, err := filepath.Glob(filepath.Join(objects, "pack", "*.promisor"))
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(paths))
+	for _, p := range paths {
+		names = append(names, filepath.Base(p))
+	}
+	return names, nil
+}
+
+// gitNoFetch returns the command that runs git with args in dir with
+// noFetchEnv, so it cannot fetch an object.
+func gitNoFetch(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), noFetchEnv()...)
+	return cmd
+}
+
 // exportCommit writes the tree of commit, as git archive exports it from the
-// repository at repo, into dst.
+// repository at repo, into dst. git archive runs with noFetchEnv, so a blob
+// the repository lacks fails the export, never fetches.
 func exportCommit(ctx context.Context, repo, commit, dst string) error {
-	cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", commit)
-	cmd.Dir = repo
+	cmd := gitNoFetch(ctx, repo, "archive", "--format=tar", commit)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
