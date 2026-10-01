@@ -10,7 +10,11 @@
 // interface or a type parameter (ledger SI-320): asserted from a captured
 // any, asserted from a captured map[string]any, asserted by a helper a
 // captured any is handed to, and a captured ~func type parameter passed
-// on. Control routes dereference a pointer loaded from
+// on. RegisterPtrStore and RegisterPtrStoreHelper each fill a route's
+// function-typed field through a pointer (ledger SI-321's probed fifth
+// class), in the registration code (PS1) or in a helper it calls (PS2):
+// the route's own reach holds no store, and the entry that runs the
+// registration fails closed on the dereference. Control routes dereference a pointer loaded from
 // a package-level variable, use a field-held container only benignly
 // (its length, its keys, a nil comparison), and compare a captured
 // function to nil before calling it; the analysis follows each.
@@ -29,6 +33,37 @@ type server struct {
 	handlers map[string]func() error
 	hch      chan http.Handler
 	hs       []http.Handler
+}
+
+// ptrStore holds a handler in a function-typed field that only a store
+// through a pointer fills (PS1, PS2).
+type ptrStore struct{ f http.HandlerFunc }
+
+func (s *ptrStore) serve(w http.ResponseWriter, r *http.Request) { s.f(w, r) }
+
+// setVia stores v through p (PS2).
+func setVia(p *http.HandlerFunc, v http.HandlerFunc) { *p = v }
+
+// directHandler returns a handler that mutates.
+func directHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { _ = app.Direct(r.Context()) }
+}
+
+// RegisterPtrStore stores the route's handler through a pointer to its
+// field in the registration code (PS1).
+func RegisterPtrStore(mux *http.ServeMux) {
+	ps1 := &ptrStore{}
+	pf := &ps1.f
+	*pf = directHandler()
+	mux.HandleFunc("/hole/ptrstore", ps1.serve)
+}
+
+// RegisterPtrStoreHelper stores the route's handler through a pointer to
+// its field in a helper the registration calls (PS2).
+func RegisterPtrStoreHelper(mux *http.ServeMux) {
+	ps2 := &ptrStore{}
+	setVia(&ps2.f, directHandler())
+	mux.HandleFunc("/hole/ptrstorehelper", ps2.serve)
 }
 
 // seam is a package-level pointer to a function, filled only at

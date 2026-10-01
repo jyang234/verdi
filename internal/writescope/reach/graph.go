@@ -112,8 +112,9 @@ type node struct {
 	out   map[int]bool
 	reads []fieldRead
 	// unfollowed lists the function values in the node's code the
-	// analysis cannot follow (valuecalls.go): an entry whose reach holds
-	// one fails closed.
+	// analysis recognizes it cannot follow (valuecalls.go; ledger SI-321's
+	// classes are not recognized): an entry whose reach holds one fails
+	// closed.
 	unfollowed []unfollowed
 }
 
@@ -343,7 +344,8 @@ func (g *Graph) siteNode(i int) (int, error) {
 
 // readChecker returns the fail-closed check for entry i's traversal:
 // every entry fails closed on a function value in its reach the analysis
-// cannot follow (checkUnfollowed); an entry a host dispatches (one with a
+// recognizes it cannot follow (checkUnfollowed; ledger SI-321's classes
+// are not recognized); an entry a host dispatches (one with a
 // site) must also resolve every function-typed field it reads
 // (checkReads).
 func (g *Graph) readChecker(i int) func(*node) error {

@@ -366,6 +366,50 @@ func testRouteEntriesFailClosedOnUnfollowableFunctionValues(t *testing.T, prog *
 	}
 }
 
+// testPointerStoreFailsClosedInTheRegisteringEntry pins ledger SI-321's
+// probed fifth class: a route's function-typed field filled through a
+// pointer, in the registration code (PS1) or in a helper it calls (PS2).
+// The route's own reach holds no store, so it reaches nothing; the entry
+// that runs the registration (a host, as serve is) fails closed on the
+// dereference, naming its site.
+func testPointerStoreFailsClosedInTheRegisteringEntry(t *testing.T, prog *reach.Program) {
+	const holes = "example.com/synth/holes"
+	routes, err := reach.RouteEntries(prog, holes, "workbench")
+	if err != nil {
+		t.Fatalf("RouteEntries: %v", err)
+	}
+	byName := map[string]reach.Entry{}
+	for _, e := range routes {
+		byName[e.Name] = e
+	}
+	tests := []struct {
+		name, register, route, wantErr string
+	}{
+		{"PS1", "RegisterPtrStore", "/hole/ptrstore", "*pf dereferences"},            // p := &s.f; *p = fv in the registration code
+		{"PS2", "RegisterPtrStoreHelper", "/hole/ptrstorehelper", "*p dereferences"}, // the same store in a helper the registration calls
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route, ok := byName[tt.route]
+			if !ok {
+				t.Fatalf("no route %s; got %v", tt.route, entryNames(routes))
+			}
+			host := reach.Entry{Surface: "cli", Name: "serve", Host: true, Roots: []reach.Root{{Func: lookupFunc(t, prog, holes, tt.register)}}}
+			g, err := reach.Build(prog, append(append([]reach.Entry{}, routes...), host))
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if hits, err := g.Reach(route, synthTargets(t, prog)); err != nil || len(hits) != 0 {
+				t.Fatalf("Reach(%s) = %v, %v; want nothing and no error: the route's own reach holds no store, so the catch is the registering entry's", tt.route, hitNames(hits), err)
+			}
+			hits, err := g.Reach(host, synthTargets(t, prog))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "fail closed") {
+				t.Fatalf("Reach(serve via %s) = %v, %v; want a fail-closed error naming %q", tt.register, hitNames(hits), err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // testDisclosedBoundaries pins the reachability classes ledger SI-321
 // discloses, which BL-136's rebuild is to close: each witnessed shape
 // (W1-W6) is today neither followed nor failed closed, and its control is
@@ -391,6 +435,7 @@ func testDisclosedBoundaries(t *testing.T, prog *reach.Program) {
 		{"/w1", "W1, a dependency (http.StripPrefix) holding an http.Handler", false},
 		{"/w2", "W2, a generic identity constrained by any", false},
 		{"/w3", "W3, a struct embedding http.HandlerFunc", false},
+		{"/w3c", "W3c, a struct embedding http.HandlerFunc held as an http.Handler", false},
 		{"/w3b", "W3b, a struct embedding a module function type", false},
 		{"/w4", "W4, a generic box's T-typed field", false},
 		{"/w5", "W5, a method-value handler of a module function type", false},

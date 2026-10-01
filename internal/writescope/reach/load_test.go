@@ -48,6 +48,7 @@ func TestSynth(t *testing.T) {
 		{"RouteEntries_FailClosedOnUnresolvedFieldCalls", testRouteEntriesFailClosedOnUnresolvedFieldCalls},
 		{"RouteEntries_FailClosedOnAnUnresolvableRegistration", testRouteEntriesFailClosedOnAnUnresolvableRegistration},
 		{"RouteEntries_FailClosedOnUnfollowableFunctionValues", testRouteEntriesFailClosedOnUnfollowableFunctionValues},
+		{"PointerStore_FailsClosedInTheRegisteringEntry", testPointerStoreFailsClosedInTheRegisteringEntry},
 		{"DisclosedBoundaries", testDisclosedBoundaries},
 		{"StringKeyedMap", testStringKeyedMap},
 		{"ExportedFuncs_ListsEveryCallableExport", testExportedFuncsListsEveryCallableExport},

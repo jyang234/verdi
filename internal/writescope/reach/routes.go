@@ -346,8 +346,9 @@ func (p *Program) rowArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root
 // implements (ledger SI-319), that is not a route-table row's value
 // (ledger SI-318): the
 // wrapped handler is named by the registration, outside the route's own
-// code, so the route starts there too. A value the flow cannot follow
-// fails closed.
+// code, so the route starts there too. A value the flow marks opaque
+// fails closed; one of ledger SI-321's classes is dropped unmarked (the
+// package doc).
 func (p *Program) wrapperArgs(pkg *Package, call *ast.CallExpr, env *rowEnv) ([]Root, error) {
 	var out []Root
 	for _, arg := range call.Args {

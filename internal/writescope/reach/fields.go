@@ -20,7 +20,9 @@ import (
 // function values it was handed. A value the flow cannot follow (an index
 // expression on anything but a package-level variable, a type assertion,
 // a range variable, a parameter of a function that escapes as a value or
-// of a function literal, ...) makes the result opaque. Three readers use
+// of a function literal, ...) makes the result opaque; a value of one of
+// ledger SI-321's classes is dropped without marking it (the package
+// doc). Three readers use
 // it (ledger SI-318): a read of a function-typed field, a call through a
 // function value captured from an enclosing function (valuecalls.go), and
 // a registration's wrapper argument (routes.go); each fails closed on an
@@ -410,9 +412,13 @@ func (r *resolver) site(s flowSite) {
 func (r *resolver) expr(pkg *Package, e ast.Expr, idx int) {
 	if t := pkg.Info.TypeOf(e); t != nil && !r.p.carriesFunc(t) {
 		if _, isTuple := t.(*types.Tuple); !isTuple {
-			// A value that cannot hold a function (a struct behind an
-			// interface, nil, a constant): class-hierarchy analysis
-			// dispatches its methods; there is nothing to follow.
+			// A value whose type does not carry a function (a struct
+			// behind an interface, nil, a constant): class-hierarchy
+			// analysis dispatches its methods; there is nothing to
+			// follow. Not so for ledger SI-321's class 2, a type
+			// parameter constrained by any, and class 3, a struct
+			// embedding a function type: each can hold a function, and
+			// the flow drops it here unfollowed and unmarked.
 			return
 		}
 	}

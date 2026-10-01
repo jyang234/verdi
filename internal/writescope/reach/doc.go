@@ -21,7 +21,8 @@
 // interface method resolves to every module type that implements the
 // interface, and a module type converted to a dependency's interface is an
 // edge to the methods that interface names. A verb that shows no target
-// in its reach therefore calls none through any of those shapes.
+// in its reach therefore calls none through any of those shapes, except
+// through the classes ledger SI-321 discloses (below).
 //
 // Soundness boundaries, disclosed rather than silently assumed:
 //   - reflection and unsafe are not followed; init functions and variable
@@ -52,8 +53,9 @@
 //     method called on a captured value that carries one, resolves through the
 //     flow, conversions transparent; every function-typed or function-carrying
 //     interface argument of a route registration's wrapper is a root of the
-//     route; and every value the analysis cannot follow fails closed, naming
-//     its site, in every entry whose reach holds it: a captured function value
+//     route; and every value the analysis cannot follow, except in the
+//     classes ledger SI-321 discloses (below), fails closed, naming its
+//     site, in every entry whose reach holds it: a captured function value
 //     used other than by calling it (passed on as an argument, assigned,
 //     returned, stored), a call through a captured value the flow cannot
 //     follow, a channel receive yielding a function value, a type assertion or
@@ -79,13 +81,16 @@
 //     struct{ http.HandlerFunc } called as ServeHTTP, or a struct embedding a
 //     module function type. (4) A method value of a module function type used
 //     as a handler, whose bound receiver is never rooted: mux.HandleFunc(p,
-//     serveFn(fv).ServeHTTP). One further class is suspected and unprobed: a
-//     store through a pointer to a function-typed field (p := &s.f; *p = fv),
-//     which is not a recorded field store. Hence spec/write-scope-registry
-//     ac-1 (a verb that reaches a mutating gitx function with no declaration
-//     fails the witness) is proven for the module's current code and the
-//     pinned evasion corpus, and disclosed-as-unproven beyond them until
-//     BL-136 lands;
+//     serveFn(fv).ServeHTTP). A fifth suspected class, a store through a
+//     pointer to a function-typed field (p := &s.f; *p = fv), is not a
+//     recorded field store, so a route that reads the field reaches nothing
+//     through it; both probes, the store in the registration code (PS1) and
+//     in a helper it calls (PS2), fail closed through the dereference rule in
+//     the entry that runs the store, and TestSynth pins both. Hence
+//     spec/write-scope-registry ac-1 (a verb that reaches a mutating gitx
+//     function with no declaration fails the witness) is proven for the
+//     module's current code and the pinned evasion corpus, and
+//     disclosed-as-unproven beyond them until BL-136 lands;
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type's method set (methods promoted
 //     from embedded fields included) has the methods of a module

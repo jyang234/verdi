@@ -15,7 +15,7 @@ import (
 // id is a generic identity (W2).
 func id[T any](v T) T { return v }
 
-// emb embeds a dependency's function type (W3).
+// emb embeds a dependency's function type (W3, W3c).
 type emb struct{ http.HandlerFunc }
 
 // serveFn is a module function type whose ServeHTTP calls its receiver.
@@ -56,6 +56,10 @@ func Register(mux *http.ServeMux) {
 	// W3: a struct embedding http.HandlerFunc, called by its promoted method.
 	w3 := emb{fv}
 	mux.HandleFunc("/w3", func(w http.ResponseWriter, r *http.Request) { w3.ServeHTTP(w, r) })
+
+	// W3c: the same struct held as an http.Handler, captured by a route.
+	w3c := http.Handler(emb{fv})
+	mux.HandleFunc("/w3c", func(w http.ResponseWriter, r *http.Request) { w3c.ServeHTTP(w, r) })
 
 	// W3b: a struct embedding a module function type.
 	w3b := emb2{serveFn(fv)}

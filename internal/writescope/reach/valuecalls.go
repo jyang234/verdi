@@ -14,10 +14,12 @@ import (
 // discloses fall outside these rules and are neither followed nor failed
 // closed until BL-136: values held by dependency code, values passed
 // through a type parameter constrained by any, an embedded function type,
-// a method-value handler's bound receiver, and (suspected) a store through
-// a pointer to a function-typed field; see the package doc. The graph is
-// use-based: a function
-// value is an edge from the code that names it. That code is in a verb's
+// and a method-value handler's bound receiver; see the package doc. A
+// store through a pointer to a function-typed field (p := &s.f; *p = fv)
+// is not a recorded field store; both probes (PS1, PS2) fail closed
+// through the dereference rule below in the entry that runs the store.
+// The graph is use-based: a function value is an edge from the code that
+// names it. That code is in a verb's
 // reach whenever the activation that produced the value is part of the
 // verb's execution: an uncaptured parameter's value was named by a caller,
 // which is in reach; an uncaptured local's by its own function; a call's
@@ -160,7 +162,7 @@ func (g *Graph) valueChecks(from int, pkg *Package, n ast.Node) {
 // function, or a method called on a captured value that holds one (an
 // interface a function type implements, or a named function type: the
 // method calls the function, ledger SI-319), resolves through the flow,
-// its values becoming edges (an unfollowable one fails closed). Any other
+// its values becoming edges (one the flow marks opaque fails closed). Any other
 // callee is covered: a field by the field flow, a call's result by its
 // callee, an uncaptured variable by the activation that produced it, and
 // an element, receive, assertion, or dereference by its own rule.
@@ -301,7 +303,8 @@ func (g *Graph) packageLoaded(pkg *Package, e ast.Expr, seen map[types.Object]bo
 }
 
 // checkUnfollowed fails closed on the first function value in n's code
-// the analysis cannot follow, naming its site.
+// recorded as unfollowable (n.unfollowed), naming its site; ledger
+// SI-321's classes are never recorded.
 func (g *Graph) checkUnfollowed(entry Entry, n *node) error {
 	if len(n.unfollowed) == 0 {
 		return nil
