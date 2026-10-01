@@ -293,14 +293,26 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		}
 	}
 
+	// UAT-023: the build branch is cut from the resolved default branch,
+	// never from whatever HEAD the checkout sits on — the same resolution
+	// and disclosure design start uses (resolveBranchBase, dc-7/I-130),
+	// read after every precondition and before the one mutation. It is cut
+	// at the resolved commit, not the ref's name, so the checkout sets no
+	// upstream to the default branch (a config write build start's
+	// declaration does not make), and the baseline is regenerated for that
+	// commit, the build branch's own.
+	base, ok := resolveBranchBaseResolution(ctx, root, "build start", stdout, stderr)
+	if !ok {
+		return 2
+	}
 	branch := "feature/" + specRef.Name
 
-	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
+	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, base.Commit); err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
 	}
 
-	regenerateBaseline(ctx, root, commit, spec, deps, "build start", stderr)
+	regenerateBaseline(ctx, root, base.Commit, spec, deps, "build start", stderr)
 
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: %s)\n", branch, spec.ID,
 		deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))

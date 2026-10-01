@@ -702,10 +702,19 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 // function is now a thin delegating wrapper that adds only the disclosure
 // prose this CLI verb prints.
 func resolveBranchBase(ctx context.Context, root, verb string, stdout, stderr io.Writer) (baseRef string, ok bool) {
+	res, ok := resolveBranchBaseResolution(ctx, root, verb, stdout, stderr)
+	return res.Ref, ok
+}
+
+// resolveBranchBaseResolution is resolveBranchBase returning the whole
+// resolution — the base ref and its commit — with the same disclosure
+// lines, for a caller that cuts at the resolved commit itself (build
+// start, UAT-023).
+func resolveBranchBaseResolution(ctx context.Context, root, verb string, stdout, stderr io.Writer) (branchbase.Resolution, bool) {
 	res, err := branchbase.Resolve(ctx, root)
 	if err != nil {
 		fmt.Fprintln(stderr, verb+":", err)
-		return "", false
+		return branchbase.Resolution{}, false
 	}
 	switch res.Kind {
 	case branchbase.ResolvedDefault:
@@ -715,15 +724,15 @@ func resolveBranchBase(ctx context.Context, root, verb string, stdout, stderr io
 		// printing it verbatim both names the base and discloses which of
 		// the two was used, with no separate annotation needed.
 		fmt.Fprintf(stdout, "%s: base %s @ %s\n", verb, res.Ref, shortSHA(res.Commit))
-		return res.Ref, true
+		return res, true
 	case branchbase.HeadFallback:
 		fmt.Fprintf(stdout, "%s: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", verb, shortSHA(res.Commit))
-		return "HEAD", true
+		return res, true
 	default:
 		// origin IS configured, but the default branch still could not be
 		// resolved: exactly the stale-default hazard UAT-021 reported.
 		fmt.Fprintf(stderr, "%s: %s\n", verb, unresolvableDefaultBranchMessage(ctx, root))
-		return "", false
+		return branchbase.Resolution{}, false
 	}
 }
 
