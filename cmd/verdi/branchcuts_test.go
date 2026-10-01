@@ -105,10 +105,11 @@ func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 	}
 
 	// UAT-031's build-start half, read by ledger SI-333: build start
-	// refuses, before any mutation and with its own refusal convention
-	// (exit 1, "build start: refused: ..."), a feature/<name> that already
-	// exists as a local branch or as a remote-tracking branch of the remote
-	// its base resolves from (origin, for origin/main).
+	// refuses, before any mutation and with its existing convention for a
+	// branch that already exists (exit 2, naming the branch and "already
+	// exists"), a feature/<name> that already exists as a local branch or
+	// as a remote-tracking branch of the remote its base resolves from
+	// (origin, for origin/main).
 	collisions := []struct {
 		name string
 		seed func(t *testing.T, fx *ritualwitness.Fixture)
@@ -130,8 +131,8 @@ func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 			d := ritualwitness.Binary{Path: bin, Args: []string{"build", "start", "spec/widget-story"}}
 			res := ritualwitness.RunOn(t, ctx, fx, d, ritualDeclaration(t, "build_start"))
 			logVerdicts(t, res)
-			if res.Exit != 1 || res.Err == nil || !strings.Contains(res.Err.Error(), "build start: refused:") || !strings.Contains(res.Err.Error(), "feature/widget-story") {
-				t.Fatalf("build start = exit %d, %v; want the exit-1 refusal naming feature/widget-story", res.Exit, res.Err)
+			if res.Exit != 2 || res.Err == nil || !strings.Contains(res.Err.Error(), "build start: feature/widget-story already exists as") {
+				t.Fatalf("build start = exit %d, %v; want the exit-2 refusal naming feature/widget-story as already existing", res.Exit, res.Err)
 			}
 			for _, c := range []struct {
 				what          string

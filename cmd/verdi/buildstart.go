@@ -310,14 +310,17 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 
 	// UAT-031's build-start half (ledger SI-333): a build branch that
 	// already exists, locally or on the remote the base resolves from, is
-	// refused before the cut — a verdict, like every other build start
-	// precondition, never a second local branch beside the remote's.
+	// refused before the cut, never cut a second time beside the remote's.
+	// The refusal keeps build start's existing convention for a branch
+	// that already exists — exit 2, operational, naming the branch and
+	// "already exists" (TestBuildCommandsFromATCRunway_Refusals) — which
+	// git's own checkout -b gave the local case before this check.
 	if collision, cerr := buildBranchCollision(ctx, root, branch, base); cerr != nil {
 		fmt.Fprintln(stderr, "build start:", cerr)
 		return 2
 	} else if collision != "" {
-		fmt.Fprintf(stderr, "build start: refused: %s already exists as %s; a build branch is cut once (UAT-031)\n", branch, collision)
-		return 1
+		fmt.Fprintf(stderr, "build start: %s already exists as %s; a build branch is cut once (UAT-031)\n", branch, collision)
+		return 2
 	}
 
 	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, base.Commit); err != nil {
