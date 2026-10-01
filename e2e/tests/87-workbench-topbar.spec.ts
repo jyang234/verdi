@@ -320,6 +320,42 @@ test.describe("chrome-and-tokens", () => {
       }
     }
 
+    // A background snapshot refresh not caused by a click keeps the open
+    // posture open (SI-323 (3); SI-331): with the disclosure open, a typed
+    // mutation posted outside the page changes the revision, the visible
+    // page's next poll tick applies it, and the swapped-in posture group
+    // is still expanded and current.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(design);
+    await page.getByTestId("topbar-posture").click();
+    await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
+    const refreshSnap = await (await page.request.get(design + "/snapshot")).json();
+    const refreshMutate = await page.request.post(design + "/api/mutate_draft", {
+      data: {
+        request: {
+          schema: "verdi.draftmutation/v1",
+          spec: "spec/" + SHOWCASE.DESIGN_SPEC,
+          base_digest: refreshSnap.base_digest,
+          base_spec_b64: refreshSnap.base_spec_b64,
+          expected: refreshSnap.expected,
+          operations: [
+            {
+              op: "edit-ac",
+              id: SHOWCASE.AC_IDS[1],
+              text: "a background refresh keeps the open posture open [87-refresh]",
+              evidence: ["attestation"],
+              anchor: "#" + SHOWCASE.AC_IDS[1],
+            },
+          ],
+        },
+      },
+    });
+    expect(refreshMutate.status(), await refreshMutate.text()).toBe(200);
+    await expect(page.getByTestId("card-" + SHOWCASE.AC_IDS[1])).toContainText("[87-refresh]", { timeout: 8_000 });
+    await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
+    await expect(bar(page).getByTestId("asd-posture-tree")).toHaveAttribute("data-dirty", "dirty");
+    await expect(page.getByTestId("asd-posture-accepted-branch")).toBeVisible();
+
     // With JavaScript disabled, one activation of the posture text reveals
     // the full posture: a native <details>, so the summary click is the
     // browser's own toggle, no script involved.

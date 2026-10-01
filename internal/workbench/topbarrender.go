@@ -53,22 +53,18 @@ type topBarOptions struct {
 }
 
 // topBarScript enhances the posture disclosure to the handoff's popover
-// (dc-2): Escape closes an open posture and returns focus to its summary.
-// It finds the disclosure at event time, so the wall's refresh can
-// replace the posture group underneath it. The tag names what it
-// enhances, so a page's guard against raw source markup (a literal
-// <script> tag from imported text) keeps its meaning.
-//
-// dc-2's other closing gesture, an outside click, is NOT enhanced here,
-// disclosed for adjudication (lane F1b, 2026-10-01): a closed story's
-// Playwright evidence (50-design-workbench, "background refresh
-// preserves unsaved edits, expansion, and the last result") opens this
-// disclosure, double-clicks a card to edit it, and asserts the disclosure
-// is still expanded — a behavior dc-4 keeps whole and never drops — and
-// an outside click that closes the disclosure contradicts it. The
-// disclosure therefore closes by its summary and by Escape until the
-// two are reconciled; adding the outside click back is one handler.
-const topBarScript = `<script data-enhances="topbar-posture">(function(){"use strict";var bar=document.querySelector('[data-testid="topbar"]');if(!bar)return;document.addEventListener("keydown",function(e){if(e.key!=="Escape")return;var d=bar.querySelector("details.topbar-posture[open]");if(!d)return;e.preventDefault();d.removeAttribute("open");var s=d.querySelector("summary");if(s)s.focus();});})();</script>`
+// (dc-2; ledger SI-331): Escape closes an open posture and returns focus
+// to its summary; a pointer down outside the posture group closes it
+// and returns focus to the summary when the press leaves focus nowhere
+// (the pressed thing is not focusable), so a press on a card or a
+// control keeps the focus it earns. A press on the group's own controls
+// (its Refresh) is inside, so the open disclosure survives a refresh the
+// user asks for, as a snapshot refresh keeps it (SI-323 (3)). It finds
+// the disclosure at event time, so the wall's refresh can replace the
+// posture group underneath it. The tag names what it enhances, so a
+// page's guard against raw source markup (a literal <script> tag from
+// imported text) keeps its meaning.
+const topBarScript = `<script data-enhances="topbar-posture">(function(){"use strict";var bar=document.querySelector('[data-testid="topbar"]');if(!bar)return;function shown(){return bar.querySelector("details.topbar-posture[open]");}function dismiss(d,refocus){d.removeAttribute("open");if(!refocus)return;var s=d.querySelector("summary");if(s)s.focus();}document.addEventListener("keydown",function(e){if(e.key!=="Escape")return;var d=shown();if(!d)return;e.preventDefault();dismiss(d,true);});document.addEventListener("pointerdown",function(e){var d=shown();if(!d)return;var g=d.closest("#asd-posture")||d;if(g.contains(e.target))return;dismiss(d,false);setTimeout(function(){if(!document.activeElement||document.activeElement===document.body)dismiss(d,true);},0);});})();</script>`
 
 // renderTopBar draws the bar for one page from its facts and options.
 // Every fact is escaped here; the option fragments arrive pre-rendered by
