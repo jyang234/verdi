@@ -115,7 +115,9 @@ func unprovenFact(reason string) barFact {
 // §4.2): the checkout's Git facts, resolved once per page by
 // resolveBranchPosture. The wall's asdView embeds it; every other page's
 // bar reads it directly. The why fields say why an empty fact is
-// unresolved.
+// unresolved; treeWhy, when set, says why the working tree's state is
+// (there is none: a remote-only branch's sealed wall), and Dirty is then
+// meaningless.
 type branchPosture struct {
 	Checkout         string
 	Branch           string
@@ -129,6 +131,7 @@ type branchPosture struct {
 	defaultBranchWhy string
 	worktreeHeadWhy  string
 	acceptedHeadWhy  string
+	treeWhy          string
 }
 
 // postureReader is the posture model's Git port (04 §port pattern:
@@ -207,7 +210,10 @@ func (bp *branchPosture) facts() barPosture {
 		AcceptedHead:   valueOr(bp.AcceptedHead, bp.acceptedHeadWhy, "the accepted HEAD could not be resolved"),
 		AheadBehind:    barFact{Text: unprovenWord + ": " + aheadBehindUnresolved, Unproven: aheadBehindUnresolved},
 	}
-	if bp.Dirty {
+	switch {
+	case bp.treeWhy != "":
+		p.Tree = barTree{State: unprovenWord, barFact: unprovenFact(bp.treeWhy)}
+	case bp.Dirty:
 		p.Tree = barTree{State: "dirty", barFact: provenFact("uncommitted changes")}
 	}
 	if bp.AheadBehindKnown {
@@ -258,6 +264,9 @@ func specBarFacts(p *BoardProjection, asd *asdView) barFacts {
 	}
 	posture := asd.facts() // the embedded branchPosture's
 	digest := provenFact(asd.BaseDigest)
+	if asd.baseDigestWhy != "" {
+		digest = unprovenFact(asd.baseDigestWhy)
+	}
 	posture.BaseDigest = &digest
 	return barFacts{Title: p.Title, Spec: spec, Posture: posture}
 }

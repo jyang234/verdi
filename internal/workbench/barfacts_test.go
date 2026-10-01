@@ -188,10 +188,10 @@ func TestSpecBarFacts_ServedWall(t *testing.T) {
 }
 
 // TestSpecBarFacts_SealedWall: a remote-only design branch's sealed wall
-// (sealedASDView) has no working tree, so its heads, accepted branch, and
-// ahead/behind are disclosed-unproven with the reason, never omitted
-// (SI-323 (1)). The working tree and base digest keep the words today's
-// sealed posture row prints ("clean", an empty digest) — no visible change.
+// (sealedASDView) has no working tree, so its heads, accepted branch,
+// ahead/behind, working-tree state, and base digest are disclosed-unproven
+// with the reason, never omitted and never a false "clean" (SI-323 (1), as
+// refined at c32f185c).
 func TestSpecBarFacts_SealedWall(t *testing.T) {
 	root := newBranchBoardFixture(t)
 	b := newBranchBoards(root, Deps{}, &boardSpecServer{root: root})
@@ -205,7 +205,10 @@ func TestSpecBarFacts_SealedWall(t *testing.T) {
 	if !strings.HasPrefix(p.Checkout.Text, "origin/design/remote-only (remote-tracking ref") || p.Branch.Text != "design/remote-only" {
 		t.Fatalf("checkout/branch = %v / %v", p.Checkout, p.Branch)
 	}
-	for name, f := range map[string]barFact{"worktree head": p.WorktreeHead, "accepted branch": p.AcceptedBranch, "accepted head": p.AcceptedHead} {
+	if p.BaseDigest == nil {
+		t.Fatal("the sealed wall's base digest is omitted, want disclosed-unproven")
+	}
+	for name, f := range map[string]barFact{"worktree head": p.WorktreeHead, "accepted branch": p.AcceptedBranch, "accepted head": p.AcceptedHead, "working tree": p.Tree.barFact, "base digest": *p.BaseDigest} {
 		if f.Unproven == "" || !strings.Contains(f.Unproven, "remote-only") {
 			t.Errorf("%s = %v, want disclosed-unproven naming the remote-only render", name, f)
 		}
@@ -216,8 +219,8 @@ func TestSpecBarFacts_SealedWall(t *testing.T) {
 	if got.Spec == nil || got.Spec.Mode != "readonly" || got.Spec.Bytes.State != "draft" || got.Spec.Bytes.Word != "proposed" {
 		t.Fatalf("spec facts = %+v", got.Spec)
 	}
-	if p.Tree.State != "clean" || p.BaseDigest == nil || p.BaseDigest.Text != "" {
-		t.Fatalf("tree / base digest = %v / %v, want today's sealed row words", p.Tree, p.BaseDigest)
+	if p.Tree.State != unprovenWord || p.Tree.Text != unprovenWord || p.BaseDigest.Text != unprovenWord {
+		t.Fatalf("tree / base digest = %+v / %v, want both disclosed-unproven", p.Tree, p.BaseDigest)
 	}
 }
 

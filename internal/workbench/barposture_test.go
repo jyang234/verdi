@@ -13,7 +13,13 @@ import (
 // test below holds the facts-driven row to: the row's markup is
 // unchanged, so the facts carry everything the row shows
 // (spec/chrome-and-tokens-v2, SI-323 (3)).
-func legacyASDPosture(p *BoardProjection, asd *asdView) string {
+//
+// noWorktree marks a remote-only branch's sealed wall, whose row changes
+// in exactly two facts, the one visible change SI-323 (1) authorizes (as
+// refined at c32f185c): the working tree reads "unproven" (data-dirty
+// "unproven") instead of a false "clean", and the base digest reads
+// "unproven" instead of empty.
+func legacyASDPosture(p *BoardProjection, asd *asdView, noWorktree bool) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	b.WriteString(`<section class="asd-posture" id="asd-posture" data-testid="asd-posture" aria-label="Repository posture">`)
@@ -29,6 +35,9 @@ func legacyASDPosture(p *BoardProjection, asd *asdView) string {
 	dirtyWord, dirtyState := "clean", "clean"
 	if asd.Dirty {
 		dirtyWord, dirtyState = "uncommitted changes", "dirty"
+	}
+	if noWorktree {
+		dirtyWord, dirtyState = "unproven", "unproven"
 	}
 	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + dirtyState + `">working tree: ` + dirtyWord + `</span>`)
 	b.WriteString(`<button type="button" class="asd-refresh" id="asd-refresh" data-testid="asd-refresh">Refresh</button>`)
@@ -46,7 +55,11 @@ func legacyASDPosture(p *BoardProjection, asd *asdView) string {
 	} else {
 		writeReadinessFact(&b, "Ahead/behind", "unproven: the accepted branch could not be resolved")
 	}
-	writeReadinessFact(&b, "Base digest", asd.BaseDigest)
+	digest := asd.BaseDigest
+	if noWorktree {
+		digest = "unproven"
+	}
+	writeReadinessFact(&b, "Base digest", digest)
 	b.WriteString(`</dl></details>`)
 	b.WriteString(`</section>`)
 	return b.String()
@@ -57,12 +70,15 @@ func legacyASDPosture(p *BoardProjection, asd *asdView) string {
 // from the projection and asdView — over synthetic postures covering
 // every branch of the row, and over the wall fixtures' real loads (an
 // authoring wall, a sealed record on the default branch, and a
-// remote-only branch's sealed wall).
+// remote-only branch's sealed wall, which differs in exactly its working
+// tree and base digest, now disclosed-unproven).
 func TestASDPosture_RendersFromBarFactsByteIdentically(t *testing.T) {
 	type wallCase struct {
 		name string
 		p    *BoardProjection
 		asd  *asdView
+		// noWorktree marks the remote-only sealed wall (legacyASDPosture).
+		noWorktree bool
 	}
 	var cases []wallCase
 	postures := map[string]branchPosture{
@@ -113,11 +129,11 @@ func TestASDPosture_RendersFromBarFactsByteIdentically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadSealed: %v", err)
 	}
-	cases = append(cases, wallCase{name: "remote-only sealed wall", p: proj, asd: sealedASDView("design/remote-only", "origin/design/remote-only", proj)})
+	cases = append(cases, wallCase{name: "remote-only sealed wall", p: proj, asd: sealedASDView("design/remote-only", "origin/design/remote-only", proj), noWorktree: true})
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			want := legacyASDPosture(tc.p, tc.asd)
+			want := legacyASDPosture(tc.p, tc.asd, tc.noWorktree)
 			bar := specBarFacts(tc.p, tc.asd)
 			if got := asdPostureHTML(&bar); got != want {
 				t.Fatalf("posture row from the bar's facts differs from today's row\n got: %s\nwant: %s", got, want)

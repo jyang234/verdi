@@ -218,9 +218,11 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 // sealed render: no working tree exists, so there is no base to mutate
 // against, no expected identity, and no capabilities consultation — each
 // disclosed honestly (the shell's context row carries the exact reason)
-// rather than fabricated. Its worktree HEAD, default branch, and accepted
-// HEAD are unresolved for the same reason, which the posture model
-// records so the top bar discloses them (SI-323 (1)).
+// rather than fabricated. Its worktree HEAD, default branch, accepted
+// HEAD, working-tree state, and base digest are unresolved for the same
+// reason, which the posture model records so the posture row and the top
+// bar disclose them — never a false "clean" or an empty digest (SI-323
+// (1)).
 func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 	noWorktree := fmt.Sprintf("branch %s exists only as remote-tracking ref %s: this remote-only render reads that ref's committed content and resolves no working tree, worktree HEAD, or default branch", branch, ref)
 	v := &asdView{
@@ -230,7 +232,9 @@ func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 			defaultBranchWhy: noWorktree,
 			worktreeHeadWhy:  noWorktree,
 			acceptedHeadWhy:  noWorktree,
+			treeWhy:          fmt.Sprintf("remote-only branch %s: no working tree", branch),
 		},
+		baseDigestWhy:  fmt.Sprintf("remote-only branch %s: no working tree, so no working-tree spec bytes to digest", branch),
 		StateFormal:    proj.Status,
 		SlugPattern:    specNameRe.String(),
 		NextIDs:        map[string]string{},

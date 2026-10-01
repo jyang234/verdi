@@ -546,6 +546,11 @@ type asdView struct {
 	StubSlugs        []string
 	EdgeFacts        map[string][]asdEdgeFact
 
+	// baseDigestWhy, when set, says why BaseDigest is unresolved: a
+	// remote-only branch's sealed wall has no working-tree spec bytes to
+	// digest (sealedASDView).
+	baseDigestWhy string
+
 	// ImportRecordHref is the read-only source-record view's address when
 	// this board's working tree carries a committed import record for the
 	// spec (spec-import-contract: "The review UI must show an adjacent
