@@ -186,6 +186,12 @@ on:
       - "testdata/**"
       - "scripts/**"
       - "verdi.bindings.yaml"
+      # The lint configurations and the strict baseline: a push changing
+      # only one of them still runs make lint and make lint-strict
+      # (spec/strict-lint-gate dc-2).
+      - ".golangci.yml"
+      - ".golangci.strict.yml"
+      - ".golangci.strict-baseline.json"
   workflow_call: {}
 
 jobs:

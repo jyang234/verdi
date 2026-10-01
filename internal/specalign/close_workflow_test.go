@@ -37,8 +37,8 @@ func closeDispatchPath(root string) string {
 // close-evidence workflow owns that branch namespace now, so one push to a
 // close/** branch runs the evidence job once, not twice), while leaving
 // every other branch's path-filtered behaviour untouched: branches-ignore
-// is EXACTLY ["close/**"] (no other branch is carved out), and the paths:
-// list and the absence of a `branches:` allow-list are unchanged.
+// is EXACTLY ["close/**"] (no other branch is carved out), the paths: list
+// is exactly the pinned one, and there is still no `branches:` allow-list.
 func TestVerifyWorkflowExcludesCloseBranchesFromItsOwnPushTrigger(t *testing.T) {
 	doc := decodeWorkflow(t, workflowPath(verdiRepoRoot, "verify.yml"))
 	if doc.On.Push == nil {
@@ -63,16 +63,21 @@ func TestVerifyWorkflowExcludesCloseBranchesFromItsOwnPushTrigger(t *testing.T) 
 	if want := []string{"branches-ignore", "paths", "tags"}; !slices.Equal(doc.On.Push.Keys, want) {
 		t.Errorf("verify.yml: push trigger body must declare exactly %v, got %v (tags-ignore:, paths-ignore:, or any other filter changes which pushes produce evidence)", want, doc.On.Push.Keys)
 	}
+	// The three lint files (spec/strict-lint-gate dc-2: "a change pushed
+	// straight to the default branch is checked too"): a push changing only
+	// a lint configuration or the strict baseline must run the static job's
+	// make lint and make lint-strict (review finding S1-B2, BL-125).
 	wantPaths := []string{
 		"**.go", "go.mod", "go.sum", "Makefile", "e2e/**",
 		".github/workflows/**", "testdata/**", "scripts/**", "verdi.bindings.yaml",
+		".golangci.yml", ".golangci.strict.yml", ".golangci.strict-baseline.json",
 	}
 	got := append([]string(nil), doc.On.Push.Paths...)
 	want := append([]string(nil), wantPaths...)
 	slices.Sort(got)
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
-		t.Errorf("verify.yml: push trigger paths: must stay byte-identical to before this lane's edit, got %v, want %v", doc.On.Push.Paths, wantPaths)
+		t.Errorf("verify.yml: push trigger paths: must be exactly the pinned list, got %v, want %v", doc.On.Push.Paths, wantPaths)
 	}
 }
 
