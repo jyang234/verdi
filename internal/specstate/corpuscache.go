@@ -17,7 +17,11 @@ const corpusCacheLimit = 4
 // corpusKey names one successor corpus: the store root it was read from
 // and the default-branch commit it was read at. commit is always a
 // resolved commit id, never a ref name, so a default branch that moves
-// resolves to a new key and is scanned again.
+// resolves to a new key and is scanned again. The commit id names the
+// whole tree — the spec zones AND the conflict set the story-supersession
+// scan reads at the same commit (scanConflicts) — so a commit that changes
+// only a conflict is a new key, and a changed conflict can never be masked
+// by a cached corpus.
 type corpusKey struct {
 	root   string
 	commit string
@@ -33,9 +37,10 @@ type corpusEntry struct {
 // corpusKey, so the one-spec Resolve calls a whole-store operation makes
 // (dex build, lint) read a default-branch commit's corpus once instead of
 // once per spec. A corpus depends only on the Git objects at its commit —
-// scanSuccessors reads the tree and blobs at that commit and never the
-// working tree, and its decode is a pure function of those bytes — so a
-// cached corpus is what a fresh scan under the same key would build.
+// scanSuccessors reads the tree and blobs at that commit (spec zones and
+// conflicts alike) and never the working tree, and its decode is a pure
+// function of those bytes — so a cached corpus is what a fresh scan under
+// the same key would build.
 //
 // A failed scan is never stored: it leaves no entry, and the next get for
 // that key scans again. Concurrent gets for a missing key share one scan:

@@ -1,0 +1,182 @@
+{
+  "config": {
+    "argv": [
+      "node",
+      "/verdi/e2e/node_modules/.bin/playwright",
+      "test",
+      "-c",
+      "/verdi/internal/playwrightjson/testdata/capture/sigint.config.ts",
+      "--workers=1",
+      "--retries=0",
+      "--pass-with-no-tests",
+      "--reporter=json",
+      "--output=/capture-tmp/output-sigint"
+    ],
+    "configFile": "/verdi/internal/playwrightjson/testdata/capture/sigint.config.ts",
+    "rootDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/capture-tmp/output-sigint",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/verdi/internal/playwrightjson/testdata/capture/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "/[\\\\/]sigint\\.spec\\.ts$/"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "sigint.spec.ts",
+      "file": "sigint.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "interrupted run",
+          "file": "sigint.spec.ts",
+          "line": 7,
+          "column": 6,
+          "specs": [
+            {
+              "title": "passes before the interrupt",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T15:49:27.271Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8f42efcc426f6c34374c-ca315f4cabed44ed4db4",
+              "file": "sigint.spec.ts",
+              "line": 8,
+              "column": 7
+            },
+            {
+              "title": "is running when the run is interrupted",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "interrupted",
+                      "duration": 62,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-30T15:49:27.292Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8f42efcc426f6c34374c-4b159742a28523ac4658",
+              "file": "sigint.spec.ts",
+              "line": 12,
+              "column": 7
+            },
+            {
+              "title": "never starts",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8f42efcc426f6c34374c-bb91ac94f8a6d6ffc06c",
+              "file": "sigint.spec.ts",
+              "line": 18,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-30T15:49:26.998Z",
+    "duration": 371.182,
+    "expected": 1,
+    "skipped": 2,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
