@@ -93,6 +93,26 @@ func liveMutants() []liveMutant {
 		{"undeclaring the /b/ git-commit action (R1-B1)", func(d *[]ws.Declaration, _ *[]ws.AwaitingFix, _ *[]ws.Classified) {
 			dropVerb(*d, ws.Workbench(branchBoardCommit))
 		}, "verb workbench:" + branchBoardCommit + " reaches internal/gitx.AddAll"},
+		{"BM9: accept folded into the carried declaration (R1-B2)", func(d *[]ws.Declaration, a *[]ws.AwaitingFix, _ *[]ws.Classified) {
+			var kept []ws.Declaration
+			for _, decl := range *d {
+				switch decl.Ritual {
+				case "accept_diagram":
+					continue
+				case ws.RitualBoardCommitPush:
+					decl.Verbs = append(decl.Verbs, ws.CLI("accept"))
+				}
+				kept = append(kept, decl)
+			}
+			*d = kept
+			var fixes []ws.AwaitingFix
+			for _, f := range *a {
+				if f.Ritual != "accept_diagram" {
+					fixes = append(fixes, f)
+				}
+			}
+			*a = fixes
+		}, "cli:accept"},
 	}
 }
 

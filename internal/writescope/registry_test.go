@@ -40,6 +40,13 @@ func TestRegistry_ReturnsAFreshValueEachCall(t *testing.T) {
 	}
 }
 
+// The board's Commit and push, at the root and under the /b/{branch}
+// mount: the only verbs a carried declaration may name.
+const (
+	rootBoardCommit = "/board/spec/{name}/api/git-commit"
+	bBoardCommit    = "/b/{branch}/board/spec/{name}/api/git-commit"
+)
+
 func TestValidateRegistry_Rejects(t *testing.T) {
 	scoped := func(ritual string, verbs ...ws.Verb) ws.Declaration {
 		return ws.Declaration{
@@ -64,11 +71,18 @@ func TestValidateRegistry_Rejects(t *testing.T) {
 		{"a verb in two declarations", []ws.Declaration{scoped("a", ws.CLI("x")), scoped("b", ws.CLI("x"))}, nil, "cli:x"},
 		{"carried on a ritual other than the board's commit and push", []ws.Declaration{carried("accept_diagram", ws.CLI("accept"))}, nil, "carried"},
 		{"carried on a second declaration", []ws.Declaration{
-			carried(ws.RitualBoardCommitPush, ws.Workbench("/x")),
+			carried(ws.RitualBoardCommitPush, ws.Workbench(rootBoardCommit)),
 			carried("accept_diagram", ws.CLI("accept")),
 		}, nil, "carried"},
+		// R1-B2 / mutant BM9: accept folded into the carried declaration.
+		{"a carried declaration naming a verb beyond the board's Commit and push", []ws.Declaration{
+			carried(ws.RitualBoardCommitPush, ws.Workbench(rootBoardCommit), ws.Workbench(bBoardCommit), ws.CLI("accept")),
+		}, nil, "cli:accept"},
+		{"a carried declaration naming another workbench action", []ws.Declaration{
+			carried(ws.RitualBoardCommitPush, ws.Workbench("/board/spec/{name}/api/create")),
+		}, nil, "carried"},
 		{"awaiting fix on an unknown ritual", []ws.Declaration{scoped("a", ws.CLI("x"))}, []ws.AwaitingFix{{Ritual: "b", Path: "verdi x", Defect: "d"}}, "unknown"},
-		{"awaiting fix on a declaration that is not scoped", []ws.Declaration{carried(ws.RitualBoardCommitPush, ws.Workbench("/x"))}, []ws.AwaitingFix{{Ritual: ws.RitualBoardCommitPush, Path: "p", Defect: "d"}}, "scoped"},
+		{"awaiting fix on a declaration that is not scoped", []ws.Declaration{carried(ws.RitualBoardCommitPush, ws.Workbench(rootBoardCommit))}, []ws.AwaitingFix{{Ritual: ws.RitualBoardCommitPush, Path: "p", Defect: "d"}}, "scoped"},
 		{"awaiting fix without a path", []ws.Declaration{scoped("a", ws.CLI("x"))}, []ws.AwaitingFix{{Ritual: "a", Defect: "d"}}, "path"},
 		{"awaiting fix without a defect", []ws.Declaration{scoped("a", ws.CLI("x"))}, []ws.AwaitingFix{{Ritual: "a", Path: "p"}}, "defect"},
 		{"the same awaiting path twice", []ws.Declaration{scoped("a", ws.CLI("x"))}, []ws.AwaitingFix{{Ritual: "a", Path: "p", Defect: "d"}, {Ritual: "a", Path: "p", Defect: "d"}}, "twice"},
@@ -85,11 +99,27 @@ func TestValidateRegistry_Rejects(t *testing.T) {
 
 func TestValidateRegistry_AcceptsTheCarriedBoardCommitAlone(t *testing.T) {
 	d := ws.Declaration{
-		Ritual: ws.RitualBoardCommitPush, Verbs: []ws.Verb{ws.Workbench("/x")},
+		Ritual: ws.RitualBoardCommitPush, Verbs: []ws.Verb{ws.Workbench(bBoardCommit), ws.Workbench(rootBoardCommit)},
 		RefsMove: []ws.RefPattern{ws.RefCheckedOut}, StagePaths: []ws.PathPattern{ws.PathWholeTree},
 		IndexCarry: ws.CarryCarried, UntrackedMayEnter: true, MayPush: true,
 	}
 	if err := ws.ValidateRegistry([]ws.Declaration{d}, nil); err != nil {
 		t.Fatalf("ValidateRegistry = %v, want nil", err)
+	}
+}
+
+func TestCarriedVerbs_AreTheBoardsCommitAndPush(t *testing.T) {
+	var got []string
+	for _, v := range ws.CarriedVerbs() {
+		got = append(got, v.String())
+	}
+	want := "workbench:" + bBoardCommit + ",workbench:" + rootBoardCommit
+	if strings.Join(got, ",") != want {
+		t.Fatalf("CarriedVerbs() = %v, want %s", got, want)
+	}
+	first := ws.CarriedVerbs()
+	first[0] = ws.CLI("mutated")
+	if ws.CarriedVerbs()[0] == ws.CLI("mutated") {
+		t.Fatal("CarriedVerbs() shares state between calls")
 	}
 }

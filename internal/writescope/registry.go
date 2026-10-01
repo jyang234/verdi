@@ -10,6 +10,18 @@ import (
 // decision 2026-09-30).
 const RitualBoardCommitPush = "board_commit_push"
 
+// CarriedVerbs returns the only verbs a carried declaration may name: the
+// board's Commit and push, at the root and under the /b/{branch} managed
+// worktree mount (parent dc-3, dc-11; the owner's 2026-09-30 decision;
+// ledger SI-314 (1)). A carried declaration is checked verb by verb, so
+// no other verb can be folded into the one carried ritual.
+func CarriedVerbs() []Verb {
+	return []Verb{
+		Workbench("/b/{branch}/board/spec/{name}/api/git-commit"),
+		Workbench("/board/spec/{name}/api/git-commit"),
+	}
+}
+
 // Registry returns the write-scope declaration of every verb that mutates
 // a git repository, one declaration per ritual. Each declaration states
 // what its ritual does at this story's base, read through parent dc-7,
@@ -261,11 +273,16 @@ func Registry() []Declaration {
 
 // ValidateRegistry reports the first problem with decls and awaiting:
 // an invalid declaration, a ritual or verb declared twice, a carried
-// declaration other than the board's Commit and push, or an awaiting-fix
-// entry that names no scoped declaration.
+// declaration other than the board's Commit and push or one naming a verb
+// outside CarriedVerbs, or an awaiting-fix entry that names no scoped
+// declaration.
 func ValidateRegistry(decls []Declaration, awaiting []AwaitingFix) error {
 	rituals := map[string]Declaration{}
 	owner := map[Verb]string{}
+	carriable := map[Verb]bool{}
+	for _, v := range CarriedVerbs() {
+		carriable[v] = true
+	}
 	for _, d := range decls {
 		if err := d.Validate(); err != nil {
 			return err
@@ -280,8 +297,15 @@ func ValidateRegistry(decls []Declaration, awaiting []AwaitingFix) error {
 			}
 			owner[v] = d.Ritual
 		}
-		if d.IndexCarry == CarryCarried && d.Ritual != RitualBoardCommitPush {
-			return fmt.Errorf("writescope: %s declares carried; only %s may (parent dc-3, dc-11)", d.Ritual, RitualBoardCommitPush)
+		if d.IndexCarry == CarryCarried {
+			if d.Ritual != RitualBoardCommitPush {
+				return fmt.Errorf("writescope: %s declares carried; only %s may (parent dc-3, dc-11)", d.Ritual, RitualBoardCommitPush)
+			}
+			for _, v := range d.Verbs {
+				if !carriable[v] {
+					return fmt.Errorf("writescope: %s declares carried and names %s; only the board's Commit and push may be carried (parent dc-3, dc-11)", d.Ritual, v)
+				}
+			}
 		}
 	}
 	paths := map[string]bool{}
