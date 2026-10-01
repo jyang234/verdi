@@ -351,6 +351,16 @@ jobs:
           go-version: "1.25"
       - name: Require every gate job to succeed
         run: scripts/merge-gate-verdict.sh e2e-1=${{ needs.e2e-1.result }} e2e-2=${{ needs.e2e-2.result }} e2e-3=${{ needs.e2e-3.result }} spec-align=${{ needs.spec-align.result }} static=${{ needs.static.result }} test-cmd=${{ needs.test-cmd.result }} test-cross=${{ needs.test-cross.result }} test-rest=${{ needs.test-rest.result }} test-slow=${{ needs.test-slow.result }}
+      # Node, set up exactly as the e2e shard jobs set it up (SI-293): `verdi
+      # sync --produce` runs the Playwright producer, which runs the named
+      # Playwright files through the harness, installing the harness's
+      # packages and browser itself (make e2e-setup), whenever an obligation
+      # this job is authoritative for names a Playwright test.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
       - run: go build -o .build/verdi ./cmd/verdi
       - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
         run: ./.build/verdi sync --produce

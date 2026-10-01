@@ -174,6 +174,17 @@ fixture:
 fixture-regen:
 	./scripts/regen-svcfix-canned.sh
 
+# playwright-report-capture re-captures internal/playwrightjson/testdata/
+# reports/*.json, the Playwright JSON reports the strict report decoder and the
+# Playwright evidence producer are tested over (SI-294), from real runs of the
+# pinned Playwright over the fixture specs in internal/playwrightjson/testdata/
+# capture/ (see capture.sh there). Opt-in and non-hermetic, like fixture-regen:
+# never part of `make verify`, `make test`, or `make fixture`, and never run by
+# CI. The fixture specs live outside e2e/tests/, so they never join a shard.
+.PHONY: playwright-report-capture
+playwright-report-capture: e2e-setup
+	./internal/playwrightjson/testdata/capture/capture.sh
+
 # lint-store builds the real verdi binary and runs `verdi lint` against
 # this repo's own self-hosted store (PLAN.md Phase 4: "eat the dog food" —
 # .verdi/specs/active/ holds the six component specs). Build-then-exec, not
