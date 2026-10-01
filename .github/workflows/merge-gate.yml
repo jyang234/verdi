@@ -47,7 +47,8 @@
 # checkout, Go 1.25, Node 22 where an e2e shard runs, the pinned
 # golangci-lint where lint runs), carries no `name:`, `if:`, or
 # `continue-on-error:`, and runs each make step as its own exact `run:`
-# command.
+# command. The static job also caches golangci-lint's analysis, keyed by
+# the pin and go.sum, which only shortens it (spec/strict-lint-reach dc-1).
 #
 # The required context is the `merge-gate` job alone: job key `merge-gate`,
 # no `name:` override, so GitHub reports it as exactly "merge-gate". It
@@ -69,11 +70,13 @@
 #                              `test` as its shards) plus the post-verify
 #                              steps, each once; a step that replays another
 #                              step's packages from the test cache runs in
-#                              that step's job, after it; `merge-gate` needs
-#                              exactly the gate jobs, with `if: always()`, the
-#                              pinned canary, and the pinned verdict call; and
-#                              every document, job, and step key is
-#                              whitelisted;
+#                              that step's job, after it; each gate job
+#                              carries exactly the pinned setup, the static
+#                              job's analysis cache included; `merge-gate`
+#                              needs exactly the gate jobs, with `if:
+#                              always()`, the pinned canary, and the pinned
+#                              verdict call; and every document, job, and step
+#                              key is whitelisted;
 #   testshards_test.go         the Go shards partition `go list ./...`, each
 #                              package executes once under -race, and the
 #                              cross-binary packages always run fresh;
@@ -124,6 +127,17 @@ jobs:
           test -x "$(go env GOPATH)/bin/golangci-lint" || \
             go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      # golangci-lint's analysis cache (spec/strict-lint-reach dc-1), at the
+      # location golangci-lint uses when GOLANGCI_LINT_CACHE is unset (the
+      # user cache directory), keyed by the pinned version and go.sum. It only
+      # shortens the job: make lint-strict holds its 60-second budget with a
+      # cold cache, and the cache changes no finding. verify.yml's evidence
+      # job does not copy it.
+      - name: Cache golangci-lint analysis
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-analysis-${{ runner.os }}-v2.5.0-${{ hashFiles('go.sum') }}
       - run: make build
       - run: make fmt-check
       - run: make vet

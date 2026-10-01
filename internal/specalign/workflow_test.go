@@ -646,16 +646,13 @@ func keysOutside(keys, allowed []string) []string {
 	return extra
 }
 
-// findCacheStep returns the first actions/cache step whose `with: path:`
-// mentions pathSubstr (e.g. "golangci-lint"), or nil if none matches. The
-// path is what disambiguates one cache step from another; matching on
-// `uses:` alone would pick whichever cache step happens to come first.
-func findCacheStep(steps []workflowStep, pathSubstr string) *workflowStep {
+// findCacheStep returns the first actions/cache step whose `with: path:` is
+// exactly path, or nil if none is. The path is what tells one cache step from
+// another, and only exactly: both golangci-lint cache paths contain
+// "golangci-lint", so a substring would take whichever step comes first.
+func findCacheStep(steps []workflowStep, path string) *workflowStep {
 	for i := range steps {
-		if !strings.HasPrefix(steps[i].Uses, "actions/cache@") {
-			continue
-		}
-		if strings.Contains(steps[i].With["path"], pathSubstr) {
+		if strings.HasPrefix(steps[i].Uses, "actions/cache@") && steps[i].With["path"] == path {
 			return &steps[i]
 		}
 	}
@@ -697,9 +694,10 @@ func workflowPath(root, file string) string {
 // runs whatever golangci-lint the workflow installed, so if the Makefile's
 // pin is bumped and the workflows are not, CI silently lints with the OLD
 // linter while every other test stays green. The Makefile is read as the
-// single source of truth and both the install step's `@<version>` AND the
-// cache key's `<version>` are asserted against it, in both workflows that
-// carry the pattern.
+// single source of truth and the install step's `@<version>`, the binary
+// cache key's `<version>`, and the analysis cache key's `<version>`
+// (spec/strict-lint-reach dc-1) are asserted against it, in both workflows
+// that carry the pattern.
 //
 // Both workflows install it in their `static` gate job. verify.yml's gate
 // jobs must equal merge-gate.yml's in every key and value (SI-267,
@@ -743,12 +741,20 @@ func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
 				t.Errorf("%s: golangci-lint install step does not pin @%s (the Makefile's GOLANGCI_LINT_VERSION), got run: %q", tt.name, pin, install.Run)
 			}
 
-			cache := findCacheStep(job.Steps, "golangci-lint")
+			cache := findCacheStep(job.Steps, golangciBinaryCachePath)
 			if cache == nil {
 				t.Fatalf("%s: no actions/cache step caching golangci-lint found", tt.name)
 			}
 			if key := cache.With["key"]; !strings.Contains(key, pin) {
 				t.Errorf("%s: golangci-lint cache key %q does not carry the Makefile's pin %s — a stale key would restore the wrong linter binary and make the install step a no-op", tt.name, key, pin)
+			}
+
+			analysis := findCacheStep(job.Steps, golangciAnalysisCachePath)
+			if analysis == nil {
+				t.Fatalf("%s: no actions/cache step caching golangci-lint's analysis found (spec/strict-lint-reach dc-1)", tt.name)
+			}
+			if key := analysis.With["key"]; !strings.Contains(key, pin) {
+				t.Errorf("%s: golangci-lint analysis cache key %q does not carry the Makefile's pin %s — another version's analysis would be restored", tt.name, key, pin)
 			}
 		})
 	}
@@ -955,22 +961,53 @@ func golangciInstallRun(pin string) string {
 		"echo \"$(go env GOPATH)/bin\" >> \"$GITHUB_PATH\""
 }
 
-// pinnedSetupActions maps each action a gate job may use to its exact
-// `with:` inputs — today's pinned setup. A `with:` that differs (a checkout
-// `ref:` naming other code, a different Go) changes what the gate proves.
-func pinnedSetupActions(pin string) map[string]map[string]string {
-	return map[string]map[string]string{
-		"actions/checkout@v4": {"fetch-depth": "0"},
-		"actions/setup-go@v5": {"go-version": "1.25"},
-		"actions/setup-node@v4": {
+// The golangci-lint cache steps' `with: path:` values. The binary cache holds
+// the pinned linter, which the static gate job caches and the evidence job
+// restores (SI-309). The analysis cache is the directory golangci-lint keeps
+// its analysis in when GOLANGCI_LINT_CACHE is unset (the user cache
+// directory), which the static gate job alone caches (spec/strict-lint-reach
+// dc-1).
+const (
+	golangciBinaryCachePath   = "~/go/bin/golangci-lint"
+	golangciAnalysisCachePath = "~/.cache/golangci-lint"
+)
+
+// golangciBinaryCacheWith is the binary cache step's exact `with:`, keyed by
+// the pinned version, so a hit restores that exact binary.
+func golangciBinaryCacheWith(pin string) map[string]string {
+	return map[string]string{
+		"path": golangciBinaryCachePath,
+		"key":  "golangci-lint-${{ runner.os }}-" + pin,
+	}
+}
+
+// golangciAnalysisCacheWith is the analysis cache step's exact `with:`, keyed
+// by the pinned version and go.sum (spec/strict-lint-reach dc-1). It has no
+// restore-keys, so a run restores only an analysis the same linter made over
+// the same modules.
+func golangciAnalysisCacheWith(pin string) map[string]string {
+	return map[string]string{
+		"path": golangciAnalysisCachePath,
+		"key":  "golangci-lint-analysis-${{ runner.os }}-" + pin + "-${{ hashFiles('go.sum') }}",
+	}
+}
+
+// pinnedSetupActions maps each action a gate job may use to the exact `with:`
+// inputs of each step it may be: today's pinned setup. A `with:` that is none
+// of them (a checkout `ref:` naming other code, a different Go, a cache of
+// another path or under another key) changes what the gate proves.
+// actions/cache@v4 may be two steps, the golangci-lint binary cache and its
+// analysis cache; every other action is one.
+func pinnedSetupActions(pin string) map[string][]map[string]string {
+	return map[string][]map[string]string{
+		"actions/checkout@v4": {{"fetch-depth": "0"}},
+		"actions/setup-go@v5": {{"go-version": "1.25"}},
+		"actions/setup-node@v4": {{
 			"node-version":          "22",
 			"cache":                 "npm",
 			"cache-dependency-path": "e2e/package-lock.json",
-		},
-		"actions/cache@v4": {
-			"path": "~/go/bin/golangci-lint",
-			"key":  "golangci-lint-${{ runner.os }}-" + pin,
-		},
+		}},
+		"actions/cache@v4": {golangciBinaryCacheWith(pin), golangciAnalysisCacheWith(pin)},
 	}
 }
 
@@ -1208,36 +1245,44 @@ func runsPlaywright(cmd string) bool {
 	return ok && (target == e2eSuiteTarget || slices.Contains(e2eShardTargets, target))
 }
 
-// TestMergeGateGateJobsUsePinnedSetup proves each gate job carries today's
-// pinned setup: it starts with a full-history checkout and Go 1.25, uses no
-// action outside the pinned set, passes each action exactly its pinned
-// inputs, finishes setup before its first gate command, installs Node 22
-// wherever an e2e shard runs, and caches and installs the pinned
-// golangci-lint wherever `make lint` or `make lint-strict` runs — which must
-// be the static job.
-func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
-	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
-	pin := makefileGolangciPin(t)
+// pinnedSetupViolations returns every way the gate jobs among jobs depart
+// from today's pinned setup, pin being the Makefile's golangci-lint version.
+// Each gate job begins with a full-history checkout and Go 1.25, uses no
+// action outside the pinned set, passes each action step exactly the inputs
+// of one step that action may be, finishes setup before its first gate
+// command, installs Node 22 wherever an e2e shard runs, and caches and
+// installs the pinned golangci-lint wherever `make lint` or `make
+// lint-strict` runs, which must be the lint job. The lint job caches
+// golangci-lint's analysis exactly once and no other gate job caches it
+// (spec/strict-lint-reach dc-1).
+func pinnedSetupViolations(jobs map[string]workflowJob, pin string) []string {
 	actions := pinnedSetupActions(pin)
 	install := golangciInstallRun(pin)
-	gates := gateJobKeys(doc.Jobs)
+	gates := gateJobKeys(jobs)
 	if len(gates) == 0 {
-		t.Fatalf("merge-gate.yml: no gate jobs found; jobs %v", jobKeys(doc.Jobs))
+		return []string{fmt.Sprintf("no gate jobs found; jobs %v", jobKeys(jobs))}
+	}
+	var out []string
+	if !slices.Contains(gates, mergeGateLintJob) {
+		out = append(out, fmt.Sprintf("no %q gate job, which runs make lint and make lint-strict and caches golangci-lint's analysis; gate jobs %v", mergeGateLintJob, gates))
 	}
 	for _, key := range gates {
-		steps := doc.Jobs[key].Steps
+		steps := jobs[key].Steps
 		if len(steps) < 2 || steps[0].Uses != "actions/checkout@v4" || steps[1].Uses != "actions/setup-go@v5" {
-			t.Errorf("merge-gate.yml: job %q must begin with actions/checkout@v4 then actions/setup-go@v5", key)
+			out = append(out, fmt.Sprintf("job %q must begin with actions/checkout@v4 then actions/setup-go@v5", key))
 		}
-		lastSetup, firstGate := -1, len(steps)
+		lastSetup, firstGate, analysisCaches := -1, len(steps), 0
 		for i, step := range steps {
 			switch {
 			case step.Uses != "":
-				want, ok := actions[step.Uses]
+				admitted, ok := actions[step.Uses]
 				if !ok {
-					t.Errorf("merge-gate.yml: job %q step %d uses %q, outside the pinned setup actions", key, i, step.Uses)
-				} else if !maps.Equal(step.With, want) {
-					t.Errorf("merge-gate.yml: job %q step %d (%s) has with: %v, want exactly %v", key, i, step.Uses, step.With, want)
+					out = append(out, fmt.Sprintf("job %q step %d uses %q, outside the pinned setup actions", key, i, step.Uses))
+				} else if !slices.ContainsFunc(admitted, func(want map[string]string) bool { return maps.Equal(step.With, want) }) {
+					out = append(out, fmt.Sprintf("job %q step %d (%s) has with: %v, want exactly one of %v", key, i, step.Uses, step.With, admitted))
+				}
+				if strings.HasPrefix(step.Uses, "actions/cache@") && step.With["path"] == golangciAnalysisCachePath {
+					analysisCaches++
 				}
 				lastSetup = i
 			case strings.TrimSpace(step.Run) == install:
@@ -1247,23 +1292,156 @@ func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
 			}
 		}
 		if lastSetup > firstGate {
-			t.Errorf("merge-gate.yml: job %q has a setup step (index %d) after its first gate command (index %d)", key, lastSetup, firstGate)
+			out = append(out, fmt.Sprintf("job %q has a setup step (index %d) after its first gate command (index %d)", key, lastSetup, firstGate))
 		}
 		runs := runCommands(steps)
 		if slices.ContainsFunc(runs, runsPlaywright) && findStep(steps, "actions/setup-node@v4") == nil {
-			t.Errorf("merge-gate.yml: job %q runs an e2e shard without actions/setup-node@v4 (Node 22)", key)
+			out = append(out, fmt.Sprintf("job %q runs an e2e shard without actions/setup-node@v4 (Node 22)", key))
 		}
 		for _, lint := range []string{"make lint", "make " + strictLintStep} {
 			if !slices.Contains(runs, lint) {
 				continue
 			}
-			if findCacheStep(steps, "golangci-lint") == nil || !slices.Contains(runs, install) {
-				t.Errorf("merge-gate.yml: job %q runs %s without the pinned golangci-lint cache and install steps", key, lint)
+			if findCacheStep(steps, golangciBinaryCachePath) == nil || !slices.Contains(runs, install) {
+				out = append(out, fmt.Sprintf("job %q runs %s without the pinned golangci-lint cache and install steps", key, lint))
 			}
 			if key != mergeGateLintJob {
-				t.Errorf("merge-gate.yml: %s runs in job %q, want %q (TestGolangciLintPinIsLockstepWithMakefile reads that job)", lint, key, mergeGateLintJob)
+				out = append(out, fmt.Sprintf("%s runs in job %q, want %q (TestGolangciLintPinIsLockstepWithMakefile reads that job)", lint, key, mergeGateLintJob))
 			}
 		}
+		want := 0
+		if key == mergeGateLintJob {
+			want = 1
+		}
+		if analysisCaches != want {
+			out = append(out, fmt.Sprintf("job %q caches golangci-lint's analysis (%s) %d times, want %d: the %q job, which runs make lint and make lint-strict, caches it once and no other gate job does (spec/strict-lint-reach dc-1)", key, golangciAnalysisCachePath, analysisCaches, want, mergeGateLintJob))
+		}
+	}
+	return out
+}
+
+// TestMergeGateGateJobsUsePinnedSetup proves merge-gate.yml's gate jobs carry
+// today's pinned setup (pinnedSetupViolations). verify.yml's gate jobs equal
+// them in every key and value (SI-267, verifyworkflow_test.go), so they carry
+// it too.
+func TestMergeGateGateJobsUsePinnedSetup(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+	for _, v := range pinnedSetupViolations(doc.Jobs, makefileGolangciPin(t)) {
+		t.Errorf("merge-gate.yml: %s", v)
+	}
+}
+
+// fixturePinnedSetup is two gate jobs carrying today's pinned setup: the lint
+// job, which caches and installs the pinned golangci-lint and caches its
+// analysis before make lint and make lint-strict, and an e2e shard job, which
+// sets up Node.
+const fixturePinnedSetup = `jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+      - name: Install golangci-lint (pinned)
+        run: |
+          test -x "$(go env GOPATH)/bin/golangci-lint" || \
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+` + fixtureAnalysisCache + `      - run: make build
+      - run: make lint
+      - run: make lint-strict
+  e2e-1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: make e2e-1
+`
+
+// fixtureAnalysisCache is the lint job's analysis cache step, exactly as the
+// workflows carry it (spec/strict-lint-reach dc-1).
+const fixtureAnalysisCache = `      - name: Cache golangci-lint analysis
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-analysis-${{ runner.os }}-v2.5.0-${{ hashFiles('go.sum') }}
+`
+
+// TestPinnedSetupViolations is pinnedSetupViolations' happy and negative
+// paths over mutated copies of fixturePinnedSetup: the analysis cache step is
+// admitted exactly as pinned, in the lint job, once, and every other change
+// to the pinned setup is still refused. Each negative case names a substring
+// one of its violations must contain.
+func TestPinnedSetupViolations(t *testing.T) {
+	mutate := func(from, to string) string {
+		return mutateSource(t, "the pinned setup fixture", fixturePinnedSetup, from, to)
+	}
+	const (
+		analysisKey  = "key: golangci-lint-analysis-${{ runner.os }}-v2.5.0-${{ hashFiles('go.sum') }}\n"
+		analysisPath = "path: ~/.cache/golangci-lint\n"
+		binaryCache  = "      - name: Cache golangci-lint\n        uses: actions/cache@v4\n        with:\n          path: ~/go/bin/golangci-lint\n          key: golangci-lint-${{ runner.os }}-v2.5.0\n"
+		buildStep    = "      - run: make build\n"
+		e2eStep      = "      - run: make e2e-1\n"
+		nodeStep     = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n"
+	)
+	cases := []struct {
+		name   string
+		source string
+		want   string // a substring of one violation; "" wants none
+	}{
+		{name: "the fixture as written", source: fixturePinnedSetup},
+		{name: "the analysis cache keyed without go.sum", source: mutate(analysisKey, "key: golangci-lint-analysis-${{ runner.os }}-v2.5.0\n"), want: `job "static" step 4 (actions/cache@v4) has with: map[key:golangci-lint-analysis-${{ runner.os }}-v2.5.0 path:~/.cache/golangci-lint]`},
+		{name: "the analysis cache keyed by another version", source: mutate(analysisKey, "key: golangci-lint-analysis-${{ runner.os }}-v2.4.0-${{ hashFiles('go.sum') }}\n"), want: `job "static" step 4 (actions/cache@v4) has with:`},
+		{name: "the analysis cache with restore-keys", source: mutate(analysisKey, analysisKey+"          restore-keys: golangci-lint-analysis-\n"), want: `job "static" step 4 (actions/cache@v4) has with:`},
+		{name: "the analysis cache keyed for the binary", source: mutate(analysisKey, "key: golangci-lint-${{ runner.os }}-v2.5.0\n"), want: `job "static" step 4 (actions/cache@v4) has with:`},
+		{name: "the analysis cache at another path", source: mutate(analysisPath, "path: ~/.cache/go-build\n"), want: `job "static" step 4 (actions/cache@v4) has with:`},
+		{name: "the binary cache under another key", source: mutate("key: golangci-lint-${{ runner.os }}-v2.5.0\n", "key: golangci-lint-${{ runner.os }}-latest\n"), want: `job "static" step 2 (actions/cache@v4) has with:`},
+		{name: "a third cache step", source: mutate(buildStep, "      - uses: actions/cache@v4\n        with:\n          path: ~/.cache/go-build\n          key: go-build\n"+buildStep), want: `job "static" step 5 (actions/cache@v4) has with: map[key:go-build path:~/.cache/go-build]`},
+		{name: "the analysis cache on an older cache action", source: mutate("        uses: actions/cache@v4\n        with:\n          "+analysisPath, "        uses: actions/cache@v3\n        with:\n          "+analysisPath), want: `job "static" step 4 uses "actions/cache@v3", outside the pinned setup actions`},
+		{name: "no analysis cache in the lint job", source: mutate(fixtureAnalysisCache, ""), want: `job "static" caches golangci-lint's analysis (~/.cache/golangci-lint) 0 times, want 1`},
+		{name: "the analysis cache twice in the lint job", source: mutate(fixtureAnalysisCache, fixtureAnalysisCache+fixtureAnalysisCache), want: `job "static" caches golangci-lint's analysis (~/.cache/golangci-lint) 2 times, want 1`},
+		{name: "the analysis cache in another gate job", source: mutate(nodeStep, nodeStep+fixtureAnalysisCache), want: `job "e2e-1" caches golangci-lint's analysis (~/.cache/golangci-lint) 1 times, want 0`},
+		{name: "the analysis cache after the first gate command", source: mutate(fixtureAnalysisCache+buildStep, buildStep+fixtureAnalysisCache), want: `job "static" has a setup step (index 5) after its first gate command (index 4)`},
+		{name: "a checkout of another ref", source: mutate("fetch-depth: 0\n      - uses: actions/setup-go@v5\n        with:\n          go-version: \"1.25\"\n      - name: Cache", "fetch-depth: 0\n          ref: main\n      - uses: actions/setup-go@v5\n        with:\n          go-version: \"1.25\"\n      - name: Cache"), want: `job "static" step 0 (actions/checkout@v4) has with: map[fetch-depth:0 ref:main]`},
+		{name: "make lint without the binary cache", source: mutate(binaryCache, ""), want: `job "static" runs make lint without the pinned golangci-lint cache and install steps`},
+		{name: "an e2e shard without Node", source: mutate(nodeStep, ""), want: `job "e2e-1" runs an e2e shard without actions/setup-node@v4`},
+		{name: "no lint job", source: mutate("jobs:\n  static:\n", "jobs:\n  lint:\n"), want: `no "static" gate job`},
+		{name: "make lint outside the lint job", source: mutate(e2eStep, e2eStep+"      - run: make lint\n"), want: `make lint runs in job "e2e-1", want "static"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			top, err := decodeWorkflowTree([]byte(tc.source))
+			if err != nil {
+				t.Fatalf("decoding the fixture: %v", err)
+			}
+			violations := pinnedSetupViolations(decodeJobs(top["jobs"]), "v2.5.0")
+			if tc.want == "" {
+				if len(violations) != 0 {
+					t.Fatalf("violations = %q, want none", violations)
+				}
+				return
+			}
+			if !slices.ContainsFunc(violations, func(v string) bool { return strings.Contains(v, tc.want) }) {
+				t.Fatalf("violations = %q, want one containing %q", violations, tc.want)
+			}
+		})
 	}
 }
 
