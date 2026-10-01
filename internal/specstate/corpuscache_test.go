@@ -19,8 +19,10 @@ import (
 // commits maps a commit id to its tree (path to bytes) and heads maps a
 // ref to the commit it points at, so a read at a ref and a read at the
 // commit that ref resolves to see the same tree, as with real git. It
-// counts every LsTree call by the revision it was asked for (one LsTree
-// call is one successor-corpus scan) and is safe for concurrent use.
+// counts every LsTree call over the spec zones by the revision it was
+// asked for (one such call is one successor-corpus scan; the scan's
+// conflict listing, which follows it at the same revision, is not counted
+// again) and is safe for concurrent use.
 type memoGit struct {
 	commits map[string]map[string][]byte
 
@@ -113,7 +115,9 @@ func (g *memoGit) FirstParentBlobLanding(ctx context.Context, dir, ref, path, oi
 func (g *memoGit) LsTree(ctx context.Context, dir, rev, prefix string) ([]string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.lsTrees[rev]++
+	if prefix == specZonesPrefix {
+		g.lsTrees[rev]++
+	}
 	if g.lsTreeErr != nil {
 		return nil, fmt.Errorf("memoGit: ls-tree %s: %w", rev, g.lsTreeErr)
 	}
