@@ -169,7 +169,11 @@ func runAcceptDiagram(ctx context.Context, root string, ref artifact.Ref, stdout
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
-	if _, err := gitx.CreateCommit(ctx, root, fmt.Sprintf("accept: %s proposed -> accepted", ref.String())); err != nil {
+	// UAT-036: commit exactly diagPath. A commit with no pathspec records
+	// the whole index, so an entry the operator had staged before the
+	// ritual rode into the acceptance commit; the pathspec form leaves it
+	// staged and uncommitted.
+	if _, err := gitx.CreateCommitPaths(ctx, root, fmt.Sprintf("accept: %s proposed -> accepted", ref.String()), diagPath); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}

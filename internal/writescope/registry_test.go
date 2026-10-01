@@ -171,10 +171,10 @@ func TestHostVerbs_AreServeMcpAndContextMcp(t *testing.T) {
 // list only shrinks: spec/ritual-effect-witness removes each path in the
 // same change as the fix that makes its ritual conform (dc-2), until the
 // list is empty, and no path is ever added back. Fixed so far: design
-// start, with its --supersedes path, and the commit-to-design ritual.
+// start, with its --supersedes path, the commit-to-design ritual, and
+// accept diagram.
 func TestAwaitingFixes_PinStoryDc3(t *testing.T) {
 	want := []string{
-		"accept_diagram|verdi accept diagram/<name>",
 		"constitution_propose|verdi context constitution propose",
 	}
 	var got []string

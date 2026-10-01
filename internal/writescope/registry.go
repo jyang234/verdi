@@ -138,8 +138,8 @@ func Registry() []Declaration {
 		},
 		{
 			// cmd/verdi/acceptdiagram.go: rewrites the diagram, git add --
-			// <file>, then a commit with no pathspec on the checked-out
-			// branch. Awaiting fix (UAT-036).
+			// <file>, then a commit naming that file on the checked-out
+			// branch (UAT-036 fixed).
 			Ritual:     "accept_diagram",
 			Verbs:      []Verb{CLI("accept")},
 			RefsMove:   []RefPattern{RefCheckedOut},
