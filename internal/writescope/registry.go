@@ -111,8 +111,8 @@ func Registry() []Declaration {
 		},
 		{
 			// internal/commitdesign: writes spec.md and board.json into a new
-			// spec directory, git add -- <dir>, then a commit with no
-			// pathspec on the checked-out branch. Awaiting fix (UAT-036).
+			// spec directory, git add -- <dir>, then a commit naming that
+			// directory on the checked-out branch (UAT-036 fixed).
 			Ritual:     "commit_to_design",
 			Verbs:      []Verb{CLI("board"), Workbench("/board/{key}/commit")},
 			RefsMove:   []RefPattern{RefCheckedOut},
