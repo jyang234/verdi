@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/index }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 790c6f3f8e53f5947dad36c24fb57a9591e219d6 }
 ---
 # Conflict: index cannot cross verdi build start
 

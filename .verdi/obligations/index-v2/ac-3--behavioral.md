@@ -16,7 +16,7 @@ quality:
     rule: "Rerun playwright:e2e/tests/96-index-pipeline.spec.ts:index › Filters, and review status disclosed when the forge is unreachable in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/index-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: 790c6f3f8e53f5947dad36c24fb57a9591e219d6 }
 ---
 # Filters, and review status disclosed when the forge is unreachable
 
