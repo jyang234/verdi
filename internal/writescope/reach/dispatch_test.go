@@ -319,6 +319,7 @@ func testRouteEntriesFailClosedOnUnfollowableFunctionValues(t *testing.T, prog *
 		{"/hole/assert", "anyHook"},     // a type assertion to a function type
 		{"/hole/deref", "*p"},           // a dereference of a pointer loaded from a local map
 		{"/hole/element", "s.handlers"}, // an element of a field-held container
+		{"/hole/switch", "switches"},    // R1-RR6: a type switch to a function type
 		{"/control/packagederef", ""},   // a pointer loaded from a package-level variable
 		{"/control/benign", ""},         // a field-held container's length, keys, and nil comparison
 		{"/control/capturednil", ""},    // a captured function compared to nil, then called (resolved)

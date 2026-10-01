@@ -3,7 +3,8 @@
 // captured function value passed on as an argument rather than called, a
 // channel receive, a type assertion to a function type, a dereference of
 // a pointer loaded from a non-package container, and an element of a
-// field-held container. Control routes dereference a pointer loaded from
+// field-held container; and a type switch to a function type (the
+// switch form of the assertion rule). Control routes dereference a pointer loaded from
 // a package-level variable, use a field-held container only benignly
 // (its length, its keys, a nil comparison), and compare a captured
 // function to nil before calling it; the analysis follows each.
@@ -35,6 +36,7 @@ func Register(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("/hole/assert", s.assert)
 	mux.HandleFunc("/hole/deref", s.deref)
 	mux.HandleFunc("/hole/element", s.element)
+	mux.HandleFunc("/hole/switch", s.typeSwitch)
 	mux.HandleFunc("/control/packagederef", s.packageDeref)
 	mux.HandleFunc("/control/benign", s.benign)
 	mux.HandleFunc("/control/capturednil", func(w http.ResponseWriter, r *http.Request) {
@@ -84,5 +86,12 @@ func (s *server) benign(w http.ResponseWriter, r *http.Request) {
 	}
 	for k := range s.handlers {
 		_ = k
+	}
+}
+
+func (s *server) typeSwitch(w http.ResponseWriter, r *http.Request) {
+	switch f := s.anyHook.(type) {
+	case func() error:
+		_ = f()
 	}
 }
