@@ -1,0 +1,4060 @@
+/* verdi — one stylesheet, two surfaces (dex + workbench). No frameworks,
+   no build step, no font/CDN fetches: system stacks only, so the site
+   stays a pure function of the tree and readable off a plain static host.
+
+   Design system — "the registry": every page is a filed record.
+   - Two typographic voices carry the system's thesis: humans write in
+     SERIF (prose, titles); the machine stamps in MONO (temporal stamps,
+     badges, refs, metadata labels — the record apparatus).
+   - verdi is green: green-tinted paper, viridian accent.
+   - The three temporal classes (01 §Temporal classes) are a first-class
+     color language: living-gated = verdi green (machine-true), authored-
+     living = ochre (hand-maintained), frozen = glacial blue (inert).
+   - The fold's five statuses share one semantic palette everywhere:
+     evidenced green / violated rust / pending ochre / no-signal gray /
+     waived violet. Dispositions reuse the same semantics (incorporated
+     green, contradicted rust, open-question ochre). */
+
+:root {
+  color-scheme: light dark;
+
+  /* surfaces + ink */
+  --paper: #f6f7f2;
+  --ink: #232920;
+  --muted: #67706675;
+  --muted-solid: #666f66;
+  /* the obligation row's kind label: the muted register, darkened one step
+     so it meets AA (4.89:1) on --living-tint — R-RR2-8 */
+  --obligation-kind-ink: #5f685f;
+  --rule: #dbded2;
+  --panel: #eef0e7;
+  --card: #fbfcf8;
+
+  /* verdi green */
+  --accent: #2e6b45;
+  --accent-strong: #235537;
+
+  /* temporal classes */
+  --living: #2e6b45;
+  --living-tint: #e3efe6;
+  --authored: #8a6414;
+  --authored-tint: #f3ecd6;
+  --frozen: #3f648a;
+  --frozen-tint: #e3ebf3;
+
+  /* fold statuses (and disposition semantics) */
+  --st-evidenced: #2e6b45;
+  --st-evidenced-tint: #e3efe6;
+  --st-violated: #a33327;
+  --st-violated-tint: #f6e2df;
+  --st-pending: #8a6414;
+  --st-pending-tint: #f3ecd6;
+  --st-nosignal: #666f66;
+  --st-nosignal-tint: #eaece4;
+  --st-waived: #6b4fa1;
+  --st-waived-tint: #ebe5f4;
+
+  /* board — the case wall. Three mode casts (the room's state): the
+     live wall is warm cork, the review mirror is cool glass, the sealed
+     record is frozen. Yarn color IS the relationship's meaning (the
+     rail's yarn key names the mapping); the hand voice is the scratch
+     tier's — unfiled human thought, typeset only on graduation. */
+  --yarn: #b0402d;
+  --wall: #ece4d2;
+  --wall-review: #e7e9ec;
+  --wall-sealed: #e3ebf3;
+  --yarn-implements: #b0402d;
+  --yarn-resolves: #2e6b45;
+  --yarn-depends-on: #8a6414;
+  --yarn-exempts: #6b4fa1;
+  --yarn-supersedes: #43483f;
+  --yarn-relates: #666f66;
+  --hand: "Bradley Hand", "Marker Felt", "Segoe Print", "Ink Free", "Comic Sans MS", cursive;
+  --grid-dot: rgba(35, 41, 32, 0.08);
+  --shadow-card: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
+  --shadow-lift: 0 10px 22px rgba(20, 26, 18, 0.28);
+  --note-comment-bg: #f6e8a6;      --note-comment-ink: #4d3f10;
+  --note-question-bg: #e6d9f2;     --note-question-ink: #453064;
+  --note-decision-bg: #f7d4ba;     --note-decision-ink: #6d3410;
+  --note-agent-bg: #cde7da;        --note-agent-ink: #1c4c34;
+  --note-unknown-bg: #e7e7e2;      --note-unknown-ink: #44483f;
+  /* the scoping canvas (spec/scoping-canvas): a story proto-sticky is
+     manila — the folder it will become; a spike proto-sticky is
+     blueprint periwinkle — the probe. Stub cards are kraft file-tab
+     stock: the future case file's tab, filed on the wall before the
+     case exists (dc-6's typeset register). */
+  --note-story-bg: #efdfb3;        --note-story-ink: #57430e;
+  --note-spike-bg: #d9def4;       --note-spike-ink: #363e6e;
+  --stub-paper: #eee3c2;
+  --stub-edge: #c4ad6d;
+  --stub-ink: #5a4716;
+
+  /* type voices */
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #151813;
+    --ink: #d7ddd1;
+    --muted: #8d968c80;
+    --muted-solid: #96a094;
+    --obligation-kind-ink: var(--muted-solid); /* 5.47:1 on --living-tint already */
+    --rule: #2c312a;
+    --panel: #1b1f19;
+    --card: #20251e;
+
+    --accent: #82c49a;
+    --accent-strong: #a3d8b6;
+
+    --living: #82c49a;
+    --living-tint: #1c2b21;
+    --authored: #d1aa4f;
+    --authored-tint: #2c2513;
+    --frozen: #82abd4;
+    --frozen-tint: #1b2633;
+
+    --st-evidenced: #82c49a;
+    --st-evidenced-tint: #1c2b21;
+    --st-violated: #e07f70;
+    --st-violated-tint: #331d19;
+    --st-pending: #d1aa4f;
+    --st-pending-tint: #2c2513;
+    --st-nosignal: #96a094;
+    --st-nosignal-tint: #23271f;
+    --st-waived: #b39fdd;
+    --st-waived-tint: #261f33;
+
+    --yarn: #d9705a;
+    --wall: #242017;
+    --wall-review: #1d2024;
+    --wall-sealed: #1b2633;
+    --yarn-implements: #d9705a;
+    --yarn-resolves: #82c49a;
+    --yarn-depends-on: #d1aa4f;
+    --yarn-exempts: #b39fdd;
+    --yarn-supersedes: #c8ccc1;
+    --yarn-relates: #96a094;
+    --grid-dot: rgba(215, 221, 209, 0.07);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.30);
+    --shadow-lift: 0 10px 22px rgba(0, 0, 0, 0.55);
+    --note-comment-bg: #453d1b;      --note-comment-ink: #ecdf9e;
+    --note-question-bg: #37294b;     --note-question-ink: #dccdf2;
+    --note-decision-bg: #48291a;     --note-decision-ink: #f0c9a8;
+    --note-agent-bg: #1c3a2b;        --note-agent-ink: #c2e5d1;
+    --note-unknown-bg: #2a2e27;      --note-unknown-ink: #c8ccc1;
+    --note-story-bg: #443917;        --note-story-ink: #ecd9a4;
+    --note-spike-bg: #2b3050;       --note-spike-ink: #ccd3f2;
+    --stub-paper: #322b18;
+    --stub-edge: #6e5f33;
+    --stub-ink: #e0d3a6;
+  }
+}
+
+/* ---------- base ---------- */
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute always wins: author display rules (flex menus,
+   fixed dialogs) must never resurrect an element the markup hid. */
+[hidden] { display: none !important; }
+
+body {
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--paper);
+  max-width: 74rem;
+  margin: 0 auto;
+  padding: 0 2rem 4rem;
+}
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-strong); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+h1, h2, h3, h4 { font-family: var(--serif); font-weight: 600; line-height: 1.25; }
+h1 { font-size: 1.9rem; letter-spacing: -0.01em; margin: 0; }
+
+code, pre, kbd { font-family: var(--mono); }
+code { font-size: 0.86em; }
+:not(pre) > code {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+}
+
+pre {
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+pre.mermaid { background: var(--card); text-align: center; }
+
+/* ---------- diagram tier disclosure (spec/illustrative-class dc-1) ----------
+
+   Every mermaid render arrives wrapped in a badged <figure> from
+   internal/render's one seam. The figure flows exactly like the bare pre
+   it wraps (same vertical rhythm, no indent), and the badge is a quiet
+   chip in the record-apparatus voice — a tier disclosure, not a warning.
+   The proposal variant speaks in the verified register instead, so the
+   two tiers are visually distinct wherever diagrams render (ac-3). */
+figure.diagram-figure { margin: 1em 0; }
+figure.diagram-figure > pre.mermaid { margin: 0; }
+.diagram-tier-badge {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.12rem 0.6rem;
+  white-space: nowrap;
+}
+.diagram-tier-badge--proposal {
+  color: var(--st-evidenced);
+  border-color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+}
+figure[data-diagram-tier="partial"] > .diagram-tier-badge--proposal {
+  color: var(--st-pending);
+  border-color: var(--st-pending);
+  background: var(--st-pending-tint);
+}
+
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+
+blockquote {
+  margin: 1rem 0;
+  padding: 0.25rem 1.1rem;
+  border-left: 3px solid var(--rule);
+  color: var(--muted-solid);
+}
+
+/* the machine's voice: small mono caps, used by every record-apparatus
+   element below */
+.breadcrumb, .badge, .temporal-banner, .copy-ref, .link-type, .toc h2,
+.connections h2, .metadata-card dt, th, .site-nav, .wordmark, .eyebrow,
+.status-badge, .count, .sub, .sticky-type, .sticky-meta, .card-kind,
+#autosave-status, .yarn-list, .obligation, .preview-banner strong {
+  font-family: var(--mono);
+}
+
+/* ---------- site head + wordmark ---------- */
+
+.site-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1.1rem 0 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 1.25rem;
+}
+
+/* the page foot: the build identification line (workbench footer) —
+   the head's rule mirrored, so the line reads as chrome, not content. */
+footer.site-foot {
+  margin-top: 2.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--rule);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--accent); }
+/* the leafmark: a square with two opposite corners rounded = a leaf.
+   Pure CSS, no asset. */
+.leafmark {
+  width: 0.72em;
+  height: 0.72em;
+  background: var(--accent);
+  border-radius: 0 70% 0 70%;
+  align-self: center;
+}
+.wordmark-surface {
+  font-weight: 400;
+  color: var(--muted-solid);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.site-nav { font-size: 0.78rem; letter-spacing: 0.04em; }
+.site-nav a { color: var(--muted-solid); text-decoration: none; margin-left: 1.1rem; }
+.site-nav a:first-child { margin-left: 0; }
+.site-nav a:hover { color: var(--accent); }
+
+/* ---------- page anatomy ---------- */
+
+.breadcrumb { font-size: 0.76rem; letter-spacing: 0.03em; color: var(--muted-solid); margin: 0 0 1.4rem; }
+.breadcrumb a { color: var(--muted-solid); text-decoration: none; }
+.breadcrumb a:hover { color: var(--accent); text-decoration: underline; }
+.breadcrumb .sep { color: var(--muted); padding: 0 0.15rem; }
+.breadcrumb .current { color: var(--ink); }
+
+.eyebrow {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted-solid);
+  margin: 0 0 0.3rem;
+}
+
+.page-header { display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap; margin: 0 0 0.6rem; }
+.page-header h1 { margin: 0; }
+
+.badge {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.18rem 0.55rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  color: var(--muted-solid);
+  background: var(--panel);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
+}
+.badge-draft { color: var(--st-pending); border-color: var(--st-pending); background: var(--st-pending-tint); }
+.badge-accepted, .badge-accepted-pending-build { color: var(--st-evidenced); border-color: var(--st-evidenced); background: var(--st-evidenced-tint); }
+.badge-superseded, .badge-closed { color: var(--st-nosignal); border-color: var(--rule); background: var(--st-nosignal-tint); }
+.badge-open { color: var(--frozen); border-color: var(--frozen); background: var(--frozen-tint); }
+/* unproven: the effective lifecycle state could not be derived from git —
+   the disclosed-unproven severity treatment (pending amber, dashed edge:
+   attention, not a verdict), matching the disclosures view's own aliases */
+.badge-unproven { color: var(--disclosed); border-color: var(--disclosed); border-style: dashed; background: var(--disclosed-tint); }
+
+/* the temporal stamp — the signature element: every page carries its
+   class's color, and the text itself never changes (temporal honesty) */
+.temporal-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.35rem 0 1.1rem;
+  padding: 0.42rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-left-width: 3px;
+  border-radius: 3px;
+  background: var(--panel);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.temporal-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--muted-solid);
+  flex: none;
+}
+.temporal--living-gated { border-left-color: var(--living); background: var(--living-tint); color: var(--living); }
+.temporal--living-gated .temporal-dot { background: var(--living); }
+.temporal--authored-living { border-left-color: var(--authored); background: var(--authored-tint); color: var(--authored); }
+.temporal--authored-living .temporal-dot { background: var(--authored); }
+.temporal--frozen { border-left-color: var(--frozen); background: var(--frozen-tint); color: var(--frozen); }
+.temporal--frozen .temporal-dot { background: var(--frozen); }
+
+/* inline mentions of the three temporal classes (the dex home's thesis
+   line) carry their class color as an underline key */
+.temporal-key { font-style: normal; text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.temporal-key--living-gated { text-decoration-color: var(--living); }
+.temporal-key--authored-living { text-decoration-color: var(--authored); }
+.temporal-key--frozen { text-decoration-color: var(--frozen); }
+
+.copy-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  margin: 0 0 1.4rem;
+  max-width: 100%;
+}
+.copy-ref code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copy-ref:hover { border-color: var(--accent); }
+
+/* the spec page's way into its Document view (spec/spec-documents ac-4),
+   and the view's own quiet chrome: the provenance note a reader meets
+   first, then the three Markdown files offered as downloads */
+.document-link { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.02em; color: var(--muted-solid); margin-left: 0.9rem; }
+.document-link:hover { color: var(--accent); }
+.document-note {
+  font-size: 0.92rem;
+  color: var(--muted-solid);
+  border-left: 3px solid var(--living);
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  margin: 0 0 1rem;
+}
+.document-note code { color: var(--accent); }
+.document-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.7rem;
+  margin: 0 0 1.8rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+.document-files span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted-solid); }
+.document-files a {
+  color: var(--ink);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+}
+.document-files a:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- closed-spec object supersession (design §6; SI-263, SI-278) ----------
+
+   The lines a document adds beside a closed spec's superseded criterion
+   or decision, and beside a successor's decision: the objsupersede views'
+   texts, verbatim, with the deciding decision, the conflict, and the
+   carrying revision linked. Register only — the record's own voice, one
+   quiet step below the object's text — so the original text stays the
+   loudest thing on the object; a disclosure (unproven, not established)
+   reads muted, never as a verdict. Presentation only: no word here. */
+.objsupersede {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.objsupersede--unproven,
+.objsupersede--not-established,
+.objsupersede--disclosure { color: var(--muted-solid); }
+.objsupersede--proposed { color: var(--living); }
+.objsupersede-conflict {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted-solid);
+  margin-left: 0.35rem;
+}
+.objsupersede-conflict:hover { color: var(--accent); }
+
+/* On the board (SI-278): a closed spec's reference card that carries its
+   object, and a decision card that carries its views, grow to show every
+   §6 line at rest — no hover, no focus, no clipping — and the layout
+   reserves the height they take (boardlayout.Object.Height, estimated
+   by internal/workbench's refCardHeightPx/cardHeightPx from these very
+   rules), so a grown card covers no other card. The lines sit in a plain
+   list one step below the card's own text; the reference card keeps
+   room for its peek cue below them. */
+.refcard.refcard--object { height: auto; min-height: 4.5rem; padding-bottom: 1.35rem; } /* two classes: outranks .refcard's fixed height, which follows in this file */
+.objcard:has(.objsupersede-lines) { height: auto; min-height: 8.75rem; }
+/* the object's ORIGINAL text, whole (SI-278: "its original text,
+   unchanged"): no clamp, and an unbreakable token wraps inside the card */
+.refcard-object-text {
+  margin: 0.4rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* a decision card that carries lines AND wall badges keeps the badge row
+   in flow, above the lines, instead of pinned over them at the card's
+   foot (the docs closure's B-1); cardHeightPx counts the rows */
+.objcard:has(.objsupersede-lines) .card-badges {
+  position: static;
+  margin: 0.4rem 0 0;
+}
+.objsupersede-lines {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.objsupersede-lines li { font-size: 0.68rem; line-height: 1.35; overflow-wrap: anywhere; }
+.objsupersede-lines .objsupersede { font-size: 0.68rem; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+.objsupersede-lines .objsupersede-conflict { font-size: 0.66rem; margin-left: 0.3rem; }
+
+/* the board's Document tab (spec/spec-documents ac-4): a reading
+   surface beside the board's working surface. One quiet header row —
+   ref, kind switch, three controls — then the document carries the page. */
+.document-page .workbench-nav .current { color: var(--ink); margin-left: 1.1rem; }
+.document-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem 1.4rem;
+  margin: 0 0 1.6rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--rule);
+}
+.document-head .eyebrow { margin: 0; }
+.document-kinds { display: flex; gap: 0.2rem; font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.04em; }
+.document-kinds a, .document-kinds .current {
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  text-decoration: none;
+  color: var(--muted-solid);
+}
+.document-kinds a:hover, .document-kinds a:focus-visible { color: var(--accent); }
+.document-kinds .current { color: var(--ink); background: var(--card); border: 1px solid var(--rule); }
+.document-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-left: auto; }
+.document-actions button, .document-actions a {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+  cursor: pointer;
+}
+.document-actions button:hover, .document-actions a:hover,
+.document-actions button:focus-visible, .document-actions a:focus-visible { border-color: var(--accent); color: var(--accent); }
+.document-status { font-family: var(--mono); font-size: 0.74rem; color: var(--muted-solid); min-height: 1em; }
+.document-region { max-width: 70ch; }
+.document-source { display: none; }
+
+/* reading column (~70ch) + rail */
+.page-body { display: flex; gap: 3rem; align-items: flex-start; }
+.content { flex: 1 1 auto; min-width: 0; max-width: 70ch; }
+.side-rail { flex: 0 0 15rem; position: sticky; top: 1.25rem; }
+
+.content h2 {
+  font-size: 1.28rem;
+  margin: 2.2rem 0 0.7rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--rule);
+}
+.content h3 { font-size: 1.08rem; margin: 1.6rem 0 0.5rem; }
+.content img { max-width: 100%; }
+
+.metadata-card {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  border-radius: 6px;
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1.5rem;
+}
+.metadata-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1.2rem;
+  align-items: baseline;
+}
+.metadata-card dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted-solid);
+  margin: 0;
+}
+.metadata-card dd { margin: 0; font-size: 0.88rem; overflow-wrap: anywhere; }
+
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.88rem; }
+th, td { border: 1px solid var(--rule); padding: 0.45rem 0.65rem; text-align: left; vertical-align: top; }
+th {
+  background: var(--panel);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted-solid);
+}
+/* wide tables scroll inside themselves, never the page */
+.content table { display: block; overflow-x: auto; }
+
+.toc, .connections {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.1rem;
+}
+.toc h2, .connections h2 {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+  border: 0;
+  padding: 0;
+}
+.toc ul, .connections ul { list-style: none; margin: 0; padding: 0; }
+.toc li, .connections li { margin: 0.32rem 0; font-size: 0.82rem; line-height: 1.45; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--accent); }
+.toc-level-3 { padding-left: 0.85rem; }
+.toc-level-4 { padding-left: 1.7rem; }
+.connections li { overflow-wrap: anywhere; }
+.link-type {
+  display: inline-block;
+  font-size: 0.62rem;
+  color: var(--muted-solid);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  padding: 0 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 0.3rem;
+}
+
+/* ---------- lists, search, empty states ---------- */
+
+.entry-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+.entry-list li {
+  padding: 0.55rem 0.15rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.95rem;
+}
+.entry-list li:first-child { border-top: 1px solid var(--rule); }
+.entry-list a { text-decoration: none; }
+.entry-list a:hover { text-decoration: underline; }
+.sub { font-size: 0.72rem; color: var(--muted-solid); margin-left: 0.5rem; }
+.count { font-size: 0.72rem; color: var(--muted-solid); font-weight: 400; }
+
+.empty, .notice {
+  font-size: 0.9rem;
+  color: var(--muted-solid);
+  font-style: italic;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  background: var(--card);
+}
+.notice { border-style: solid; border-left: 3px solid var(--st-pending); font-style: normal; }
+
+/* ---------- the disclosures view (spec/disclosures-panel) ----------
+   One markup, two editions (workbench live page, dex read-only edition —
+   both render internal/disclosureview's output through this same sheet).
+   Severity is legible without being alarming: disclosed-unproven wears
+   the pending amber (attention, not violation — violated is a verdict
+   failure and never appears here). The empty state is the view's quiet
+   signature: "no current disclosures" is a positive, computed verdict,
+   so it wears the evidenced green rather than a gray absence. Two
+   aliases keep that tuning in one place; both resolve per-theme. */
+:root {
+  --disclosed: var(--st-pending);
+  --disclosed-tint: var(--st-pending-tint);
+}
+
+.disclosures-count { font-size: 0.95rem; color: var(--muted-solid); margin: 0.4rem 0 1rem; }
+.disclosures-count strong { color: var(--ink); }
+
+.disclosure-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+.disclosure-item {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--disclosed);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.7rem 1rem 0.8rem;
+  margin: 0 0 0.75rem;
+}
+.disclosure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.disclosure-severity {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
+  color: var(--disclosed);
+  border: 1px solid var(--disclosed);
+  background: var(--disclosed-tint);
+  padding: 0.18rem 0.55rem;
+  border-radius: 3px;
+}
+.disclosure-source {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.08rem 0.4rem;
+  overflow-wrap: anywhere;
+}
+.disclosure-scope {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.disclosure-text { margin: 0; font-size: 0.92rem; line-height: 1.55; overflow-wrap: anywhere; }
+
+.disclosures-empty {
+  border: 1px solid var(--st-evidenced);
+  border-left: 3px solid var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+}
+.disclosures-empty-claim { margin: 0 0 0.25rem; font-weight: 600; color: var(--st-evidenced); font-size: 1.05rem; }
+.disclosures-empty-detail { margin: 0; font-size: 0.9rem; color: var(--muted-solid); }
+
+.disclosures-note {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted-solid);
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+}
+
+.home-disclosures { font-size: 0.95rem; }
+
+#search-box {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  width: 100%;
+  max-width: 34rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+}
+#search-box:focus { border-color: var(--accent); outline: none; }
+#search-results { list-style: none; padding: 0; margin: 1rem 0; }
+#search-results li { margin: 0; padding: 0.5rem 0.15rem; border-bottom: 1px solid var(--rule); font-size: 0.95rem; }
+
+/* ---------- semantic status palette (fold + dispositions) ---------- */
+
+.status-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.14rem 0.5rem;
+  border-radius: 3px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+td.status-evidenced .status-badge, .status-evidenced > .status-badge,
+td.disposition-incorporated .status-badge
+  { color: var(--st-evidenced); border-color: var(--st-evidenced); background: var(--st-evidenced-tint); }
+td.status-violated .status-badge, .status-violated > .status-badge,
+td.disposition-contradicted .status-badge
+  { color: var(--st-violated); border-color: var(--st-violated); background: var(--st-violated-tint); }
+td.status-pending .status-badge, .status-pending > .status-badge,
+td.disposition-open-question .status-badge
+  { color: var(--st-pending); border-color: var(--st-pending); background: var(--st-pending-tint); }
+td.status-no-signal .status-badge, .status-no-signal > .status-badge
+  { color: var(--st-nosignal); border-color: var(--st-nosignal); background: var(--st-nosignal-tint); }
+td.status-waived .status-badge, .status-waived > .status-badge
+  { color: var(--st-waived); border-color: var(--st-waived); background: var(--st-waived-tint); }
+
+/* long machine ids (ULIDs, shas): visually truncated, full value intact
+   in the DOM (selection copies the full form) and in title */
+.ulid, .card-ref {
+  display: inline-block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.dispositions h2 { margin-top: 0; }
+.dispositions-table td { font-size: 0.86rem; }
+
+/* ---------- the feature lens (V1-P8, 05 §Lenses) ----------
+   The two-level model as a color statement: the stub plan is a
+   point-in-time record (frozen glacial blue), the live mapping is
+   machine-computed now (living verdi green), and the banner between the
+   reader and both is the honesty device that says so. */
+
+.acceptance-plan-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.2rem 0 1rem;
+  padding: 0.42rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--frozen);
+  border-radius: 3px;
+  background: var(--frozen-tint);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--frozen);
+}
+.acceptance-plan-banner .temporal-dot { background: var(--frozen); }
+
+.stub-plan, .live-mapping {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.85rem 1.1rem;
+  margin: 0 0 1rem;
+}
+.stub-plan { border-left: 3px solid var(--frozen); }
+.live-mapping { border-left: 3px solid var(--living); }
+.stub-plan h3, .live-mapping h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.lens-note {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  margin-left: 0.5rem;
+}
+.stub-plan .lens-note { color: var(--frozen); }
+.live-mapping .lens-note { color: var(--living); }
+.stub-list { list-style: none; margin: 0; padding: 0; }
+.stub-list li { margin: 0.35rem 0; font-size: 0.92rem; }
+.stub-acs { font-family: var(--mono); font-size: 0.78rem; color: var(--muted-solid); }
+.live-mapping table { margin: 0.4rem 0 0; }
+.live-mapping .empty { border: 0; padding: 0; background: none; }
+
+/* ladder-state badges (story lens, §3b of the concept): spec-stale is
+   the rung-arbitrage counter-pressure (blocks closure — rust);
+   pending-supersession is the advisory race-window flag (ochre) */
+.badge-spec-stale { color: var(--st-violated); border-color: var(--st-violated); background: var(--st-violated-tint); }
+.badge-pending-supersession { color: var(--st-pending); border-color: var(--st-pending); background: var(--st-pending-tint); }
+
+/* the per-ADR exemption page + the by-story quartet's slot labels */
+.exemption-list .entry-list li { line-height: 1.6; }
+.quartet-slot-label {
+  font-size: 0.82rem;
+  color: var(--muted-solid);
+  margin: 0.6rem 0 0.4rem;
+}
+
+/* obligations registry — promoted: machine-checked guarantees read as a
+   registry of stamps, not a bullet list */
+.obligations-registry {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.obligation {
+  font-size: 0.78rem;
+  border: 1px solid var(--living);
+  border-radius: 3px;
+  background: var(--living-tint);
+  padding: 0.3rem 0.65rem;
+}
+.obligation a { color: var(--living); text-decoration: none; font-weight: 600; }
+.obligation a:hover { text-decoration: underline; }
+
+/* ---------- workbench-specific ---------- */
+
+.store-root { font-size: 0.82rem; color: var(--muted-solid); }
+
+.home-specs, .home-specs-archived, .home-kinds, .home-services, .home-boards {
+  margin: 0 0 1.6rem;
+}
+.home-specs h2, .home-specs-archived h2, .home-kinds h2, .home-services h2, .home-boards h2 {
+  font-size: 1.15rem;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.3rem;
+  margin: 1.8rem 0 0.6rem;
+}
+.home-kinds h3 { font-size: 0.95rem; margin: 1rem 0 0.3rem; }
+.home-specs ul, .home-specs-archived ul, .home-kinds ul, .home-services ul, .home-boards ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0;
+}
+.home-specs li, .home-specs-archived li, .home-kinds li, .home-services li, .home-boards li {
+  padding: 0.45rem 0.15rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.95rem;
+}
+.home-specs a, .home-specs-archived a, .home-kinds a, .home-services a, .home-boards a { text-decoration: none; }
+.home-specs a:hover, .home-specs-archived a:hover, .home-kinds a:hover, .home-services a:hover, .home-boards a:hover { text-decoration: underline; }
+.obligation-count {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--living);
+  border: 1px solid var(--living);
+  border-radius: 3px;
+  background: var(--living-tint);
+  padding: 0.08rem 0.45rem;
+  margin-left: 0.5rem;
+}
+
+/* advisory preview banner — loud, honest, ochre: never mistakable for the
+   gate's real answer */
+.preview-banner {
+  border: 1px solid var(--st-pending);
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--ink);
+  padding: 0.7rem 1rem;
+  font-size: 0.88rem;
+  margin: 0.5rem 0 1.2rem;
+}
+.preview-banner strong { color: var(--st-pending); letter-spacing: 0.08em; }
+
+.matrix-table td, .verdict-diff td { font-size: 0.86rem; }
+.matrix-summary { font-family: var(--mono); font-size: 0.8rem; color: var(--muted-solid); }
+.verdict-diff ul { margin: 0; padding-left: 1.1rem; }
+
+.snapshot-picker { margin: 1rem 0; }
+
+/* forms (workbench) */
+label { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-solid); }
+input[type="text"], input:not([type]), select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+}
+input:focus, select:focus { border-color: var(--accent); outline: none; }
+button {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+.btn-primary, button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+  font-weight: 600;
+}
+.btn-primary:hover, button[type="submit"]:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--paper);
+}
+
+/* error pages: honest, legible, never blank */
+.error-page {
+  border: 1px solid var(--st-violated);
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: var(--st-violated-tint);
+  padding: 1rem 1.2rem;
+  max-width: 70ch;
+}
+.error-message { margin: 0 0 0.6rem; }
+.error-detail {
+  background: var(--card);
+  border-color: var(--rule);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.error-hint { font-size: 0.9rem; margin: 0.6rem 0 0; }
+
+/* ---------- the board: the one deliberately fat page ---------- */
+
+.board-page { max-width: none; padding: 0 2rem 3rem; }
+
+.board-head { align-items: center; }
+#autosave-status {
+  margin-left: auto;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  min-height: 1.2em;
+}
+#autosave-status:not(:empty) {
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+  padding: 0.2rem 0.7rem;
+}
+
+.board-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+
+/* drafting-paper canvas: a calm, wide-pitched dot grid — texture you
+   notice only when you look for it — inside an inset frame */
+.board-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 42rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background-color: var(--panel);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1.4px);
+  background-size: 36px 36px;
+  overflow: hidden;
+}
+
+/* the thread lies UNDER the papers, tied to their edges: a thread that
+   crosses a card passes behind it (never through its text), and
+   pointer-events: none keeps it from ever intercepting a drag */
+.yarn-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.yarn-thread { fill: none; stroke: var(--yarn); stroke-width: 2.4; opacity: 0.85; }
+.yarn-knot { fill: var(--yarn); }
+
+/* yarn color IS the relationship (the rail's yarn key names the
+   mapping): implements red — the classic thread and the minimum path's
+   edge; resolves green (answered); depends-on ochre (contingent);
+   exempts violet (a waiver); supersedes charcoal, long-dashed — the
+   stroke that amends the record. Scratch relates stays the gray dashed
+   thread it always was. */
+.yarn-thread--type-implements { stroke: var(--yarn-implements); }
+.yarn-knot--type-implements { fill: var(--yarn-implements); }
+.yarn-thread--type-resolves { stroke: var(--yarn-resolves); }
+.yarn-knot--type-resolves { fill: var(--yarn-resolves); }
+.yarn-thread--type-depends-on { stroke: var(--yarn-depends-on); }
+.yarn-knot--type-depends-on { fill: var(--yarn-depends-on); }
+.yarn-thread--type-exempts { stroke: var(--yarn-exempts); }
+.yarn-knot--type-exempts { fill: var(--yarn-exempts); }
+.yarn-thread--type-supersedes { stroke: var(--yarn-supersedes); stroke-dasharray: 13 5; }
+.yarn-knot--type-supersedes { fill: var(--yarn-supersedes); }
+.yarn-thread--type-relates { stroke: var(--yarn-relates); }
+.yarn-knot--type-relates { fill: var(--yarn-relates); }
+.yarn-thread-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  fill: var(--yarn);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+
+/* pinned-ref index cards */
+.card {
+  position: absolute;
+  z-index: 2;
+  width: 15rem;
+  padding: 1rem 0.9rem 0.7rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  cursor: grab;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.card::before { /* a physical pushpin: highlit head, seated shadow */
+  content: "";
+  position: absolute;
+  top: -0.42rem;
+  left: 50%;
+  width: 0.84rem;
+  height: 0.84rem;
+  margin-left: -0.42rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.card-kind {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  margin-bottom: 0.3rem;
+}
+/* the header lockup: kind label left (truncates before it ever wraps),
+   id right as the stable anchor the eye scans for */
+.card-kind-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.card-kind-id {
+  flex: none;
+  font-weight: 700;
+  color: var(--ink);
+}
+.card-ref { font-family: var(--mono); font-size: 0.78rem; color: var(--accent); max-width: 100%; }
+
+/* stickies: paper notes, one color per annotation type */
+.sticky {
+  position: absolute;
+  z-index: 3;
+  width: 12.5rem;
+  min-height: 7rem;
+  padding: 0.65rem 0.75rem 0.9rem;
+  background: var(--note-unknown-bg);
+  color: var(--note-unknown-ink);
+  border-radius: 2px;
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* editors inside a drag surface still select normally */
+.sticky textarea, .objcard textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
+}
+/* deterministic, subtle lean — pinned paper, not a grid of divs */
+.sticky:nth-of-type(odd) { transform: rotate(-0.7deg); }
+.sticky:nth-of-type(even) { transform: rotate(0.6deg); }
+/* the folded corner */
+.sticky::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border-style: solid;
+  border-width: 0 0 0.85rem 0.85rem;
+  border-color: transparent transparent var(--paper) rgba(0, 0, 0, 0.14);
+}
+.sticky-type {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  /* Full ink: the reduced-opacity label failed WCAG AA contrast on the
+     note papers (Wave 6 §5.2's automated scan) — the size and tracking
+     already set the label apart. */
+  opacity: 1;
+}
+/* the scratch tier is HANDWRITTEN: a sticky is unfiled human thought,
+   and graduation literally typesets it into the record's serif. The
+   editor writes in the same hand it will read in. */
+.sticky-body {
+  margin: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  /* a sticky keeps its author's line breaks (Shift+Enter writes one):
+     the stored newline renders as a break, never a collapsed space */
+  white-space: pre-wrap;
+  font-family: var(--hand);
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+/* Author line at full ink: opacity 0.65 failed WCAG AA on the note
+   papers (Wave 6 automated-scan witness); size and tracking already set
+   the meta line apart. */
+.sticky-meta { font-size: 0.62rem; letter-spacing: 0.05em; opacity: 0.9; }
+
+.sticky--comment { background: var(--note-comment-bg); color: var(--note-comment-ink); }
+.sticky--question { background: var(--note-question-bg); color: var(--note-question-ink); }
+.sticky--decision-needed { background: var(--note-decision-bg); color: var(--note-decision-ink); }
+.sticky--agent-task { background: var(--note-agent-bg); color: var(--note-agent-ink); }
+/* proto-stickies (the scoping canvas, feature walls only): manila for
+   the story — the folder it graduates into — periwinkle blueprint for
+   the spike. Handwritten like every sticky; the register changes only
+   at graduation. */
+.sticky--story { background: var(--note-story-bg); color: var(--note-story-ink); }
+.sticky--spike { background: var(--note-spike-bg); color: var(--note-spike-ink); }
+
+/* the sticky draft's inline type control: choosing the paper's color IS
+   part of pinning it (owner UAT round 6, item 2: the draft starts
+   neutral — no silent question-default, no second modal) */
+.sticky-type-picker { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.sticky-type-choice {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.14rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.sticky-type-choice:hover { opacity: 1; }
+.sticky-type-choice[aria-pressed="true"] {
+  opacity: 1;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.12);
+}
+.sticky-type-hint { margin: 0; font-size: 0.68rem; font-style: italic; opacity: 0.85; }
+
+.card:active, .sticky:active { cursor: grabbing; }
+/* a lifted paper rises above everything while it moves */
+.dragging {
+  box-shadow: var(--shadow-lift);
+  z-index: 10;
+}
+.sticky.dragging { transform: rotate(0deg) scale(1.02); }
+
+/* the board's side column: yarn legend + the commit ritual. Sticky, so
+   the rail rides with the reader instead of floating detached at the top
+   of a tall canvas. */
+.board-side {
+  flex: 0 0 20rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  position: sticky;
+  top: 1.25rem;
+}
+
+.yarn, .commit-to-design {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 1rem 1.1rem;
+}
+.yarn h2, .commit-to-design h2 {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+}
+.yarn-list { list-style: none; margin: 0; padding: 0; font-size: 0.74rem; }
+.yarn-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--rule);
+  overflow-wrap: anywhere;
+}
+.yarn-list li::before { content: "— "; color: var(--yarn); font-weight: 700; }
+.yarn-list .yarn-label { color: var(--yarn); }
+.yarn .empty, .commit-to-design .ritual-note { font-size: 0.82rem; }
+
+.commit-to-design { border-color: var(--accent); }
+.ritual-note { color: var(--muted-solid); margin: 0 0 0.9rem; }
+.commit-to-design .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
+.commit-to-design input { width: 100%; }
+.commit-to-design .optional { text-transform: none; letter-spacing: 0; color: var(--muted); }
+.commit-to-design button[type="submit"] { width: 100%; margin-top: 0.2rem; }
+#commit-result { font-family: var(--mono); font-size: 0.76rem; margin-top: 0.7rem; overflow-wrap: anywhere; }
+#commit-result:not(:empty) {
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 0.5rem 0.7rem;
+}
+
+/* ---------- the v1 board: spec-as-source projection ---------- */
+
+/* the mode stamp: three rooms, three inks — a rubber stamp on the page
+   header, not a neutral pill (authoring = the live wall you may pin
+   into; review = a mirror of someone else's MR; read-only = the sealed
+   record) */
+.board-mode-tag {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  border: 2px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.18rem 0.6rem;
+  margin-left: 0.9rem;
+  transform: rotate(-1.2deg);
+}
+.board-mode-tag--authoring { color: var(--accent); border-color: var(--accent); }
+.board-mode-tag--review { color: var(--authored); border-color: var(--authored); }
+.board-mode-tag--readonly { color: var(--frozen); border-color: var(--frozen); }
+
+/* the terminal-status badge on the board head: a superseded spec's own
+   `superseded` status made legible on its wall (spec/feature-supersession-
+   state ac-2), in the same badge vocabulary the index and dex pages carry so
+   status reads identically on every surface. Set just off square so it joins
+   the murder board's stamped family beside the mode tag, without taking on the
+   heavier rubber-stamp border of its own. */
+.board-status-badge { align-self: center; transform: rotate(-0.7deg); }
+
+/* the case file: problem → outcome as ONE header lockup — the folder
+   the wall opens with. Problem wears the violated ink, outcome the
+   evidenced one; the arrow between them is the arc the wall below
+   exists to close. */
+.board-placards { display: flex; gap: 0.9rem; margin: 0 0 1rem; }
+.case-file { position: relative; margin-top: 1.1rem; }
+.case-tab {
+  position: absolute;
+  top: -1.05rem;
+  left: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--authored);
+  background: var(--authored-tint);
+  border: 1px solid var(--authored);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  padding: 0.14rem 0.7rem;
+}
+.placard {
+  position: relative;
+  flex: 1 1 0;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  padding: 0.6rem 0.9rem;
+}
+.placard--problem { border-left-color: var(--st-violated); }
+.placard--outcome { border-left-color: var(--st-evidenced); }
+/* the placard keeps a bounded footprint like every card on the wall: a
+   long problem or outcome clamps to three lines and carries its full form
+   in the click-to-expand dialog (owner directive: a truncated placard is
+   never silently cut — it fades, marks itself, and opens on click) */
+.placard p {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.placard-tag {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+}
+.placard--problem .placard-tag { color: var(--st-violated); }
+.placard--outcome .placard-tag { color: var(--st-evidenced); }
+.case-arrow {
+  align-self: center;
+  color: var(--muted-solid);
+  font-size: 1.3rem;
+  line-height: 1;
+  flex: none;
+}
+
+/* the class stamp: the case file wears its spec class (02 §Kind
+   registry) — FEATURE (the outcome-shaped plan), STORY · <tracker-ref>
+   (the unit of build), SPIKE (a story-class probe). Same rubber-stamp
+   voice and weight as the mode tag, tilted the other way — two stamps
+   on one folder never sit square. The tracker ref keeps its machine
+   case: it is a quoted ref, not stamp lettering. */
+.case-class-tag {
+  position: absolute;
+  top: -1.05rem;
+  right: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  background: var(--paper);
+  border: 2px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.14rem 0.55rem;
+  transform: rotate(1.1deg);
+}
+.case-class-tag--feature { color: var(--accent); border-color: var(--accent); }
+.case-class-tag--story { color: var(--authored); border-color: var(--authored); }
+.case-class-tag--spike { color: var(--st-waived); border-color: var(--st-waived); }
+.case-class-ref { text-transform: none; }
+
+/* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
+   line — honest and visible, never dominant — that discloses a skipped
+   input (unreachable review feed, assumed default branch) rather than
+   rendering as if it were simply absent. The mono "disclosed" stamp and
+   the ochre left accent carry the authored-living color (the "hand-off,
+   unverified input" voice) through the shared theme tokens; the prose
+   stays quiet page ink at footnote size — an advisory note in the
+   margin, not a second headline. */
+.board-notices { display: flex; flex-direction: column; gap: 0.3rem; margin: 0 0 0.7rem; }
+.board-notice {
+  border-left: 3px solid var(--authored);
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--muted-solid);
+  padding: 0.1rem 0.8rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.board-notice::before {
+  content: "disclosed";
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+  margin-right: 0.6rem;
+  transform: translateY(-0.08em);
+}
+/* the drag-refusal notice (a read-only board is never silently inert)
+   speaks the same channel, stamped as the refusal it is */
+.board-notice--refusal::before { content: "read-only"; }
+
+/* the v2 canvas scrolls and is sized server-side to its content (an
+   inline min-height: content + working margin, never a fixed void).
+   Its surface is the MODE: warm cork for the live wall, cool glass for
+   the review mirror, frozen paper (grid faded, sealed stamp) for the
+   accepted record — the room's state, readable before a single card. */
+.boardv2-canvas { overflow: auto; min-height: 26rem; }
+.mode-authoring .boardv2-canvas { background-color: var(--wall); }
+.mode-review .boardv2-canvas { background-color: var(--wall-review); }
+.mode-readonly .boardv2-canvas {
+  background-color: var(--wall-sealed);
+  border-color: var(--frozen);
+  background-image: none;
+}
+.mode-readonly .boardv2-canvas::after {
+  content: "sealed";
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--frozen);
+  border: 2px solid var(--frozen);
+  border-radius: 4px;
+  padding: 0.16rem 0.55rem;
+  transform: rotate(2deg);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+/* zone labels: the zoned layout's filing scheme, made visible — tape
+   strips over each kind's column band. Teaching chrome only: never an
+   interaction layer (pointer-events: none), under the papers. An empty
+   band in authoring is an invitation ("decisions land here"), dimmed
+   and dotted. */
+.zone-labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.zone-label {
+  position: absolute;
+  top: 9px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  text-align: center;
+  padding: 0.2rem 0.3rem;
+  border: 1px dashed color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.07);
+  transform: rotate(-0.5deg);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.zone-label--acceptance-criterion { color: var(--st-evidenced); background: color-mix(in srgb, var(--st-evidenced-tint) 80%, transparent); }
+.zone-label--constraint { color: var(--st-violated); background: color-mix(in srgb, var(--st-violated-tint) 80%, transparent); }
+.zone-label--decision { color: var(--authored); background: color-mix(in srgb, var(--authored-tint) 80%, transparent); }
+.zone-label--open-question { color: var(--st-waived); background: color-mix(in srgb, var(--st-waived-tint) 80%, transparent); }
+/* the stubs band wears the kraft voice of the cards that file there */
+.zone-label--stub { color: var(--stub-ink); background: color-mix(in srgb, var(--stub-paper) 80%, transparent); }
+.zone-label--reference { color: var(--frozen); background: color-mix(in srgb, var(--frozen-tint) 80%, transparent); }
+.zone-label--scratch { color: var(--st-nosignal); background: color-mix(in srgb, var(--st-nosignal-tint) 80%, transparent); }
+.zone-label--empty {
+  opacity: 0.55;
+  background: transparent;
+  border-style: dotted;
+  box-shadow: none;
+}
+
+/* the empty wall: an invitation in authoring (handwritten — nothing is
+   filed yet), a plain statement of record everywhere else. Inert to the
+   pointer so the canvas stays clickable through it. */
+.board-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  padding: 2.5rem;
+  pointer-events: none;
+  z-index: 0;
+}
+.board-empty-lead { margin: 0; font-size: 1.05rem; color: var(--muted-solid); }
+.mode-authoring .board-empty-lead {
+  font-family: var(--hand);
+  font-size: 1.55rem;
+  color: var(--ink);
+  opacity: 0.8;
+  transform: rotate(-1.2deg);
+}
+.board-empty-how {
+  margin: 0;
+  max-width: 34rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--muted-solid);
+}
+
+/* object cards: one per frontmatter-declared object — a UNIFORM
+   index-card footprint (12.5rem × 8.75rem, mirrored by boardlayout's
+   CardWidth/CardHeight), so slots and drops can be collision-free by
+   construction; the text clamps and carries its full form in title */
+.objcard {
+  position: absolute;
+  z-index: 2;
+  width: 12.5rem;
+  height: 8.75rem;
+  padding: 0.7rem 0.9rem 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--muted-solid);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.objcard:active { cursor: grabbing; }
+/* layered paper: a touched card rises above an overlapping neighbour
+   (e.g. an anchored review sticky riding the card above it) */
+.objcard:hover, .sticky:hover { z-index: 8; }
+/* a live wall's papers lift when the hand approaches — the "you can
+   pick this up" cue, spoken only where picking up means something */
+.mode-authoring .objcard:hover { box-shadow: var(--shadow-lift); transform: translateY(-2px); }
+.mode-authoring .sticky:hover { box-shadow: var(--shadow-lift); }
+
+/* four kinds, four papers — what a card IS is readable across the room:
+   ACs are ruled index cards (things that must be checked off),
+   constraints wear a hazard edge (hard limits), decisions sit on ochre
+   slips (the authored voice), open questions carry their own watermark */
+.objcard .card-kind-label { font-weight: 700; }
+.objcard--acceptance-criterion {
+  border-top-color: var(--st-evidenced);
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0 21px,
+    color-mix(in srgb, var(--st-evidenced) 14%, transparent) 21px 22px
+  );
+}
+.objcard--acceptance-criterion .card-kind-label { color: var(--st-evidenced); }
+.objcard--constraint {
+  border-top-color: var(--st-violated);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--st-violated) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+  background-size: 7px 100%;
+  background-repeat: no-repeat;
+}
+.objcard--constraint .card-kind-label { color: var(--st-violated); }
+.objcard--decision {
+  border-top-color: var(--authored);
+  background-color: color-mix(in srgb, var(--card) 90%, var(--authored) 10%);
+}
+.objcard--decision .card-kind-label { color: var(--authored); }
+.objcard--open-question {
+  border-top-color: var(--st-waived);
+  background-color: color-mix(in srgb, var(--card) 93%, var(--st-waived) 7%);
+}
+.objcard--open-question .card-kind-label { color: var(--st-waived); }
+.objcard--open-question::after {
+  content: "?";
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0;
+  font-family: var(--serif);
+  font-size: 3.1rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--st-waived);
+  opacity: 0.13;
+  pointer-events: none;
+}
+.objcard .card-text {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.card-editor, .sticky-editor {
+  width: 100%;
+  min-height: 4.5rem;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.3rem 0.4rem;
+  resize: vertical;
+}
+/* the sticky's editor writes in the hand it will read in (the card's
+   stays the record's serif — editing a card IS editing the spec) */
+.sticky-editor { font-family: var(--hand); font-size: 0.98rem; }
+
+/* the yarn handle IS the card's pushpin: a physical pin head seated at
+   the top edge — the affordance yarn is drawn from, present only where
+   drawing yarn means something (authoring mode) */
+.yarn-handle {
+  position: absolute;
+  top: -0.5rem;
+  left: 50%;
+  margin-left: -0.5rem;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  cursor: crosshair;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  touch-action: none;
+}
+/* the pin says "I'm a handle" on approach: a halo ring, not just a
+   bigger head */
+.yarn-handle:hover, .yarn-handle:focus-visible {
+  transform: scale(1.22);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 0 0 5px color-mix(in srgb, var(--yarn) 28%, transparent);
+}
+
+/* reference cards: targets outside this spec, filed frozen-blue — the
+   one deliberately different paper on the wall (squat, tinted, pinned
+   ref) sharing the cards' radius, shadow, and header lockup */
+.refcard {
+  position: absolute;
+  z-index: 2;
+  width: 12.5rem;
+  height: 4.5rem;
+  padding: 0.55rem 0.8rem 0.65rem;
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  box-shadow: var(--shadow-card);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.refcard .card-kind, .refcard .card-kind-id { color: var(--frozen); }
+.refcard .card-ref {
+  color: var(--frozen);
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the reference peek: a filed card pulled from the drawer — fixed to the
+   right edge above the board, frozen-blue like the refcards it serves,
+   dismissible from ×, Escape, or any outside click. Read-only in every
+   mode. The card advertises the affordance itself: a magnifier cursor,
+   and a corner "peek" cue on approach. */
+.refcard { cursor: zoom-in; }
+.refcard::after {
+  content: "peek";
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--frozen);
+  opacity: 0;
+}
+.refcard:hover::after, .refcard:focus-visible::after { opacity: 0.9; }
+.ref-peek {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  bottom: 1rem;
+  width: 24rem;
+  max-width: calc(100vw - 2rem);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--frozen);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  z-index: 15;
+  overflow: hidden;
+}
+.ref-peek-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--frozen-tint);
+}
+.ref-peek-ref {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--frozen);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ref-peek-close {
+  border: 0;
+  background: transparent;
+  color: var(--frozen);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.ref-peek-content { padding: 0.8rem 1rem 1rem; overflow-y: auto; font-size: 0.88rem; }
+.ref-peek-content .peek-title { font-size: 1.05rem; margin: 0.35rem 0 0.5rem; }
+.peek-kind, .peek-status {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  margin-right: 0.3rem;
+}
+.peek-body { line-height: 1.55; }
+.peek-body h1, .peek-body h2, .peek-body h3 { font-size: 0.95rem; margin: 0.8rem 0 0.3rem; }
+.peek-open { display: inline-block; margin-top: 0.8rem; font-size: 0.85rem; }
+.peek-error { color: var(--muted-solid); font-size: 0.88rem; }
+.peek-error::before {
+  content: "disclosed";
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+  margin-right: 0.6rem;
+}
+
+/* yarn chips: the edge's label, riding its thread at the first point
+   clear of every card's interior (layoutYarn slides it along the curve),
+   so the chip sits on the yarn without lying over anyone's text — and
+   stays clickable (its Graduate affordance is part of the contract) */
+.yarn-chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.14rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--yarn);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--yarn);
+  z-index: 4;
+}
+/* the chip wears its thread's ink: label and yarn agree at a glance */
+.yarn-chip[data-edge-type="implements"] { color: var(--yarn-implements); border-color: var(--yarn-implements); }
+.yarn-chip[data-edge-type="resolves"] { color: var(--yarn-resolves); border-color: var(--yarn-resolves); }
+.yarn-chip[data-edge-type="depends-on"] { color: var(--yarn-depends-on); border-color: var(--yarn-depends-on); }
+.yarn-chip[data-edge-type="exempts"] { color: var(--yarn-exempts); border-color: var(--yarn-exempts); }
+.yarn-chip[data-edge-type="supersedes"] { color: var(--yarn-supersedes); border-color: var(--yarn-supersedes); }
+.yarn-chip--annotation { border-style: dashed; color: var(--yarn-relates); border-color: var(--yarn-relates); font-weight: 400; }
+/* the document's own edge: the chip names its off-board endpoint */
+.yarn-chip-doc {
+  font-size: 0.56rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted-solid);
+  border-right: 1px solid var(--rule);
+  padding-right: 0.4rem;
+}
+.yarn-thread--annotation { stroke-dasharray: 5 4; opacity: 0.6; }
+.yarn-draft { stroke: var(--yarn); stroke-width: 2; opacity: 0.7; stroke-dasharray: 3 3; }
+
+.graduate-btn {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.sticky .graduate-btn { align-self: flex-end; }
+
+/* deletion affordances (owner UAT round 6, item 3): a quiet × — the
+   scratch tier's records graduate or die, and a spec edge is removable
+   as the inverse of drawing it. Authoring mode only (server-gated). */
+.delete-btn {
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0 0.28rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.delete-btn:hover { opacity: 1; }
+.sticky .delete-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  border: 0;
+  font-size: 0.95rem;
+}
+
+/* the chip's type label doubles as the in-place retype affordance on
+   editable spec edges (owner directive): same lockup, dotted underline
+   as the "this opens the picker" cue */
+button.yarn-chip-type {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+/* review stickies: the MR's voice, anchored or trayed — never dropped */
+.review-sticky {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--note-comment-bg);
+  color: var(--note-comment-ink);
+  border-radius: 2px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.review-sticky .sticky-body { margin: 0.2rem 0 0; overflow-wrap: anywhere; font-size: 0.92rem; }
+
+/* the rail's hierarchy, top-down by consequence: the git panel
+   (Commit & push — the page's one write to the record) leads with the
+   accent and the primary button; the scratch panel recedes into dashed
+   paper; the yarn key and the four-move guide are reading aids that
+   wait quietly at the bottom */
+.inbox-tray, .git-panel, .scratch-panel, .yarn-key, .mirror-note {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 1rem 1.1rem;
+}
+.git-panel {
+  border-top: 3px solid var(--accent);
+  box-shadow: var(--shadow-card);
+}
+.scratch-panel {
+  background: transparent;
+  border-style: dashed;
+}
+.inbox-tray h2, .git-panel h2, .scratch-panel h2, .yarn-key h2, .mirror-note h2 {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--rule);
+}
+.git-panel h2 { color: var(--accent); border-bottom-color: var(--rule); }
+.inbox-tray .review-sticky { margin-top: 0.6rem; }
+.inbox-tray .empty, .scratch-panel .ritual-note { font-size: 0.82rem; }
+
+/* the review mirror explains itself in its own (authored-ochre) voice */
+.mirror-note { border-left: 3px solid var(--authored); }
+.mirror-note h2 { color: var(--authored); }
+.mirror-note .ritual-note { margin: 0; font-size: 0.82rem; }
+
+/* the sealed record's panel: frozen, filed, not editable */
+.sealed-panel {
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-left-width: 3px;
+}
+.sealed-panel h2 { color: var(--frozen); border-bottom-color: color-mix(in srgb, var(--frozen) 40%, transparent); }
+
+/* a read-only wall that is NOT the sealed record (MVP release amendment
+   R2): its acceptance is unproven, or the revision is not yet accepted —
+   the frozen rule without the filed tint, so the two rooms never read
+   alike at a glance */
+.readonly-panel {
+  border: 1px dashed var(--frozen);
+  border-left: 3px solid var(--frozen);
+}
+.readonly-panel h2 { color: var(--frozen); border-bottom-color: color-mix(in srgb, var(--frozen) 40%, transparent); }
+.readonly-panel code { font-size: 0.78rem; }
+
+/* the yarn key: a legend of THIS wall — only the types present render */
+.yarn-key ul { list-style: none; margin: 0; padding: 0; }
+.yarn-key li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.32rem 0;
+  border-bottom: 1px dashed var(--rule);
+  font-size: 0.78rem;
+}
+.yarn-key li:last-child { border-bottom: 0; }
+.yarn-key li[data-edge-type="implements"] { color: var(--yarn-implements); }
+.yarn-key li[data-edge-type="resolves"] { color: var(--yarn-resolves); }
+.yarn-key li[data-edge-type="depends-on"] { color: var(--yarn-depends-on); }
+.yarn-key li[data-edge-type="supersedes"] { color: var(--yarn-supersedes); }
+.yarn-key li[data-edge-type="exempts"] { color: var(--yarn-exempts); }
+.yarn-key li[data-edge-type="relates"] { color: var(--yarn-relates); }
+.yarn-key-swatch {
+  flex: none;
+  width: 1.5rem;
+  border-top: 3px solid currentColor;
+  border-radius: 2px;
+  transform: translateY(-0.2em);
+}
+.yarn-key li[data-edge-type="supersedes"] .yarn-key-swatch,
+.yarn-key li[data-edge-type="relates"] .yarn-key-swatch { border-top-style: dashed; }
+.yarn-key-type { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; }
+.yarn-key-what { color: var(--muted-solid); font-size: 0.74rem; }
+
+/* the four-move guide (05 §Workbench: the four-concept minimum path) —
+   present, collapsed, never front-loaded */
+.board-guide {
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.84rem;
+  color: var(--muted-solid);
+}
+.board-guide summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.board-guide[open] summary { margin-bottom: 0.6rem; }
+/* the class lesson (feature walls only): what THIS wall is — outcome
+   ACs + stubs here, stories point up from their own specs. One breath,
+   set off in the feature ink before the four moves. */
+.guide-class-note {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--panel);
+  line-height: 1.5;
+}
+.guide-moves {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.guide-moves li { line-height: 1.5; }
+.guide-moves strong { color: var(--ink); font-weight: 600; }
+.guide-more { margin: 0.6rem 0 0; font-style: italic; }
+
+/* the git affordance: quiet chrome, one calm indicator */
+.git-panel .uncommitted {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--authored);
+  background: var(--authored-tint);
+  border: 1px solid var(--authored);
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  margin-bottom: 0.7rem;
+}
+.git-panel button, .scratch-panel button, .board-dialog button { cursor: pointer; }
+#commit-push-btn, #add-sticky-btn {
+  display: block;
+  width: 100%;
+  margin: 0.2rem 0 0.7rem;
+}
+.branch-row { display: flex; align-items: center; gap: 0.5rem; }
+.branch-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+}
+.branch-switcher {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 0.25rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+.branch-menu {
+  margin-top: 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.branch-menu [role="menuitem"] { text-align: left; font-family: var(--mono); font-size: 0.76rem; }
+
+/* dialogs: paper modals over a soft scrim */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+.board-dialog {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 22rem;
+  max-width: 32rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1.1rem 1.3rem 1.2rem;
+  z-index: 21;
+}
+.board-dialog h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.board-dialog .ritual-note { color: var(--muted-solid); font-size: 0.85rem; margin: 0 0 0.8rem; }
+.board-dialog .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
+.board-dialog input { font: inherit; padding: 0.3rem 0.5rem; }
+.dialog-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+.picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.picker-item:last-child { border-bottom: 0; }
+.picker-item [role="menuitem"] {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.picker-item .consequence { font-size: 0.78rem; color: var(--muted-solid); }
+.graduate-menu {
+  transform: none;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+}
+.graduate-menu [role="menuitem"] { text-align: left; }
+
+/* ---------- pinned references, the supply toolbox, the trash ---------- */
+
+/* a pinned reference: the SAME frozen-blue paper, seated by a real
+   pushpin and leaning the scratch tier's half-degree — planning
+   material, not yet the record's straight filing */
+.refcard--pinned { transform: rotate(-0.65deg); }
+.refcard--pinned::before {
+  content: "";
+  position: absolute;
+  top: -0.42rem;
+  left: 50%;
+  width: 0.84rem;
+  height: 0.84rem;
+  margin-left: -0.42rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+/* on the live wall reference cards drag (pins re-place, the rest ride
+   to the trash and snap home) — never at the cost of the peek click */
+.mode-authoring .refcard { touch-action: none; }
+.mode-authoring .refcard--pinned { cursor: grab; }
+.mode-authoring .refcard--pinned:active { cursor: grabbing; }
+.mode-authoring .refcard:hover { box-shadow: var(--shadow-lift); }
+.mode-authoring .yarn-chip--annotation { touch-action: none; cursor: grab; }
+
+/* the supply toolbox: the wall's box of pins — one quiet tab at the
+   screen's lower-left (zero clutter at rest), one click to the picker */
+.pin-toolbox { position: fixed; left: 1.1rem; bottom: 1.1rem; z-index: 18; }
+.pin-toolbox-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  padding: 0.42rem 0.75rem;
+  cursor: pointer;
+  transform: rotate(-0.8deg);
+}
+.pin-toolbox-tab:hover,
+.pin-toolbox-tab:focus-visible,
+.pin-toolbox-tab[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lift);
+}
+.pin-head {
+  flex: none;
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* the tray the tab opens: the picker over the corpus drawer */
+.pin-tray {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.6rem);
+  width: 26rem;
+  max-width: calc(100vw - 2.5rem);
+  max-height: min(30rem, 70vh);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1rem 1.1rem;
+}
+.pin-tray h2 {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  margin: 0 0 0.4rem;
+}
+.pin-tray .ritual-note { font-size: 0.78rem; margin: 0 0 0.6rem; }
+#pin-search {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.55rem;
+  margin: 0 0 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+}
+#pin-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#pin-results { overflow-y: auto; min-height: 3rem; }
+.pin-result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.55rem;
+  row-gap: 0.05rem;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--rule);
+  border-radius: 0;
+  padding: 0.45rem 0.15rem;
+  cursor: pointer;
+}
+.pin-result:last-child { border-bottom: 0; }
+.pin-result:hover, .pin-result:focus-visible { background: var(--panel); }
+.pin-result-kind {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--frozen);
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-radius: 999px;
+  padding: 0.06rem 0.45rem;
+}
+.pin-result-title { font-size: 0.84rem; line-height: 1.35; }
+.pin-result-ref {
+  grid-column: 2;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.pin-results-empty, .pin-results-more {
+  font-size: 0.78rem;
+  color: var(--muted-solid);
+  margin: 0.4rem 0 0;
+}
+
+/* the trash target (owner directive): sleeps invisible at the screen's
+   lower-right; a drag nearing the corner raises it; hovering it is
+   unmistakable — the bin goes hot in the violated ink and asks for the
+   release. Never a pointer target (the gesture code measures its box). */
+.board-trash {
+  position: fixed;
+  right: 1.4rem;
+  bottom: 1.4rem;
+  z-index: 19;
+  width: 4.4rem;
+  height: 4.4rem;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  border: 2px dashed var(--muted-solid);
+  background: var(--panel);
+  color: var(--muted-solid);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+}
+.board-trash.is-armed { opacity: 0.95; transform: translateY(0); }
+.board-trash.is-hot {
+  border-style: solid;
+  border-color: var(--st-violated);
+  background: var(--st-violated-tint);
+  color: var(--st-violated);
+  transform: scale(1.14);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--st-violated) 22%, transparent);
+}
+.board-trash-label {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.board-trash-label::after { content: "remove"; }
+.board-trash.is-hot .board-trash-label::after { content: "release"; }
+
+/* ---------- the scoping canvas (spec/scoping-canvas) ---------- */
+
+/* the stub card: a declared stub is the future case file's TAB, filed
+   in the stubs band before the case exists — kraft file-divider stock,
+   set straight in the record's register (no hand voice, no lean; dc-6:
+   graduation typesets the handwritten sticky into this paper in place).
+   Uniform footprint 12.5rem × 7.5rem, mirrored by boardlayout's
+   StubCardHeight. */
+.stubcard {
+  position: absolute;
+  z-index: 2;
+  width: 12.5rem;
+  height: 7.5rem;
+  padding: 0.55rem 0.8rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+  background: var(--stub-paper);
+  border: 1px solid var(--stub-edge);
+  border-radius: 2px 6px 6px 6px;
+  box-shadow: var(--shadow-card);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* the tab: the slug in the machine's mono — the identity the story is
+   bound to at instantiation (dc-3: slug equality, no new provenance) */
+.stub-tab {
+  position: absolute;
+  top: -0.95rem;
+  left: -1px;
+  max-width: 82%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--stub-ink);
+  background: var(--stub-paper);
+  border: 1px solid var(--stub-edge);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  padding: 0.12rem 0.55rem;
+}
+.stubcard .card-kind { margin-bottom: 0; }
+/* Stub ink for the kind lockup: the kraft paper's own ink meets WCAG AA
+   where --authored/--muted-solid dip under 4.5:1 on this stock (the Wave
+   6 automated scan's witness). */
+.stubcard .card-kind-label { font-weight: 700; color: var(--stub-ink); }
+.stubcard .card-kind-id { color: var(--stub-ink); font-weight: 400; }
+/* the spike stub wears the spike's waived-violet ink (the same ink the
+   case-class stamp uses for a spike) */
+.stubcard--spike .card-kind-label,
+.stubcard--spike .stub-tab { color: var(--st-waived); }
+.stub-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* attributions retired from the card (owner directive): the stub's
+   declared coverage/resolution hangs on the wall as scoping yarn — see
+   "the scoping yarn" below — so the card carries only its own identity */
+
+/* stub cards drag on the live wall (round 5.5 dc-6): the same pick-up
+   cues every positioned paper speaks, only where moving means something */
+.mode-authoring .stubcard { cursor: grab; touch-action: none; }
+.mode-authoring .stubcard:active { cursor: grabbing; }
+.mode-authoring .stubcard:hover { box-shadow: var(--shadow-lift); }
+
+/* the scoping yarn: BASTING STITCHES — a run of round tacking dots, the
+   temporary stitch that lays the work out before any permanent seam.
+   Committed spec yarn is solid thread (supersedes long-dashed) and the
+   scratch layer a flat gray dash; the basting run is the third voice:
+   planning. Each type wears the ink of the surface it serves — covers
+   in the evidenced green of the AC's own coverage receipt, resolves in
+   the spike's waived violet — so thread, receipt, and card agree at a
+   glance in both themes. */
+.yarn-thread--scoping {
+  stroke-dasharray: 2 8;
+  stroke-linecap: round;
+  stroke-width: 2.2;
+  opacity: 0.8;
+}
+.yarn-thread--scoping.yarn-thread--type-covers { stroke: var(--st-evidenced); }
+.yarn-knot--scoping.yarn-knot--type-covers { fill: var(--st-evidenced); }
+.yarn-thread--scoping.yarn-thread--type-resolves { stroke: var(--st-waived); }
+.yarn-knot--scoping.yarn-knot--type-resolves { fill: var(--st-waived); }
+
+/* the scoping chip is cut from the stub's own kraft stock: dotted edge,
+   type ink — a label pinned to the basting run, never an affordance
+   (a scoping edge is a projection of the stubs block; nothing to edit) */
+.yarn-chip--scoping {
+  border-style: dotted;
+  background: var(--stub-paper);
+}
+.yarn-chip--scoping[data-edge-type="covers"] { color: var(--st-evidenced); border-color: var(--st-evidenced); }
+.yarn-chip--scoping[data-edge-type="resolves"] { color: var(--st-waived); border-color: var(--st-waived); }
+
+/* the key rows for the planning threads: dotted swatch, same inks */
+.yarn-key li[data-layer="scoping"] .yarn-key-swatch { border-top-style: dotted; }
+.yarn-key li[data-layer="scoping"][data-edge-type="covers"] { color: var(--st-evidenced); }
+.yarn-key li[data-layer="scoping"][data-edge-type="resolves"] { color: var(--st-waived); }
+
+/* instantiate (ac-6): the one live affordance a sealed record permits —
+   the paved road's green on frozen paper, unmistakably the only thing
+   here that still acts */
+.stub-instantiate {
+  align-self: flex-start;
+  margin-top: auto;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+  cursor: pointer;
+}
+.stub-instantiate:hover, .stub-instantiate:focus-visible {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* coverage receipts (ac-4): every AC card on a feature wall says, in
+   the receipts voice, whether a stub claims it — calm evidenced green
+   when covered, quietly insistent pending ochre (dashed, never red)
+   when not. The OQ multi-claim smell (ac-5) is a norm-shaped
+   observation in the no-signal ink: worth a look, never a rule. */
+.coverage-chip, .oq-claims {
+  position: absolute;
+  left: 0.9rem;
+  bottom: 0.5rem;
+  max-width: calc(100% - 1.8rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.06rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.coverage-chip--covered {
+  color: var(--st-evidenced);
+  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
+  background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent);
+}
+.coverage-chip--none {
+  color: var(--st-pending);
+  border-style: dashed;
+  border-color: var(--st-pending);
+  background: transparent;
+}
+.oq-claims {
+  /* --st-nosignal alone dips under AA on the card paper (automated-scan
+     witness); mixing toward the page ink keeps the no-signal hue while
+     clearing 4.5:1. */
+  color: color-mix(in srgb, var(--st-nosignal) 55%, var(--ink));
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--st-nosignal) 60%, transparent);
+  background: color-mix(in srgb, var(--st-nosignal-tint) 70%, transparent);
+}
+/* a card wearing a receipt gives its text one clamped line back, so
+   the chip never sits on the prose */
+.objcard:has(.coverage-chip) .card-text,
+.objcard:has(.oq-claims) .card-text { -webkit-line-clamp: 3; }
+
+/* obligation disclosures (spec/obligation-wall ac-2): a STORY AC card reads
+   out, per declared evidence kind, what that kind's obligation demands —
+   read on the wall itself, never recovered from the sidecar (feature co-3).
+   One compact row per kind, in the receipts register: a mono kind tag, then
+   the demand (the obligation's title, in the reading ink, its fuller prose a
+   hover away) or a disclosed "no obligation" badge in the SAME dashed
+   pending vocabulary the "no stub" coverage chip wears (dc-2 discloses, it
+   never refuses). */
+.card-obligations {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+.obligation {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.obligation-kind {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--obligation-kind-ink);
+}
+.obligation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.64rem;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.obligation-badge {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  border: 1px dashed var(--st-pending);
+  color: var(--st-pending);
+  background: transparent;
+}
+/* evidence slots (spec/evidence-slot ac-3/dc-2): the record-state chip
+   joins each obligation row at its tail — demand reads left, holdings
+   right, one line per kind. An EMPTY slot wears the exact dashed pending
+   vocabulary "no stub" and "no obligation" already speak (a calm fact of
+   the authoring state, never an alarm — dc-1's never-synced wall is the
+   ordinary one); a HELD slot wears the coverage receipt's covered
+   register (record presence, the same claim "covered by 1 stub" makes —
+   presence, never a pass/fail verdict, dc-4). */
+.slot-chip {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.slot-chip--empty {
+  border-style: dashed;
+  border-color: var(--st-pending);
+  color: var(--st-pending);
+  background: transparent;
+}
+.slot-chip--held {
+  color: var(--st-evidenced);
+  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
+  background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent);
+}
+/* the un-obligated row's "no obligation" badge sits directly against its
+   slot chip; keep the pair from touching when the row runs tight */
+.obligation .obligation-badge { margin-right: 0.1rem; }
+/* a story AC card wearing obligations gives its text two clamped lines back
+   so the disclosures sit below the prose, never on it (mirrors coverage) */
+.objcard:has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
+
+/* wall badges (spec/badge-computes ac-5, dc-4): computed receipts the
+   wall wears — a VL-finding chip on the card it anchors to, a ladder or
+   spec-level stamp on the case-file lockup. Disclosure, not alarm
+   (wall-receipts dc-2): every badge speaks the board's disclosed ochre —
+   the authored/"hand-off, unverified input" voice the board-notice and
+   the pending receipts already use — never an error red. Each badge is a
+   real BUTTON (keyboard-focusable; data-badge-source + data-badge-record
+   are the derivation drawer's opener contract), so it takes the pointer
+   cue and focus ring every live control on the wall takes. */
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.18rem;
+  min-width: 0;
+}
+/* on an object card the chip row joins the receipts column pinned at the
+   card's foot, exactly where the coverage chip sits */
+.objcard .card-badges {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  bottom: 0.5rem;
+}
+.badge-chip, .case-stamp {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--authored);
+  background: color-mix(in srgb, var(--authored-tint) 75%, transparent);
+  border: 1px solid color-mix(in srgb, var(--authored) 55%, transparent);
+  border-radius: 999px;
+  padding: 0.06rem 0.45rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.badge-chip:hover, .badge-chip:focus-visible,
+.case-stamp:hover, .case-stamp:focus-visible {
+  border-color: var(--authored);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--authored) 18%, transparent);
+}
+/* a card wearing badges keeps its receipts a COLUMN (dc-4: "one column
+   of receipts"): the chip row takes the foot, an existing receipt on the
+   same card moves up one row, and the clamped text gives lines back so
+   nothing sits on the prose (mirrors the coverage/obligation rules) */
+.objcard:has(.card-badges) .coverage-chip,
+.objcard:has(.card-badges) .oq-claims,
+.objcard:has(.card-badges) .card-obligations { bottom: 1.75rem; }
+.objcard:has(.card-badges) .card-text { -webkit-line-clamp: 3; }
+.objcard:has(.card-badges):has(.coverage-chip) .card-text,
+.objcard:has(.card-badges):has(.oq-claims) .card-text,
+.objcard:has(.card-badges):has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
+/* on a stub card (a flex column, not absolute-positioned innards) the
+   chip row sits in flow at the card's foot; the sealed wall's
+   Instantiate keeps its own place right below it */
+.stubcard .card-badges { margin-top: auto; }
+.stubcard:has(.card-badges) .stub-instantiate { margin-top: 0; }
+
+/* the case-file stamps: spec-level badges beside the class tag (dc-4) —
+   the same top-right lockup, the stamps first, the class tag keeping its
+   own stamped look inside the row (position handled by the row now). A
+   stamp joins the folder's stamped family — squared corners, the slight
+   off-square set every stamp on this board wears — but keeps the
+   disclosed ochre voice and its prose label's own case (a receipt's
+   message, not stamp lettering). */
+.case-stamp-row {
+  position: absolute;
+  top: -1.05rem;
+  right: 0.85rem;
+  display: flex;
+  /* top-aligned: the class tag deliberately tucks its foot behind the
+     placard's paper (the stamped-folder look), but a stamp is shorter
+     than the tag — bottom-aligning would sink half of it behind the
+     folder. Top-aligned it sits fully legible on the folder's lip. */
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.case-stamp-row .case-class-tag { position: static; top: auto; right: auto; }
+.case-stamp {
+  border-radius: 4px;
+  background: var(--paper);
+  max-width: 18rem;
+  transform: rotate(-0.8deg);
+}
+
+/* the case-file disclosure line (spec/case-file-flags dc-4): a ladder
+   outcome that could not be PROVEN either way renders on the case-file
+   lockup as a line in the board's notice vocabulary — the same
+   "disclosed" ochre voice .board-notice speaks — never a stamp
+   (unproven is never dressed as a verdict) and never silence. It spans
+   the folder's full width under the placards; the placards row wraps to
+   give it its own line. */
+.case-file { flex-wrap: wrap; }
+.case-disclosure {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/* ---------- the derivation drawer: a receipt, opened ----------
+
+   Every wall badge's server-rendered drawer body (spec/derivation-drawer
+   dc-1): hidden beside its badge button until boardspec.js moves it to
+   the body and lifts the scrim — the same paper modal vocabulary as
+   every board dialog, deliberately calm and document-like (a receipt is
+   read, never alarmed at): the rule id and every cited digest/sha in the
+   record's own monospace, the firing records as quiet prose, the
+   disclosure contrasts in the pending ochre the wall's other disclosed
+   receipts already wear — never the violated red. */
+.badge-drawer {
+  position: fixed;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 66vh;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1rem 1.2rem 1.1rem;
+  z-index: 21;
+  text-align: left;
+  white-space: normal;
+  cursor: auto;
+}
+.drawer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.15rem;
+}
+.drawer-source {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--authored);
+  overflow-wrap: anywhere;
+}
+.drawer-close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+}
+.drawer-close:hover, .drawer-close:focus-visible { color: var(--ink); }
+.drawer-label {
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--ink);
+  margin: 0 0 0.7rem;
+}
+/* the sweep-provenance block, stamped once at the drawer's head: pinned
+   identifiers, so the record's own monospace, framed like the wall's
+   dashed receipt vocabulary */
+.drawer-provenance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  margin: 0 0 0.8rem;
+}
+.drawer-provenance-line {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.drawer-inputs {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.8rem;
+}
+.drawer-inputs caption,
+.drawer-section-label {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  margin: 0 0 0.3rem;
+}
+/* the caption keeps its native table-caption display (display:block
+   would drop it into the row flow, under the header row); the section
+   labels are plain spans and need the block themselves */
+.drawer-inputs caption { caption-side: top; padding: 0 0 0.3rem; }
+.drawer-section-label { display: block; }
+.drawer-inputs th {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-solid);
+  text-align: left;
+  padding: 0 0.7rem 0.2rem 0;
+}
+.drawer-inputs td {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--ink);
+  border-top: 1px dashed var(--rule);
+  padding: 0.3rem 0.7rem 0.3rem 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.drawer-records ul, .drawer-disclosures ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.drawer-record {
+  font-family: var(--serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+.drawer-record::marker, .drawer-disclosure::marker { color: var(--muted-solid); }
+.drawer-records { margin: 0 0 0.8rem; }
+/* disclosures are the receipt's own honesty — the disclosed ochre voice
+   (the "no stub"/"no obligation" pending vocabulary), never alarm red */
+.drawer-disclosure {
+  font-family: var(--serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--st-pending);
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- click-to-expand: truncation is visible, never silent ----------
+
+   Any wall text the layout clamps (a case-file placard, an object card's
+   text, a stub's title) says so when it actually overflows: its last line
+   fades into the paper and a quiet pencilled "⋯" sits in the corner. The
+   affordance is added by boardspec.js ONLY when the text is measurably
+   truncated — a short placard stays crisp, keeps its cursor, and does
+   nothing on click. Clicking a clamped text opens the read-only expand
+   dialog (below). The hint is a static gradient and a mark — no motion,
+   so nothing here needs the reduced-motion guard. */
+.is-clamped {
+  cursor: zoom-in;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15em), transparent);
+}
+.clamp-more {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.clamp-more::before { content: "\22EF"; } /* ⋯ */
+/* while a card's inline editor is open its text is hidden — so is its mark */
+.objcard:has(.card-editor) .clamp-more { display: none; }
+
+/* ---------- the case file's always-present "read the full file" mark ----
+
+   A case-file placard is ALWAYS expandable (the board-polish pass), not only
+   when its headline happens to clamp: the fuller authored problem/outcome
+   prose lives a click away, so the placard wears a persistent, quiet
+   affordance saying so. That mark is a dog-ear — a page corner folded up to
+   show there is more file behind this one — drawn in the placard's own
+   accent (the violated red on the problem, the evidenced green on the
+   outcome). It is distinct from the truncation fade+⋯, which still appears
+   ONLY when the headline is genuinely cut and layers on top. The one
+   placard that gets neither is the degenerate one — a short headline with no
+   body section, where the face already IS the whole file. */
+.placard--problem { --placard-accent: var(--st-violated); --placard-accent-tint: var(--st-violated-tint); }
+.placard--outcome { --placard-accent: var(--st-evidenced); --placard-accent-tint: var(--st-evidenced-tint); }
+.placard--expandable { cursor: zoom-in; }
+/* the clamp ⋯, when a placard's headline also clamps, steps left of the
+   dog-ear so the two marks never sit on top of one another */
+.placard .clamp-more { right: 1.25rem; }
+.placard-more {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+/* the fold itself: the bottom-right triangle turned up to reveal the
+   accent-tinted back of the page, its crease a hairline in the full accent */
+.placard-more::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-bottom-right-radius: 6px;
+  opacity: 0.5;
+  background: linear-gradient(
+    135deg,
+    transparent calc(50% - 0.6px),
+    var(--placard-accent) calc(50% - 0.6px) calc(50% + 0.6px),
+    var(--placard-accent-tint) calc(50% + 0.6px)
+  );
+}
+.placard-more:hover::after,
+.placard-more:focus-visible::after { opacity: 1; }
+.placard-more:focus-visible {
+  outline: 2px solid var(--placard-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* the expand dialog: the same paper modal + scrim as every board dialog
+   (matched, not reinvented), closing on ×, the backdrop, or Escape. It is
+   read-only information, so it opens in every mode. The header is the
+   element's identity in its own eyebrow voice; the body is the full text
+   as readable prose — serif for the spec register, the hand for scratch. */
+.expand-dialog { padding-top: 1.4rem; }
+.expand-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+}
+.expand-close:hover, .expand-close:focus-visible { color: var(--ink); }
+.expand-kind {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+}
+.expand-text {
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.expand-dialog--hand .expand-text { font-family: var(--hand); font-size: 1.05rem; }
+/* a placard's body prose reads as laid-out prose — real paragraphs, lists,
+   and emphasis, rendered from the server's escaped HTML — not the plain
+   pre-wrapped single string the text expand shows. */
+.expand-text--rich { white-space: normal; }
+.expand-text--rich > :first-child { margin-top: 0; }
+.expand-text--rich > :last-child { margin-bottom: 0; }
+.expand-text--rich p { margin: 0 0 0.7rem; }
+.expand-text--rich ul, .expand-text--rich ol { margin: 0 0 0.7rem; padding-left: 1.25rem; }
+.expand-text--rich li { margin: 0.25rem 0; }
+.expand-text--rich li::marker { color: var(--muted-solid); }
+
+@media (max-width: 60rem) {
+  .board-placards { flex-direction: column; }
+  .case-arrow { display: none; }
+}
+
+/* ---------- responsive + motion ---------- */
+
+/* ------------------------------------------------------------------ */
+/* The diagram-proposal editor (spec/board-editor): drafting focus.
+   Three sheets on the wall's paper vocabulary — the code pane is the
+   draftsman's source sheet (mono, quiet), the live preview is the large
+   working sheet the drawing dominates, and the verification rail is a
+   slim margin column that informs and never blocks. Render errors are
+   PAINTED on the working sheet in the violated voice: never a blank,
+   never a stale picture. */
+.diagram-editor {
+  display: grid;
+  grid-template-columns: minmax(18rem, 26rem) minmax(0, 1fr) 16rem;
+  gap: 1.1rem;
+  align-items: stretch;
+  margin-top: 1.4rem;
+}
+.diagram-code, .diagram-stage, .diagram-rail {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1.1rem 0.9rem 0.9rem;
+}
+/* each sheet wears a tape tab, the board's filing voice */
+.panel-tab {
+  position: absolute;
+  top: -0.72rem;
+  left: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.1rem 0.5rem;
+  transform: rotate(-0.6deg);
+}
+.diagram-code { display: flex; flex-direction: column; }
+#diagram-source {
+  flex: 1;
+  width: 100%;
+  min-height: 24rem;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  white-space: pre;
+  overflow: auto;
+}
+.mode-readonly #diagram-source { color: var(--muted-solid); }
+.diagram-code-note { margin: 0.5rem 0 0; font-size: 0.72rem; }
+
+/* the working sheet: the drawing dominates the room */
+.diagram-stage { display: flex; flex-direction: column; background: var(--wall); }
+.diagram-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.diagram-toolbar-hint { font-size: 0.72rem; color: var(--muted-solid); }
+.diagram-stage-panels { display: flex; gap: 0.9rem; flex: 1; min-height: 24rem; }
+.diagram-preview-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.diagram-preview {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1rem;
+  overflow: auto;
+}
+.diagram-preview svg { max-width: 100%; height: auto; }
+/* structural gestures live on the picture (authoring, in-subset only) */
+.mode-authoring .diagram-preview g.node[data-node-id] { cursor: pointer; }
+.mode-authoring .diagram-preview path.flowchart-link[data-from],
+.mode-authoring .diagram-preview path.diagram-edge-hit { cursor: pointer; }
+.diagram-preview g.node[data-node-selected] rect,
+.diagram-preview g.node[data-node-selected] polygon,
+.diagram-preview g.node[data-node-selected] circle {
+  stroke: var(--accent) !important;
+  stroke-width: 2.5px !important;
+}
+/* the painted render-error state (ac-1): it replaces the picture */
+.diagram-render-error {
+  border: 2px solid var(--st-violated);
+  border-left-width: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--st-violated-tint) 80%, transparent);
+  color: var(--ink);
+  padding: 0.8rem 0.9rem;
+  margin-top: 0.6rem;
+}
+.diagram-render-error-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--st-violated);
+  margin-bottom: 0.4rem;
+}
+.diagram-render-error-msg {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* the before-peek panel (ac-4): the pinned base beside the working
+   preview, read-only — it wears the frozen (pinned record) voice */
+.diagram-peek {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--frozen);
+  border-radius: 4px;
+  background: var(--paper);
+  padding: 1.1rem 0.7rem 0.7rem;
+}
+.panel-tab--peek { color: var(--frozen); border-color: var(--frozen); }
+.diagram-preview--peek { border-style: dashed; }
+.diagram-peek-close {
+  align-self: flex-end;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+}
+
+/* the slim verification rail (ac-5): chips in the wall's receipt voice */
+.diagram-rail { font-size: 0.78rem; }
+.diagram-rail h2 { font-size: 0.8rem; margin: 0 0 0.6rem; }
+.rail-verification { margin-bottom: 1.2rem; }
+.rail-tier-row { color: var(--muted-solid); margin-bottom: 0.6rem; }
+.rail-tier {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.08rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-left: 0.3rem;
+}
+.rail-tier--full { color: var(--st-evidenced); border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent); background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent); }
+.rail-tier--partial { color: var(--st-pending); border-style: dashed; border-color: var(--st-pending); background: transparent; }
+.rail-tier--illustrative { color: var(--st-nosignal); border-style: dashed; border-color: color-mix(in srgb, var(--st-nosignal) 60%, transparent); background: color-mix(in srgb, var(--st-nosignal-tint) 70%, transparent); }
+.rail-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.rail-finding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.rail-finding-id { font-size: 0.72rem; }
+.rail-finding-kind {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.rail-finding-kind--exists { color: var(--st-evidenced); border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent); background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent); }
+.rail-finding-kind--proposed-new { color: var(--authored); border-color: color-mix(in srgb, var(--authored) 55%, transparent); background: color-mix(in srgb, var(--authored-tint) 75%, transparent); }
+.rail-finding-kind--contradicted { color: var(--st-violated); border-color: color-mix(in srgb, var(--st-violated) 55%, transparent); background: color-mix(in srgb, var(--st-violated-tint) 75%, transparent); }
+.rail-finding-kind--stale-base { color: var(--st-pending); border-style: dashed; border-color: var(--st-pending); background: transparent; }
+.rail-finding-witness { flex-basis: 100%; font-size: 0.66rem; color: var(--muted-solid); }
+/* the disclosed unavailable state: the board-notice voice, boxed so it
+   is unmistakably a state, never an empty region */
+.rail-unavailable {
+  border: 1px dashed var(--authored);
+  border-left: 3px solid var(--authored);
+  border-radius: 0 4px 4px 0;
+  padding: 0.5rem 0.7rem;
+  color: var(--muted-solid);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.rail-unavailable-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+  margin-right: 0.45rem;
+}
+.rail-note { font-size: 0.68rem; margin: 0.6rem 0 0; }
+.rail-provenance-ref { font-size: 0.72rem; color: var(--muted-solid); overflow-wrap: anywhere; }
+.rail-provenance-actions { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+
+/* the node/edge toolbox popover and the inline rename input */
+.diagram-node-toolbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+  padding: 0.3rem 0.5rem;
+  z-index: 30;
+}
+.diagram-node-toolbox-hint { font-family: var(--mono); font-size: 0.66rem; color: var(--muted-solid); }
+.diagram-node-toolbox button { font-size: 0.7rem; }
+.diagram-rename-input {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  padding: 0.2rem 0.4rem;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink);
+  z-index: 30;
+}
+
+/* the diagram status badge shares the board head's stamp row */
+.diagram-status-badge { text-transform: uppercase; }
+
+/* the diagram designer's exit affordance (spec/tool-view-exit ac-1): a
+   labeled "back" doorway leading the board head, distinct in place and
+   style from the site head's index/artifact nav links */
+.diagram-exit-link {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-solid);
+  text-decoration: none;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  margin-right: 0.9rem;
+  white-space: nowrap;
+}
+.diagram-exit-link:hover { color: var(--accent); border-color: var(--accent); }
+
+/* a proposal-diagram reference card's editor doorway (board wall) */
+.refcard-editor-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.diagram-editor-link { margin: 1rem 0 0; }
+
+@media (max-width: 60rem) {
+  body { padding: 0 1rem 3rem; }
+  .page-body { flex-direction: column; }
+  .side-rail { position: static; flex: none; width: 100%; }
+  .board-layout { flex-direction: column; }
+  .board-side { flex: none; width: 100%; position: static; }
+  .board-canvas { min-height: 30rem; }
+  .diagram-editor { grid-template-columns: 1fr; }
+  .diagram-stage-panels { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .copy-ref, button, a, .sticky, .card { transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease, box-shadow 120ms ease; }
+  /* the wall's approach cues: lifts, halos, and the peek whisper —
+     all withheld when the reader prefers reduced motion */
+  .objcard, .stubcard, .yarn-handle { transition: box-shadow 120ms ease, transform 120ms ease; }
+  .refcard::after { transition: opacity 120ms ease; }
+  /* the trash's rise and heat are motion; without it the states still
+     switch, instantly and honestly */
+  .board-trash { transition: opacity 160ms ease, transform 160ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease; }
+  /* the sealed wall's one live affordance answers the hand */
+  .stub-instantiate { transition: box-shadow 120ms ease, color 120ms ease, border-color 120ms ease; }
+  /* the case-file dog-ear brightens under the pointer/focus; without motion
+     it still switches, just instantly */
+  .placard-more::after { transition: opacity 120ms ease; }
+}
+
+/* ---------- the home status glance (spec/home-status-glance) ----------
+   The leading, actionable-first section above the exhaustive Directory
+   below: three fixed buckets (on-the-desk / in-flight / settling) laid
+   out as calm side-by-side columns on a wide viewport, stacking on a
+   narrow one. Deliberately leaner than a dir-entry card — no source
+   chip, no in-review chip — so it reuses the SAME badge vocabulary
+   without inventing a second design system. */
+.home-glance { margin: 0.4rem 0 1.4rem; }
+.glance-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+@media (max-width: 860px) {
+  .glance-buckets { grid-template-columns: 1fr; }
+}
+.glance-group {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 0.6rem 0.75rem 0.8rem;
+}
+.glance-group h3 { margin: 0 0 0.4rem; font-size: 0.98rem; }
+.glance-group ul { list-style: none; margin: 0; padding: 0; }
+.glance-entry {
+  padding: 0.35rem 0.1rem;
+  border-top: 1px dashed var(--rule);
+  font-size: 0.92rem;
+  background: var(--card);
+}
+.glance-group li:last-child { border-bottom: 1px dashed var(--rule); }
+.glance-entry a { text-decoration: none; }
+.glance-entry a:hover { text-decoration: underline; }
+.glance-board { color: var(--muted-solid); }
+
+/* ---------- the directory home (spec/directory-home) ----------
+   The whole-store directory: four status groups (workbench-directory
+   dc-2) as the page's organizing structure, each entry chipped by status
+   (the shared badge vocabulary above) and by ref source (feature dc-5),
+   absences disclosed inline. Deliberately calm and information-dense:
+   the existing list/badge apparatus, no new design system. */
+.home-directory { margin: 0.4rem 0 1.2rem; }
+.dir-provenance { font-size: 0.78rem; color: var(--muted-solid); margin: 0.1rem 0 0.9rem; }
+.dir-group { margin: 0 0 0.9rem; }
+.dir-group h3 { margin: 0.7rem 0 0.25rem; }
+.dir-group ul { list-style: none; margin: 0; padding: 0; }
+.dir-entry { padding: 0.3rem 0.1rem; border-top: 1px dashed var(--rule); font-size: 0.95rem; }
+.dir-group li:last-child { border-bottom: 1px dashed var(--rule); }
+.dir-entry a { text-decoration: none; }
+.dir-entry a:hover { text-decoration: underline; }
+/* an active component is living, in the temporal palette's sense */
+.badge-active { color: var(--living); border-color: var(--living); background: var(--living-tint); }
+/* the source chip is quieter than a status chip: informative, not a state */
+.badge-src { color: var(--muted-solid); border-color: var(--rule); background: none; font-weight: 400; }
+.dir-ref { font-family: var(--mono); font-size: 0.88rem; }
+.dir-disclosed { font-size: 0.82rem; font-style: italic; color: var(--st-pending); }
+.dir-mr-unavailable, .dir-index-failed { margin: 0.4rem 0 0.8rem; }
+
+/* the creation form (spec/creation-form ac-3): the sealed feature wall's
+   second live affordance beside stub instantiate — a free story its
+   stubs did not plan, born from the class template's own placeholders.
+   The dialog wears the stub paper's own slug tab: the design branch the
+   submit will cut, live-updating as the name is typed — the identity
+   being minted, in the machine's mono voice. Everything else stays the
+   board dialog's quiet standard chrome. */
+.create-spec-btn {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  cursor: pointer;
+}
+.create-spec-btn:hover, .create-spec-btn:focus-visible {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.create-dialog {
+  max-width: 30rem;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+/* the branch chip: the stub tab's mono voice, sitting statically at the
+   dialog's head (the dialog scrolls, so nothing may hang outside it) —
+   the identity submit will mint, live as the name is typed */
+.create-dialog .create-branch-tab {
+  position: static;
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.62rem;
+  border-bottom: 1px solid var(--stub-edge);
+  border-radius: 5px;
+  margin-bottom: 0.5rem;
+}
+.create-dialog textarea {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  min-height: 4rem;
+  resize: vertical;
+}
+.create-dialog .field-hint {
+  font-size: 0.72rem;
+  color: var(--muted-solid);
+}
+.create-acs {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem 0.6rem;
+  margin: 0 0 0.8rem;
+}
+.create-acs legend {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  padding: 0 0.3rem;
+}
+.create-acs .ritual-note { font-size: 0.78rem; margin: 0 0 0.5rem; }
+.create-ac {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+  margin: 0.15rem 0;
+  cursor: pointer;
+}
+.create-ac .create-ac-id {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted-solid);
+}
+.create-error {
+  color: var(--st-violated);
+  font-size: 0.82rem;
+  margin: 0 0 0.7rem;
+}
+
+/* the revise dialog (spec/uat-round-1 ac-11, board half): the sealed
+   feature wall's third live affordance — a superseding successor cut on
+   its own design branch. Wears the creation form's chrome (the same
+   button pill, the same branch tab) plus one success line whose link
+   opens the successor's own board. */
+.revise-panel .ritual-note { margin-bottom: 0.7rem; }
+.revise-success {
+  font-size: 0.85rem;
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.revise-success a {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* ---------- the readiness pilot cockpit (GET /readiness) ----------
+   F-01 corrected form (SI-125, owner-approved mockup): orientation first
+   ("where am I?"), a horizontal four-step process rail, then the ranked
+   focus list ("what should I focus on next?") with the top three
+   priorities as cards and the exact remainder behind one native
+   disclosure; completed checks close the page. States are summarized in
+   plain words (Ready / Needs attention / Not enough evidence yet) with
+   the formal state kept in each row's technical details; unproven chips
+   add a dashed border so color is never the only signal. Tokens only —
+   dark mode needs no extra rules here. */
+
+.readiness-page { max-width: 64rem; }
+/* the cockpit needs a wider measure than the prose pages' 70ch shell
+   column — widened only when the shell hosts this page */
+.content:has(> .readiness-page) { max-width: 64rem; }
+
+/* orientation: title, step line, purpose, and the snapshot notice */
+.readiness-orient {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
+  gap: 1.6rem;
+  align-items: start;
+  margin: 0 0 1.4rem;
+}
+.readiness-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.readiness-title {
+  margin: 0 0 0.4rem;
+  font-family: var(--serif);
+  font-size: 1.9rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.readiness-step { margin: 0 0 0.4rem; font-size: 1.02rem; font-weight: 600; }
+.readiness-purpose { margin: 0; color: var(--muted-solid); font-size: 0.88rem; max-width: 46ch; }
+
+.readiness-stale {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  background: var(--st-pending-tint);
+  border: 1px solid var(--st-pending);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+}
+.readiness-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* the process rail: four steps, snapshot order */
+.readiness-rail { margin: 0 0 1.6rem; }
+.readiness-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.readiness-station { min-width: 0; }
+.readiness-station + .readiness-station { border-left: 1px solid var(--rule); }
+.readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  height: 100%;
+  padding: 0.7rem 0.75rem 0.8rem;
+  border-top: 3px solid transparent;
+  text-decoration: none;
+  color: var(--ink);
+}
+.readiness-station-link:hover { background: var(--panel); }
+.readiness-station-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.readiness-station--focus .readiness-station-link {
+  border-top-color: var(--accent);
+  background: var(--panel);
+}
+.readiness-station-num { font-family: var(--mono); font-size: 0.7rem; color: var(--muted-solid); }
+.readiness-station-label { font-family: var(--serif); font-size: 0.98rem; overflow-wrap: anywhere; }
+
+/* the plain state chip; the formal state rides the modifier class */
+.readiness-state {
+  display: inline-block;
+  width: fit-content;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.14rem 0.5rem;
+  border: 1px solid;
+  border-radius: 999px;
+}
+.readiness-state--proven {
+  color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  border-color: var(--st-evidenced);
+}
+.readiness-state--violated-with-witness {
+  color: var(--st-violated);
+  background: var(--st-violated-tint);
+  border-color: var(--st-violated);
+}
+.readiness-state--unproven {
+  color: var(--st-pending);
+  background: var(--st-pending-tint);
+  border-color: var(--st-pending);
+  border-style: dashed;
+}
+
+.readiness-heading { font-family: var(--serif); font-size: 1.3rem; margin: 0 0 0.25rem; }
+
+/* focus next: the ranked cards */
+.readiness-queue { margin: 0 0 2rem; }
+.readiness-queue-note { color: var(--muted-solid); font-size: 0.8rem; margin: 0 0 0.2rem; }
+.readiness-downstream {
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-violated);
+}
+.readiness-queue-empty {
+  border: 1px solid var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  color: var(--st-evidenced);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.9rem;
+}
+.readiness-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+.readiness-card,
+.readiness-row { scroll-margin-top: 1rem; }
+.readiness-card {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  padding: 0.85rem 1rem;
+}
+.readiness-rank {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted-solid);
+}
+.readiness-copy { min-width: 0; flex: 1; }
+.readiness-stage {
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.readiness-summary {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.readiness-row .readiness-summary { font-weight: 500; font-size: 0.9rem; }
+
+/* technical details: the formal facts, one native disclosure per row */
+.readiness-tech { margin: 0.5rem 0 0; }
+.readiness-tech summary,
+.readiness-more-summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--muted-solid);
+  font-size: 0.78rem;
+}
+.readiness-tech summary:focus-visible,
+.readiness-more-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-tech-facts {
+  margin: 0.45rem 0 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--panel);
+  border-left: 3px solid var(--rule);
+  font-size: 0.76rem;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.7rem;
+}
+.readiness-tech-facts dt { color: var(--muted-solid); }
+.readiness-tech-facts dd { margin: 0; min-width: 0; }
+.readiness-tech-facts code,
+.readiness-witnesses code { overflow-wrap: anywhere; }
+.readiness-witnesses { list-style: none; margin: 0; padding: 0; }
+.readiness-witnesses li { margin: 0.1rem 0; }
+
+/* the one inline remainder disclosure: exact-count closed label,
+   "Show fewer" open label — swapped purely by CSS, no script */
+.readiness-more { margin: 0.8rem 0 0; }
+.readiness-more-summary {
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.4rem 0;
+}
+.readiness-more:not([open]) .readiness-more-open { display: none; }
+.readiness-more[open] .readiness-more-closed { display: none; }
+.readiness-queue-rest { margin-top: 0.7rem; }
+
+/* destinations */
+.readiness-dest { margin: 0.55rem 0 0; }
+.readiness-board-link { font-weight: 600; color: var(--accent-strong); }
+.readiness-board-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-cli {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.readiness-cli:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-cli-token {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.76rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* completed checks: quieter rows, everything proven, nothing dropped */
+.readiness-completed { border-top: 2px solid var(--rule); padding-top: 1.1rem; }
+.readiness-completed-note { color: var(--muted-solid); font-size: 0.8rem; margin: 0 0 0.6rem; }
+.readiness-row {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  min-width: 0;
+  border-top: 1px solid var(--rule);
+  padding: 0.6rem 0.2rem;
+  font-size: 0.88rem;
+}
+
+/* narrow viewport: the rail becomes the pinned strip — continuously
+   visible, fragment targets offset below it */
+@media (max-width: 720px) {
+  .readiness-orient { grid-template-columns: 1fr; gap: 0.9rem; }
+  .readiness-rail {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+    margin: 0 0 1rem;
+  }
+  .readiness-rail-list { display: flex; }
+  .readiness-station { flex: 1; min-width: 0; }
+  .readiness-station-link { padding: 0.45rem 0.4rem; }
+  .readiness-station-label { font-size: 0.8rem; }
+  .readiness-card { flex-wrap: wrap; }
+  .readiness-card,
+  .readiness-row { scroll-margin-top: 11rem; }
+}
+
+/* motion is opt-in; a reduced-motion preference gets a static page */
+@media (prefers-reduced-motion: no-preference) {
+  .readiness-station-link,
+  .readiness-board-link { transition: background-color 140ms ease, color 140ms ease; }
+}
+
+/* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
+   class-based palettes are the ONLY place code colour is defined — which is
+   what lets a dark-mode browser restyle highlighted code instead of showing
+   one theme's ink baked into the HTML. internal/render's github (light) and
+   github-dark palettes are composed in at the two markers below by
+   internal/dex.StyleCSS.
+
+   Unlike this file's --ink/--paper tokens — resolved at their use site, so
+   their dark override can sit up top — chroma palettes carry CONCRETE
+   colours, so source order decides the cascade. The dark palette therefore
+   gets its OWN prefers-color-scheme:dark block placed AFTER the light
+   default here (not folded into the token override block above): both rules
+   match in dark mode, and the later one must be the dark one, or the light
+   ink wins and the code is unreadable — exactly the defect this fixes. */
+/* Background */ .chroma-bg { background-color: #f7f7f7; }
+/* PreWrapper */ .chroma-chroma { background-color: #f7f7f7; -webkit-text-size-adjust: none; }
+/* Error */ .chroma-chroma .chroma-err { color: #f6f8fa; background-color: #82071e }
+/* LineLink */ .chroma-chroma .chroma-lnlinks { outline: none; text-decoration: none; color: inherit }
+/* LineTableTD */ .chroma-chroma .chroma-lntd { vertical-align: top; padding: 0; margin: 0; border: 0; }
+/* LineTable */ .chroma-chroma .chroma-lntable { border-spacing: 0; padding: 0; margin: 0; border: 0; }
+/* LineHighlight */ .chroma-chroma .chroma-hl { background-color: #dedede }
+/* LineNumbersTable */ .chroma-chroma .chroma-lnt { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #7f7f7f }
+/* LineNumbers */ .chroma-chroma .chroma-ln { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #7f7f7f }
+/* Line */ .chroma-chroma .chroma-line { display: flex; }
+/* Keyword */ .chroma-chroma .chroma-k { color: #cf222e }
+/* KeywordConstant */ .chroma-chroma .chroma-kc { color: #cf222e }
+/* KeywordDeclaration */ .chroma-chroma .chroma-kd { color: #cf222e }
+/* KeywordNamespace */ .chroma-chroma .chroma-kn { color: #cf222e }
+/* KeywordPseudo */ .chroma-chroma .chroma-kp { color: #cf222e }
+/* KeywordReserved */ .chroma-chroma .chroma-kr { color: #cf222e }
+/* KeywordType */ .chroma-chroma .chroma-kt { color: #cf222e }
+/* NameAttribute */ .chroma-chroma .chroma-na { color: #1f2328 }
+/* NameClass */ .chroma-chroma .chroma-nc { color: #1f2328 }
+/* NameConstant */ .chroma-chroma .chroma-no { color: #0550ae }
+/* NameDecorator */ .chroma-chroma .chroma-nd { color: #0550ae }
+/* NameEntity */ .chroma-chroma .chroma-ni { color: #6639ba }
+/* NameLabel */ .chroma-chroma .chroma-nl { color: #990000; font-weight: bold }
+/* NameNamespace */ .chroma-chroma .chroma-nn { color: #24292e }
+/* NameOther */ .chroma-chroma .chroma-nx { color: #1f2328 }
+/* NameTag */ .chroma-chroma .chroma-nt { color: #0550ae }
+/* NameBuiltin */ .chroma-chroma .chroma-nb { color: #6639ba }
+/* NameBuiltinPseudo */ .chroma-chroma .chroma-bp { color: #6a737d }
+/* NameVariable */ .chroma-chroma .chroma-nv { color: #953800 }
+/* NameVariableClass */ .chroma-chroma .chroma-vc { color: #953800 }
+/* NameVariableGlobal */ .chroma-chroma .chroma-vg { color: #953800 }
+/* NameVariableInstance */ .chroma-chroma .chroma-vi { color: #953800 }
+/* NameVariableMagic */ .chroma-chroma .chroma-vm { color: #953800 }
+/* NameFunction */ .chroma-chroma .chroma-nf { color: #6639ba }
+/* NameFunctionMagic */ .chroma-chroma .chroma-fm { color: #6639ba }
+/* LiteralString */ .chroma-chroma .chroma-s { color: #0a3069 }
+/* LiteralStringAffix */ .chroma-chroma .chroma-sa { color: #0a3069 }
+/* LiteralStringBacktick */ .chroma-chroma .chroma-sb { color: #0a3069 }
+/* LiteralStringChar */ .chroma-chroma .chroma-sc { color: #0a3069 }
+/* LiteralStringDelimiter */ .chroma-chroma .chroma-dl { color: #0a3069 }
+/* LiteralStringDoc */ .chroma-chroma .chroma-sd { color: #0a3069 }
+/* LiteralStringDouble */ .chroma-chroma .chroma-s2 { color: #0a3069 }
+/* LiteralStringEscape */ .chroma-chroma .chroma-se { color: #0a3069 }
+/* LiteralStringHeredoc */ .chroma-chroma .chroma-sh { color: #0a3069 }
+/* LiteralStringInterpol */ .chroma-chroma .chroma-si { color: #0a3069 }
+/* LiteralStringOther */ .chroma-chroma .chroma-sx { color: #0a3069 }
+/* LiteralStringRegex */ .chroma-chroma .chroma-sr { color: #0a3069 }
+/* LiteralStringSingle */ .chroma-chroma .chroma-s1 { color: #0a3069 }
+/* LiteralStringSymbol */ .chroma-chroma .chroma-ss { color: #032f62 }
+/* LiteralNumber */ .chroma-chroma .chroma-m { color: #0550ae }
+/* LiteralNumberBin */ .chroma-chroma .chroma-mb { color: #0550ae }
+/* LiteralNumberFloat */ .chroma-chroma .chroma-mf { color: #0550ae }
+/* LiteralNumberHex */ .chroma-chroma .chroma-mh { color: #0550ae }
+/* LiteralNumberInteger */ .chroma-chroma .chroma-mi { color: #0550ae }
+/* LiteralNumberIntegerLong */ .chroma-chroma .chroma-il { color: #0550ae }
+/* LiteralNumberOct */ .chroma-chroma .chroma-mo { color: #0550ae }
+/* Operator */ .chroma-chroma .chroma-o { color: #0550ae }
+/* OperatorWord */ .chroma-chroma .chroma-ow { color: #0550ae }
+/* OperatorReserved */ .chroma-chroma .chroma-or { color: #0550ae }
+/* Punctuation */ .chroma-chroma .chroma-p { color: #1f2328 }
+/* Comment */ .chroma-chroma .chroma-c { color: #57606a }
+/* CommentHashbang */ .chroma-chroma .chroma-ch { color: #57606a }
+/* CommentMultiline */ .chroma-chroma .chroma-cm { color: #57606a }
+/* CommentSingle */ .chroma-chroma .chroma-c1 { color: #57606a }
+/* CommentSpecial */ .chroma-chroma .chroma-cs { color: #57606a }
+/* CommentPreproc */ .chroma-chroma .chroma-cp { color: #57606a }
+/* CommentPreprocFile */ .chroma-chroma .chroma-cpf { color: #57606a }
+/* GenericDeleted */ .chroma-chroma .chroma-gd { color: #82071e; background-color: #ffebe9 }
+/* GenericEmph */ .chroma-chroma .chroma-ge { color: #1f2328 }
+/* GenericInserted */ .chroma-chroma .chroma-gi { color: #116329; background-color: #dafbe1 }
+/* GenericOutput */ .chroma-chroma .chroma-go { color: #1f2328 }
+/* GenericUnderline */ .chroma-chroma .chroma-gl { text-decoration: underline }
+/* TextWhitespace */ .chroma-chroma .chroma-w { color: #ffffff }
+
+@media (prefers-color-scheme: dark) {
+/* Background */ .chroma-bg { color: #e6edf3; background-color: #0d1117; }
+/* PreWrapper */ .chroma-chroma { color: #e6edf3; background-color: #0d1117; -webkit-text-size-adjust: none; }
+/* Error */ .chroma-chroma .chroma-err { color: #f85149 }
+/* LineLink */ .chroma-chroma .chroma-lnlinks { outline: none; text-decoration: none; color: inherit }
+/* LineTableTD */ .chroma-chroma .chroma-lntd { vertical-align: top; padding: 0; margin: 0; border: 0; }
+/* LineTable */ .chroma-chroma .chroma-lntable { border-spacing: 0; padding: 0; margin: 0; border: 0; }
+/* LineHighlight */ .chroma-chroma .chroma-hl { background-color: #6e7681 }
+/* LineNumbersTable */ .chroma-chroma .chroma-lnt { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #737679 }
+/* LineNumbers */ .chroma-chroma .chroma-ln { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #6e7681 }
+/* Line */ .chroma-chroma .chroma-line { display: flex; }
+/* Keyword */ .chroma-chroma .chroma-k { color: #ff7b72 }
+/* KeywordConstant */ .chroma-chroma .chroma-kc { color: #79c0ff }
+/* KeywordDeclaration */ .chroma-chroma .chroma-kd { color: #ff7b72 }
+/* KeywordNamespace */ .chroma-chroma .chroma-kn { color: #ff7b72 }
+/* KeywordPseudo */ .chroma-chroma .chroma-kp { color: #79c0ff }
+/* KeywordReserved */ .chroma-chroma .chroma-kr { color: #ff7b72 }
+/* KeywordType */ .chroma-chroma .chroma-kt { color: #ff7b72 }
+/* NameClass */ .chroma-chroma .chroma-nc { color: #f0883e; font-weight: bold }
+/* NameConstant */ .chroma-chroma .chroma-no { color: #79c0ff; font-weight: bold }
+/* NameDecorator */ .chroma-chroma .chroma-nd { color: #d2a8ff; font-weight: bold }
+/* NameEntity */ .chroma-chroma .chroma-ni { color: #ffa657 }
+/* NameException */ .chroma-chroma .chroma-ne { color: #f0883e; font-weight: bold }
+/* NameLabel */ .chroma-chroma .chroma-nl { color: #79c0ff; font-weight: bold }
+/* NameNamespace */ .chroma-chroma .chroma-nn { color: #ff7b72 }
+/* NameProperty */ .chroma-chroma .chroma-py { color: #79c0ff }
+/* NameTag */ .chroma-chroma .chroma-nt { color: #7ee787 }
+/* NameVariable */ .chroma-chroma .chroma-nv { color: #79c0ff }
+/* NameVariableClass */ .chroma-chroma .chroma-vc { color: #79c0ff }
+/* NameVariableGlobal */ .chroma-chroma .chroma-vg { color: #79c0ff }
+/* NameVariableInstance */ .chroma-chroma .chroma-vi { color: #79c0ff }
+/* NameVariableMagic */ .chroma-chroma .chroma-vm { color: #79c0ff }
+/* NameFunction */ .chroma-chroma .chroma-nf { color: #d2a8ff; font-weight: bold }
+/* NameFunctionMagic */ .chroma-chroma .chroma-fm { color: #d2a8ff; font-weight: bold }
+/* Literal */ .chroma-chroma .chroma-l { color: #a5d6ff }
+/* LiteralDate */ .chroma-chroma .chroma-ld { color: #79c0ff }
+/* LiteralString */ .chroma-chroma .chroma-s { color: #a5d6ff }
+/* LiteralStringAffix */ .chroma-chroma .chroma-sa { color: #79c0ff }
+/* LiteralStringBacktick */ .chroma-chroma .chroma-sb { color: #a5d6ff }
+/* LiteralStringChar */ .chroma-chroma .chroma-sc { color: #a5d6ff }
+/* LiteralStringDelimiter */ .chroma-chroma .chroma-dl { color: #79c0ff }
+/* LiteralStringDoc */ .chroma-chroma .chroma-sd { color: #a5d6ff }
+/* LiteralStringDouble */ .chroma-chroma .chroma-s2 { color: #a5d6ff }
+/* LiteralStringEscape */ .chroma-chroma .chroma-se { color: #79c0ff }
+/* LiteralStringHeredoc */ .chroma-chroma .chroma-sh { color: #79c0ff }
+/* LiteralStringInterpol */ .chroma-chroma .chroma-si { color: #a5d6ff }
+/* LiteralStringOther */ .chroma-chroma .chroma-sx { color: #a5d6ff }
+/* LiteralStringRegex */ .chroma-chroma .chroma-sr { color: #79c0ff }
+/* LiteralStringSingle */ .chroma-chroma .chroma-s1 { color: #a5d6ff }
+/* LiteralStringSymbol */ .chroma-chroma .chroma-ss { color: #a5d6ff }
+/* LiteralNumber */ .chroma-chroma .chroma-m { color: #a5d6ff }
+/* LiteralNumberBin */ .chroma-chroma .chroma-mb { color: #a5d6ff }
+/* LiteralNumberFloat */ .chroma-chroma .chroma-mf { color: #a5d6ff }
+/* LiteralNumberHex */ .chroma-chroma .chroma-mh { color: #a5d6ff }
+/* LiteralNumberInteger */ .chroma-chroma .chroma-mi { color: #a5d6ff }
+/* LiteralNumberIntegerLong */ .chroma-chroma .chroma-il { color: #a5d6ff }
+/* LiteralNumberOct */ .chroma-chroma .chroma-mo { color: #a5d6ff }
+/* Operator */ .chroma-chroma .chroma-o { color: #ff7b72; font-weight: bold }
+/* OperatorWord */ .chroma-chroma .chroma-ow { color: #ff7b72; font-weight: bold }
+/* OperatorReserved */ .chroma-chroma .chroma-or { color: #ff7b72; font-weight: bold }
+/* Comment */ .chroma-chroma .chroma-c { color: #8b949e; font-style: italic }
+/* CommentHashbang */ .chroma-chroma .chroma-ch { color: #8b949e; font-style: italic }
+/* CommentMultiline */ .chroma-chroma .chroma-cm { color: #8b949e; font-style: italic }
+/* CommentSingle */ .chroma-chroma .chroma-c1 { color: #8b949e; font-style: italic }
+/* CommentSpecial */ .chroma-chroma .chroma-cs { color: #8b949e; font-weight: bold; font-style: italic }
+/* CommentPreproc */ .chroma-chroma .chroma-cp { color: #8b949e; font-weight: bold; font-style: italic }
+/* CommentPreprocFile */ .chroma-chroma .chroma-cpf { color: #8b949e; font-weight: bold; font-style: italic }
+/* GenericDeleted */ .chroma-chroma .chroma-gd { color: #ffa198; background-color: #490202 }
+/* GenericEmph */ .chroma-chroma .chroma-ge { font-style: italic }
+/* GenericError */ .chroma-chroma .chroma-gr { color: #ffa198 }
+/* GenericHeading */ .chroma-chroma .chroma-gh { color: #79c0ff; font-weight: bold }
+/* GenericInserted */ .chroma-chroma .chroma-gi { color: #56d364; background-color: #0f5323 }
+/* GenericOutput */ .chroma-chroma .chroma-go { color: #8b949e }
+/* GenericPrompt */ .chroma-chroma .chroma-gp { color: #8b949e }
+/* GenericStrong */ .chroma-chroma .chroma-gs { font-weight: bold }
+/* GenericSubheading */ .chroma-chroma .chroma-gu { color: #79c0ff }
+/* GenericTraceback */ .chroma-chroma .chroma-gt { color: #ff7b72 }
+/* GenericUnderline */ .chroma-chroma .chroma-gl { text-decoration: underline }
+/* TextWhitespace */ .chroma-chroma .chroma-w { color: #6e7681 }
+
+}
+
+/* == ASD workbench (Wave 6 Task 2) =======================================
+   The board page's posture header, promoted four-area shell, typed forms,
+   and on-demand panels. Reuses the readiness pilot's shell vocabulary
+   (readiness-*) wholesale; everything here is additive and scoped. */
+
+.skip-link {
+  position: absolute;
+  left: -999em;
+  top: 0;
+  background: var(--paper, #fff);
+  color: inherit;
+  padding: 0.5rem 0.75rem;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  outline: 2px solid currentColor;
+}
+
+.asd-live { position: absolute; left: -999em; }
+.asd-last-result {
+  font-size: 0.85rem;
+  max-width: 60rem;
+  overflow-wrap: anywhere;
+}
+.asd-last-result[data-result-kind="stale"],
+.asd-last-result[data-result-kind="verdict"] { color: var(--warn-ink, #8a5a00); }
+.asd-last-result[data-result-kind="operational"],
+.asd-last-result[data-result-kind="partial"] { color: var(--fail-ink, #a4262c); }
+
+.asd-posture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--rule, #d5d0c5);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.asd-posture-bytes, .asd-posture-tree { white-space: nowrap; }
+.asd-posture-formal { opacity: 0.7; }
+.asd-posture-tree[data-dirty="dirty"] { font-weight: 600; }
+.asd-posture-tech { flex-basis: 100%; }
+.asd-refresh { margin-left: auto; }
+
+/* The shell sits ALONGSIDE the canvas (task-2 adjudication 1: "the board
+   canvas remains beneath/alongside it"): a two-column grid keeps the
+   working wall inside the initial viewport while the rail/queue stays
+   continuously visible in its own scrollable column. Narrow viewports
+   stack (the 320px contract keeps every fact reachable). */
+#boardv2-region {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 22rem);
+  /* dense back-fills .asd-main into the row BESIDE the shell: the shell
+     precedes it in DOM (orientation-first reading order, F-01) but sits
+     in column 2, and sparse auto-placement would otherwise strand the
+     board a full shell-height below the fold. */
+  grid-auto-flow: row dense;
+  gap: 0 1rem;
+  align-items: start;
+}
+#boardv2-region > .board-notices,
+#boardv2-region > .asd-posture {
+  grid-column: 1 / -1;
+}
+#boardv2-region > .asd-shell {
+  grid-column: 2;
+  position: sticky;
+  top: 0.5rem;
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+}
+#boardv2-region > .asd-main {
+  grid-column: 1;
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  #boardv2-region {
+    display: block;
+  }
+  #boardv2-region > .asd-shell {
+    position: static;
+    max-height: none;
+  }
+}
+
+.asd-shell {
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--rule, #d5d0c5);
+  border-radius: 6px;
+}
+.asd-shell .readiness-rail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.asd-sequence-note { font-size: 0.85rem; opacity: 0.85; max-width: 60rem; }
+.asd-human-review {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 0.4rem;
+  margin: 0 0 0.25rem;
+}
+/* the secondary fact line under a guidance-led card (ac-12): quieter than
+   the primary .readiness-summary, same wrapping rule, token ink only */
+.asd-fact {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+
+.asd-forms button { display: block; margin: 0.3rem 0; }
+.asd-panel { margin: 0.5rem 0; }
+.asd-panel-json {
+  max-height: 24rem;
+  overflow: auto;
+  font-size: 0.75rem;
+}
+.asd-panel-body { overflow-x: auto; }
+.asd-stub-correct { font-size: 0.75rem; margin-top: 0.25rem; }
+.asd-field-error { color: var(--fail-ink, #a4262c); font-size: 0.85rem; }
+.asd-op-dialog textarea { width: 100%; min-height: 6rem; }
+.asd-stub-acs label, .asd-stub-oqs label { display: block; font-size: 0.85rem; }
+
+/* Visible focus everywhere the ASD surfaces add interactivity. */
+.objcard:focus-visible,
+.asd-refresh:focus-visible,
+.asd-shell a:focus-visible,
+.asd-forms button:focus-visible,
+.asd-stub-correct:focus-visible {
+  outline: 2px solid var(--accent, #2f6f4f);
+  outline-offset: 2px;
+}
+
+/* 320px / narrow: the shell and posture stack; the canvas keeps its own
+   contained horizontal scroll (it is intrinsically wide). */
+@media (max-width: 480px) {
+  .asd-posture { flex-direction: column; align-items: flex-start; }
+  .asd-refresh { margin-left: 0; }
+  .asd-shell .readiness-rail-list { flex-direction: column; }
+}
