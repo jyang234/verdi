@@ -16,7 +16,7 @@ quality:
     rule: "Rerun playwright:e2e/tests/93-readiness-page.spec.ts:readiness-page › Focus next ranks every concern, guidance first in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/readiness-page-v2" }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: dbea2070d3c3ec5f5599f20d10dda4eedb218582 }
 ---
 # Focus next ranks every concern, guidance first
 

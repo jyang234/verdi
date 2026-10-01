@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/readiness-page }
-frozen: { at: 2026-09-30, commit: ca6ecec16b315d74bdfac2a0f9f422cf141ebcf2 }
+frozen: { at: 2026-09-30, commit: dbea2070d3c3ec5f5599f20d10dda4eedb218582 }
 ---
 # Conflict: readiness-page cannot cross verdi build start
 
