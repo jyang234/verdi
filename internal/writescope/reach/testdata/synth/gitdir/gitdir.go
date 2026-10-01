@@ -1,11 +1,15 @@
 // Package gitdir holds the shapes the git-directory writer detector must
 // tell apart: a write through a helper chain, a ".git" literal path, a
-// git-directory value that is never written, an unrelated write, and a
-// git-directory path handed to a writer in another package.
+// git-directory value that is never written, an unrelated write, a
+// git-directory path handed to a writer in another package, a walk of the
+// git directory whose callback writes the paths it is handed (a literal or
+// a named function), a write through an os.Root opened on the git
+// directory, and a tree copied into it.
 package gitdir
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -55,4 +59,43 @@ func WriteElsewhere(dir string) error { return os.WriteFile(filepath.Join(dir, "
 func ViaOtherPackage(ctx context.Context, repo string) error {
 	common, _ := gitx.CommonDir(ctx, repo)
 	return other.Write(filepath.Join(common, "x"))
+}
+
+// PruneByWalk deletes what a walk of the git directory hands its callback.
+func PruneByWalk(ctx context.Context, repo string) error {
+	common, _ := gitx.CommonDir(ctx, repo)
+	return filepath.WalkDir(filepath.Join(common, "worktrees"), func(path string, d fs.DirEntry, err error) error {
+		return os.RemoveAll(path)
+	})
+}
+
+func removeVisited(path string, d fs.DirEntry, err error) error { return os.RemoveAll(path) }
+
+// PruneByNamedWalk hands the walk a named function that deletes each path.
+func PruneByNamedWalk(ctx context.Context, repo string) error {
+	common, _ := gitx.CommonDir(ctx, repo)
+	return filepath.WalkDir(filepath.Join(common, "worktrees"), removeVisited)
+}
+
+// WalkElsewhere deletes what a walk of an unrelated directory finds.
+func WalkElsewhere(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error { return os.Remove(path) })
+}
+
+// PruneInRoot deletes an administrative entry through an os.Root opened on
+// the git directory.
+func PruneInRoot(ctx context.Context, repo string) error {
+	common, _ := gitx.CommonDir(ctx, repo)
+	root, err := os.OpenRoot(common)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.RemoveAll("worktrees/x")
+}
+
+// CopyInto copies a tree into the git directory.
+func CopyInto(ctx context.Context, repo string) error {
+	common, _ := gitx.CommonDir(ctx, repo)
+	return os.CopyFS(filepath.Join(common, "x"), os.DirFS("."))
 }

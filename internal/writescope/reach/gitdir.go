@@ -14,7 +14,8 @@ import (
 // GitDirWriters returns the module functions, outside the packages in
 // exclude, that write under a repository's git directory without going
 // through git: a function that hands a filesystem mutation in package os
-// a path derived from the git directory.
+// (a function, os.CopyFS, or a mutating method of an *os.Root, whose
+// receiver counts as its path) a path derived from the git directory.
 //
 // A path is derived from the git directory when it flows from a call to
 // one of locators, from a string constant naming the git directory
@@ -28,9 +29,14 @@ import (
 // writes; a function that writes only what it is handed is not one, so a
 // generic file writer is never flagged for one caller's argument.
 //
+// A walk of a git-directory path (filepath.Walk, filepath.WalkDir,
+// fs.WalkDir) hands its callback paths under it: a literal callback's path
+// parameter carries the walk root's label, and a named callback that
+// writes its path parameter makes the walk a write.
+//
 // Not tracked: paths stored in struct fields and read in another function,
 // paths passed through channels or interface calls, and parameters of
-// function literals.
+// function literals other than a walk callback's path.
 func GitDirWriters(prog *Program, locators []*types.Func, exclude []string) ([]Writer, error) {
 	if len(locators) == 0 {
 		return nil, errors.New("reach: GitDirWriters needs at least one locator")
@@ -110,15 +116,28 @@ type taint struct {
 }
 
 // osMutations are the package os functions that change the filesystem at
-// a path argument.
+// a path argument, and the *os.Root methods that change it beneath the
+// root (the receiver, opened on a path, counts as one of their paths).
 func osMutations() map[string]bool {
 	return map[string]bool{
-		"os.Chmod": true, "os.Chown": true, "os.Chtimes": true, "os.Create": true,
-		"os.CreateTemp": true, "os.Lchown": true, "os.Link": true, "os.Mkdir": true,
-		"os.MkdirAll": true, "os.MkdirTemp": true, "os.OpenFile": true, "os.Remove": true,
-		"os.RemoveAll": true, "os.Rename": true, "os.Symlink": true, "os.Truncate": true,
-		"os.WriteFile": true,
+		"os.Chmod": true, "os.Chown": true, "os.Chtimes": true, "os.CopyFS": true,
+		"os.Create": true, "os.CreateTemp": true, "os.Lchown": true, "os.Link": true,
+		"os.Mkdir": true, "os.MkdirAll": true, "os.MkdirTemp": true, "os.OpenFile": true,
+		"os.Remove": true, "os.RemoveAll": true, "os.Rename": true, "os.Symlink": true,
+		"os.Truncate": true, "os.WriteFile": true,
+
+		"(*os.Root).Chmod": true, "(*os.Root).Chown": true, "(*os.Root).Chtimes": true,
+		"(*os.Root).Create": true, "(*os.Root).Lchown": true, "(*os.Root).Link": true,
+		"(*os.Root).Mkdir": true, "(*os.Root).MkdirAll": true, "(*os.Root).OpenFile": true,
+		"(*os.Root).Remove": true, "(*os.Root).RemoveAll": true, "(*os.Root).Rename": true,
+		"(*os.Root).Symlink": true, "(*os.Root).WriteFile": true,
 	}
+}
+
+// walkRoots maps each directory-walk function to the index of its root
+// argument; its callback is its last argument.
+func walkRoots() map[string]int {
+	return map[string]int{"path/filepath.Walk": 0, "path/filepath.WalkDir": 0, "io/fs.WalkDir": 1}
 }
 
 // isGitDirString reports whether a string constant names the git directory.
@@ -140,12 +159,13 @@ type fnState struct {
 	at      token.Pos
 	changed bool
 	muts    map[string]bool
+	walks   map[string]int
 }
 
 // analyze recomputes fn's summary and reports whether it grew.
 func (t *taint) analyze(fn *types.Func) bool {
 	d := t.prog.decls[fn]
-	st := &fnState{t: t, pkg: d.pkg, lab: map[types.Object]uint64{}, muts: osMutations()}
+	st := &fnState{t: t, pkg: d.pkg, lab: map[types.Object]uint64{}, muts: osMutations(), walks: walkRoots()}
 	sig := fn.Type().(*types.Signature)
 	if sig.Recv() != nil {
 		st.lab[sig.Recv()] = recvBit
@@ -231,7 +251,7 @@ func (st *fnState) walk(n ast.Node, inLit bool) {
 				}
 			}
 		case *ast.CallExpr:
-			l := st.sinkLabel(s)
+			l := st.sinkLabel(s) | st.walkLabel(s)
 			if l&srcBit != 0 && st.at == token.NoPos {
 				st.at = s.Pos()
 			}
@@ -239,6 +259,46 @@ func (st *fnState) walk(n ast.Node, inLit bool) {
 		}
 		return true
 	})
+}
+
+// walkLabel handles a directory walk: it labels a literal callback's path
+// parameter with the walk root's bits, and returns the root's bits as
+// written when a named module callback writes its path parameter.
+func (st *fnState) walkLabel(call *ast.CallExpr) uint64 {
+	var id *ast.Ident
+	switch f := calleeExpr(call).(type) {
+	case *ast.Ident:
+		id = f
+	case *ast.SelectorExpr:
+		id = f.Sel
+	default:
+		return 0
+	}
+	fn, ok := st.pkg.Info.Uses[id].(*types.Func)
+	if !ok {
+		return 0
+	}
+	at, ok := st.walks[fn.FullName()]
+	if !ok || len(call.Args) != at+2 {
+		return 0
+	}
+	l := st.label(call.Args[at])
+	if l == 0 {
+		return 0
+	}
+	cb := unparen(call.Args[len(call.Args)-1])
+	if lit, ok := cb.(*ast.FuncLit); ok {
+		if ps := lit.Type.Params; ps != nil && len(ps.List) > 0 && len(ps.List[0].Names) > 0 {
+			st.set(st.pkg.Info.Defs[ps.List[0].Names[0]], l)
+		}
+		return 0
+	}
+	if callee := st.t.prog.funcValue(st.pkg, cb); callee != nil {
+		if sum, ok := st.t.sums[callee]; ok && sum.paramWrite&paramBit(0) != 0 {
+			return l
+		}
+	}
+	return 0
 }
 
 // target returns the variable an assignment to e taints: the root variable
@@ -372,6 +432,9 @@ func (st *fnState) sinkLabel(call *ast.CallExpr) uint64 {
 			var l uint64
 			for _, a := range call.Args {
 				l |= st.label(a)
+			}
+			if s, isMethod := st.pkg.Info.Selections[sel]; isMethod && s.Kind() == types.MethodVal {
+				l |= st.label(sel.X)
 			}
 			return l
 		}

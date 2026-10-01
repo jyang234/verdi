@@ -26,14 +26,20 @@ func TestGitDirWriters_FindsEveryWriteUnderTheGitDirectory(t *testing.T) {
 		fn   string
 		want bool
 	}{
-		{"gitdir.Reconcile", true},       // locator result reaches os.RemoveAll through three helpers
-		{"gitdir.WriteHook", true},       // a ".git" path literal reaches os.WriteFile
-		{"gitdir.ViaOtherPackage", true}, // locator result handed to another package's writer
-		{"gitdir.CacheKey", false},       // a git-directory value that is never written
-		{"gitdir.WriteElsewhere", false}, // a write that never touches the git directory
-		{"gitdir.removeOne", false},      // writes only what it is handed: its caller is the writer
-		{"other.Write", false},           // generic writer: the caller handing it a git path is flagged
-		{"gitdir.removeEntries", false},  // forwards its parameter: not a writer on its own
+		{"gitdir.Reconcile", true},        // locator result reaches os.RemoveAll through three helpers
+		{"gitdir.WriteHook", true},        // a ".git" path literal reaches os.WriteFile
+		{"gitdir.ViaOtherPackage", true},  // locator result handed to another package's writer
+		{"gitdir.CacheKey", false},        // a git-directory value that is never written
+		{"gitdir.WriteElsewhere", false},  // a write that never touches the git directory
+		{"gitdir.removeOne", false},       // writes only what it is handed: its caller is the writer
+		{"other.Write", false},            // generic writer: the caller handing it a git path is flagged
+		{"gitdir.removeEntries", false},   // forwards its parameter: not a writer on its own
+		{"gitdir.PruneByWalk", true},      // R1-A6: a walk callback literal writes the paths the walk hands it
+		{"gitdir.PruneByNamedWalk", true}, // R1-A6: a named walk callback that writes its path parameter
+		{"gitdir.WalkElsewhere", false},   // the same walk over an unrelated directory
+		{"gitdir.removeVisited", false},   // writes only what it is handed
+		{"gitdir.PruneInRoot", true},      // R1-A6: (*os.Root).RemoveAll on a root opened on the git directory
+		{"gitdir.CopyInto", true},         // R1-A6: os.CopyFS into the git directory
 	}
 	for _, tt := range tests {
 		t.Run(tt.fn, func(t *testing.T) {
