@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/branchbase"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -307,6 +308,18 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 	}
 	branch := "feature/" + specRef.Name
 
+	// UAT-031's build-start half (ledger SI-333): a build branch that
+	// already exists, locally or on the remote the base resolves from, is
+	// refused before the cut — a verdict, like every other build start
+	// precondition, never a second local branch beside the remote's.
+	if collision, cerr := buildBranchCollision(ctx, root, branch, base); cerr != nil {
+		fmt.Fprintln(stderr, "build start:", cerr)
+		return 2
+	} else if collision != "" {
+		fmt.Fprintf(stderr, "build start: refused: %s already exists as %s; a build branch is cut once (UAT-031)\n", branch, collision)
+		return 1
+	}
+
 	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, base.Commit); err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
@@ -317,6 +330,33 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: %s)\n", branch, spec.ID,
 		deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 	return 0
+}
+
+// buildBranchCollision returns the ref under which branch already exists —
+// the local branch, or a remote-tracking branch of the remote base resolves
+// from (origin, for an origin/<default> base) — or "" when it exists under
+// neither (ledger SI-333). A base that is a local branch or the disclosed
+// HEAD fallback resolves from no remote, so only the local branch is asked.
+func buildBranchCollision(ctx context.Context, root, branch string, base branchbase.Resolution) (string, error) {
+	local, err := gitx.HasLocalBranch(ctx, root, branch)
+	if err != nil {
+		return "", err
+	}
+	if local {
+		return "refs/heads/" + branch, nil
+	}
+	remote, ok := strings.CutSuffix(base.Ref, "/"+base.BranchName)
+	if base.Kind != branchbase.ResolvedDefault || base.BranchName == "" || !ok || remote == "" {
+		return "", nil
+	}
+	tracking, err := gitx.HasRemoteTrackingBranch(ctx, root, remote, branch)
+	if err != nil {
+		return "", err
+	}
+	if tracking {
+		return "refs/remotes/" + remote + "/" + branch, nil
+	}
+	return "", nil
 }
 
 type buildObligationDebt struct {

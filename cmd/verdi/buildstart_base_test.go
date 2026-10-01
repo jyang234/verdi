@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/branchbase"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/specstate"
 )
@@ -77,6 +78,49 @@ func TestRunBuildStart_CutsFromTheResolvedBase(t *testing.T) {
 			// upstream, a config write build start does not declare.
 			if out, err := exec.CommandContext(context.Background(), "git", "-C", repo.Dir, "config", "--local", "--get-regexp", `^branch\.feature/`).CombinedOutput(); err == nil {
 				t.Fatalf("the cut wrote branch configuration %q; build start declares no config write", out)
+			}
+		})
+	}
+}
+
+// TestBuildBranchCollision (UAT-031, ledger SI-333): the build branch
+// collides when it exists locally, or as a remote-tracking branch of the
+// remote the base resolves from; a local or HEAD-fallback base resolves
+// from no remote; a directory that is not a repository is an error.
+func TestBuildBranchCollision(t *testing.T) {
+	const branch = "feature/widget-story"
+	originMain := branchbase.Resolution{Kind: branchbase.ResolvedDefault, Ref: "origin/main", BranchName: "main"}
+	localMain := branchbase.Resolution{Kind: branchbase.ResolvedDefault, Ref: "main", BranchName: "main"}
+	headFallback := branchbase.Resolution{Kind: branchbase.HeadFallback, Ref: "HEAD"}
+	tests := []struct {
+		name    string
+		seed    []string // a ref to create at HEAD, by full name
+		base    branchbase.Resolution
+		want    string
+		wantErr bool
+	}{
+		{"no collision", nil, originMain, "", false},
+		{"a local branch", []string{"refs/heads/" + branch}, originMain, "refs/heads/" + branch, false},
+		{"the base's remote", []string{"refs/remotes/origin/" + branch}, originMain, "refs/remotes/origin/" + branch, false},
+		{"another remote is not the base's", []string{"refs/remotes/upstream/" + branch}, originMain, "", false},
+		{"a local base asks no remote", []string{"refs/remotes/origin/" + branch}, localMain, "", false},
+		{"the HEAD fallback asks no remote", []string{"refs/remotes/origin/" + branch}, headFallback, "", false},
+		{"the HEAD fallback still asks the local branch", []string{"refs/heads/" + branch}, headFallback, "refs/heads/" + branch, false},
+		{"not a repository", nil, originMain, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if !tt.wantErr {
+				repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "a\n"}, Message: "seed"}})
+				dir = repo.Dir
+				for _, ref := range tt.seed {
+					gitTestOutput(t, dir, "update-ref", ref, "HEAD")
+				}
+			}
+			got, err := buildBranchCollision(context.Background(), dir, branch, tt.base)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("buildBranchCollision = %q, %v; want %q (error %v)", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}
