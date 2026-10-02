@@ -57,7 +57,11 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 	}
 
 	fixes := ws.AwaitingFixes()
-	t.Logf("awaiting fix (%d), declared scoped until spec/ritual-effect-witness fixes them:", len(fixes))
+	if len(fixes) == 0 {
+		t.Logf("awaiting fix (0): no ritual is declared scoped ahead of its fix")
+	} else {
+		t.Logf("awaiting fix (%d), declared scoped until spec/ritual-effect-witness fixes them:", len(fixes))
+	}
 	for _, a := range fixes {
 		t.Logf("  %s [%s]: %s", a.Path, a.Ritual, a.Defect)
 	}
