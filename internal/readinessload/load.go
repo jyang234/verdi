@@ -374,6 +374,7 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	}
 	sort.Strings(openQuestionIDs)
 	claimedQuestions := claimedQuestionsOf(spec.Stubs)
+	success := successFactsOf(spec)
 
 	boardPath := ""
 	if opts.BoardHref != nil {
@@ -408,6 +409,7 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 			DeclaredObjectIDs: declaredIDs, OpenQuestionIDs: openQuestionIDs,
 			ClaimedQuestions: claimedQuestions,
 		},
+		Success:    success,
 		Provenance: provenance,
 		Board:      board,
 		Journey:    record,

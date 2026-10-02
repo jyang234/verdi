@@ -68,6 +68,7 @@ func readinessConcernQuestion() readinesspilot.Concern {
 		ID: "shape/question/q-alpha", Area: readinesspilot.AreaShape,
 		State: readinesspilot.StateUnproven, Blocking: true, Timing: readinesspilot.TimingCurrent,
 		Summary:   "Declared open question remains unresolved",
+		Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "q-alpha"}),
 		Witnesses: []string{"q-alpha"},
 		Destination: readinesspilot.Destination{
 			BoardPath: "/board/spec/pilot", CLI: []string{},
@@ -81,6 +82,7 @@ func readinessConcernCoverage() readinesspilot.Concern {
 		State: readinesspilot.StateViolated, Blocking: true, Timing: readinesspilot.TimingCurrent,
 		WorkClass: journey.ClassMechanical,
 		Summary:   "Coverage gate must be green",
+		Guidance:  "Coverage gate must be green",
 		Witnesses: []string{"coverage gate output names the red step", "gate run 41 is red"},
 		Destination: readinesspilot.Destination{
 			CLI: []string{"verdi", "gate", "run", "--target", "spec/pilot"},
@@ -102,6 +104,7 @@ func readinessConcernAction() readinesspilot.Concern {
 		ID: "review/action", Area: readinesspilot.AreaReview,
 		State: readinesspilot.StateUnproven, Blocking: true, Timing: readinesspilot.TimingCurrent,
 		Summary:   "Lifecycle and safe-action posture can advance review",
+		Guidance:  "Establish the facts the witnesses name, so verdi journey can offer a safe review action.",
 		Witnesses: []string{"safe review action is unavailable"},
 		Destination: readinesspilot.Destination{
 			CLI: []string{"verdi", "journey", "--target", "spec/pilot"},
@@ -115,6 +118,7 @@ func readinessConcernSignoff() readinesspilot.Concern {
 		State: readinesspilot.StateViolated, Blocking: false, Timing: readinesspilot.TimingEventual,
 		WorkClass: journey.ClassGovernance,
 		Summary:   "Governance signoff will be required",
+		Guidance:  "Governance signoff will be required",
 		Witnesses: []string{"principal profile names a governance signoff"},
 		Destination: readinesspilot.Destination{
 			CLI: []string{"verdi", "journey", "--target", "spec/pilot"},
@@ -379,6 +383,7 @@ func TestReadinessRender_FocusListFewerThanFour(t *testing.T) {
 	signoff := readinessConcernSignoff()
 	signoff.State = readinesspilot.StateProven
 	signoff.Destination = readinesspilot.Destination{CLI: []string{}}
+	signoff.Guidance = ""
 	snap.AllConcerns[5] = signoff
 	snap.Attention = []readinesspilot.Concern{
 		readinessConcernQuestion(),

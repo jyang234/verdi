@@ -47,6 +47,13 @@ type Destination struct {
 }
 
 // Concern is one lossless source-derived readiness row.
+//
+// Guidance is the row's source-derived corrective guidance (SI-338 (1);
+// Wave 6 §3.1): non-empty exactly when the row is not proven, empty when it
+// is. Object is the declared object id that one segment of the row's id
+// names (SI-338 (2)), or empty when no segment names one. Neither is a new
+// fact: both are pure functions of the derivation's own inputs, and no
+// document byte, gate, verdict, or lifecycle input reads them.
 type Concern struct {
 	ID          string
 	Area        AreaID
@@ -55,8 +62,20 @@ type Concern struct {
 	Timing      Timing
 	WorkClass   journey.BlockerClass
 	Summary     string
+	Guidance    string
+	Object      string
 	Witnesses   []string
 	Destination Destination
+}
+
+// HumanReview reports whether the row is human-review work (SI-338 (3);
+// Wave 6 §3.1 "human-review work labeled plainly as human review"): a
+// review/role/* principal requirement, or a journey blocker of work class
+// governance (principal resolution, countersign, exemption). Judgmental
+// rows (author vouch, outcome floor, semantic judge) are not. It is a pure
+// function of the id and the work class.
+func (c Concern) HumanReview() bool {
+	return strings.HasPrefix(c.ID, "review/role/") || c.WorkClass == journey.ClassGovernance
 }
 
 // Area is one aggregate presentation row.
@@ -67,13 +86,15 @@ type Area struct {
 }
 
 // Snapshot is the immutable, in-memory readiness projection consumed by the
-// workbench.
+// workbench. BoardPath is the target's root-relative wall address when one
+// is servable (the loader's own board href), else empty.
 type Snapshot struct {
 	TargetRef     string
 	TargetTitle   string
 	TargetClass   string
 	Branch        string
 	Head          string
+	BoardPath     string
 	RequestDigest string
 	Areas         []Area
 	CurrentFocus  AreaID
@@ -119,6 +140,9 @@ func (s Snapshot) Validate() error {
 	if s.StaleNotice == "" || containsControl(s.StaleNotice) {
 		return fmt.Errorf("readinesspilot: stale notice must be non-empty and control-free")
 	}
+	if s.BoardPath != "" && (!strings.HasPrefix(s.BoardPath, "/") || containsControl(s.BoardPath)) {
+		return fmt.Errorf("readinesspilot: board path %q must be root-relative and control-free", s.BoardPath)
+	}
 	if !digestPattern.MatchString(s.RequestDigest) {
 		return fmt.Errorf("readinesspilot: request digest %q must match sha256:<64 lowercase hex>", s.RequestDigest)
 	}
@@ -151,6 +175,10 @@ func (s Snapshot) Validate() error {
 		}
 		if i > 0 && !concernLess(s.AllConcerns[i-1], concern) {
 			return fmt.Errorf("readinesspilot: all concerns must be strictly sorted by area and id order")
+		}
+		if classifyConcern(concern.ID) == familySuccessCoverage && s.TargetClass != "feature" {
+			// vocab:identity — names the fixed artifact class identity in a schema diagnostic, not display prose
+			return fmt.Errorf("readinesspilot: all concerns[%d]: coverage concern %q applies only to a feature target, not %q", i, concern.ID, s.TargetClass)
 		}
 		counts[concern.Area]++
 	}
@@ -255,6 +283,19 @@ func (c Concern) validate() error {
 	if c.Summary == "" {
 		return fmt.Errorf("concern %q summary must be non-empty", c.ID)
 	}
+	if err := c.validateFamilyPosture(); err != nil {
+		return err
+	}
+	if c.State == StateProven {
+		if c.Guidance != "" {
+			return fmt.Errorf("concern %q proven concern must carry no guidance", c.ID)
+		}
+	} else if c.Guidance == "" || containsControl(c.Guidance) {
+		return fmt.Errorf("concern %q unresolved concern guidance must be non-empty and control-free", c.ID)
+	}
+	if c.Object != "" && !namesSegment(c.ID, c.Object) {
+		return fmt.Errorf("concern %q object %q is not one of its id's object segments", c.ID, c.Object)
+	}
 	if err := validateWitnesses(fmt.Sprintf("concern %q witnesses", c.ID), c.Witnesses); err != nil {
 		return err
 	}
@@ -299,49 +340,172 @@ func (d Destination) validate(state State, concernID string) error {
 	return nil
 }
 
+// concernFamily is one family of the closed concern-identity vocabulary.
+// classifyConcern is its one classifier: concernIdentity fixes each
+// family's area and blocking rule from it, and guidanceFor its corrective
+// guidance, so a family added here without guidance fails the guidance
+// table test (TestGuidanceFor_EveryFamilyOfTheClosedVocabulary) rather than
+// shipping a row Validate would refuse.
+type concernFamily int
+
+const (
+	familyUnknown concernFamily = iota
+	familyShapeProblem
+	familyShapeOutcome
+	familyShapeProvenance
+	familyShapeMutation
+	familyShapeBoard
+	familyShapeQuestion
+	familyShapeBoardItem
+	familySuccessCriteria
+	familySuccessCoverage
+	familySuccessContributor
+	familySuccessBlocker
+	familyContextVerdict
+	familyContextMechanical
+	familyContextSemantic
+	familyContextDisclosure
+	familyReviewBlocker
+	familyReviewRole
+	familyReviewAction
+	familyReviewEventualDerivation
+	// familyEnd bounds the enumeration; it is not a family.
+	familyEnd
+)
+
+// classifyConcern returns id's family in the closed vocabulary, or
+// familyUnknown. It checks shape only; validateIdentity checks the id's
+// components first.
+func classifyConcern(id string) concernFamily {
+	parts := strings.Split(id, "/")
+	switch {
+	case id == "shape/problem":
+		return familyShapeProblem
+	case id == "shape/outcome":
+		return familyShapeOutcome
+	case id == "shape/provenance":
+		return familyShapeProvenance
+	case id == "shape/mutation":
+		return familyShapeMutation
+	case id == "shape/board":
+		return familyShapeBoard
+	case len(parts) >= 3 && parts[0] == "shape" && parts[1] == "question":
+		return familyShapeQuestion
+	case len(parts) >= 4 && parts[0] == "shape" && parts[1] == "board" && (parts[2] == "question" || parts[2] == "agent-task"):
+		return familyShapeBoardItem
+	case id == "success/criteria":
+		return familySuccessCriteria
+	case len(parts) == 3 && parts[0] == "success" && parts[1] == "coverage":
+		return familySuccessCoverage
+	case len(parts) >= 3 && parts[0] == "success" && parts[1] == "contributor":
+		return familySuccessContributor
+	case len(parts) >= 3 && parts[0] == "success" && parts[1] == "blocker":
+		return familySuccessBlocker
+	case id == "context/verdict":
+		return familyContextVerdict
+	case len(parts) >= 3 && parts[0] == "context" && parts[1] == "mechanical":
+		return familyContextMechanical
+	case len(parts) >= 3 && parts[0] == "context" && parts[1] == "semantic":
+		return familyContextSemantic
+	case len(parts) >= 3 && parts[0] == "context" && parts[1] == "disclosure":
+		return familyContextDisclosure
+	case len(parts) >= 3 && parts[0] == "review" && parts[1] == "blocker":
+		return familyReviewBlocker
+	case len(parts) >= 5 && parts[0] == "review" && parts[1] == "role":
+		return familyReviewRole
+	case id == "review/action":
+		return familyReviewAction
+	case id == "review/eventual-derivation":
+		return familyReviewEventualDerivation
+	default:
+		return familyUnknown
+	}
+}
+
 func concernIdentity(id string, timing Timing) (AreaID, bool, bool, error) {
 	if err := validateIdentity("concern id", id); err != nil {
 		return "", false, false, fmt.Errorf("invalid id %q: %w", id, err)
 	}
-	parts := strings.Split(id, "/")
 	current := timing == TimingCurrent
-	switch {
-	case id == "shape/problem" || id == "shape/outcome":
+	switch classifyConcern(id) {
+	case familyShapeProblem, familyShapeOutcome:
 		return AreaShape, false, true, nil
-	case id == "shape/provenance" || id == "shape/mutation" || id == "shape/board":
+	case familyShapeProvenance, familyShapeMutation, familyShapeBoard:
 		return AreaShape, false, false, nil
-	case len(parts) >= 3 && parts[0] == "shape" && parts[1] == "question":
+	case familyShapeQuestion:
 		// An unclaimed question blocks now (current); a question a spike
 		// stub claims is a later-timed, non-blocking readiness concern
 		// (PLAN.md §7 I-128 option (a); spec/uat-round-1 ac-10) — the same
 		// timing-derives-blocking shape blockerConcern already uses.
 		return AreaShape, false, current, nil
-	case len(parts) >= 4 && parts[0] == "shape" && parts[1] == "board" && (parts[2] == "question" || parts[2] == "agent-task"):
+	case familyShapeBoardItem:
 		return AreaShape, false, false, nil
-	case len(parts) >= 3 && parts[0] == "success" && parts[1] == "contributor":
+	// SI-338 (5): whether the spec declares acceptance criteria at all,
+	// blocking — the success area's own anchor.
+	case familySuccessCriteria:
+		return AreaSuccess, false, true, nil
+	// SI-338 (4): an acceptance criterion no non-spike stub lists, on a
+	// feature only — the wall's "no stub", never a blocker.
+	case familySuccessCoverage:
 		return AreaSuccess, false, false, nil
-	case len(parts) >= 3 && parts[0] == "success" && parts[1] == "blocker":
+	case familySuccessContributor:
+		return AreaSuccess, false, false, nil
+	case familySuccessBlocker:
 		return AreaSuccess, true, current, nil
-	case id == "context/verdict":
+	case familyContextVerdict:
 		return AreaContext, false, true, nil
-	case len(parts) >= 3 && parts[0] == "context" && (parts[1] == "mechanical" || parts[1] == "semantic" || parts[1] == "disclosure"):
+	case familyContextMechanical, familyContextSemantic, familyContextDisclosure:
 		return AreaContext, false, false, nil
-	case len(parts) >= 3 && parts[0] == "review" && parts[1] == "blocker":
+	case familyReviewBlocker:
 		return AreaReview, true, current, nil
-	case len(parts) >= 5 && parts[0] == "review" && parts[1] == "role":
+	case familyReviewRole:
 		return AreaReview, false, false, nil
-	case id == "review/action":
+	case familyReviewAction:
 		return AreaReview, false, true, nil
 	// SI-213 / R-RRF-1: the completeness of the journey's own eventual
 	// derivation, blocking and current — a readiness conclusion drawn over
 	// a partial derivation is not a conclusion. Not journey-derived in the
 	// work-class sense: it describes the derivation, not one blocker.
-	case id == "review/eventual-derivation":
+	case familyReviewEventualDerivation:
 		return AreaReview, false, true, nil
 	default:
 		// vocab:identity — "closed" describes enum closure in a schema diagnostic, not the renameable lifecycle state.
 		return "", false, false, fmt.Errorf("invalid id %q: not in the closed concern identity vocabulary", id)
 	}
+}
+
+// validateFamilyPosture enforces the two success families' fixed states
+// beyond concernIdentity's area and blocking rule: success/criteria is
+// proven or violated, never unproven (SI-338 (5)); success/coverage/<ac>
+// is unproven and current, never proven (SI-338 (4)) — a declared stub is
+// a claim of relatedness, never evidence (index-coverage co-1).
+func (c Concern) validateFamilyPosture() error {
+	switch classifyConcern(c.ID) {
+	case familySuccessCriteria:
+		if c.State != StateProven && c.State != StateViolated {
+			return fmt.Errorf("concern %q criteria concern must be proven or violated, not %q", c.ID, c.State)
+		}
+	case familySuccessCoverage:
+		if c.State != StateUnproven {
+			return fmt.Errorf("concern %q coverage concern must be unproven, not %q", c.ID, c.State)
+		}
+		if c.Timing != TimingCurrent {
+			return fmt.Errorf("concern %q coverage concern must be current, not %q", c.ID, c.Timing)
+		}
+	}
+	return nil
+}
+
+// namesSegment reports whether object equals one of id's segments after
+// its two family segments — exactly, never by prefix.
+func namesSegment(id, object string) bool {
+	parts := strings.Split(id, "/")
+	for i := 2; i < len(parts); i++ {
+		if parts[i] == object {
+			return true
+		}
+	}
+	return false
 }
 
 func validWorkClass(class journey.BlockerClass) bool {

@@ -20,6 +20,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/designprovenance"
+	"github.com/jyang234/verdi/internal/featurecoverage"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
@@ -196,6 +197,31 @@ func claimedQuestionsOf(stubs []artifact.Stub) []readinesspilot.ClaimedQuestion 
 		claims = append(claims, readinesspilot.ClaimedQuestion{QuestionID: id, StubSlugs: slugs})
 	}
 	return claims
+}
+
+// successFactsOf maps a decoded spec onto readinesspilot.SuccessFacts:
+// its declared acceptance criteria, sorted, and — on a feature only — the
+// criteria no non-spike stub lists, by the wall's own rule
+// (featurecoverage.Compute over featurecoverage.StubDecls, no story links:
+// the wall's "no stub", SI-338 (4)). A story never carries an uncovered
+// criterion. Both lists are always non-nil.
+func successFactsOf(spec *artifact.SpecFrontmatter) readinesspilot.SuccessFacts {
+	ids := make([]string, len(spec.AcceptanceCriteria))
+	for i, ac := range spec.AcceptanceCriteria {
+		ids[i] = ac.ID
+	}
+	uncovered := make([]string, 0)
+	if spec.Class == artifact.ClassFeature {
+		coverage := featurecoverage.Compute(ids, featurecoverage.StubDecls(spec.Stubs), nil)
+		for _, id := range ids {
+			if len(coverage[id].Stubs) == 0 {
+				uncovered = append(uncovered, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	sort.Strings(uncovered)
+	return readinesspilot.SuccessFacts{CriterionIDs: ids, UncoveredCriteria: uncovered}
 }
 
 // digest is the canonical sha256:<hex> content digest Load uses for both

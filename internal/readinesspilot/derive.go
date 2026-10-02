@@ -45,6 +45,16 @@ type ClaimedQuestion struct {
 	StubSlugs  []string
 }
 
+// SuccessFacts is the decoded success definition the readiness pilot needs:
+// the spec's declared acceptance criteria and, on a feature, the criteria
+// no non-spike stub lists — the wall's own "no stub" rule, computed by the
+// caller through internal/featurecoverage (SI-338 (4)). A story never
+// carries an uncovered criterion.
+type SuccessFacts struct {
+	CriterionIDs      []string
+	UncoveredCriteria []string
+}
+
 // ProvenanceFacts carries the already-classified design provenance and draft
 // mutation postures. Derive never reads or reclassifies their sources.
 type ProvenanceFacts struct {
@@ -79,6 +89,7 @@ type Fallbacks struct {
 type Input struct {
 	Target     TargetFacts
 	Shape      ShapeFacts
+	Success    SuccessFacts
 	Provenance ProvenanceFacts
 	Board      BoardFacts
 	Journey    journey.Record
@@ -114,6 +125,14 @@ func Derive(input Input) (Snapshot, error) {
 	concerns = append(concerns, deriveSuccess(input)...)
 	concerns = append(concerns, deriveContext(input)...)
 	concerns = append(concerns, deriveReview(input)...)
+	declared := make(map[string]bool, len(input.Shape.DeclaredObjectIDs))
+	for _, id := range input.Shape.DeclaredObjectIDs {
+		declared[id] = true
+	}
+	for i := range concerns {
+		concerns[i].Object = objectOf(concerns[i].ID, declared)
+		concerns[i].Guidance = guidanceFor(concerns[i], input)
+	}
 	sort.Slice(concerns, func(i, j int) bool { return concernLess(concerns[i], concerns[j]) })
 
 	states := aggregateAreaStates(concerns)
@@ -142,6 +161,7 @@ func Derive(input Input) (Snapshot, error) {
 		TargetClass:   input.Target.Class,
 		Branch:        input.Target.Branch,
 		Head:          input.Target.Head,
+		BoardPath:     input.Target.BoardPath,
 		RequestDigest: input.RequestDigest,
 		Areas:         areas,
 		CurrentFocus:  currentFocus,
@@ -188,6 +208,9 @@ func (in Input) validate() error {
 		return err
 	}
 	if err := validateClaimedQuestions(in.Shape.OpenQuestionIDs, in.Shape.ClaimedQuestions); err != nil {
+		return err
+	}
+	if err := validateSuccessFacts(in.Target.Class, in.Shape.DeclaredObjectIDs, in.Success); err != nil {
 		return err
 	}
 	if err := in.Provenance.ChainState.validate("chain state"); err != nil {
@@ -317,7 +340,33 @@ func deriveShape(input Input) []Concern {
 }
 
 func deriveSuccess(input Input) []Concern {
-	concerns := make([]Concern, 0, len(input.Journey.Evidence.Contributors)+len(input.Journey.Blockers.Current)+len(input.Journey.Blockers.Eventual.Items))
+	concerns := make([]Concern, 0, 1+len(input.Success.UncoveredCriteria)+len(input.Journey.Evidence.Contributors)+len(input.Journey.Blockers.Current)+len(input.Journey.Blockers.Eventual.Items))
+	// SI-338 (5): whether the spec declares acceptance criteria at all. A
+	// story may declare none; it then reads violated with a witness instead
+	// of leaving the success area vacuous, which Validate refuses.
+	if len(input.Success.CriterionIDs) == 0 {
+		concerns = append(concerns, newConcern(
+			"success/criteria", AreaSuccess, StateViolated, true, TimingCurrent, "",
+			"Acceptance criteria are missing", []string{"Acceptance criteria are missing"},
+			boardDestination(input, input.Fallbacks.Success),
+		))
+	} else {
+		concerns = append(concerns, newConcern(
+			"success/criteria", AreaSuccess, StateProven, true, TimingCurrent, "",
+			"Acceptance criteria are declared", input.Success.CriterionIDs, Destination{CLI: []string{}},
+		))
+	}
+	// SI-338 (4): the wall's own "no stub" rule — a declared criterion no
+	// non-spike stub lists, on a feature only. A stub is a claim of
+	// relatedness, never evidence (index-coverage co-1), so the row is
+	// unproven and never proven: a covered criterion emits no row.
+	for _, id := range sortedCopy(input.Success.UncoveredCriteria) {
+		concerns = append(concerns, newConcern(
+			"success/coverage/"+id, AreaSuccess, StateUnproven, false, TimingCurrent, "",
+			"No stub covers acceptance criterion "+id, []string{"declared stub coverage count for " + id + " is 0"},
+			boardDestination(input, input.Fallbacks.Success),
+		))
+	}
 	for _, contributor := range input.Journey.Evidence.Contributors {
 		state := State(contributor.Resolution)
 		destination := Destination{CLI: []string{}}
@@ -573,6 +622,58 @@ func validateSourceIDs(field string, ids []string) error {
 		seen[id] = true
 	}
 	return nil
+}
+
+// validateSuccessFacts checks the success definition: every criterion is a
+// unique declared object, every uncovered criterion is a unique declared
+// criterion, and only a feature carries an uncovered one (SI-338 (4)).
+func validateSuccessFacts(class string, declaredObjectIDs []string, facts SuccessFacts) error {
+	if facts.CriterionIDs == nil {
+		return fmt.Errorf("readinesspilot: success criterion ids must be non-nil")
+	}
+	if facts.UncoveredCriteria == nil {
+		return fmt.Errorf("readinesspilot: success uncovered criteria must be non-nil")
+	}
+	if err := validateSourceIDs("success criterion ids", facts.CriterionIDs); err != nil {
+		return err
+	}
+	if err := validateSourceIDs("success uncovered criteria", facts.UncoveredCriteria); err != nil {
+		return err
+	}
+	declared := make(map[string]bool, len(declaredObjectIDs))
+	for _, id := range declaredObjectIDs {
+		declared[id] = true
+	}
+	criteria := make(map[string]bool, len(facts.CriterionIDs))
+	for _, id := range facts.CriterionIDs {
+		if !declared[id] {
+			return fmt.Errorf("readinesspilot: success criterion %q is not a declared object", id)
+		}
+		criteria[id] = true
+	}
+	for _, id := range facts.UncoveredCriteria {
+		if !criteria[id] {
+			return fmt.Errorf("readinesspilot: uncovered criterion %q is not a declared acceptance criterion", id)
+		}
+	}
+	if len(facts.UncoveredCriteria) > 0 && class != "feature" {
+		// vocab:identity — names the fixed artifact class identity in a validation diagnostic, not display prose
+		return fmt.Errorf("readinesspilot: uncovered criteria apply only to a feature target, not %q", class)
+	}
+	return nil
+}
+
+// objectOf returns the declared object id that one segment of id names
+// after its two family segments, matched exactly (never by prefix) against
+// declared, or "" when none does (SI-338 (2)).
+func objectOf(id string, declared map[string]bool) string {
+	parts := strings.Split(id, "/")
+	for i := 2; i < len(parts); i++ {
+		if declared[parts[i]] {
+			return parts[i]
+		}
+	}
+	return ""
 }
 
 // validateClaimedQuestions checks every claim names a declared open
