@@ -1,11 +1,7 @@
 package dex
 
 import (
-	"html"
-	"regexp"
-	"strconv"
-	"strings"
-
+	"github.com/jyang234/verdi/internal/headings"
 	"github.com/jyang234/verdi/internal/render"
 )
 
@@ -24,36 +20,14 @@ var (
 	highlightCode  = render.HighlightCode
 )
 
-// tocHeadingRe extracts every heading goldmark emitted with an
-// auto-generated id — <h2 id="foo">Text</h2> — to build the on-this-page
-// TOC (05 §Verdi-dex page anatomy) as a second pass over already-rendered
-// HTML rather than a second AST walk; simpler, and just as deterministic
-// since it's a pure function of the same rendered bytes.
-var tocHeadingRe = regexp.MustCompile(`(?s)<h([2-4]) id="([^"]*)">(.*?)</h[2-4]>`)
-
-// innerTagRe strips any nested tags (e.g. <code>, <em>) a heading's inline
-// markdown produced, so the TOC shows plain text labels.
-var innerTagRe = regexp.MustCompile(`<[^>]+>`)
-
-// TOCEntry is one on-this-page table-of-contents entry.
-type TOCEntry struct {
-	Level int
-	ID    string
-	Text  string
-}
+// TOCEntry is one on-this-page table-of-contents entry: the shared heading
+// extraction's entry (internal/headings), which the workbench's Document
+// page reads too (spec/document-page-v2, ledger SI-340 (1)).
+type TOCEntry = headings.Entry
 
 // extractTOC walks renderedHTML's h2-h4 headings (goldmark's
-// WithAutoHeadingID gave each one a stable id) in document order.
+// WithAutoHeadingID gave each one a stable id) in document order, through
+// the shared extraction (05 §Verdi-dex page anatomy: the on-this-page TOC).
 func extractTOC(renderedHTML string) []TOCEntry {
-	matches := tocHeadingRe.FindAllStringSubmatch(renderedHTML, -1)
-	entries := make([]TOCEntry, 0, len(matches))
-	for _, m := range matches {
-		level, err := strconv.Atoi(m[1])
-		if err != nil {
-			level = 2
-		}
-		text := strings.TrimSpace(innerTagRe.ReplaceAllString(m[3], ""))
-		entries = append(entries, TOCEntry{Level: level, ID: m[2], Text: html.UnescapeString(text)})
-	}
-	return entries
+	return headings.Extract(renderedHTML)
 }
