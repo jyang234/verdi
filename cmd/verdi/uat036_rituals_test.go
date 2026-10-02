@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -99,13 +101,31 @@ func uat036Rituals(t *testing.T, bin string) []uat036Ritual {
 // the built binary and the workbench's commit through the running server's
 // handler (dc-1), so no command log exists (until spec/gitx-recorder-seam):
 // the claims rest on the state diff and each created commit's file list.
+//
+// Of the verdicts logged, the test asserts the index carry, which is ac-3's
+// claim, and nothing else: every other effect is ac-2's (lane R3). Design
+// start's `config: outside` verdicts (branch.design/<n>.remote and .merge,
+// written because it cuts at the base's remote-tracking ref name) are a
+// known effect carried to R3 (backlog BL-141).
+//
+// Beside the fixture's foreign entry at the repository root, each run also
+// stages storeForeignFile inside .verdi/, outside every listed ritual's
+// declared stage paths, so a commit naming a pathspec wider than the
+// ritual's own paths (the whole .verdi/, say) cannot pass.
 func TestUAT036_RitualsNeverCarryForeignEntries(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	ctx := context.Background()
 	for _, r := range uat036Rituals(t, bin) {
 		t.Run(r.name, func(t *testing.T) {
 			fx := ritualwitness.BuildWith(t, ctx, ritualwitness.SeedFull, r.base)
-			res := ritualwitness.RunOn(t, ctx, fx, r.driver(t, fx), ritualDeclaration(t, r.ritual))
+			stageStoreForeignEntry(t, fx)
+			decl := ritualDeclaration(t, r.ritual)
+			for _, p := range decl.StagePaths {
+				if p.Matches(storeForeignFile) {
+					t.Fatalf("%s lies under %s's declared stage path %s", storeForeignFile, r.ritual, p)
+				}
+			}
+			res := ritualwitness.RunOn(t, ctx, fx, r.driver(t, fx), decl)
 			logVerdicts(t, res)
 			requireCleanRun(t, res)
 
@@ -113,13 +133,15 @@ func TestUAT036_RitualsNeverCarryForeignEntries(t *testing.T) {
 			if len(created) == 0 {
 				t.Fatal("the ritual created no commit")
 			}
-			for _, id := range created {
-				if files := res.After.Commits[id].Files; slices.Contains(files, ritualwitness.ForeignFile) {
-					t.Errorf("commit %s recorded the pre-staged foreign entry %s (UAT-036); its files: %v", id, ritualwitness.ForeignFile, files)
+			for _, foreign := range []string{ritualwitness.ForeignFile, storeForeignFile} {
+				for _, id := range created {
+					if files := res.After.Commits[id].Files; slices.Contains(files, foreign) {
+						t.Errorf("commit %s recorded the pre-staged foreign entry %s (UAT-036); its files: %v", id, foreign, files)
+					}
 				}
-			}
-			if !stagedIn(res.After, ritualwitness.ForeignFile) {
-				t.Errorf("the foreign entry %s is no longer staged: a scoped commit leaves it in the index", ritualwitness.ForeignFile)
+				if !stagedIn(res.Before, foreign) || !stagedIn(res.After, foreign) {
+					t.Errorf("the foreign entry %s is not staged before and after the run: a scoped commit leaves it in the index", foreign)
+				}
 			}
 			requireIndexCarryWithin(t, res)
 		})
@@ -171,7 +193,12 @@ func TestUAT036_RitualsNeverCarryForeignEntries(t *testing.T) {
 		if !slices.Equal(carried, []string{ws.RitualBoardCommitPush}) {
 			t.Fatalf("carried declarations = %v, want exactly %s", carried, ws.RitualBoardCommitPush)
 		}
-		want := ws.CarriedVerbs()
+		// The two literal routes, never ws.CarriedVerbs(): a verb added to
+		// both that list and the declaration must not pass unnoticed.
+		want := []ws.Verb{
+			ws.Workbench("/board/spec/{name}/api/git-commit"),
+			ws.Workbench("/b/{branch}/board/spec/{name}/api/git-commit"),
+		}
 		less := func(a, b ws.Verb) int { return strings.Compare(a.String(), b.String()) }
 		slices.SortFunc(verbs, less)
 		slices.SortFunc(want, less)
@@ -198,4 +225,18 @@ func closeStoreFiles() map[string]string {
 		files[".verdi/obligations/close-fixture/ac-1--"+string(kind)+".md"] = fixtureElaboratedObligationMD("close-fixture", "ac-1", kind, producer, "1", gateFakeFrozenCommit)
 	}
 	return files
+}
+
+// storeForeignFile is a colleague's unrelated entry inside the store,
+// pre-staged beside the fixture's own foreign entry: inside .verdi/, and
+// under none of the listed rituals' declared stage paths.
+const storeForeignFile = ".verdi/colleague-staged.md"
+
+// stageStoreForeignEntry writes and stages storeForeignFile in fx.
+func stageStoreForeignEntry(t *testing.T, fx *ritualwitness.Fixture) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(fx.Dir, filepath.FromSlash(storeForeignFile)), []byte("a colleague's unrelated staged store work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestOutput(t, fx.Dir, "add", "--", storeForeignFile)
 }
