@@ -15,6 +15,17 @@
 // Declaration; Run and RunOn (harness.go) compose them; Outcome
 // (outcome.go) folds a run's verdicts into pass, fail, or unproven.
 //
+// # Exit classes
+//
+// A Driver reports a verb's exit class — 0 clean, 1 verdict failure, 2
+// operational refusal — or -1, no verb's exit, which RunOn refuses to
+// judge. Exit 2 is not a refusal's signature by itself: a usage error, a
+// workbench 4xx or 5xx answer, and a Go panic all read as 2 too. So Binary
+// maps a Go panic trace to -1, Workbench follows no redirect, and a
+// witness of a refused declaration (index carry refused) asserts the
+// refusal's own reason — the words of the error RunOn returns — never exit
+// 2 alone (ledger SI-334 (3), (4)).
+//
 // # Sensed
 //
 // Every ref of the repository and of the remote (refs/*, deletions

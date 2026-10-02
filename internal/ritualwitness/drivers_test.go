@@ -48,6 +48,10 @@ func TestBinary_Run(t *testing.T) {
 		{"a refusal keeps its exit", Binary{Path: exe, Env: []string{helperEnv + "=2"}}, 2, []string{"exited 2"}, ""},
 		{"a binary that cannot start is no verb's exit", Binary{Path: filepath.Join(t.TempDir(), "absent")}, -1, []string{"running"}, ""},
 		{"no path is no verb's exit", Binary{}, -1, []string{"no binary"}, ""},
+		{"a Go panic's exit 2 is no verb's exit", Binary{Path: exe, Env: []string{helperEnv + "=panic"}}, -1,
+			[]string{"panicked", "helper verb panicked", "goroutine"}, ""},
+		{"a refusal whose words begin panic: but carry no trace keeps its exit", Binary{Path: exe, Env: []string{helperEnv + "=panic-words"}}, 2,
+			[]string{"exited 2", "the refusal's own words"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,6 +72,33 @@ func TestBinary_Run(t *testing.T) {
 			}
 			if tt.wantBranch != "" {
 				runGitFixture(t, ctx, fx.Dir, "rev-parse", "--verify", "refs/heads/"+tt.wantBranch)
+			}
+		})
+	}
+}
+
+// TestGoPanicTrace: a panic header followed by a goroutine stack is a
+// trace; either alone, or the stack before the header, is not.
+func TestGoPanicTrace(t *testing.T) {
+	trace := "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n\t/x/main.go:3 +0x1d\nexit status 2\n"
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{"a panic and its stack", trace, true},
+		{"after other output", "verdi: starting\n" + trace, true},
+		{"a recovered-and-repanicked trace", "panic: boom [recovered]\n\tpanic: again\n\ngoroutine 7 [running]:\n", true},
+		{"a refusal's words alone", "panic: the refusal's own words, not a trace\n", false},
+		{"a stack alone", "goroutine 1 [running]:\nmain.main()\n", false},
+		{"the stack before the header", "goroutine 1 [running]:\npanic: boom\n", false},
+		{"the header mid-line", "build start: panic: boom\ngoroutine 1 [running]:\n", false},
+		{"nothing", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := goPanicTrace(tt.stderr); got != tt.want {
+				t.Fatalf("goPanicTrace(%q) = %v, want %v", tt.stderr, got, tt.want)
 			}
 		})
 	}
