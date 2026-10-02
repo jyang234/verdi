@@ -4107,15 +4107,18 @@ body:not(.board-page) > footer.site-foot,
 }
 .topbar-branch[data-detached="true"],
 .topbar-branch[data-state="unproven"] { color: var(--st-pending); }
-.topbar-posture { position: static; margin: 0; min-width: auto; }
+.topbar-posture { position: static; margin: 0; min-width: auto; max-width: 100%; }
 /* the posture summary does not shrink and does not clip: no overflow
-   clip, no ellipsis, nowrap at desktop widths; below 640 px of bar width
-   it flows as wrapped text (the container query below) */
+   clip, no ellipsis; its facts — the bytes, the dot, the tree, written
+   without a space between them — are its flex items, on one line
+   wherever that fits the group, else on wrapped lines, each fact whole
+   on its own (the shared rule keeps a fact on one line) */
 .topbar-posture > summary {
-  display: inline-flex;
+  display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 2px 6px;
   width: auto;
   max-width: 100%;
   padding: 2px 6px;
@@ -4123,7 +4126,6 @@ body:not(.board-page) > footer.site-foot,
   border-radius: 4px;
   list-style: none;
   cursor: pointer;
-  white-space: nowrap;
 }
 .topbar-posture > summary::-webkit-details-marker { display: none; }
 /* the arrow is decoration: no alternative text, so the summary's
@@ -4285,13 +4287,8 @@ body:not(.board-page) > footer.site-foot,
   .topbar-posture-group { flex: 1 1 100%; flex-wrap: wrap; }
   .topbar-title { flex: 1 1 100%; max-width: none; white-space: normal; }
   .topbar-branch { flex: 1 1 auto; width: auto; max-width: 100%; }
-  /* the posture words flow as wrapped lines — the bytes fact, its dot,
-     the tree fact — each fact on its own line, never clipped (the facts
-     are written without a space between them, so a flex line break, not
-     a text one, is what breaks them); a fact wider than the bar, such as
-     the bytes with a formal state of their own, wraps between its words */
-  .topbar-posture { max-width: 100%; }
-  .topbar-posture > summary { display: flex; flex-wrap: wrap; gap: 2px 6px; white-space: normal; }
+  /* a fact wider than the bar itself, such as the bytes with a formal
+     state of their own, wraps between its words rather than overflow */
   .topbar-posture-group .asd-posture-bytes,
   .topbar-posture-group .asd-posture-tree { white-space: normal; }
   .topbar-controls { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; margin-left: 0; justify-content: flex-start; }
