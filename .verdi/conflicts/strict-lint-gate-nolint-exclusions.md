@@ -27,6 +27,6 @@ green make lint-strict with an uncounted, unreasoned suppression.
 ## Resolution
 
 spec/strict-lint-gate-v2 supersedes spec/strict-lint-gate with ac-3 revised to count source //nolint directives naming a
-gated linter, require their reasons, and refuse a directive naming no linter, and dc-4 added; every other criterion is
-v1's. The conflict is resolved superseded with v2 on the same branch, so the merge lands both rung-3 records together
-(story-supersession design §5).
+gated linter, require their reasons, and refuse a directive that suppresses every linter (no list, or all anywhere in
+its list), and dc-4 added; every other criterion is v1's. The conflict is resolved superseded with v2 on the same
+branch, so the merge lands both rung-3 records together (story-supersession design §5).
