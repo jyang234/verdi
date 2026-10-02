@@ -35,13 +35,17 @@ func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+			// The obligation is committed with the story: build start judges
+			// it only where the working tree equals its base (ledger SI-334
+			// (2)), here the HEAD fallback.
+			files := map[string]string{
 				".verdi/verdi.yaml":                        phase7ManifestYAML,
 				".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
-			}, Message: "accepted story"}})
-			if tt.write {
-				writeBuildQualityObligation(t, repo.Dir, "widget-story", "ac-1", artifact.EvidenceStatic, tt.quality)
 			}
+			if tt.write {
+				files[".verdi/obligations/widget-story/ac-1--static.md"] = buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, tt.quality)
+			}
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "accepted story"}})
 			beforeHead, err := gitx.RevParse(context.Background(), repo.Dir, "HEAD")
 			if err != nil {
 				t.Fatal(err)
@@ -79,8 +83,9 @@ func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml":                        phase7ManifestYAML,
 		".verdi/specs/active/widget-story/spec.md": obligationSeamStoryCleanMD,
+		".verdi/obligations/widget-story/ac-2--behavioral.md": buildQualityObligationDocument("widget-story", "ac-2", artifact.EvidenceBehavioral,
+			"quality:\n  state: unresolved-design-debt\n"),
 	}, Message: "accepted story"}})
-	writeBuildQualityObligation(t, repo.Dir, "widget-story", "ac-2", artifact.EvidenceBehavioral, "quality:\n  state: unresolved-design-debt\n")
 
 	var stdout, stderr bytes.Buffer
 	resolver := fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}}
@@ -180,18 +185,6 @@ func TestRunBuildStart_ObligationQualityMisbindingIsOperationalBeforeMutation(t 
 	afterStatus := gitTestOutput(t, repo.Dir, "status", "--porcelain=v1", "--untracked-files=all")
 	if afterHead != beforeHead || afterBranch != beforeBranch || afterStatus != beforeStatus {
 		t.Fatalf("misbinding refusal mutated git state: head %s→%s branch %s→%s status %q→%q", beforeHead, afterHead, beforeBranch, afterBranch, beforeStatus, afterStatus)
-	}
-}
-
-func writeBuildQualityObligation(t *testing.T, root, specName, acID string, kind artifact.EvidenceKind, quality string) {
-	t.Helper()
-	path := filepath.Join(root, ".verdi", "obligations", specName, acID+"--"+string(kind)+".md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	doc := buildQualityObligationDocument(specName, acID, kind, quality)
-	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -383,13 +376,15 @@ func TestBuildStartConflictPreEffect(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
-				".verdi/verdi.yaml":                               phase7ManifestYAML,
-				".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
-				".verdi/obligations/widget-story/ac-1--static.md": buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock()),
-			}, Message: "accepted story"}})
+			// The policy store is committed with the story: build start
+			// judges its preconditions only where the working tree equals
+			// its base (ledger SI-334 (2)).
+			files := contextPolicyStoreFiles(t)
+			files[".verdi/verdi.yaml"] = phase7ManifestYAML
+			files[".verdi/specs/active/widget-story/spec.md"] = statuslessBuildStorySpecMD
+			files[".verdi/obligations/widget-story/ac-1--static.md"] = buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock())
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "accepted story"}})
 			pinFixtureDefaultBranch(t, repo.Dir)
-			installConflictPolicyStore(t, repo.Dir)
 			requestPath := contextLifecycleRequestFile(t, repo.Dir, "build-start-context.json", "spec/widget-story", contextcompile.PhaseBuild, nil)
 			before := takeConflictLifecycleSnapshot(t, repo.Dir,
 				".verdi/specs/active/widget-story/spec.md",
@@ -428,7 +423,9 @@ func TestBuildStartConflictPreEffect(t *testing.T) {
 				assertConflictLifecycleSnapshot(t, repo.Dir, before)
 			}
 			if tt.provider != nil {
-				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+				// The base is disclosed before every precondition (ledger
+				// SI-334 (2)); nothing else reaches stdout.
+				if stdout.String() != "build start: base main @ "+shortSHA(repo.Head)+"\n" || !strings.Contains(stderr.String(), "provider unavailable") {
 					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
 				}
 				return

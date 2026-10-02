@@ -33,19 +33,18 @@ func HostVerbs() []Verb {
 
 // Registry returns the write-scope declaration of every verb that mutates
 // a git repository, one declaration per ritual. Each declaration states
-// what its ritual does at this story's base, read through parent dc-7,
-// except the owner-ruled fixes of story dc-3: design start (with
-// --supersedes), the commit-to-design ritual, accept diagram, and
-// constitution propose are declared scoped and sit in AwaitingFixes until
-// spec/ritual-effect-witness fixes them. Paths are store-relative.
+// what its ritual does, read through parent dc-7. The owner-ruled fixes of
+// story dc-3 — design start (with --supersedes), the commit-to-design
+// ritual, accept diagram, and constitution propose committing only their
+// declared paths — have landed (spec/ritual-effect-witness), so
+// AwaitingFixes is empty. Paths are store-relative.
 func Registry() []Declaration {
 	return []Declaration{
 		{
 			// cmd/verdi/design.go (runDesignStart) and designsupersede.go:
 			// cut design/<name> from the resolved base and switch to it,
 			// write the spec directory, git add -- <dir>, then a commit
-			// with no pathspec. Awaiting fix: the commit carries pre-staged
-			// entries today (UAT-036).
+			// naming that directory (UAT-036 fixed on both paths).
 			Ritual:     "design_start",
 			Verbs:      []Verb{CLI("design start")},
 			RefsCreate: []RefPattern{"refs/heads/design/*"},
@@ -112,8 +111,8 @@ func Registry() []Declaration {
 		},
 		{
 			// internal/commitdesign: writes spec.md and board.json into a new
-			// spec directory, git add -- <dir>, then a commit with no
-			// pathspec on the checked-out branch. Awaiting fix (UAT-036).
+			// spec directory, git add -- <dir>, then a commit naming that
+			// directory on the checked-out branch (UAT-036 fixed).
 			Ritual:     "commit_to_design",
 			Verbs:      []Verb{CLI("board"), Workbench("/board/{key}/commit")},
 			RefsMove:   []RefPattern{RefCheckedOut},
@@ -139,8 +138,8 @@ func Registry() []Declaration {
 		},
 		{
 			// cmd/verdi/acceptdiagram.go: rewrites the diagram, git add --
-			// <file>, then a commit with no pathspec on the checked-out
-			// branch. Awaiting fix (UAT-036).
+			// <file>, then a commit naming that file on the checked-out
+			// branch (UAT-036 fixed).
 			Ritual:     "accept_diagram",
 			Verbs:      []Verb{CLI("accept")},
 			RefsMove:   []RefPattern{RefCheckedOut},
@@ -149,10 +148,10 @@ func Registry() []Declaration {
 		},
 		{
 			// internal/constitutionapp (propose.go): on the branch the
-			// request names, created from HEAD or checked out when it
-			// exists, stages the one proposed policy file and commits with
-			// no pathspec. Awaiting fix (UAT-036; it also stops cutting from
-			// HEAD, a base the write scope does not express).
+			// request names, cut from the resolved default branch's commit
+			// or checked out when it exists, stages the one proposed policy
+			// file and commits naming it (UAT-036 and UAT-023 fixed; the
+			// base is not a write-scope field).
 			Ritual:     "constitution_propose",
 			Verbs:      []Verb{CLI("context constitution propose")},
 			RefsCreate: []RefPattern{"refs/heads/*"},

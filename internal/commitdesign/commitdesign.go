@@ -219,7 +219,11 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	if err := gitx.AddPaths(ctx, in.Root, specDir); err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
 	}
-	commit, err := gitx.CreateCommit(ctx, in.Root, fmt.Sprintf("commit-to-design: %s from board %s", specRef, in.BoardKey))
+	// UAT-036: commit exactly specDir. A commit with no pathspec records
+	// the whole index, so an entry the operator had staged before the
+	// ritual rode into this commit; the pathspec form leaves it staged and
+	// uncommitted.
+	commit, err := gitx.CreateCommitPaths(ctx, in.Root, fmt.Sprintf("commit-to-design: %s from board %s", specRef, in.BoardKey), specDir)
 	if err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
 	}

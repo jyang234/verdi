@@ -207,9 +207,9 @@ func fixtureStoreNoSpec(t *testing.T) (*fixturegit.Repo, *store.Config) {
 }
 
 // cutEmptyBranch cuts name from repo's current checkout (gitx.
-// CheckoutNewBranch — the cut-from-current mechanism build start and
-// close both use) and stays checked out on it, mirroring an interrupted
-// ritual that got as far as the branch cut and no further. Returns the
+// CheckoutNewBranch — the cut-from-current mechanism close uses) and
+// stays checked out on it, mirroring an interrupted ritual that got as
+// far as the branch cut and no further. Returns the
 // branch's cut point (its tip immediately after the cut, before any
 // further commits).
 func cutEmptyBranch(t *testing.T, repo *fixturegit.Repo, name string) (cutPoint string) {

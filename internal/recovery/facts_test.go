@@ -97,7 +97,7 @@ func addOriginRemote(t *testing.T, dir string) {
 }
 
 // TestGather_EmptyBranchCut_CutFromCurrent covers R-RR3-5's cut-from-
-// current mechanism (close/build start): a branch cut straight from
+// current mechanism (close): a branch cut straight from
 // "main" with no commits of its own reads empty, naming "main" as its
 // witness.
 func TestGather_EmptyBranchCut_CutFromCurrent(t *testing.T) {

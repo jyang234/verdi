@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -92,16 +93,46 @@ type Fixture struct {
 // configuration isolated (isolateGitConfig).
 func Build(t testing.TB, ctx context.Context, state SeedState) *Fixture {
 	t.Helper()
+	return BuildWith(t, ctx, state, nil)
+}
+
+// BuildWith is Build with base's files added to the one seed commit: a
+// real ritual runs against a verdi store, whose files must be tracked at
+// the commit the default branch resolves to before state's working-tree
+// and index layer is laid over them. base maps repository-relative slash
+// paths to content; a path that collides with the fixture's own
+// (baseCollision), or that the seed commit does not track (a base
+// .gitignore can ignore one), fails the test.
+func BuildWith(t testing.TB, ctx context.Context, state SeedState, base map[string]string) *Fixture {
+	t.Helper()
+	if err := baseCollision(base); err != nil {
+		t.Fatalf("ritualwitness: BuildWith: %v", err)
+	}
 	isolateGitConfig(t)
 
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
-			".gitignore":           IgnoredDir + "\n",
-			TrackedFile:            "original content\n",
-			OwnedDir + "/keep.txt": "kept\n",
-		},
-		Message: "seed",
-	}})
+	files := map[string]string{
+		".gitignore":           IgnoredDir + "\n",
+		TrackedFile:            "original content\n",
+		OwnedDir + "/keep.txt": "kept\n",
+	}
+	for path, content := range base {
+		files[path] = content
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "seed"}})
+	tracked := make(map[string]bool)
+	for _, path := range strings.Split(runGitFixture(t, ctx, repo.Dir, "ls-tree", "-r", "-z", "--name-only", repo.Head), "\x00") {
+		tracked[path] = true
+	}
+	var untracked []string
+	for path := range base {
+		if !tracked[path] {
+			untracked = append(untracked, path)
+		}
+	}
+	if len(untracked) > 0 {
+		sort.Strings(untracked)
+		t.Fatalf("ritualwitness: BuildWith: the seed commit does not track base file(s) %s", strings.Join(untracked, ", "))
+	}
 
 	runGitFixture(t, ctx, repo.Dir, "branch", SideBranch)
 	runGitFixture(t, ctx, repo.Dir, "worktree", "add", "--quiet", "--detach", RegisteredWorktree, repo.Head)
@@ -121,6 +152,24 @@ func Build(t testing.TB, ctx context.Context, state SeedState) *Fixture {
 		Registered: canonicalPath(repo.Dir, RegisteredWorktree),
 		State:      state,
 	}
+}
+
+// baseCollision reports a base file BuildWith cannot seed: one of the
+// fixture's own seed files (.gitignore, TrackedFile, OwnedDir/keep.txt),
+// one of the files the seeded states lay over the base (UntrackedFile,
+// ForeignFile), or a path under IgnoredDir, which the seed's .gitignore
+// keeps out of every commit.
+func baseCollision(base map[string]string) error {
+	own := map[string]bool{".gitignore": true, TrackedFile: true, OwnedDir + "/keep.txt": true, UntrackedFile: true, ForeignFile: true}
+	for path := range base {
+		switch {
+		case own[path]:
+			return fmt.Errorf("base file %s is one the fixture seeds itself", path)
+		case strings.HasPrefix(path, IgnoredDir):
+			return fmt.Errorf("base file %s lies under %s, which the fixture ignores", path, IgnoredDir)
+		}
+	}
+	return nil
 }
 
 // isolateGitConfig makes every git process the test starts — the

@@ -57,7 +57,11 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 	}
 
 	fixes := ws.AwaitingFixes()
-	t.Logf("awaiting fix (%d), declared scoped until spec/ritual-effect-witness fixes them:", len(fixes))
+	if len(fixes) == 0 {
+		t.Logf("awaiting fix (0): no ritual is declared scoped ahead of its fix")
+	} else {
+		t.Logf("awaiting fix (%d), declared scoped until spec/ritual-effect-witness fixes them:", len(fixes))
+	}
 	for _, a := range fixes {
 		t.Logf("  %s [%s]: %s", a.Path, a.Ritual, a.Defect)
 	}
@@ -122,15 +126,21 @@ func liveMutants() []liveMutant {
 			}
 			*a = fixes
 		}, "cli:accept"},
-		{"BM10: accept's awaiting-fix entry dropped (R1-B3)", func(_ *[]ws.Declaration, a *[]ws.AwaitingFix, _ *[]ws.Classified) {
-			var fixes []ws.AwaitingFix
-			for _, f := range *a {
-				if f.Ritual != "accept_diagram" {
-					fixes = append(fixes, f)
+		// R1-B3's two directions, on the facts after spec/ritual-effect-
+		// witness scoped accept diagram's commit: a scoped declaration whose
+		// verb still reaches the whole-index commit must be listed (close's
+		// own commit is whole-index, behind its refusal), and an entry for a
+		// ritual that no longer reaches it is stale.
+		{"BM10: close declared scoped with no awaiting-fix entry (R1-B3)", func(d *[]ws.Declaration, _ *[]ws.AwaitingFix, _ *[]ws.Classified) {
+			for i := range *d {
+				if (*d)[i].Ritual == "close" {
+					(*d)[i].IndexCarry = ws.CarryScoped
 				}
 			}
-			*a = fixes
-		}, "accept_diagram is scoped, but cli:accept reaches internal/gitx.CreateCommit"},
+		}, "close is scoped, but cli:close reaches internal/gitx.CreateCommit"},
+		{"BM10b: a stale awaiting-fix entry for the fixed accept diagram (R1-B3)", func(_ *[]ws.Declaration, a *[]ws.AwaitingFix, _ *[]ws.Classified) {
+			*a = append(*a, ws.AwaitingFix{Ritual: "accept_diagram", Path: "verdi accept diagram/<name>", Defect: "commits every pre-staged index entry"})
+		}, "awaiting fix in accept_diagram is stale"},
 		{"BM11: Push reclassified read-only (R1-B4)", func(_ *[]ws.Declaration, _ *[]ws.AwaitingFix, c *[]ws.Classified) {
 			reclassify(*c, "internal/gitx.Push", ws.ReadOnly)
 		}, "internal/gitx.Push is classified read_only"},

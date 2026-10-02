@@ -34,11 +34,12 @@ type Ritual func(ctx context.Context, dir string) (exit int, err error)
 
 // Driver runs one ritual against a prepared, already-seeded fixture
 // directory and reports its exit classification and git command log.
-// spec/ritual-effect-witness dc-1 names three more drivers its R3 lane
-// adds — the built binary, the workbench's handlers, and MCP — each with
-// its own way (or, before spec/gitx-recorder-seam, inability) to supply a
-// command log; this interface is shaped so all four drop in unchanged.
-// InProcess is the only one built here.
+// spec/ritual-effect-witness dc-1 names the entry points: InProcess runs a
+// synthetic ritual; Binary (driver_binary.go) runs a CLI verb as the built
+// binary; Workbench (driver_workbench.go) sends a workbench action through
+// the running server's handler. The last two cannot supply a command log
+// before spec/gitx-recorder-seam lands one. An MCP driver drops in the same
+// way.
 type Driver interface {
 	Run(ctx context.Context, dir string) (exit int, log CommandLog, err error)
 }

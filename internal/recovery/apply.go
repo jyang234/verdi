@@ -297,9 +297,9 @@ func reproveUnwind(facts Facts, choice Choice, fresh Facts) string {
 	// cut-from-current mechanism this is transitively implied by the
 	// return-branch re-resolution below (its candidates ARE the emptiness
 	// witnesses), but a resolved-base cut's return branch (design/<name>,
-	// policy/adopt) is the re-resolved default branch and ignores the
-	// witnesses entirely — so a branch that LOST its emptiness inside the
-	// re-prove window would otherwise reach the executor. R-RR3-9: exit
+	// feature/<name>, policy/adopt) is the re-resolved default branch and
+	// ignores the witnesses entirely — so a branch that LOST its emptiness
+	// inside the re-prove window would otherwise reach the executor. R-RR3-9: exit
 	// 1, nothing changed.
 	if !freshRB.Empty() {
 		return fmt.Sprintf("%s now carries commit(s) of its own: no other local branch reaches its tip %s any more", name, freshRB.Tip)

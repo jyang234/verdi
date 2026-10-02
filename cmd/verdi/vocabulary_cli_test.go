@@ -144,7 +144,11 @@ func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 
 	// 3. build start's success line resolves the accepted state — succ-story
 	// is accepted purely because its bytes are already landed on main, no
-	// `verdi accept` call involved at all.
+	// `verdi accept` call involved at all. succ-story implements
+	// some-feature, so its cascade check reads every active spec.md and
+	// build start judges it only where the working tree equals the base
+	// (ledger SI-334 (2)): step 2's divergence is restored first.
+	gitTestOutput(t, repo.Dir, "checkout", "--", ".verdi/specs/active/some-feature/spec.md")
 	code, stdout, stderr = runVerdi(t, bin, repo.Dir, "build", "start", "spec/succ-story")
 	if code != 0 {
 		t.Fatalf("build start spec/succ-story = %d, want 0; stderr=%s", code, stderr)
