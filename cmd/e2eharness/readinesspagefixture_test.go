@@ -142,7 +142,11 @@ func TestReadinessPageFixture_Handler_Happy(t *testing.T) {
 	}
 	get := func(path string) (int, string) {
 		t.Helper()
-		resp, err := http.Get(url + path)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
 		}
@@ -221,7 +225,11 @@ func TestReadinessPageFixture_ControlWiring(t *testing.T) {
 	ctrl := newControlServer(t.TempDir(), absModuleRoot(t), "")
 	srv := httptest.NewServer(ctrl.handler())
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/readiness-page-fixture")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/readiness-page-fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET control endpoint: %v", err)
 	}

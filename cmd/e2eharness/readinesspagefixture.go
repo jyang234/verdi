@@ -91,7 +91,7 @@ func (f *readinessPageFixture) handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	url, err := f.ensureStarted()
+	url, err := f.ensureStarted(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -102,9 +102,10 @@ func (f *readinessPageFixture) handler(w http.ResponseWriter, r *http.Request) {
 
 // ensureStarted derives the fixture snapshots, binds a loopback listener,
 // and serves the real workbench handler with the snapshots behind
-// Deps.ReadinessLoader — exactly the production seam. A failed start
-// caches nothing, so the next call retries.
-func (f *readinessPageFixture) ensureStarted() (string, error) {
+// Deps.ReadinessLoader — exactly the production seam. ctx bounds the bind
+// only; the server lives until the harness exits. A failed start caches
+// nothing, so the next call retries.
+func (f *readinessPageFixture) ensureStarted(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.url != "" {
@@ -120,7 +121,7 @@ func (f *readinessPageFixture) ensureStarted() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("readiness-page fixture: %w", err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("readiness-page fixture: %w", err)
 	}
