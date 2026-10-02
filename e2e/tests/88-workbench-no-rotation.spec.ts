@@ -106,8 +106,9 @@ async function rotatedElements(page: Page): Promise<string[]> {
 }
 
 // handElements: every element whose computed font family is the hand
-// face (the --hand token's cursive stack), with the sticky it sits in.
-async function handElements(page: Page): Promise<{ what: string; sticky: string | null }[]> {
+// face (the --hand token's cursive stack), with the sticky it sits in —
+// its classes and its id.
+async function handElements(page: Page): Promise<{ what: string; sticky: string | null; stickyID: string | null }[]> {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll("*"))
       .filter((el) => /bradley hand|marker felt|cursive/i.test(getComputedStyle(el).fontFamily))
@@ -116,6 +117,7 @@ async function handElements(page: Page): Promise<{ what: string; sticky: string 
           el.tagName.toLowerCase() +
           (typeof el.className === "string" && el.className ? "." + el.className.split(" ").join(".") : ""),
         sticky: el.closest(".sticky")?.getAttribute("class") ?? null,
+        stickyID: el.closest(".sticky")?.getAttribute("data-id") ?? null,
       })),
   );
 }
@@ -218,7 +220,16 @@ test.describe("chrome-and-tokens", () => {
       const moved = await stylesOf(parked.locator(".sticky-body"));
       expect(moved.font, "a story sticky moved out of the band").not.toMatch(/bradley hand|marker felt|cursive/i);
       expect(moved.font, "a story sticky moved out of the band").toMatch(/georgia|palatino|iowan|serif/i);
-      expect(await handElements(page), "no hand face remains once the sticky has left the band").toEqual([]);
+      // Other suites park their own proto-stickies on this shared wall,
+      // which keep the hand; none of what remains is this sticky's, and
+      // every remaining hand-face element is a parked sticky's.
+      const remaining = await handElements(page);
+      expect(remaining.filter((h) => h.stickyID === id), "no hand face remains on the sticky that left the band").toEqual([]);
+      for (const h of remaining) {
+        expect(h.sticky, `${h.what} wears the hand face outside a parked story or spike sticky`).toMatch(
+          /sticky--parked/,
+        );
+      }
     } finally {
       await dragToTrash(page, parked);
       await expectAutosaved(page);
