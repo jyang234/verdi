@@ -55,19 +55,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/lintratchet"
 )
 
 // strictLintDirectiveCount is the pinned number of //nolint directives in the
 // module's linux/amd64 lint set that name a gated linter. Adding one means
 // changing this number in the same change (ac-3).
 const strictLintDirectiveCount = 1
-
-// nolintProbeDir is the //nolint probe module (internal/lintratchet's
-// TestLintStrict_NolintProbe), relative to the repository root: each file
-// holds one gated finding under one directive shape, and its
-// name says whether the pinned golangci-lint suppresses that finding
-// (suppressed_*.go) or reports it (reported_*.go).
-const nolintProbeDir = "internal/lintratchet/testdata/nolintprobe"
 
 // nolintDirective is one //nolint directive, read as golangci-lint 2.5.0
 // reads it.
@@ -437,7 +432,7 @@ func testStrictLintSourceDirectives(t *testing.T) {
 	}
 
 	t.Run("the probe module", func(t *testing.T) {
-		for _, p := range nolintProbeProblems(t, filepath.Join(verdiRepoRoot, filepath.FromSlash(nolintProbeDir)), gated) {
+		for _, p := range nolintProbeProblems(t, filepath.Join(verdiRepoRoot, filepath.FromSlash(lintratchet.NolintProbeDir)), gated) {
 			t.Error(p)
 		}
 	})

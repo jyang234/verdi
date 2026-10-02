@@ -55,14 +55,6 @@ const (
 	probeUnshown    = "this run cannot show which //nolint shapes in the probe module suppress a gated finding"
 )
 
-// nolintProbeDir is the //nolint probe module, relative to the repository
-// root: each file but doc.go holds one gochecknoglobals violation under one
-// directive shape, and is named suppressed_*.go when the pinned golangci-lint
-// is expected to suppress that finding, reported_*.go when it is expected to
-// report it. (A comment line of this package must not begin with that
-// directive's name, which golangci-lint would read as a bare directive.)
-const nolintProbeDir = "internal/lintratchet/testdata/nolintprobe"
-
 // pinnedGolangciLint returns the path of golangci-lint at the Makefile's
 // pinned version, and skips the test when that binary is absent (not on
 // PATH, or on PATH at another version), with a reason ending in unshown, the
@@ -210,9 +202,9 @@ func TestStrictFixtureReportIsCurrent(t *testing.T) {
 // each, from the linter the file's name says, and none in a suppressed_*.go
 // file.
 func TestLintStrict_NolintProbe(t *testing.T) {
-	findings := lintStrictFixture(t, nolintProbeDir, probeUnshown)
+	findings := lintStrictFixture(t, NolintProbeDir, probeUnshown)
 
-	entries, err := os.ReadDir(filepath.Join(repoRoot(t), filepath.FromSlash(nolintProbeDir)))
+	entries, err := os.ReadDir(filepath.Join(repoRoot(t), filepath.FromSlash(NolintProbeDir)))
 	if err != nil {
 		t.Fatalf("reading the probe module: %v", err)
 	}
@@ -239,7 +231,7 @@ func TestLintStrict_NolintProbe(t *testing.T) {
 	got := map[string]int{}
 	for _, f := range findings {
 		name := path.Base(f.File)
-		if path.Dir(f.File) != nolintProbeDir || f.Key.Linter != linter[name] {
+		if path.Dir(f.File) != NolintProbeDir || f.Key.Linter != linter[name] {
 			t.Errorf("finding outside the probe files' own linters' findings: %+v", f)
 			continue
 		}
