@@ -66,6 +66,10 @@ type documentPageData struct {
 	// page's one h1), and the index, Board, and Document links in its nav.
 	Bar    barFacts
 	TopBar template.HTML
+	// Facts is the page's chrome facts (spec/document-page-v2, SI-340):
+	// the stamp, identity card, contents rail, and chip anchors, the same
+	// value the snapshot carries, for the chrome around the body.
+	Facts documentPageFacts
 }
 
 // renderBoardDocumentPage builds the Document tab. Every sibling link is
@@ -78,7 +82,24 @@ type documentPageData struct {
 // exactly one newline there, so without it a Markdown that began with
 // "\n" would lose that byte on the way to the clipboard.
 func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
-	boardHref := strings.TrimSuffix(requestPath, "/document")
+	data := documentPageView(requestPath, name, snap, bar)
+	// The Wall and Document switch, in the bar's controls slot (dc-3), with
+	// the wall's own two labels; the ids stay the page's.
+	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + stdhtml.EscapeString(data.BoardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>`
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // the escaped board href and the current marker
+	observeBar(ctx, data.Bar)
+	var buf bytes.Buffer
+	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("workbench: rendering document page: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// documentPageView is the page template's data for snap under requestPath:
+// every sibling link derived from the request path, the body and its
+// revision as the snapshot carries them, the bar's facts, and the page's
+// chrome facts. The top bar's markup is renderBoardDocumentPage's.
+func documentPageView(requestPath, name string, snap documentSnapshot, bar barFacts) documentPageData {
 	kinds := []documentKindLink{
 		{Kind: "spec", Label: "Spec"},
 		{Kind: "plan", Label: "Plan"},
@@ -88,10 +109,10 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		kinds[i].Href = requestPath + "?kind=" + kinds[i].Kind
 		kinds[i].Current = kinds[i].Kind == snap.Kind
 	}
-	data := documentPageData{
+	return documentPageData{
 		Title:        name + " — document · verdi workbench",
 		Ref:          snap.Ref,
-		BoardHref:    boardHref,
+		BoardHref:    strings.TrimSuffix(requestPath, "/document"),
 		Kinds:        kinds,
 		DownloadHref: requestPath + "?format=md&kind=" + snap.Kind,
 		DownloadName: name + "-" + snap.Kind + ".md",
@@ -100,15 +121,6 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		HTML:         template.HTML(snap.HTML), //nolint:gosec // the fragment is our own renderer's output (specdoc.RenderHTML over escaped object text)
 		Markdown:     snap.Markdown,
 		Bar:          bar,
+		Facts:        snap.Facts,
 	}
-	// The Wall and Document switch, in the bar's controls slot (dc-3), with
-	// the wall's own two labels; the ids stay the page's.
-	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>`
-	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // the escaped board href and the current marker
-	observeBar(ctx, data.Bar)
-	var buf bytes.Buffer
-	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("workbench: rendering document page: %w", err)
-	}
-	return buf.Bytes(), nil
 }
