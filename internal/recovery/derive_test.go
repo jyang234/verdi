@@ -131,11 +131,16 @@ func TestDerive_EmptyBranchCut_ResolvedBaseMechanism(t *testing.T) {
 }
 
 // TestDerive_EmptyBranchCut_FeatureBranch is 2B-F10: no existing test
-// exercised an empty cut on feature/<name> (build start's own
-// cut-from-current ritual) specifically.
+// exercised an empty cut on feature/<name> specifically. Build start cuts
+// it from the resolved default branch (UAT-023, ledger SI-333 (1)), so its
+// cut is resolved-base, exactly as design start's is (ledger SI-334 (1)):
+// the return is the re-resolved default branch, never another local branch
+// that happens to sit at the cut. B here is such a branch — a colleague's,
+// at the default branch's remote tip — and the operator never left it.
 func TestDerive_EmptyBranchCut_FeatureBranch(t *testing.T) {
 	f := baseFacts()
-	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1", EmptyWitnesses: []string{"main"}}
+	f.LocalBranches = []BranchTip{{Name: "B", Tip: "f1"}, {Name: "main", Tip: "deadbeef"}}
+	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1", EmptyWitnesses: []string{"B"}}
 	p := Derive(f)
 	mustValidate(t, p)
 
@@ -147,7 +152,31 @@ func TestDerive_EmptyBranchCut_FeatureBranch(t *testing.T) {
 		t.Fatalf("Scope = %q, want ref", s.Scope)
 	}
 	if len(s.Choices) != 1 || s.Choices[0].Effects[0] != "switch back to main" {
-		t.Fatalf("Choices = %+v, want a return to main", s.Choices)
+		t.Fatalf("Choices = %+v, want a return to the re-resolved default branch main, not B", s.Choices)
+	}
+}
+
+// TestDerive_EmptyBranchCut_FeatureBranchUndecidableBase: with the default
+// branch unresolved, a resolved-base cut has no return branch, so build
+// start's empty cut offers no executor — even when exactly one other local
+// branch sits at its tip, which a cut-from-current rule would have chosen.
+func TestDerive_EmptyBranchCut_FeatureBranchUndecidableBase(t *testing.T) {
+	f := baseFacts()
+	f.DefaultBranchResolved = false
+	f.LocalBranches = []BranchTip{{Name: "B", Tip: "f1"}}
+	f.Feature = RitualBranch{Name: "feature/checkout", Exists: true, Tip: "f1", EmptyWitnesses: []string{"B"}}
+	p := Derive(f)
+	mustValidate(t, p)
+
+	s, ok := stateFor(p.States, StateEmptyBranchCut, "feature/checkout")
+	if !ok {
+		t.Fatalf("no empty-branch-cut state for feature/checkout: %+v", p.States)
+	}
+	if len(s.Choices) != 0 {
+		t.Fatalf("Choices = %+v, want none: the re-resolved default branch is undecidable", s.Choices)
+	}
+	if len(s.Uncertainties) != 1 || !strings.Contains(s.Uncertainties[0].Text, "re-resolved default branch") {
+		t.Fatalf("Uncertainties = %+v, want the resolved-base undecidable uncertainty", s.Uncertainties)
 	}
 }
 

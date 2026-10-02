@@ -79,10 +79,12 @@ func headInvariant(f Facts) string {
 // --- empty-branch-cut (R-RR3-5, R-RR3-8) -----------------------------
 
 // ritualCandidate pairs one of the four ritual branches with its scope
-// and its cut mechanism (R-RR3-5): "current" (build start, close — cut
-// from whatever was checked out) or "resolved-base" (design start,
-// policy adopt — cut from the resolved default branch, independent of
-// the checkout).
+// and its cut mechanism (R-RR3-5): "current" (close — cut from whatever
+// was checked out) or "resolved-base" (design start, build start, policy
+// adopt — cut from the resolved default branch, independent of the
+// checkout). Build start moved to resolved-base when it began cutting at
+// the resolved default branch (UAT-023, ledger SI-333 (1)); its cut is
+// classified exactly as design start's is (ledger SI-334 (1)).
 type ritualCandidate struct {
 	rb        RitualBranch
 	scope     Scope
@@ -92,7 +94,7 @@ type ritualCandidate struct {
 func ritualCandidates(f Facts) []ritualCandidate {
 	return []ritualCandidate{
 		{f.Design, ScopeRef, "resolved-base"},
-		{f.Feature, ScopeRef, "current"},
+		{f.Feature, ScopeRef, "resolved-base"},
 		{f.Close, ScopeRef, "current"},
 		{f.PolicyAdopt, ScopeStore, "resolved-base"},
 	}
