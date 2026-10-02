@@ -29,23 +29,26 @@ type Binary struct {
 	// Args are the verb and its arguments, after the binary's name.
 	Args []string
 	// Env is extra environment, appended to the test process's own, which
-	// carries the fixture's git configuration isolation.
+	// carries the fixture's git configuration isolation, and to
+	// GOTRACEBACK=single, which Env may override.
 	Env []string
 }
 
 // Run implements Driver. A non-zero exit returns its code with an error
 // naming the binary's stdout and stderr. A binary that cannot be started,
 // that ends without an exit code (a signal), or whose exit 2 is a Go
-// panic's (goPanicTrace) returns -1, which is no verb's exit class, so
-// RunOn refuses the run instead of judging it a refusal (ledger SI-334
-// (4)).
+// runtime crash (goCrash: a panic trace or a fatal error) returns -1,
+// which is no verb's exit class, so RunOn refuses the run instead of
+// judging it a refusal (ledger SI-334 (4)). The child runs with
+// GOTRACEBACK=single, so an ambient setting cannot hide or reshape the
+// trace the detection reads; the fixture's own Env still wins.
 func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if d.Path == "" {
 		return -1, CommandLog{}, errors.New("ritualwitness: Binary: no binary path")
 	}
 	cmd := exec.CommandContext(ctx, d.Path, d.Args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), d.Env...)
+	cmd.Env = append(append(os.Environ(), "GOTRACEBACK=single"), d.Env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -54,8 +57,8 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 		return 0, CommandLog{}, nil
 	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 && goPanicTrace(stderr.String()) {
-		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s panicked, which is no verb's exit\nstderr: %s",
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 && goCrash(stderr.String()) {
+		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s crashed (panicked, or a runtime fatal error), which is no verb's exit\nstderr: %s",
 			filepath.Base(d.Path), strings.Join(d.Args, " "), strings.TrimSpace(stderr.String()))
 	}
 	if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
@@ -76,4 +79,15 @@ var panicTrace = regexp.MustCompile(`(?ms)^panic: .*^goroutine \d+ \[[^\]\n]*\]:
 // the trace, not the code, tells the two apart.
 func goPanicTrace(stderr string) bool {
 	return panicTrace.MatchString(stderr)
+}
+
+// fatalError matches the Go runtime's report of a fatal error (a deadlock,
+// concurrent map writes): a line beginning "fatal error: ".
+var fatalError = regexp.MustCompile(`(?m)^fatal error: `)
+
+// goCrash reports whether stderr carries a Go runtime crash: a panic trace
+// or a fatal error, after either of which the runtime exits 2 (re-review
+// RR-B1).
+func goCrash(stderr string) bool {
+	return goPanicTrace(stderr) || fatalError.MatchString(stderr)
 }

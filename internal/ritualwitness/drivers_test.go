@@ -109,6 +109,73 @@ func TestGoPanicTrace(t *testing.T) {
 	}
 }
 
+// TestBinary_CrashIsNoVerbsExit (re-review RR-B1): the child runs with
+// GOTRACEBACK=single, overriding an ambient setting that would hide or
+// reshape the panic trace, while the fixture's own Env still wins; a
+// runtime fatal error is a crash as a panic is; and a refusal that only
+// mentions a fatal error mid-line keeps its exit 2.
+func TestBinary_CrashIsNoVerbsExit(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	exe := selfBinary(t)
+	tests := []struct {
+		name     string
+		ambient  string // GOTRACEBACK in the test process's own environment
+		env      []string
+		wantExit int
+		wantErr  []string
+	}{
+		{"a panic under an ambient GOTRACEBACK=system", "system", []string{helperEnv + "=panic"}, -1, []string{"panicked", "goroutine 1 [running]:"}},
+		{"a panic under an ambient GOTRACEBACK=none", "none", []string{helperEnv + "=panic"}, -1, []string{"panicked", "goroutine 1 [running]:"}},
+		{"a runtime fatal error (deadlock)", "", []string{helperEnv + "=deadlock"}, -1, []string{"crashed", "fatal error: all goroutines are asleep"}},
+		{"a refusal that mentions a fatal error mid-line", "", []string{helperEnv + "=fatal-words"}, 2, []string{"exited 2", "holds a fatal error"}},
+		{"the child's GOTRACEBACK is single over an ambient one", "system", []string{helperEnv + "=gotraceback"}, 1, []string{"GOTRACEBACK=single"}},
+		{"the fixture's own Env still wins", "system", []string{helperEnv + "=gotraceback", "GOTRACEBACK=crash"}, 1, []string{"GOTRACEBACK=crash"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.ambient != "" {
+				t.Setenv("GOTRACEBACK", tt.ambient)
+			}
+			exit, log, err := Binary{Path: exe, Env: tt.env}.Run(ctx, fx.Dir)
+			if exit != tt.wantExit {
+				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
+			}
+			if log.OK || log.Calls != nil {
+				t.Fatalf("log = %+v, want unavailable", log)
+			}
+			for _, w := range tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), w) {
+					t.Errorf("err = %v, want it to name %q", err, w)
+				}
+			}
+		})
+	}
+}
+
+// TestGoCrash: a Go panic trace or a line beginning "fatal error: " is a
+// crash; "fatal error" anywhere else in a line is not.
+func TestGoCrash(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{"a panic trace", "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n", true},
+		{"a runtime fatal error", "fatal error: all goroutines are asleep - deadlock!\n\ngoroutine 1 [chan receive]:\n", true},
+		{"a fatal error after other output", "verdi: starting\nfatal error: concurrent map writes\n", true},
+		{"a fatal error mid-line", "close: refused: the index holds a fatal error: x\n", false},
+		{"a refusal's panic words alone", "panic: the refusal's own words, not a trace\n", false},
+		{"nothing", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := goCrash(tt.stderr); got != tt.want {
+				t.Fatalf("goCrash(%q) = %v, want %v", tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestBinary_RunOnReportsTheLogUnavailable: through RunOn, an effect only
 // the log could attribute stays unattributable, so the run is unproven,
 // never a pass inferred from an absent log.
@@ -280,7 +347,13 @@ func (r *fatalRecorder) message() string {
 // before any judgment; a verb's exit is judged.
 func TestRunOn_RefusesAnExitNoVerbHas(t *testing.T) {
 	ctx := context.Background()
-	for _, exit := range []int{-1, 3, 0, 2} {
+	// Literal expectations, never verbExit itself: the oracle is not the
+	// function under test (re-review RR-B3).
+	for _, tt := range []struct {
+		exit   int
+		judged bool
+	}{{-1, false}, {3, false}, {0, true}, {1, true}, {2, true}} {
+		exit := tt.exit
 		t.Run(strconv.Itoa(exit), func(t *testing.T) {
 			fx := Build(t, ctx, SeedClean)
 			d := InProcess{Fn: func(context.Context, string) (int, error) {
@@ -298,7 +371,7 @@ func TestRunOn_RefusesAnExitNoVerbHas(t *testing.T) {
 			}()
 			<-done
 			got := rec.message()
-			if verbExit(exit) {
+			if tt.judged {
 				if got != "" || res.Exit != exit {
 					t.Fatalf("RunOn on exit %d = %+v, fatal %q; want it judged", exit, res, got)
 				}

@@ -37,7 +37,10 @@ func TestMain(m *testing.M) {
 // named, then writes a line to stdout and to stderr and exits <exit>. Spec
 // "panic" panics, which the Go runtime reports with a trace and exit 2;
 // spec "panic-words" is a refusal whose own words begin "panic: " but that
-// carries no trace, exiting 2.
+// carries no trace, exiting 2; spec "deadlock" blocks forever, which the
+// runtime reports as "fatal error: all goroutines are asleep" and exit 2;
+// spec "fatal-words" is a refusal that mentions a fatal error mid-line,
+// exiting 2; spec "gotraceback" prints its GOTRACEBACK and exits 1.
 func helperVerb(spec string) int {
 	switch spec {
 	case "panic":
@@ -45,6 +48,14 @@ func helperVerb(spec string) int {
 	case "panic-words":
 		fmt.Fprintln(os.Stderr, "panic: the refusal's own words, not a trace")
 		return 2
+	case "deadlock":
+		<-make(chan int)
+	case "fatal-words":
+		fmt.Fprintln(os.Stderr, "close: refused: the index holds a fatal error: foreign-staged.txt is staged")
+		return 2
+	case "gotraceback":
+		fmt.Fprintf(os.Stderr, "GOTRACEBACK=%s\n", os.Getenv("GOTRACEBACK"))
+		return 1
 	}
 	code, branch, _ := strings.Cut(spec, ":")
 	exit, err := strconv.Atoi(code)
