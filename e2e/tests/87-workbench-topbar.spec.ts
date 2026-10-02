@@ -240,6 +240,48 @@ async function checkoutOf(page: Page, path: string): Promise<string> {
   return snap.expected.checkout as string;
 }
 
+// expectWordsPainted (ac-2, closure ruling): the displayed-bytes word and
+// the clean/dirty word are painted, never clipped — each fact's visible
+// text (its first text node) has a box inside the posture summary's box
+// and inside the viewport, and a hit test at its last character lands
+// inside the summary.
+async function expectWordsPainted(page: Page, what: string): Promise<void> {
+  const m = await page.evaluate(() => {
+    const s = document.querySelector(".topbar-posture > summary") as HTMLElement;
+    const sb = s.getBoundingClientRect();
+    const words: Record<string, { text: string; left: number; right: number; top: number; bottom: number; hitInside: boolean }> = {};
+    for (const sel of [".asd-posture-bytes", ".asd-posture-tree"]) {
+      const e = s.querySelector(sel);
+      if (!e) continue;
+      const t = e.firstChild;
+      if (!t || t.nodeType !== Node.TEXT_NODE) throw new Error(sel + ": its first child is not its visible text");
+      const txt = (t.textContent || "").replace(/\s+$/, "");
+      const whole = document.createRange();
+      whole.setStart(t, 0);
+      whole.setEnd(t, txt.length);
+      const r = whole.getBoundingClientRect();
+      const last = document.createRange();
+      last.setStart(t, txt.length - 1);
+      last.setEnd(t, txt.length);
+      const c = last.getBoundingClientRect();
+      const hit = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+      words[sel] = { text: txt, left: r.left, right: r.right, top: r.top, bottom: r.bottom, hitInside: !!hit && s.contains(hit) };
+    }
+    return { summary: { left: sb.left, right: sb.right, top: sb.top, bottom: sb.bottom }, viewport: document.documentElement.clientWidth, words };
+  });
+  expect(Object.keys(m.words), `${what}: both words present`).toEqual([".asd-posture-bytes", ".asd-posture-tree"]);
+  for (const [sel, w] of Object.entries(m.words)) {
+    const tag = `${what} ${sel} "${w.text}"`;
+    expect(w.left, `${tag}: starts left of the summary`).toBeGreaterThanOrEqual(m.summary.left - 0.5);
+    expect(w.right, `${tag}: clipped by the summary's right edge`).toBeLessThanOrEqual(m.summary.right + 0.5);
+    expect(w.top, `${tag}: above the summary`).toBeGreaterThanOrEqual(m.summary.top - 0.5);
+    expect(w.bottom, `${tag}: below the summary`).toBeLessThanOrEqual(m.summary.bottom + 0.5);
+    expect(w.left, `${tag}: left of the viewport`).toBeGreaterThanOrEqual(-0.5);
+    expect(w.right, `${tag}: right of the viewport`).toBeLessThanOrEqual(m.viewport + 0.5);
+    expect(w.hitInside, `${tag}: its last character is not painted inside the summary`).toBe(true);
+  }
+}
+
 async function expectBytesAndTree(
   page: Page,
   what: string,
@@ -377,7 +419,7 @@ test.describe("chrome-and-tokens", () => {
     page,
     browser,
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(300_000);
     // A clean working tree, on a fixture whose default branch cannot be
     // resolved: the wall and its Document page, at 1440 px and at 320 px.
     const unproven = await unprovenWallURL(page);
@@ -483,6 +525,39 @@ test.describe("chrome-and-tokens", () => {
       }
     } finally {
       await noJS.close();
+    }
+
+    // The words are painted, never clipped, at every width from 320 px
+    // (closure ruling): the box of the bytes word and of the tree word
+    // lies inside the summary's box and the viewport, hit-tested, on
+    // every wall kind and the Document page, with script on and off —
+    // at the ruling's widths, at 1280, and on both sides of the 640 px
+    // breakpoint.
+    const sealedRemote = branchBoardPath(`design/${SHOWCASE.DB_SEALED_REMOTE}`, SHOWCASE.DB_SEALED_REMOTE);
+    const walls = [
+      design,
+      design + "/document",
+      boardPath(SHOWCASE.REVIEW_SPEC),
+      boardPath(SHOWCASE.READONLY_SPEC),
+      boardPath(SHOWCASE.SUPERSEDED_FEATURE_SPEC),
+      branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC),
+      sealedRemote,
+      unproven,
+    ];
+    for (const scripted of [true, false]) {
+      const ctx = await browser.newContext({ javaScriptEnabled: scripted });
+      try {
+        const p = await ctx.newPage();
+        for (const width of [1440, 1280, 1024, 800, 640, 639, 320]) {
+          await p.setViewportSize({ width, height: 900 });
+          for (const path of walls) {
+            await p.goto(path.startsWith("http") ? path : WORKBENCH + path);
+            await expectWordsPainted(p, `${path.replace(/^https?:\/\/[^/]+/, "")} @${width} script ${scripted ? "on" : "off"}`);
+          }
+        }
+      } finally {
+        await ctx.close();
+      }
     }
   });
 
