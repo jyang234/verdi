@@ -89,12 +89,13 @@ const (
 func evidenceJobSteps(gates []string, lintSetup []workflowStep) []workflowStep {
 	// The golangci-lint pin feeds only the cache step's key, which is not
 	// read here: the copied steps carry the static job's own.
+	// Checkout, Go, and Node each have the one pinned shape.
 	setup := pinnedSetupActions("")
 	steps := []workflowStep{
-		{Uses: "actions/checkout@v4", With: setup["actions/checkout@v4"]},
-		{Uses: "actions/setup-go@v5", With: setup["actions/setup-go@v5"]},
+		{Uses: "actions/checkout@v4", With: setup["actions/checkout@v4"][0]},
+		{Uses: "actions/setup-go@v5", With: setup["actions/setup-go@v5"][0]},
 		{Run: verdictRunFor(gates)},
-		{Uses: "actions/setup-node@v4", With: setup["actions/setup-node@v4"]},
+		{Uses: "actions/setup-node@v4", With: setup["actions/setup-node@v4"][0]},
 	}
 	for _, s := range lintSetup {
 		steps = append(steps, workflowStep{Name: s.Name, Uses: s.Uses, With: s.With, Run: strings.TrimSpace(s.Run), Keys: s.Keys})
@@ -112,13 +113,15 @@ func evidenceJobSteps(gates []string, lintSetup []workflowStep) []workflowStep {
 
 // staticLintSetup returns merge-gate.yml's static gate job's two golangci-lint
 // steps, the binary cache and the pinned install, which the evidence job
-// copies exactly (SI-309), or why they cannot be found.
+// copies exactly (SI-309), or why they cannot be found. The static job's
+// analysis cache (spec/strict-lint-reach dc-1) is not among them: the
+// evidence job restores the linter, not its analysis.
 func staticLintSetup(mergeGateJobs map[string]workflowJob) ([]workflowStep, string) {
 	static, ok := mergeGateJobs[mergeGateLintJob]
 	if !ok {
 		return nil, fmt.Sprintf("merge-gate.yml has no %q job, whose golangci-lint steps the evidence job copies (SI-309)", mergeGateLintJob)
 	}
-	cache := findCacheStep(static.Steps, "golangci-lint")
+	cache := findCacheStep(static.Steps, golangciBinaryCachePath)
 	install := findRunStep(static.Steps, "go install github.com/golangci/golangci-lint")
 	if cache == nil || install == nil {
 		return nil, fmt.Sprintf("merge-gate.yml's %q job carries no golangci-lint cache step and install step for the evidence job to copy (SI-309)", mergeGateLintJob)
@@ -452,6 +455,12 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		nodeStep        = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n          cache: npm\n          cache-dependency-path: e2e/package-lock.json\n"
 		buildStep       = "      - run: go build -o .build/verdi ./cmd/verdi\n"
 		lintSetup       = fixtureLintCache + fixtureLintInstall
+		// The static gate job's binary cache, and the same with its analysis
+		// cache ahead of it (spec/strict-lint-reach dc-1); both fixtures'
+		// static jobs hold the first once, and the evidence job's binary
+		// cache follows its Node step instead.
+		staticLintCache     = "fetch-depth: 0\n" + fixtureLintCache
+		staticAnalysisCache = "fetch-depth: 0\n" + fixtureAnalysisCache + fixtureLintCache
 	)
 	cases := []struct {
 		name      string
@@ -503,6 +512,8 @@ func TestVerifyWorkflowViolations(t *testing.T) {
 		{name: "the upload names another artifact", verify: verify("name: verdi-evidence\n", "name: other-evidence\n"), want: "step 8 must be: uses actions/upload-artifact@v4"},
 		{name: "the upload takes another path", verify: verify("path: .verdi/data/derived/\n", "path: .verdi/data/\n"), want: "step 8 must be: uses actions/upload-artifact@v4"},
 		{name: "the static job's golangci-lint steps, changed alike everywhere", verify: strings.ReplaceAll(fixtureVerify, "echo installed", "echo cached"), mergeGate: mergeGate("echo installed", "echo cached")},
+		{name: "the static job's analysis cache ahead of its binary cache, not copied", verify: verify(staticLintCache, staticAnalysisCache), mergeGate: mergeGate(staticLintCache, staticAnalysisCache)},
+		{name: "the static job's analysis cache copied into the evidence job", verify: mutateSource(t, "the verify.yml fixture", verify(staticLintCache, staticAnalysisCache), fixtureLintInstall+buildStep, fixtureLintInstall+fixtureAnalysisCache+buildStep), mergeGate: mergeGate(staticLintCache, staticAnalysisCache), want: "runs 10 steps, want exactly these 9"},
 		{name: "no golangci-lint cache in the evidence job", verify: verify(nodeStep+fixtureLintCache, nodeStep), want: "runs 8 steps, want exactly these 9"},
 		{name: "no golangci-lint install in the evidence job", verify: verify(fixtureLintInstall+buildStep, buildStep), want: "runs 8 steps, want exactly these 9"},
 		{name: "the golangci-lint steps after the build", verify: verify(nodeStep+lintSetup+buildStep, nodeStep+buildStep+lintSetup), want: "step 4 must be: uses actions/cache@v4"},
