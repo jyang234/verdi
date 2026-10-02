@@ -31,9 +31,11 @@
 // comment directly above the exclusion's list item: golangci-lint v2's rule
 // schema has no reason field.
 //
-// Out of this witness's scope, by the obligation's own scope
-// (.golangci.strict.yml): //nolint directives in Go source, which suppress
-// a finding at its line for whichever configuration runs.
+// spec/strict-lint-gate-v2 ac-3 widens the witness to //nolint directives in
+// Go source, which suppress a finding at its line for whichever configuration
+// runs: the same test counts those that name a gated linter apart from these
+// exclusions, against a pin of its own, and refuses one that suppresses every
+// linter (strictlintdirectives_test.go).
 package specalign
 
 import (
@@ -520,11 +522,16 @@ issues:
 `
 
 // TestStrictLintExclusionsCounted proves ac-3 on the committed configuration
-// and that the witness bites: every exclusion in .golangci.strict.yml names a
-// path or a text pattern and carries a reason, no gated linter is disabled or
-// excluded wholesale, and the exclusion count equals strictLintExclusionCount;
-// each falsifier shape, applied to a fixture, is reported.
+// and source, and that the witness bites: every exclusion in
+// .golangci.strict.yml names a path or a text pattern and carries a reason,
+// no gated linter is disabled or excluded wholesale, and the exclusion count
+// equals strictLintExclusionCount; every //nolint directive in the module's
+// linux/amd64 lint set that names a gated linter carries a reason, none
+// suppresses every linter, and their count equals strictLintDirectiveCount
+// (spec/strict-lint-gate-v2 ac-3); each falsifier shape, applied to a
+// fixture, is reported.
 func TestStrictLintExclusionsCounted(t *testing.T) {
+	t.Run("source directives", testStrictLintSourceDirectives)
 	universe := realStrictLintUniverse(t)
 	t.Run("the committed configuration", func(t *testing.T) {
 		for _, p := range strictLintExclusionProblems(readStrictLintConfig(t), strictLintExclusionCount, universe) {
