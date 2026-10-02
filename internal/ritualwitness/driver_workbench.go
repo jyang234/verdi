@@ -19,7 +19,9 @@ import (
 //
 // The workbench has no exit codes of its own: a 2xx answer is exit 0, and
 // any other answer is 2, the operational class, with the status and body in
-// the error. Its actions root their own contexts (the commit-to-design
+// the error. Run follows no redirect, so a 3xx answer is itself exit 2 and
+// never judged by its target, which is never requested (ledger SI-334
+// (3)). Its actions root their own contexts (the commit-to-design
 // action runs commitdesign.Run under context.Background), so no observer
 // on the request reaches their gitx calls: Run reports the log
 // unavailable, as Binary does, until spec/gitx-recorder-seam threads one.
@@ -51,7 +53,9 @@ func (d Workbench) Run(ctx context.Context, dir string) (int, CommandLog, error)
 			req.Header.Add(k, v)
 		}
 	}
-	resp, err := srv.Client().Do(req)
+	client := srv.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return -1, CommandLog{}, fmt.Errorf("ritualwitness: Workbench: %s %s: %w", d.Method, d.Path, err)
 	}

@@ -163,6 +163,38 @@ func TestWorkbench_Run(t *testing.T) {
 	}
 }
 
+// TestWorkbench_RedirectIsNoCleanRun (ledger SI-334 (3)): the driver
+// follows no redirect, so a 303 is exit 2 naming its status, judged by
+// itself and never by its target, which is never requested.
+func TestWorkbench_RedirectIsNoCleanRun(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	serve := func(root string) http.Handler {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/act", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/page?error=refused", http.StatusSeeOther)
+		})
+		mux.HandleFunc("/page", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := plainGit(r.Context(), root, "branch", "made-by-the-target"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+		return mux
+	}
+	exit, log, err := Workbench{Serve: serve, Method: http.MethodPost, Path: "/act"}.Run(ctx, fx.Dir)
+	if exit != 2 || err == nil || !strings.Contains(err.Error(), "303") {
+		t.Fatalf("Run = exit %d, %v; want exit 2 naming the 303", exit, err)
+	}
+	if log.OK || log.Calls != nil {
+		t.Fatalf("log = %+v, want unavailable", log)
+	}
+	if out, gerr := plainGit(ctx, fx.Dir, "branch", "--list", "made-by-the-target"); gerr != nil || out != "" {
+		t.Fatalf("the redirect's target was requested (branch listing %q, %v)", out, gerr)
+	}
+}
+
 // TestWorkbench_RunOnReportsTheLogUnavailable mirrors the Binary case.
 func TestWorkbench_RunOnReportsTheLogUnavailable(t *testing.T) {
 	ctx := context.Background()
