@@ -265,18 +265,19 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		return 2
 	}
 
-	// Ledger SI-334 (2): the preconditions below read the working tree, and
-	// the cut carries the base's tree, so they are judged only where the
-	// two agree at every path they read (buildbaseinputs.go). Anything else
-	// is refused before any effect, naming the paths.
-	differing, derr := differingGovernedInputs(ctx, root, base.Commit, buildGovernedInputs(specRef.Name, spec))
+	// Ledger SI-334 (2): the preconditions below read the working tree and
+	// HEAD's commit tree, and the cut carries the base's tree, so they are
+	// judged only where both agree with the base at every governed path
+	// (buildbaseinputs.go). Anything else is refused before any effect,
+	// naming the paths.
+	differing, derr := differingBuildInputs(ctx, root, base.Commit, specRef.Name, spec)
 	if derr != nil {
 		fmt.Fprintln(stderr, "build start:", derr)
 		return 2
 	}
-	if len(differing) > 0 {
-		fmt.Fprintf(stderr, "build start: refused: the working tree differs from the base %s @ %s at %s; build start judges its preconditions only against the content its branch is cut from (ledger SI-334)\n",
-			base.Ref, shortSHA(base.Commit), strings.Join(differing, ", "))
+	if !differing.empty() {
+		fmt.Fprintf(stderr, "build start: refused: the content build start's preconditions read differs from the base %s @ %s, %s; build start judges its preconditions only against the content its branch is cut from (ledger SI-334)\n",
+			base.Ref, shortSHA(base.Commit), differing)
 		return 2
 	}
 

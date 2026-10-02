@@ -60,14 +60,16 @@ func withFile(files map[string]string, rel, content string) map[string]string {
 }
 
 // TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase is ledger SI-334
-// (2) through the built binary (the R4-A2 probe P7 and its converse): build
-// start resolves its base and checks the branch name first, then judges
-// its preconditions — the cascade check, the obligation-quality check, and
-// the conflict gate — only when the working tree's governed inputs (the
-// spec's directory, its obligations, the policy store, and the cascade
-// check's inputs) equal the base commit's tree. Otherwise it refuses with
-// exit 2 before any effect, naming every differing path. UAT-023 still
-// holds: a tree that differs only outside those paths cuts at the base.
+// (2), as amended, through the built binary (the R4-A2 probe P7 and its
+// converse): build start resolves its base and checks the branch name
+// first, then judges its preconditions — the cascade check, the
+// obligation-quality check, and the conflict gate — only when the governed
+// inputs (the spec's directory, its obligations, the policy store, the
+// cascade check's inputs, the store manifest, and the instruction-
+// projection files) equal the base commit's tree, both in the working tree
+// and in HEAD's commit tree. Otherwise it refuses with exit 2 before any
+// effect, naming every differing path. UAT-023 still holds: a tree that
+// differs only outside those paths cuts at the base.
 func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 	t.Parallel()
 	bin := buildVerdiBinary(t)
@@ -80,6 +82,7 @@ func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 	obligation := ".verdi/obligations/widget-story/ac-1--static.md"
 	edited := buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic,
 		strings.Replace(buildQualityBlock(), "claim: claim", "claim: a claim edited only on HEAD's branch", 1))
+	adoptedWithProjection := withFile(policy, "AGENTS.md", "# the managed projection, as the base carries it\n")
 	tests := []struct {
 		name      string
 		layers    []map[string]string
@@ -100,7 +103,16 @@ func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 			head:     map[string]string{".verdi/specs/active/other/spec.md": recoverE2ESpecMD},
 			wantExit: 2, wantNamed: []string{"differs from the base", ".verdi/specs/active/other/spec.md"}},
 		{name: "an uncommitted obligation edit at the base", layers: []map[string]string{story}, dirty: map[string]string{obligation: edited},
-			wantExit: 2, wantNamed: []string{"differs from the base", obligation}},
+			wantExit: 2, wantNamed: []string{"differs from the base", "in the working tree at " + obligation}},
+		{name: "HEAD's commit edits an obligation the working tree restores to the base", layers: []map[string]string{story},
+			head: map[string]string{obligation: edited}, dirty: map[string]string{obligation: story[obligation]},
+			wantExit: 2, wantNamed: []string{"differs from the base", "in HEAD's commit at " + obligation}},
+		{name: "a differing store manifest", layers: []map[string]string{story},
+			head:     map[string]string{".verdi/verdi.yaml": story[".verdi/verdi.yaml"] + "# edited only on HEAD's branch\n"},
+			wantExit: 2, wantNamed: []string{"differs from the base", ".verdi/verdi.yaml"}},
+		{name: "a differing instruction-projection file", layers: []map[string]string{story, adoptedWithProjection},
+			head:     map[string]string{"AGENTS.md": "# edited only on HEAD's branch\n"},
+			wantExit: 2, wantNamed: []string{"differs from the base", "AGENTS.md"}},
 		{name: "a tree that differs only outside the governed inputs (UAT-023)", layers: []map[string]string{story},
 			head:     map[string]string{".verdi/specs/active/other/board.json": "{}\n", "docs/notes.md": "notes\n"},
 			wantExit: 0},

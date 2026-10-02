@@ -13,10 +13,12 @@ import (
 )
 
 // TestBuildGovernedInputs (ledger SI-334 (2)): build start's governed
-// inputs are the spec's directory, its obligations, and the policy store,
-// plus what the cascade check reads — every active spec's spec.md and the
-// story's re-affirmations — only when the spec implements a feature, the
-// one case the cascade check reads anything.
+// inputs are the spec's directory, its obligations, the policy store, and
+// the store manifest the conflict gate reads, plus what the cascade check
+// reads — every active spec's spec.md and the story's re-affirmations —
+// only when the spec implements a feature, the one case the cascade check
+// reads anything. The instruction-projection files join them in a second
+// phase (projectionInputs), once the policy store is known to agree.
 func TestBuildGovernedInputs(t *testing.T) {
 	implementing := &artifact.SpecFrontmatter{
 		Base:  artifact.Base{Links: []artifact.Link{{Type: artifact.LinkImplements, Ref: "spec/some-feature#ac-1"}}},
@@ -30,10 +32,10 @@ func TestBuildGovernedInputs(t *testing.T) {
 		wantGlobs []string
 	}{
 		{"a story implementing a feature", implementing,
-			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/reaffirmations/jira-widget-1"},
+			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml", ".verdi/reaffirmations/jira-widget-1"},
 			[]string{".verdi/specs/active/*/spec.md"}},
 		{"a spec implementing nothing", standalone,
-			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy"}, nil},
+			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,11 +70,12 @@ func TestGovernedInputs_Covers(t *testing.T) {
 	}
 }
 
-// TestDifferingGovernedInputs: the working tree's content at the governed
-// paths is compared with the base commit's tree — a changed, added,
-// untracked, ignored, or deleted file is named, by its store-relative
-// path; a change outside them is not; a nested store is compared under its
-// own prefix; and a base that does not resolve is an error.
+// TestDifferingGovernedInputs: the governed paths' content, both in the
+// working tree and in HEAD's commit tree, is compared with the base
+// commit's tree — a changed, added, untracked, ignored, or deleted file is
+// named, by its store-relative path, under the side it differs on; a
+// change outside them is not; a nested store is compared under its own
+// prefix; and a base that does not resolve is an error.
 func TestDifferingGovernedInputs(t *testing.T) {
 	ctx := context.Background()
 	g := governedInputs{trees: []string{".verdi/obligations/s", ".verdi/policy"}, globs: []string{".verdi/specs/active/*/spec.md"}}
@@ -144,26 +147,40 @@ func TestDifferingGovernedInputs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("differingGovernedInputs: %v", err)
 			}
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("differingGovernedInputs = %v, want %v", got, tt.want)
+			// HEAD is the base here, so only the working tree can differ.
+			if !slices.Equal(got.worktree, tt.want) || got.head != nil {
+				t.Fatalf("differingGovernedInputs = %+v, want working tree %v and HEAD nil", got, tt.want)
 			}
 		})
 	}
 
-	t.Run("a base commit whose tree differs from the working tree", func(t *testing.T) {
-		repo := fixturegit.Build(t, []fixturegit.Layer{
-			{Files: committed, Message: "base"},
-			{Files: map[string]string{".verdi/obligations/s/ac-1--static.md": "edited on HEAD's branch\n"}, Message: "HEAD's branch"},
+	edited := ".verdi/obligations/s/ac-1--static.md"
+	for _, tt := range []struct {
+		name         string
+		restore      bool // the working tree restores the base's content
+		wantWorktree []string
+	}{
+		{"HEAD's commit differs, and the working tree with it", false, []string{edited}},
+		{"HEAD's commit differs while the working tree restores the base", true, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{
+				{Files: committed, Message: "base"},
+				{Files: map[string]string{edited: "edited on HEAD's branch\n"}, Message: "HEAD's branch"},
+			})
+			if tt.restore {
+				write(t, repo.Dir, edited, committed[edited])
+			}
+			base := strings.TrimSpace(gitTestOutput(t, repo.Dir, "rev-parse", "HEAD~1"))
+			got, err := differingGovernedInputs(ctx, repo.Dir, base, g)
+			if err != nil {
+				t.Fatalf("differingGovernedInputs: %v", err)
+			}
+			if !slices.Equal(got.worktree, tt.wantWorktree) || !slices.Equal(got.head, []string{edited}) {
+				t.Fatalf("differingGovernedInputs = %+v, want working tree %v and HEAD [%s]", got, tt.wantWorktree, edited)
+			}
 		})
-		base := strings.TrimSpace(gitTestOutput(t, repo.Dir, "rev-parse", "HEAD~1"))
-		got, err := differingGovernedInputs(ctx, repo.Dir, base, g)
-		if err != nil {
-			t.Fatalf("differingGovernedInputs: %v", err)
-		}
-		if want := []string{".verdi/obligations/s/ac-1--static.md"}; !slices.Equal(got, want) {
-			t.Fatalf("differingGovernedInputs = %v, want %v", got, want)
-		}
-	})
+	}
 
 	t.Run("an unresolvable base is an error", func(t *testing.T) {
 		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: committed, Message: "base"}})
@@ -177,4 +194,33 @@ func TestDifferingGovernedInputs(t *testing.T) {
 			t.Fatalf("differingGovernedInputs = %v, nil; want an error", got)
 		}
 	})
+}
+
+// TestProjectionInputs: once the policy store agrees, an adopted store's
+// governed inputs gain every adapter's managed instruction-projection file
+// (the conflict gate's projection check reads them); a store that has not
+// adopted a constitution gains none; a store that cannot load is an error.
+func TestProjectionInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		files   map[string]string
+		want    []string
+		wantErr bool
+	}{
+		{"not adopted", map[string]string{".verdi/verdi.yaml": minimalManifestYAML}, nil, false},
+		{"adopted", contextPolicyStoreFiles(t), []string{"AGENTS.md"}, false},
+		{"a policy store that does not load", map[string]string{".verdi/policy/constitution.md": "not a constitution\n"}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: tt.files, Message: "store"}})
+			got, err := projectionInputs(repo.Dir)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("projectionInputs = %+v, %v; want error %v", got, err, tt.wantErr)
+			}
+			if !slices.Equal(got.trees, tt.want) || got.globs != nil {
+				t.Fatalf("projectionInputs = %+v, want trees %v", got, tt.want)
+			}
+		})
+	}
 }
