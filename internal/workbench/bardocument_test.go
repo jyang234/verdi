@@ -45,11 +45,11 @@ func TestDocumentBarFacts_EqualTheWalls(t *testing.T) {
 				t.Fatalf("loadASD: %v", err)
 			}
 			wall := specBarFacts(proj, asd)
-			_, res, err := s.loadDocument(t.Context(), tc.spec, specdoc.KindSpec)
+			snap, res, err := s.loadDocument(t.Context(), tc.spec, specdoc.KindSpec)
 			if err != nil {
 				t.Fatalf("loadDocument: %v", err)
 			}
-			doc := s.documentBarFacts(t.Context(), tc.spec, res)
+			doc := s.documentBarFacts(t.Context(), tc.spec, res, snap.checkout)
 			checkBarFacts(t, doc)
 			if !reflect.DeepEqual(doc, wall) {
 				t.Fatalf("Document page facts =\n%+v\n%+v\nwall's =\n%+v\n%+v", doc, doc.Spec, wall, wall.Spec)
@@ -79,7 +79,7 @@ func TestDocumentBarFacts_BytesAgreeWithTheStamp(t *testing.T) {
 			if err != nil {
 				t.Fatalf("loadDocument: %v", err)
 			}
-			bar := s.documentBarFacts(t.Context(), tc.spec, res)
+			bar := s.documentBarFacts(t.Context(), tc.spec, res, snap.checkout)
 			if bar.Spec == nil || bar.Spec.Bytes.Word != tc.word || snap.Proposed != tc.proposed {
 				t.Fatalf("bar bytes %+v, stamp proposed %t; want %q and %t", bar.Spec, snap.Proposed, tc.word, tc.proposed)
 			}
@@ -97,13 +97,13 @@ func TestDocumentBarFacts_BytesAgreeWithTheStamp(t *testing.T) {
 func TestDocumentBarFacts_StateTheLoadCouldNotResolve(t *testing.T) {
 	root := newBarFixture(t)
 	s := &boardSpecServer{root: root}
-	_, res, err := s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
+	snap, res, err := s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
 	if err != nil {
 		t.Fatalf("loadDocument: %v", err)
 	}
 	res.State = nil
 	res.Disclosures = []string{"status not resolved: the projector failed"}
-	got := s.documentBarFacts(t.Context(), boardFixtureName, res)
+	got := s.documentBarFacts(t.Context(), boardFixtureName, res, snap.checkout)
 	checkBarFacts(t, got)
 	if got.Spec == nil || got.Spec.Name != boardFixtureName || !strings.Contains(got.Spec.Unproven, "the projector failed") {
 		t.Fatalf("spec facts = %+v, want disclosed-unproven with the load's reason", got.Spec)
@@ -247,11 +247,11 @@ func TestBarFacts_ModeCarriesTheReviewFeedDisclosure(t *testing.T) {
 				t.Fatalf("loadASD: %v", err)
 			}
 			wall := specBarFacts(proj, asd)
-			_, res, err := tc.s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
+			snap, res, err := tc.s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
 			if err != nil {
 				t.Fatalf("loadDocument: %v", err)
 			}
-			doc := tc.s.documentBarFacts(t.Context(), boardFixtureName, res)
+			doc := tc.s.documentBarFacts(t.Context(), boardFixtureName, res, snap.checkout)
 			for page, f := range map[string]barFacts{"wall": wall, "Document page": doc} {
 				got := f.Spec.ModeDisclosure
 				switch {

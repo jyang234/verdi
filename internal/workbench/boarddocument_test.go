@@ -239,13 +239,14 @@ func TestBoardDocument_DownloadMatchesSnapshotMarkdown(t *testing.T) {
 		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
 	}
 	var decoded struct {
-		Revision    string   `json:"revision"`
-		HTML        string   `json:"html"`
-		Markdown    string   `json:"markdown"`
-		Kind        string   `json:"kind"`
-		Ref         string   `json:"ref"`
-		Proposed    bool     `json:"proposed"`
-		Disclosures []string `json:"disclosures"`
+		Revision    string            `json:"revision"`
+		HTML        string            `json:"html"`
+		Markdown    string            `json:"markdown"`
+		Kind        string            `json:"kind"`
+		Ref         string            `json:"ref"`
+		Proposed    bool              `json:"proposed"`
+		Disclosures []string          `json:"disclosures"`
+		Facts       documentPageFacts `json:"facts"`
 	}
 	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
 		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)
@@ -482,13 +483,14 @@ func TestBoardDocument_ReadinessLoaderErrorBecomesDisclosure(t *testing.T) {
 		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
 	}
 	var decoded struct {
-		Revision    string   `json:"revision"`
-		HTML        string   `json:"html"`
-		Markdown    string   `json:"markdown"`
-		Kind        string   `json:"kind"`
-		Ref         string   `json:"ref"`
-		Proposed    bool     `json:"proposed"`
-		Disclosures []string `json:"disclosures"`
+		Revision    string            `json:"revision"`
+		HTML        string            `json:"html"`
+		Markdown    string            `json:"markdown"`
+		Kind        string            `json:"kind"`
+		Ref         string            `json:"ref"`
+		Proposed    bool              `json:"proposed"`
+		Disclosures []string          `json:"disclosures"`
+		Facts       documentPageFacts `json:"facts"`
 	}
 	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
 		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)

@@ -29,17 +29,75 @@ const (
 
 // documentSnapshot is the Document tab's conditional projection: the
 // rendered HTML fragment, the canonical Markdown it was rendered from,
-// and a revision token over the ref, kind, and Markdown. The Markdown
-// already carries the stamp (commit, proposed posture, engine), so any
-// change a reader could see moves the token.
+// the page's chrome facts (spec/document-page-v2, SI-340 (8)), and a
+// revision token over every fact the page renders (documentRevision).
 type documentSnapshot struct {
-	Revision    string   `json:"revision"`
-	HTML        string   `json:"html"`
-	Markdown    string   `json:"markdown"`
-	Kind        string   `json:"kind"`
-	Ref         string   `json:"ref"`
-	Proposed    bool     `json:"proposed"`
-	Disclosures []string `json:"disclosures"`
+	Revision    string            `json:"revision"`
+	HTML        string            `json:"html"`
+	Markdown    string            `json:"markdown"`
+	Kind        string            `json:"kind"`
+	Ref         string            `json:"ref"`
+	Proposed    bool              `json:"proposed"`
+	Disclosures []string          `json:"disclosures"`
+	Facts       documentPageFacts `json:"facts"`
+
+	// checkout is the Git state the load read, which the page's top bar
+	// reuses (documentBarFacts); never part of the wire projection.
+	checkout documentCheckout
+}
+
+// documentCheckout is the serving checkout's Git state as one Document
+// load read it, through the wall's own gitState path: the identity
+// card's branch and the page's top bar both read this one value, so they
+// cannot disagree within a render and the bar reads no Git state of its
+// own (SI-323 (2)). err, when set, says why it could not be read.
+type documentCheckout struct {
+	git *boardGitState
+	err error
+}
+
+// errCheckoutNotRead is a documentCheckout's error when no load read it.
+var errCheckoutNotRead = errors.New("no load read it")
+
+// state is the Git state the load read, or why there is none.
+func (c documentCheckout) state() (*boardGitState, error) {
+	switch {
+	case c.err != nil:
+		return nil, c.err
+	case c.git == nil:
+		return nil, errCheckoutNotRead
+	}
+	return c.git, nil
+}
+
+// branch is the checked-out branch as the bar states it (barPosture's
+// Branch and Detached): proven, an empty text that is a detached HEAD, or
+// disclosed-unproven when the Git state could not be read.
+func (c documentCheckout) branch() (barFact, bool) {
+	git, err := c.state()
+	if err != nil {
+		return unprovenFact(checkoutUnreadable(err)), false
+	}
+	return provenFact(git.Branch), git.Branch == ""
+}
+
+// checkoutUnreadable is the reason every fact the checkout's Git state
+// would have proven is disclosed-unproven.
+func checkoutUnreadable(err error) string {
+	return "the checkout's Git state could not be read: " + err.Error()
+}
+
+// documentRevision is the snapshot's revision token: a digest over every
+// fact the page renders (Wave 6 §5.1) — the ref, the kind, the Markdown
+// (which carries the body's own stamp: commit, proposed posture, engine),
+// and the chrome facts, whose owners, branch, and files the Markdown does
+// not carry. So any change a reader could see moves the token, and a poll
+// that swaps the body brings the chrome of the same revision.
+func documentRevision(snap documentSnapshot) (string, error) {
+	return canonjson.Digest(struct {
+		Ref, Kind, Markdown string
+		Facts               documentPageFacts
+	}{snap.Ref, snap.Kind, snap.Markdown, snap.Facts})
 }
 
 // loadDocument renders the working tree of the checkout this server
@@ -53,7 +111,10 @@ type documentSnapshot struct {
 // fails the render: it becomes a "readiness: <err>" disclosure and the
 // section states its own absence, exactly like any other degraded fact a
 // document is not a verdict over (R-RR1-9). The load's Result comes back
-// too: the page's top bar reuses its resolutions (documentBarFacts).
+// too: the page's top bar reuses its resolutions (documentBarFacts). The
+// load also reads the checkout's Git state once, for the identity card's
+// branch and the bar alike, and keeps the document it built, from which
+// the chrome facts are drawn (SI-340 (1)).
 func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind specdoc.Kind) (documentSnapshot, specdocload.Result, error) {
 	if !specNameRe.MatchString(name) {
 		return documentSnapshot{}, specdocload.Result{}, fmt.Errorf("workbench: spec %q not found: %w", name, ErrBoardNotFound)
@@ -91,10 +152,14 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 	if readinessDisclosure != "" {
 		disclosures = append(disclosures, readinessDisclosure)
 	}
-	snap := documentSnapshot{HTML: html, Markdown: md, Kind: string(kind), Ref: doc.Stamp.Ref, Proposed: doc.Stamp.Proposed, Disclosures: disclosures}
-	rev, err := canonjson.Digest(struct {
-		Ref, Kind, Markdown string
-	}{snap.Ref, snap.Kind, snap.Markdown})
+	var checkout documentCheckout
+	checkout.git, _, checkout.err = s.gitState(ctx)
+	snap := documentSnapshot{
+		HTML: html, Markdown: md, Kind: string(kind), Ref: doc.Stamp.Ref, Proposed: doc.Stamp.Proposed, Disclosures: disclosures,
+		Facts:    newDocumentPageFacts(name, doc, html, res, checkout, s.model),
+		checkout: checkout,
+	}
+	rev, err := documentRevision(snap)
 	if err != nil {
 		return documentSnapshot{}, specdocload.Result{}, err
 	}
@@ -109,20 +174,21 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 // the base digest from the bytes it rendered, and the worktree and
 // accepted HEADs from the heads it resolved — so the page keeps its one
 // accepted-HEAD resolution (Wave 6 §5.3) and the bar can never disagree
-// with the document's stamp. Only the checkout's gitState (branch,
-// working tree) and the review feed, which the load does not read, are
-// read here, through the wall's own path. A fact that cannot be obtained
-// is disclosed-unproven: a projection the load could not make leaves the
-// spec's facts unproven with its reason.
-func (s *boardSpecServer) documentBarFacts(ctx context.Context, name string, res specdocload.Result) barFacts {
+// with the document's stamp. The checkout's gitState (branch, working
+// tree) is the one the load read (checkout), so the bar and the identity
+// card state the same branch; only the review feed, which the load does
+// not read, is read here, through the wall's own path. A fact that cannot
+// be obtained is disclosed-unproven: a projection the load could not make
+// leaves the spec's facts unproven with its reason.
+func (s *boardSpecServer) documentBarFacts(ctx context.Context, name string, res specdocload.Result, checkout documentCheckout) barFacts {
 	title := name
 	if res.Input.Spec != nil {
 		title = res.Input.Spec.Title
 	}
-	git, _, err := s.gitState(ctx)
+	git, err := checkout.state()
 	if err != nil {
-		f := unprovenBarFacts(title, s.root, "the checkout's Git state could not be read: "+err.Error())
-		f.Spec = &barSpec{Name: name, Unproven: "the checkout's Git state could not be read: " + err.Error()}
+		f := unprovenBarFacts(title, s.root, checkoutUnreadable(err))
+		f.Spec = &barSpec{Name: name, Unproven: checkoutUnreadable(err)}
 		return f
 	}
 	heads := documentHeads(git, res)
@@ -260,7 +326,7 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		// EscapedPath, not Path: under the /b/{branch} mount the branch
 		// rides one segment with its slashes percent-encoded, and every
 		// sibling link on the page must keep that encoding to resolve.
-		bar := s.documentBarFacts(r.Context(), name, res)
+		bar := s.documentBarFacts(r.Context(), name, res, snap.checkout)
 		page, err := renderBoardDocumentPage(r.Context(), r.URL.EscapedPath(), name, snap, bar)
 		if err != nil {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
