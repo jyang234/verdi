@@ -196,13 +196,19 @@ func TestStrictFixtureReportIsCurrent(t *testing.T) {
 // TestLintStrict_NolintProbe runs the pinned golangci-lint with
 // .golangci.strict.yml, as make lint-strict runs it, over the //nolint probe
 // module, and proves which directive shapes suppress a gated finding there
-// (spec/strict-lint-gate-v2 ac-3, dc-4): a bare //nolint, the same after a
-// space, //nolint:all, //nolint:unused,all, and //nolint:gochecknoglobals
-// each suppress the gochecknoglobals finding beside them, so the witness's
-// refusal of the first four follows real suppression; //nolint:unused and a
-// mid-comment mention suppress nothing gated. Every finding must be
-// gochecknoglobals' in a reported_*.go file, exactly one in each, and none in
-// a suppressed_*.go file.
+// (spec/strict-lint-gate-v2 ac-3, dc-4; ledger SI-337). A bare //nolint, the
+// same after a space, //nolint:all, //nolint:unused,all, and
+// //nolint:gochecknoglobals each suppress the gochecknoglobals finding beside
+// them, so the witness's refusal of the first four follows real suppression;
+// //nolint:unused and a mid-comment mention suppress nothing gated. On a
+// callee's doc comment, contextcheck's name in an ungated directive's reason
+// or inside another linter's name, and contextcheck's request flag, each
+// suppress contextcheck's finding at the call, so the witness counts them;
+// the same directive without that name, with it capitalised, or a blank line
+// away from the doc, and the request flag's shape without the flag, suppress
+// nothing. Every finding must be in a reported_*.go file, exactly one in
+// each, from the linter the file's name says, and none in a suppressed_*.go
+// file.
 func TestLintStrict_NolintProbe(t *testing.T) {
 	findings := lintStrictFixture(t, nolintProbeDir, probeUnshown)
 
@@ -210,30 +216,38 @@ func TestLintStrict_NolintProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the probe module: %v", err)
 	}
-	want := map[string]int{} // findings per file
+	want := map[string]int{}      // findings per file
+	linter := map[string]string{} // the gated linter whose finding each file holds
 	for _, e := range entries {
 		name := e.Name()
+		var kind string
 		switch {
 		case e.IsDir() || !strings.HasSuffix(name, ".go") || name == "doc.go":
+			continue
 		case strings.HasPrefix(name, "reported_"):
-			want[name] = 1
+			want[name], kind = 1, "reported_"
 		case strings.HasPrefix(name, "suppressed_"):
-			want[name] = 0
+			want[name], kind = 0, "suppressed_"
 		default:
 			t.Fatalf("probe file %s is named neither suppressed_*.go nor reported_*.go", name)
+		}
+		linter[name] = "gochecknoglobals"
+		if strings.HasPrefix(strings.TrimPrefix(name, kind), "contextcheck_") {
+			linter[name] = "contextcheck"
 		}
 	}
 	got := map[string]int{}
 	for _, f := range findings {
-		if path.Dir(f.File) != nolintProbeDir || f.Key.Linter != "gochecknoglobals" {
-			t.Errorf("finding outside the probe's gochecknoglobals findings: %+v", f)
+		name := path.Base(f.File)
+		if path.Dir(f.File) != nolintProbeDir || f.Key.Linter != linter[name] {
+			t.Errorf("finding outside the probe files' own linters' findings: %+v", f)
 			continue
 		}
-		got[path.Base(f.File)]++
+		got[name]++
 	}
 	for name, n := range want {
 		if got[name] != n {
-			t.Errorf("%s: golangci-lint reported %d gochecknoglobals finding(s), want %d", name, got[name], n)
+			t.Errorf("%s: golangci-lint reported %d %s finding(s), want %d", name, got[name], linter[name], n)
 		}
 	}
 	for name := range got {

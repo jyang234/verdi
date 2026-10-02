@@ -29,6 +29,14 @@
 // The reason is the text after that first "//", trimmed; nolintlint's
 // require-explanation likewise wants more than "//" there.
 //
+// contextcheck reads directives of its own, which golangci-lint's nolint
+// filter never sees (ledger SI-337): a line of a function declaration's doc
+// comment that it reads makes it skip that function, or check it as a
+// handler, and drop its finding at the function's call sites. The witness
+// reads those lines as contextcheck does (contextcheckDocDirective), each as
+// a directive naming contextcheck, counted and needing a reason after its
+// own // like any other. A line both readings recognize is one directive.
+//
 // The files read are the module's linux/amd64 lint set, the configuration
 // witness's own universe (moduleGoFiles; ledger SI-315): the files make
 // lint-strict analyzes, test files included, testdata directories and nested
@@ -38,10 +46,12 @@ package specalign
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -54,7 +64,7 @@ const strictLintDirectiveCount = 1
 
 // nolintProbeDir is the //nolint probe module (internal/lintratchet's
 // TestLintStrict_NolintProbe), relative to the repository root: each file
-// holds one gochecknoglobals violation under one directive shape, and its
+// holds one gated finding under one directive shape, and its
 // name says whether the pinned golangci-lint suppresses that finding
 // (suppressed_*.go) or reports it (reported_*.go).
 const nolintProbeDir = "internal/lintratchet/testdata/nolintprobe"
@@ -74,6 +84,46 @@ type nolintDirective struct {
 	linters []string
 	// reason is the text after its own //, trimmed, or "" when it has none.
 	reason string
+	// contextcheck reports that contextcheck itself reads it, a line of a
+	// function declaration's doc comment, so it names contextcheck whatever
+	// its list says (contextcheckDocDirective; ledger SI-337).
+	contextcheck bool
+}
+
+// contextcheckLinter is the gated linter that reads directives of its own,
+// and the name it looks for in them.
+const contextcheckLinter = "contextcheck"
+
+// contextcheckNolintPattern is contextcheck v1.1.6's own pattern for a doc
+// line that makes it skip a function (nolintRe, contextcheck.go:272).
+var contextcheckNolintPattern = regexp.MustCompile(`^//\s?nolint:`)
+
+// contextcheckRequestFlag is contextcheck v1.1.6's other doc flag
+// (runner.docFlag, contextcheck.go:265), which makes it check a function
+// taking an *http.Request as a handler; the pinned golangci-lint then drops
+// that function's call-site finding (the probe module's
+// suppressed_contextcheck_request.go).
+const contextcheckRequestFlag = "// @contextcheck(req_has_ctx)"
+
+// contextcheckDocDirective reports whether contextcheck reads comment, one
+// line of a function declaration's doc comment as go/ast holds it (its //
+// included), as one of its own directives, and returns the text after the
+// directive's opening, where its reason is sought after its own //. It reads
+// as contextcheck v1.1.6, bundled in the pinned golangci-lint 2.5.0, does in
+// github.com/kkHAIKE/contextcheck@v1.1.6/contextcheck.go:261-292: for each
+// line of a function declaration's doc (FuncDecl.Doc, in getDocFromFunc; a
+// method is one too), a line matching nolintRe, ^//\s?nolint:, that holds the
+// case-sensitive substring contextcheck anywhere skips the function, and
+// otherwise one beginning with the request flag marks it a handler
+// (docFlag).
+func contextcheckDocDirective(comment string) (string, bool) {
+	if loc := contextcheckNolintPattern.FindStringIndex(comment); loc != nil && strings.Contains(comment, contextcheckLinter) {
+		return comment[loc[1]:], true
+	}
+	if rest, ok := strings.CutPrefix(comment, contextcheckRequestFlag); ok {
+		return rest, true
+	}
+	return "", false
 }
 
 // parseNolintDirective reads comment, one comment's text as go/ast holds it
@@ -103,18 +153,35 @@ func parseNolintDirective(comment string) (nolintDirective, bool) {
 
 // fileNolintDirectives returns the //nolint directives among the comments of
 // src, the Go file at rel, parsed as golangci-lint parses a file for them
-// (go/parser with parser.ParseComments). A file that does not parse is an
-// error, never a file without directives.
+// (go/parser with parser.ParseComments), and contextcheck's own directives
+// among its function declarations' doc lines, one directive per comment. A
+// file that does not parse is an error, never a file without directives.
 func fileNolintDirectives(rel string, src []byte) ([]nolintDirective, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, rel, src, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s for //nolint directives: %w", rel, err)
 	}
+	funcDoc := map[*ast.Comment]bool{}
+	for _, decl := range f.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Doc != nil {
+			for _, c := range fd.Doc.List {
+				funcDoc[c] = true
+			}
+		}
+	}
 	var out []nolintDirective
 	for _, g := range f.Comments {
 		for _, c := range g.List {
-			if d, ok := parseNolintDirective(c.Text); ok {
+			d, ok := parseNolintDirective(c.Text)
+			if rest, read := contextcheckDocDirective(c.Text); read && funcDoc[c] {
+				if !ok {
+					_, reason, _ := strings.Cut(rest, "//")
+					d, ok = nolintDirective{text: c.Text, reason: strings.TrimSpace(reason)}, true
+				}
+				d.contextcheck = true
+			}
+			if ok {
 				d.at = fmt.Sprintf("%s:%d", rel, fset.Position(c.Pos()).Line)
 				out = append(out, d)
 			}
@@ -167,10 +234,15 @@ func strictConfigGatedLinters(raw string) ([]string, error) {
 	return slices.Sorted(slices.Values(enabled)), nil
 }
 
-// gatedNamed returns, sorted and once each, the gated linters d names.
+// gatedNamed returns, sorted and once each, the gated linters d names: those
+// in its list, and contextcheck when contextcheck itself reads it.
 func gatedNamed(d nolintDirective, gated []string) []string {
+	names := d.linters
+	if d.contextcheck {
+		names = append(slices.Clone(names), contextcheckLinter)
+	}
 	var out []string
-	for _, l := range d.linters {
+	for _, l := range names {
 		if slices.Contains(gated, l) && !slices.Contains(out, l) {
 			out = append(out, l)
 		}
@@ -235,13 +307,47 @@ func synthesizeDirectives(t *testing.T, decls string) []nolintDirective {
 // pinned golangci-lint suppresses or reports as its file name says.
 func testStrictLintSourceDirectives(t *testing.T) {
 	gated := realStrictGatedLinters(t)
+	committed, err := lintSetNolintDirectives(verdiRepoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Run("the committed lint set", func(t *testing.T) {
-		directives, err := lintSetNolintDirectives(verdiRepoRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range strictLintDirectiveProblems(directives, gated, strictLintDirectiveCount) {
+		for _, p := range strictLintDirectiveProblems(committed, gated, strictLintDirectiveCount) {
 			t.Error(p)
+		}
+	})
+
+	// The S3 review's reproduction of finding S3-1: this file, added to the
+	// lint set at internal/lintratchet/zz_slip.go, suppressed contextcheck's
+	// finding at line 11 under the pinned golangci-lint while the witness
+	// passed. It is read here beside the committed lint set, never added to
+	// it: counted, it breaks the pin; without a reason, it is named.
+	t.Run("the review's contextcheck slip", func(t *testing.T) {
+		const (
+			slipFile      = "internal/lintratchet/zz_slip.go"
+			slipDirective = "//nolint:unused // contextcheck: deliberately starts afresh"
+			slipSource    = "package lintratchet\n\nimport \"context\"\n\nfunc slipWait(ctx context.Context) error { return ctx.Err() }\n\n" +
+				slipDirective + "\nfunc slipFresh() error { return slipWait(context.Background()) }\n\n" +
+				"// SlipCaller has a context but calls slipFresh, which does not take it.\n" +
+				"func SlipCaller(ctx context.Context) error { _ = ctx; return slipFresh() }\n"
+		)
+		cases := []struct {
+			name, directive, want string
+		}{
+			{name: "as reproduced", directive: slipDirective, want: fmt.Sprintf("holds %d //nolint directive(s) naming a gated linter, but strictLintDirectiveCount pins %d", strictLintDirectiveCount+1, strictLintDirectiveCount)},
+			{name: "without a reason", directive: "//nolint:contextchecks", want: slipFile + ":7: \"//nolint:contextchecks\" names gated linter(s) [contextcheck] but carries no reason"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				slip, err := fileNolintDirectives(slipFile, []byte(strings.Replace(slipSource, slipDirective, tc.directive, 1)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				problems := strictLintDirectiveProblems(append(slices.Clone(committed), slip...), gated, strictLintDirectiveCount)
+				if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, tc.want) }) {
+					t.Fatalf("problems = %q, want one containing %q", problems, tc.want)
+				}
+			})
 		}
 	})
 
@@ -288,6 +394,32 @@ func testStrictLintSourceDirectives(t *testing.T) {
 		{name: "a word beginning with nolint", decls: "var x int //nolintx", pinned: 0},
 		{name: "a block comment", decls: "var x int /* nolint */", pinned: 0},
 		{name: "a tab before nolint", decls: "var x int //\tnolint", pinned: 0},
+		// contextcheck's own reading of a function declaration's doc (ledger
+		// SI-337), counted as naming contextcheck.
+		{name: "contextcheck's name in the reason of a function's doc directive", decls: "//nolint:unused // contextcheck: deliberately starts afresh\nfunc fresh() {}", pinned: 1},
+		{name: "contextcheck's name in a method's doc directive", decls: "type T struct{}\n\n//nolint:unused // contextcheck: a reason\nfunc (T) m() {}", pinned: 1},
+		{name: "contextcheck's name in a later line of a function's doc", decls: "// fresh starts afresh.\n//\n//nolint:unused // contextcheck: a reason\nfunc fresh() {}", pinned: 1},
+		{name: "contextcheck's name in a spaced doc directive's reason", decls: "// nolint:staticcheck // contextcheck too\nfunc fresh() {}", pinned: 1},
+		{name: "contextcheck named in a function's doc by both readings, counted once", decls: "//nolint:contextcheck // a reason\nfunc fresh() {}", pinned: 1},
+		{name: "contextcheck's request flag, with a reason", decls: "// @contextcheck(req_has_ctx) // a reason\nfunc h() {}", pinned: 1},
+		{name: "contextcheck's name in a function's doc, beyond the pin", decls: "//nolint:unused // contextcheck: a reason\nfunc fresh() {}", pinned: 0, want: "holds 1 //nolint directive(s) naming a gated linter, but strictLintDirectiveCount pins 0"},
+		{name: "contextcheck's name inside another in a function's doc, without a reason", decls: "//nolint:contextchecks\nfunc fresh() {}", pinned: 1, want: "synthetic.go:3: \"//nolint:contextchecks\" names gated linter(s) [contextcheck] but carries no reason"},
+		{name: "contextcheck after a tab in a function's doc, without a reason", decls: "//\tnolint:contextcheck\nfunc fresh() {}", pinned: 1, want: "synthetic.go:3: \"//\\tnolint:contextcheck\" names gated linter(s) [contextcheck] but carries no reason"},
+		{name: "contextcheck's request flag, without a reason", decls: "// @contextcheck(req_has_ctx)\nfunc h() {}", pinned: 1, want: "synthetic.go:3: \"// @contextcheck(req_has_ctx)\" names gated linter(s) [contextcheck] but carries no reason"},
+		{name: "contextcheck's request flag and a reason without its //", decls: "// @contextcheck(req_has_ctx) because\nfunc h() {}", pinned: 1, want: "names gated linter(s) [contextcheck] but carries no reason"},
+		{name: "all in a function's doc beside contextcheck's name", decls: "//nolint:all // contextcheck\nfunc fresh() {}", pinned: 1, want: "\"//nolint:all // contextcheck\" suppresses every linter"},
+		// Not contextcheck's reading: neither counted nor refused.
+		{name: "contextcheck's name capitalised in a function's doc", decls: "//nolint:unused // ContextCheck: a reason\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's name in a variable's doc directive", decls: "//nolint:unused // contextcheck: a reason\nvar x int", pinned: 0},
+		{name: "contextcheck's name above a function, a blank line between", decls: "//nolint:unused // contextcheck: a reason\n\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's name inside a function", decls: "func fresh() {\n\t//nolint:unused // contextcheck: a reason\n}", pinned: 0},
+		{name: "contextcheck's name after a function, on its line", decls: "func fresh() {} //nolint:unused // contextcheck: a reason", pinned: 0},
+		{name: "contextcheck's name in a function's doc, two spaces before nolint", decls: "//  nolint:unused // contextcheck: a reason\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's name in a function's doc, a third slash before nolint", decls: "///nolint:unused // contextcheck: a reason\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's name in a function's doc that holds no directive", decls: "// fresh is contextcheck's concern.\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's name in a function's block-comment doc", decls: "/*nolint:unused // contextcheck */\nfunc fresh() {}", pinned: 0},
+		{name: "contextcheck's request flag on a type's doc", decls: "// @contextcheck(req_has_ctx)\ntype T struct{}", pinned: 0},
+		{name: "contextcheck's request flag, unspaced", decls: "//@contextcheck(req_has_ctx)\nfunc h() {}", pinned: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -427,6 +559,22 @@ func TestFileNolintDirectives(t *testing.T) {
 	}{
 		{name: "none", src: "package p\n\n// a comment\nvar x int\n"},
 		{name: "several", src: "//nolint:errorlint // a\npackage p\n\n/*\nnolint\n*/\nvar x int //nolint\n\nfunc f() {\n\t// nolint:noctx\n}\n", want: []string{"f.go:1 //nolint:errorlint // a", "f.go:7 //nolint", "f.go:10 // nolint:noctx"}},
+		{
+			name: "contextcheck's reading of function declarations' docs",
+			src: "package p\n\n// T is a type.\n//\n//nolint:unused // contextcheck: a type's doc\ntype T struct{}\n\n" +
+				"// m is a method.\n//\n//nolint:unused // contextcheck: a reason\nfunc (T) m() {}\n\n" +
+				"//\tnolint:contextcheck\nfunc f() {\n\t//nolint:unused // contextcheck: in a body\n}\n\n" +
+				"// @contextcheck(req_has_ctx) // a reason\nfunc g() {}\n\n" +
+				"//nolint:unused // ContextCheck: capitalised\nfunc h() {}\n",
+			want: []string{
+				"f.go:5 //nolint:unused // contextcheck: a type's doc",
+				"f.go:10 //nolint:unused // contextcheck: a reason [contextcheck]",
+				"f.go:13 //\tnolint:contextcheck [contextcheck]",
+				"f.go:15 //nolint:unused // contextcheck: in a body",
+				"f.go:18 // @contextcheck(req_has_ctx) // a reason [contextcheck]",
+				"f.go:21 //nolint:unused // ContextCheck: capitalised",
+			},
+		},
 		{name: "not Go", src: "package p\n\nvar x int //nolint\nfunc {\n", wantErr: true},
 	}
 	for _, tc := range cases {
@@ -437,7 +585,11 @@ func TestFileNolintDirectives(t *testing.T) {
 			}
 			var got []string
 			for _, d := range ds {
-				got = append(got, d.at+" "+d.text)
+				line := d.at + " " + d.text
+				if slices.Contains(gatedNamed(d, []string{"contextcheck"}), "contextcheck") && !slices.Contains(d.linters, "contextcheck") {
+					line += " [contextcheck]" // named by contextcheck's own reading alone
+				}
+				got = append(got, line)
 			}
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("fileNolintDirectives = %q, want %q", got, tc.want)
@@ -537,6 +689,50 @@ func TestStrictConfigGatedLinters(t *testing.T) {
 			}
 			if err != nil || !slices.Equal(got, tc.want) {
 				t.Fatalf("strictConfigGatedLinters = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestContextcheckDocDirective covers contextcheck's own reading of one line
+// of a function declaration's doc comment (ledger SI-337): its nolint
+// pattern, one optional whitespace character after the //, with its name
+// anywhere in the line, case-sensitively; or its request flag as a prefix.
+// What follows the flag is where the line's reason is sought.
+func TestContextcheckDocDirective(t *testing.T) {
+	cases := []struct {
+		comment string
+		ok      bool
+		rest    string
+	}{
+		{comment: "//nolint:unused // contextcheck: a reason", ok: true, rest: "unused // contextcheck: a reason"},
+		{comment: "//nolint:contextcheck", ok: true, rest: "contextcheck"},
+		{comment: "//nolint:contextchecks", ok: true, rest: "contextchecks"},
+		{comment: "// nolint:staticcheck // contextcheck", ok: true, rest: "staticcheck // contextcheck"},
+		{comment: "//\tnolint:contextcheck", ok: true, rest: "contextcheck"},
+		{comment: "//nolint:all // contextcheck", ok: true, rest: "all // contextcheck"},
+		{comment: "// @contextcheck(req_has_ctx)", ok: true, rest: ""},
+		{comment: "// @contextcheck(req_has_ctx) // a reason", ok: true, rest: " // a reason"},
+		{comment: "// @contextcheck(req_has_ctx)x", ok: true, rest: "x"},
+		// Not contextcheck's.
+		{comment: "//nolint:unused // a reason"},
+		{comment: "//nolint:unused // ContextCheck"},
+		{comment: "//NOLINT:contextcheck"},
+		{comment: "//  nolint:contextcheck"},
+		{comment: "///nolint:contextcheck"},
+		{comment: "//nolint contextcheck"},
+		{comment: "//nolint"},
+		{comment: "/*nolint:contextcheck*/"},
+		{comment: "// contextcheck"},
+		{comment: "//@contextcheck(req_has_ctx)"},
+		{comment: "// @contextcheck(req_has_ctx"},
+		{comment: "// see @contextcheck(req_has_ctx)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.comment, func(t *testing.T) {
+			rest, ok := contextcheckDocDirective(tc.comment)
+			if ok != tc.ok || rest != tc.rest {
+				t.Fatalf("contextcheckDocDirective(%q) = %q, %v; want %q, %v", tc.comment, rest, ok, tc.rest, tc.ok)
 			}
 		})
 	}
