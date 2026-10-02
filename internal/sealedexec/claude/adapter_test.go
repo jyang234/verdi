@@ -353,7 +353,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			t.Fatalf("New: %v", err)
 		}
 		//nolint:staticcheck
-		if _, err := adapter.Start(nil, launch); err == nil { //nolint:contextcheck
+		if _, err := adapter.Start(nil, launch); err == nil {
 			t.Fatal("Start(nil ctx) should return error")
 		}
 	})
