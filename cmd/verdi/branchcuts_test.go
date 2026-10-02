@@ -33,7 +33,9 @@ func divergeHead(t *testing.T, fx *ritualwitness.Fixture) string {
 // resolved default branch's commit (origin/main), never at HEAD. Build
 // start's branch is created at that commit and stays there (it never
 // commits); constitution propose's branch is created there and gains the
-// proposal commit, whose first parent is that commit. Build start also
+// proposal commit, whose first parent is that commit. Neither writes any
+// local configuration: cut at the commit, not at origin/main's name, the
+// new branch gets no upstream (ledger SI-333 (1)). Build start also
 // refuses, with nothing created, moved, or configured, a feature/<name>
 // that already exists locally or on the remote it cuts from (UAT-031,
 // ledger SI-333).
@@ -100,6 +102,9 @@ func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 			}
 			if res.After.Head.Ref != tt.branch {
 				t.Errorf("HEAD after the run = %+v, want %s checked out", res.After.Head, tt.branch)
+			}
+			if !reflect.DeepEqual(res.Before.Config, res.After.Config) {
+				t.Errorf("the cut changed the local configuration (an upstream, SI-333 (1)):\nbefore %v\nafter  %v", res.Before.Config, res.After.Config)
 			}
 		})
 	}
