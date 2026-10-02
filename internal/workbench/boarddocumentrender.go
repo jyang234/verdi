@@ -2,7 +2,9 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	stdhtml "html"
 	"html/template"
 	"strings"
 )
@@ -23,10 +25,7 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 </head>
 <body class="document-page">
 <a class="skip-link" href="#document-region">Skip to the document</a>
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a> · <a href="{{.BoardHref}}" data-testid="document-tab-board">Board</a> · <span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>
-</header>
+{{.TopBar}}
 <header class="document-head">
 <p class="eyebrow"><code>{{.Ref}}</code> · document</p>
 <nav class="document-kinds" aria-label="Document kind">{{range .Kinds}}{{if .Current}}<span class="current" aria-current="page" data-testid="document-kind-{{.Kind}}">{{.Label}}</span>{{else}}<a href="{{.Href}}" data-testid="document-kind-{{.Kind}}">{{.Label}}</a>{{end}}{{end}}</nav>
@@ -62,6 +61,11 @@ type documentPageData struct {
 	SnapshotHref string
 	HTML         template.HTML
 	Markdown     string
+	// Bar is the top bar's facts (SI-323 (2)), which TopBar draws: the
+	// spec's title as plain text (the rendered document carries the
+	// page's one h1), and the index, Board, and Document links in its nav.
+	Bar    barFacts
+	TopBar template.HTML
 }
 
 // renderBoardDocumentPage builds the Document tab. Every sibling link is
@@ -73,7 +77,7 @@ type documentPageData struct {
 // deliberate newline right after the <pre> tag: the HTML parser drops
 // exactly one newline there, so without it a Markdown that began with
 // "\n" would lose that byte on the way to the clipboard.
-func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot) ([]byte, error) {
+func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
 	boardHref := strings.TrimSuffix(requestPath, "/document")
 	kinds := []documentKindLink{
 		{Kind: "spec", Label: "Spec"},
@@ -95,7 +99,13 @@ func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot) ([
 		SnapshotHref: requestPath + "/snapshot?kind=" + snap.Kind,
 		HTML:         template.HTML(snap.HTML), //nolint:gosec // the fragment is our own renderer's output (specdoc.RenderHTML over escaped object text)
 		Markdown:     snap.Markdown,
+		Bar:          bar,
 	}
+	// The Wall and Document switch, in the bar's controls slot (dc-3), with
+	// the wall's own two labels; the ids stay the page's.
+	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>`
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // the escaped board href and the current marker
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering document page: %w", err)

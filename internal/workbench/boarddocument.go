@@ -52,10 +52,11 @@ type documentSnapshot struct {
 // ref) — never a shared or foreign snapshot. A derivation error never
 // fails the render: it becomes a "readiness: <err>" disclosure and the
 // section states its own absence, exactly like any other degraded fact a
-// document is not a verdict over (R-RR1-9).
-func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind specdoc.Kind) (documentSnapshot, error) {
+// document is not a verdict over (R-RR1-9). The load's Result comes back
+// too: the page's top bar reuses its resolutions (documentBarFacts).
+func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind specdoc.Kind) (documentSnapshot, specdocload.Result, error) {
 	if !specNameRe.MatchString(name) {
-		return documentSnapshot{}, fmt.Errorf("workbench: spec %q not found: %w", name, ErrBoardNotFound)
+		return documentSnapshot{}, specdocload.Result{}, fmt.Errorf("workbench: spec %q not found: %w", name, ErrBoardNotFound)
 	}
 
 	var readiness *readinesspilot.Snapshot
@@ -75,16 +76,16 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 	// cards' posture and links no corpus page on a per-branch board.
 	res, err := specdocload.Load(ctx, specdocload.Request{Root: s.root, Name: name, Mode: specdocload.ModeWorkingTree, Kind: kind, Model: s.model, Readiness: readiness, CorpusUnservable: s.fixedBranch != ""})
 	if err != nil {
-		return documentSnapshot{}, err
+		return documentSnapshot{}, specdocload.Result{}, err
 	}
 	doc, err := specdoc.Build(res.Input)
 	if err != nil {
-		return documentSnapshot{}, err
+		return documentSnapshot{}, specdocload.Result{}, err
 	}
 	md := specdoc.RenderMarkdown(doc)
 	html, err := specdoc.RenderHTML(doc)
 	if err != nil {
-		return documentSnapshot{}, err
+		return documentSnapshot{}, specdocload.Result{}, err
 	}
 	disclosures := append([]string(nil), res.Disclosures...)
 	if readinessDisclosure != "" {
@@ -95,10 +96,69 @@ func (s *boardSpecServer) loadDocument(ctx context.Context, name string, kind sp
 		Ref, Kind, Markdown string
 	}{snap.Ref, snap.Kind, snap.Markdown})
 	if err != nil {
-		return documentSnapshot{}, err
+		return documentSnapshot{}, specdocload.Result{}, err
 	}
 	snap.Revision = rev
-	return snap, nil
+	return snap, res, nil
+}
+
+// documentBarFacts is the Document page's top bar facts (SI-323 (2), as
+// refined at 23083dae): the facts the wall shows for the same spec and
+// branch, adding no resolution of its own. The displayed bytes and the
+// mode come from the effective-state projection the document load made,
+// the base digest from the bytes it rendered, and the worktree and
+// accepted HEADs from the heads it resolved — so the page keeps its one
+// accepted-HEAD resolution (Wave 6 §5.3) and the bar can never disagree
+// with the document's stamp. Only the checkout's gitState (branch,
+// working tree) and the review feed, which the load does not read, are
+// read here, through the wall's own path. A fact that cannot be obtained
+// is disclosed-unproven: a projection the load could not make leaves the
+// spec's facts unproven with its reason.
+func (s *boardSpecServer) documentBarFacts(ctx context.Context, name string, res specdocload.Result) barFacts {
+	title := name
+	if res.Input.Spec != nil {
+		title = res.Input.Spec.Title
+	}
+	git, _, err := s.gitState(ctx)
+	if err != nil {
+		f := unprovenBarFacts(title, s.root, "the checkout's Git state could not be read: "+err.Error())
+		f.Spec = &barSpec{Name: name, Unproven: "the checkout's Git state could not be read: " + err.Error()}
+		return f
+	}
+	heads := documentHeads(git, res)
+	if res.State == nil || res.Input.Spec == nil {
+		bp := branchPostureFrom(ctx, s.root, git, heads, s.posture)
+		f := barFacts{Title: title, Posture: bp.facts()}
+		digest := provenFact(digestSpecBytes(res.Content))
+		f.Posture.BaseDigest = &digest
+		f.Spec = &barSpec{Name: name, Unproven: "the effective state could not be resolved: " + strings.Join(res.Disclosures, "; ")}
+		return f
+	}
+	_, underReview, notice := s.consultReview(ctx, name)
+	p := projectionHead(name, res.Input.Spec, effectiveMode(underReview, *res.State, git), string(res.State.ArtifactStatus()))
+	p.applyModelVocabulary(s.model)
+	asd := s.postureView(ctx, p, git, res.Content, *res.State, heads)
+	asd.reviewNotice = notice
+	return specBarFacts(p, asd)
+}
+
+// documentHeads states the heads the document load resolved as the
+// posture's: its HEAD, and the default branch's head it resolved for its
+// views' history (specdocload.Result.Accepted).
+func documentHeads(git *boardGitState, res specdocload.Result) postureHeads {
+	h := postureHeads{worktree: res.Head}
+	if res.Head == "" {
+		h.worktreeWhy = "the worktree HEAD could not be resolved"
+	}
+	switch {
+	case git.DefaultBranch == "" || res.Accepted.Ref == "":
+		h.acceptedWhy = defaultBranchUnresolved
+	case res.Accepted.Commit == "":
+		h.acceptedWhy = fmt.Sprintf("the accepted HEAD (%s) could not be resolved", res.Accepted.Ref)
+	default:
+		h.accepted = res.Accepted.Commit
+	}
+	return h
 }
 
 // documentKindFromQuery reads ?kind=, defaulting to the spec document;
@@ -163,19 +223,19 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		name := r.PathValue("name")
 		kind, err := documentKindFromQuery(r)
 		if err != nil {
-			renderError(w, http.StatusBadRequest, err)
+			renderError(r.Context(), w, s.root, http.StatusBadRequest, err)
 			return
 		}
 		format, err := documentFormatFromQuery(r)
 		if err != nil {
-			renderError(w, http.StatusBadRequest, err)
+			renderError(r.Context(), w, s.root, http.StatusBadRequest, err)
 			return
 		}
-		snap, err := s.loadDocument(r.Context(), name, kind)
+		snap, res, err := s.loadDocument(r.Context(), name, kind)
 		if err != nil {
 			// The HTML route fails as the board does: renderError's page,
 			// never a plain-text body (/snapshot keeps JSON errors).
-			renderError(w, documentLoadStatus(name, err), err)
+			renderError(r.Context(), w, s.root, documentLoadStatus(name, err), err)
 			return
 		}
 		if format == "md" {
@@ -200,9 +260,10 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		// EscapedPath, not Path: under the /b/{branch} mount the branch
 		// rides one segment with its slashes percent-encoded, and every
 		// sibling link on the page must keep that encoding to resolve.
-		page, err := renderBoardDocumentPage(r.URL.EscapedPath(), name, snap)
+		bar := s.documentBarFacts(r.Context(), name, res)
+		page, err := renderBoardDocumentPage(r.Context(), r.URL.EscapedPath(), name, snap, bar)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -231,7 +292,7 @@ func (s *boardSpecServer) boardDocumentSnapshotHandler() http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		snap, err := s.loadDocument(r.Context(), name, kind)
+		snap, _, err := s.loadDocument(r.Context(), name, kind)
 		if err != nil {
 			writeJSONError(w, documentLoadStatus(name, err), err.Error())
 			return

@@ -42,7 +42,7 @@ test.describe("build identification footer", () => {
     const home = await footerLine(page);
 
     await page.goto("/board/STORY-1482");
-    await expect(page.locator(".page-header h1")).toHaveText("Board: STORY-1482");
+    await expect(page.getByTestId("topbar-title")).toHaveText("Board: STORY-1482");
     expect(await footerLine(page)).toBe(home);
 
     await page.goto(DRAFT_BOARD());

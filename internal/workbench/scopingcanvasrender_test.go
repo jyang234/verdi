@@ -485,7 +485,7 @@ func TestScopingCanvas_StickyEndpointMintsNoRefCard(t *testing.T) {
 // gate instead of discovering it by refusal.
 func TestScopingCanvas_PayloadCarriesClass(t *testing.T) {
 	p := scopingRenderProjection(t, modeAuthoring)
-	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "design/x"}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), p, &boardGitState{Branch: "design/x"}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -516,7 +516,7 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 		}
 	}
 
-	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "main"}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), p, &boardGitState{Branch: "main"}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}

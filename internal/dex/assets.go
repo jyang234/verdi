@@ -18,23 +18,40 @@ const (
 	chromaDarkMarker  = "/* CHROMA-DARK-PALETTE */"
 )
 
-// StyleCSS returns the served stylesheet: the committed assets/style.css
-// with the light palette (github) composed in at its default marker and the
-// dark palette (github-dark) composed in inside the existing
-// prefers-color-scheme:dark block. The result is deterministic (a pure
-// function of the embedded bytes and the two pinned chroma styles), so
-// writing it into a dex build stays byte-identical across rebuilds.
+// StyleCSS returns the workbench's stylesheet: the committed
+// assets/style.css, workbench-only blocks included, with the light palette
+// (github) composed in at its default marker and the dark palette
+// (github-dark) composed in inside the existing prefers-color-scheme:dark
+// block. The result is deterministic (a pure function of the embedded
+// bytes and the two pinned chroma styles).
 //
-// internal/workbench serves this exact same composed stylesheet at its own
-// /assets/style.css route (as it already reuses this package's vendored
-// mermaid.min.js) rather than owning a second copy — one stylesheet in the
-// binary, two surfaces, so both surfaces' shared class-based code rendering
-// is coloured identically and is equally dark-mode-correct.
+// internal/workbench serves it at its own /assets/style.css route (as it
+// already reuses this package's vendored mermaid.min.js) rather than
+// owning a second copy — one stylesheet in the binary, two surfaces, so
+// both surfaces' shared class-based code rendering is coloured identically
+// and is equally dark-mode-correct. The docs site writes the same
+// composition of the committed file with its workbench-only blocks
+// stripped first (docsStyleCSS, SI-322), so its bytes are not StyleCSS's.
 func StyleCSS() ([]byte, error) {
+	raw, err := embeddedStyleCSS()
+	if err != nil {
+		return nil, err
+	}
+	return composeStyleCSS(raw)
+}
+
+// embeddedStyleCSS reads the committed assets/style.css from the binary.
+func embeddedStyleCSS() ([]byte, error) {
 	raw, err := embeddedAssets.ReadFile("assets/style.css")
 	if err != nil {
 		return nil, fmt.Errorf("dex: reading embedded style.css: %w", err)
 	}
+	return raw, nil
+}
+
+// composeStyleCSS composes the two chroma palettes into a committed
+// stylesheet's bytes at their markers.
+func composeStyleCSS(raw []byte) ([]byte, error) {
 	css := string(raw)
 	for marker, palette := range map[string]string{
 		chromaLightMarker: render.ChromaLightCSS(),
@@ -87,15 +104,22 @@ func MermaidJS() ([]byte, error) {
 }
 
 // writeStaticAssets writes every entry of staticAssets to
-// outDir/assets/<Name>.
-func writeStaticAssets(outDir string) error {
+// outDir/assets/<Name>. styleSource supplies the committed stylesheet's
+// bytes (embeddedStyleCSS in every build; a package test passes a broken
+// one to drive a refusal through Build).
+func writeStaticAssets(outDir string, styleSource func() ([]byte, error)) error {
 	for _, a := range staticAssets {
 		var data []byte
 		var err error
 		if a.Name == "style.css" {
 			// The stylesheet is the one asset that is composed, not copied
-			// verbatim: its two chroma palettes are generated (StyleCSS).
-			data, err = StyleCSS()
+			// verbatim: its two chroma palettes are generated, and the docs
+			// site's copy drops the workbench-only blocks the workbench
+			// serves (docsStyleCSS, SI-322).
+			var raw []byte
+			if raw, err = styleSource(); err == nil {
+				data, err = docsStyleCSS(raw)
+			}
 		} else {
 			data, err = embeddedAssets.ReadFile(a.EmbedPath)
 		}

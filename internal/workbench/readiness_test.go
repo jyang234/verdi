@@ -174,7 +174,7 @@ func TestReadinessFixture_ContractValid(t *testing.T) {
 
 func renderReadinessFixture(t *testing.T, snap readinesspilot.Snapshot) string {
 	t.Helper()
-	out, err := renderReadiness(snap)
+	out, err := renderReadiness(t.Context(), "", snap)
 	if err != nil {
 		t.Fatalf("renderReadiness: %v", err)
 	}

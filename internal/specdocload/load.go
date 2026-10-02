@@ -55,6 +55,34 @@ type Result struct {
 	RelPath     string
 	Head        string
 	Disclosures []string
+
+	// What the load resolved on its way to Input, exposed so a consumer
+	// stating facts beside the document (the workbench's top bar,
+	// spec/chrome-and-tokens-v2 SI-323 (2)) reuses this load's
+	// resolutions instead of making its own, and so cannot disagree with
+	// the document's stamp. None of them changes the fields above.
+	//
+	// Content is the exact bytes the document was rendered from.
+	Content []byte
+	// State is the effective-state projection the load made of Content;
+	// nil when it could not be resolved (Disclosures says why).
+	State *specstate.Result
+	// Accepted is the default branch's head as the load resolved it for
+	// the closed-spec object supersession views' history.
+	Accepted AcceptedHead
+}
+
+// AcceptedHead is the default branch's head as one load resolved it
+// (specstate.ResolveDefaultBranch, then the commit at its authoritative
+// ref).
+type AcceptedHead struct {
+	// Branch is the default branch's name and Ref its authoritative rev
+	// (origin/<name> when that ref exists); both are empty when the
+	// default branch could not be resolved.
+	Branch, Ref string
+	// Commit is Ref's full commit id; empty when the branch or the commit
+	// could not be resolved.
+	Commit string
 }
 
 // Load assembles the Input. Errors are operational (unreadable store,
@@ -96,7 +124,9 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	var disclosures []string
 	status := ""
 	proposed := false
+	var state *specstate.Result
 	if res, rerr := specstate.NewProjector().Resolve(ctx, req.Root, specstate.Candidate{Path: src.relPath, Content: src.content}); rerr == nil {
+		state = &res
 		status = string(res.ArtifactStatus())
 		if req.Mode == ModeWorkingTree {
 			proposed = res.Relation != specstate.RelationExact
@@ -162,10 +192,11 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	// load: a document never renders a superseded object as untouched
 	// because its records could not be read.
 	var sup *Views
+	var history defaultHistory
 	if req.Mode == ModeWorkingTree {
-		sup, err = WorkTreeViews(ctx, req.Root)
+		sup, history, err = workTreeViewsWithHistory(ctx, req.Root)
 	} else {
-		sup, err = CommitViews(ctx, req.Root, src.commit)
+		sup, history, err = commitViewsWithHistory(ctx, req.Root, src.commit)
 	}
 	if err != nil {
 		// vocab:identity — "closed-spec object supersession" is the design's feature name (design §2), not a lifecycle state label
@@ -189,6 +220,9 @@ func Load(ctx context.Context, req Request) (Result, error) {
 		RelPath:     src.relPath,
 		Head:        head,
 		Disclosures: disclosures,
+		Content:     src.content,
+		State:       state,
+		Accepted:    history.accepted(),
 	}, nil
 }
 

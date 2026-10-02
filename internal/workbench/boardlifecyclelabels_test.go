@@ -236,11 +236,13 @@ func TestBoard_NotYetAcceptedReadOnly_NeverLabeledSealed(t *testing.T) {
 	})
 }
 
-// TestWriteASDPosture_DisplayedBytesWordByStateFormal: the posture
-// header's plain word is a pure function of the formal state — both
+// TestWriteASDPosture_DisplayedBytesWordByStateFormal: the bar's posture
+// group's plain word is a pure function of the formal state — both
 // spellings of proposed map to "proposed", the three proven default-branch
 // states keep their own words, and anything unrecognized (including an
-// absent state) reads as unproven, never as proposed or accepted.
+// absent state) reads as unproven, never as proposed or accepted. The
+// group is the top bar's (spec/chrome-and-tokens-v2), rendered from the
+// same facts the wall's snapshot carries.
 func TestWriteASDPosture_DisplayedBytesWordByStateFormal(t *testing.T) {
 	proj := &BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
 	for _, tc := range []struct{ state, want string }{
@@ -255,9 +257,10 @@ func TestWriteASDPosture_DisplayedBytesWordByStateFormal(t *testing.T) {
 	} {
 		asd := testASDView()
 		asd.StateFormal = tc.state
-		body := renderBoardRegion(proj, &boardGitState{}, asd)
-		if want := `displayed bytes: ` + tc.want + ` <span class="asd-posture-formal">`; !strings.Contains(body, want) {
-			t.Errorf("StateFormal %q: posture header missing %q", tc.state, want)
+		bar := specBarFacts(proj, asd)
+		body := asdPostureHTML(&bar)
+		if want := `displayed bytes: ` + tc.want + ` <span class="asd-posture-formal`; !strings.Contains(body, want) {
+			t.Errorf("StateFormal %q: posture group missing %q in %s", tc.state, want, body)
 		}
 	}
 	// And the same function is mode-independent: an authoring wall's
@@ -265,7 +268,8 @@ func TestWriteASDPosture_DisplayedBytesWordByStateFormal(t *testing.T) {
 	proj.Mode = modeAuthoring
 	asd := testASDView()
 	asd.StateFormal = "proposed"
-	if body := renderBoardRegion(proj, &boardGitState{Branch: "design/s"}, asd); !strings.Contains(body, "displayed bytes: proposed ") {
+	bar := specBarFacts(proj, asd)
+	if body := asdPostureHTML(&bar); !strings.Contains(body, "displayed bytes: proposed <span") {
 		t.Errorf("authoring wall's proposed bytes not read as proposed")
 	}
 }
@@ -290,7 +294,12 @@ func TestBoardDiagram_ReadOnlyStampNeverSealed(t *testing.T) {
 // dressed as the sealed record — the undeclared case reads as unproven.
 func TestRenderBoardRegion_ReadOnlyReasonFailsClosed(t *testing.T) {
 	proj := &BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
-	body := renderBoardRegion(proj, &boardGitState{}, testASDView())
+	asd := testASDView()
+	// The reason and the panel are the region's; the mode stamp is the top
+	// bar's posture group (spec/chrome-and-tokens-v2), rendered from the
+	// same projection.
+	bar := specBarFacts(proj, asd)
+	body := renderBoardRegion(proj, &boardGitState{}, asd) + asdPostureHTML(&bar)
 	bodyMustHave(t, body, `data-readonly-reason="unproven"`, unprovenStamp)
 	bodyMustLack(t, body, sealedStamp, sealedClaim, `sealed-panel`)
 }

@@ -13,6 +13,7 @@
 package workbench
 
 import (
+	"context"
 	stdhtml "html"
 	"html/template"
 	"net/http"
@@ -34,8 +35,10 @@ const staleDerivedHint = `This store's <code>derived/</code> records pin commits
 //
 // status is written verbatim — DEFECT B's rule is that loud stays loud: the
 // caller keeps choosing the (non-2xx) code, and this helper only makes the
-// body honest.
-func renderError(w http.ResponseWriter, status int, err error) {
+// body honest. root is the checkout the failing handler serves, for the
+// page's top bar facts (renderPage); "" when it knows none, and those
+// facts are then disclosed-unproven.
+func renderError(ctx context.Context, w http.ResponseWriter, root string, status int, err error) {
 	var body strings.Builder
 	body.WriteString(`<div class="error-page" role="alert">`)
 	body.WriteString(`<p class="error-message"><strong>The workbench could not render this page.</strong></p>`)
@@ -47,7 +50,7 @@ func renderError(w http.ResponseWriter, status int, err error) {
 	}
 	body.WriteString(`</div>`)
 
-	out, rerr := renderPage(pageData{
+	out, rerr := renderPage(ctx, root, pageData{
 		Title:    "Error",
 		Nav:      template.HTML(`<span class="current">error</span>`),
 		BodyHTML: template.HTML(body.String()),

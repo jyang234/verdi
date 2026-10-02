@@ -127,6 +127,39 @@
     restoreFocus(focused);
   }
 
+  // -- the top bar's posture group (spec/chrome-and-tokens-v2; SI-323 (3)) --
+  // The snapshot and every mutation response carry the bar's posture group
+  // as their own fragment (the server's `posture` field); the bar swaps it
+  // in whole, keeping an open disclosure and the focused control across
+  // the swap, exactly as the region swap does for its own.
+  function applyPosture(html) {
+    var cur = document.getElementById("asd-posture");
+    if (!cur || typeof html !== "string" || !html) return;
+    var open = [];
+    var ds = cur.querySelectorAll("details[open]");
+    for (var i = 0; i < ds.length; i++) {
+      var key = ds[i].getAttribute("data-testid") || ds[i].id;
+      if (key) open.push(key);
+    }
+    var active = document.activeElement;
+    var focused = active && active !== document.body && cur.contains(active)
+      ? active.getAttribute("data-testid") || active.id || null
+      : null;
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    var next = tpl.content.firstElementChild;
+    if (!next) return;
+    cur.replaceWith(next);
+    for (var j = 0; j < open.length; j++) {
+      var d = next.querySelector('details[data-testid="' + open[j] + '"]') || next.querySelector("#" + open[j]);
+      if (d && d.tagName === "DETAILS") d.setAttribute("open", "");
+    }
+    if (focused) {
+      var f = next.querySelector('[data-testid="' + focused + '"]') || next.querySelector("#" + focused);
+      if (f && f.focus) f.focus({ preventScroll: true });
+    }
+  }
+
   function applyProjection(p, announceText) {
     var a = api2();
     if (a && a.interactionLive()) {
@@ -143,6 +176,7 @@
     }
     adoptProjection(p);
     if (typeof p.html === "string" && p.html) applyRegion(p.html);
+    if (typeof p.posture === "string" && p.posture) applyPosture(p.posture);
     if (announceText) announce(announceText);
   }
 
@@ -177,7 +211,7 @@
       })
       .then(function (snap) {
         if (force && snap && mutationSeq === mutationsAtStart) {
-          applyProjection({ html: snap.html, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined });
+          applyProjection({ html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined });
           return undefined;
         }
         if (seq !== refreshSeq) {
@@ -190,7 +224,7 @@
         if (snap) {
           var changed = snap.revision !== revision;
           applyProjection(
-            { html: snap.html, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined },
+            { html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined },
             changed ? "Board updated" : null
           );
         }

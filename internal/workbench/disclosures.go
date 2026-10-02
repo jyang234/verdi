@@ -36,16 +36,16 @@ func disclosuresHandler(root string, extras []disclosure.Disclosure) http.Handle
 			// An unenumerable store is an operational failure and must
 			// say so — a vacuous "no disclosures" here would be the exact
 			// silent pass this page exists to forbid (constitution 2).
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
-		out, err := renderPage(pageData{
+		out, err := renderPage(r.Context(), root, pageData{
 			Title:    "Disclosures",
 			Nav:      template.HTML(`<a href="/">index</a>`),
 			BodyHTML: disclosureview.HTML(items, disclosuresNote),
 		})
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -95,6 +95,21 @@ type diagramEditorView struct {
 	// populated by loadDiagram itself (loadDiagram has no request in
 	// scope) and never read by the fragment or API routes.
 	Exit diagramExitTarget
+
+	// Bar is the top bar's facts (spec/chrome-and-tokens-v2; SI-323 (1)):
+	// page-chrome-only state the page handler sets from the Git state
+	// loadDiagram already read — the editor is a page not about one spec.
+	// Never read by the fragment or API routes.
+	Bar barFacts
+}
+
+// pageTitle is the editor page's title: the proposal's own, or its name
+// when it carries none.
+func (v *diagramEditorView) pageTitle() string {
+	if v.Title == "" {
+		return v.Name
+	}
+	return v.Title
 }
 
 // diagramPath is the proposal's file in the working tree (01 §Directory
@@ -262,13 +277,14 @@ func (s *boardDiagramServer) boardDiagramPageHandler() http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		v.Exit = resolveDiagramExit(s.root, r.URL.Query().Get("board"))
-		out, err := renderDiagramEditorPage(v)
+		v.Bar = branchBarFactsFor(r.Context(), s.root, v.pageTitle(), v.Git)
+		out, err := renderDiagramEditorPage(r.Context(), v)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -291,7 +307,7 @@ func (s *boardDiagramServer) boardDiagramFragmentHandler() http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -173,7 +173,7 @@ func TestLoadDocument_PerBranchLinksNoCorpusPage(t *testing.T) {
 	ctx := context.Background()
 	repo := scenario.Build(t, "proposed") // checkout design/successor
 	serving := &boardSpecServer{root: repo.Dir}
-	snap, err := serving.loadDocument(ctx, "successor", specdoc.KindSpec)
+	snap, _, err := serving.loadDocument(ctx, "successor", specdoc.KindSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestLoadDocument_PerBranchLinksNoCorpusPage(t *testing.T) {
 		t.Fatalf("the serving checkout's Document tab lacks the corpus link:\n%s", snap.Markdown)
 	}
 	branch := &boardSpecServer{root: repo.Dir, fixedBranch: "design/successor"}
-	snap, err = branch.loadDocument(ctx, "successor", specdoc.KindSpec)
+	snap, _, err = branch.loadDocument(ctx, "successor", specdoc.KindSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,11 +337,11 @@ func TestPerBranch_KeepsConflictRefAsText(t *testing.T) {
 
 	// The closed feature's Document tab: linked on the serving instance,
 	// text on the per-branch one, the same words either way.
-	servingDoc, err := serving.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
+	servingDoc, _, err := serving.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	branchDoc, err := branch.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
+	branchDoc, _, err := branch.loadDocument(ctx, "closed-feature", specdoc.KindSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestPerBranch_KeepsConflictRefAsText(t *testing.T) {
 	if want := []supersessionLinkView{{Ref: obsConflictF, Href: ""}}; !equalLinks(bLines[1].Trailing, want) {
 		t.Errorf("per-branch since trailing = %+v, want the ref with no href %+v", bLines[1].Trailing, want)
 	}
-	page, err := renderBoardSpecPage(branchProj, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), branchProj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatal(err)
 	}

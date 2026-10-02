@@ -34,25 +34,25 @@ func TestBuildIdentificationFooter(t *testing.T) {
 		{
 			name: "shared read-page shell",
 			render: func() ([]byte, error) {
-				return renderPage(pageData{Title: "T", BodyHTML: "<p>body</p>"})
+				return renderPage(t.Context(), "", pageData{Title: "T", BodyHTML: "<p>body</p>"})
 			},
 		},
 		{
 			name: "v0 board page",
 			render: func() ([]byte, error) {
-				return renderBoardPage(boardClientState{Key: "STORY-1"}, classWords{})
+				return renderBoardPage(t.Context(), boardClientState{Key: "STORY-1"}, classWords{}, barFacts{})
 			},
 		},
 		{
 			name: "v1 board page",
 			render: func() ([]byte, error) {
-				return renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly, Status: "draft"}, &boardGitState{}, testASDView())
+				return renderBoardSpecPage(t.Context(), &BoardProjection{Spec: "s", Title: "S", Mode: modeReadOnly, Status: "draft"}, &boardGitState{}, testASDView())
 			},
 		},
 		{
 			name: "diagram editor page",
 			render: func() ([]byte, error) {
-				return renderDiagramEditorPage(&diagramEditorView{Name: "d", Status: "proposed", Mode: modeReadOnly, Raw: []byte("flowchart TD\n"), Body: []byte("flowchart TD\n")})
+				return renderDiagramEditorPage(t.Context(), &diagramEditorView{Name: "d", Status: "proposed", Mode: modeReadOnly, Raw: []byte("flowchart TD\n"), Body: []byte("flowchart TD\n")})
 			},
 		},
 	}

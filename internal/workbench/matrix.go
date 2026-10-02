@@ -40,37 +40,37 @@ func matrixHandler(root string) http.HandlerFunc {
 		ctx := r.Context()
 		spec, err := storyresolve.Resolve(root, storyArg)
 		if err != nil {
-			renderError(w, http.StatusNotFound, err)
+			renderError(r.Context(), w, root, http.StatusNotFound, err)
 			return
 		}
 
 		commit, err := gitx.RevParse(ctx, root, "HEAD")
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 		records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
 		landing := ""
 		ref, err := artifact.ParseRef(spec.ID)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		relPath := store.ActiveSpecRelPath(ref.Name)
 		content, err := os.ReadFile(store.ActiveSpecPath(root, ref.Name))
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		state, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		if state.Baseline != nil {
@@ -83,7 +83,7 @@ func matrixHandler(root string) http.HandlerFunc {
 			Git: workbenchObligationAncestry{},
 		})
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -92,9 +92,9 @@ func matrixHandler(root string) http.HandlerFunc {
 			Nav:       template.HTML(`<a href="/">index</a>`),
 			ExtraHTML: renderMatrixHTML(result),
 		}
-		out, err := renderPage(page)
+		out, err := renderPage(r.Context(), root, page)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

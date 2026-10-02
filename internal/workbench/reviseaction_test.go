@@ -559,7 +559,7 @@ func TestBoardRender_ReviseVocabulary(t *testing.T) {
 		Class:  "feature",
 	}
 	proj.applyModelVocabulary(vocabTestModel())
-	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), proj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestBoardRender_ReviseAbsentInReviewMode(t *testing.T) {
 			Status: "accepted-pending-build",
 			Class:  "feature",
 		}
-		page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+		page, err := renderBoardSpecPage(t.Context(), proj, &boardGitState{}, testASDView())
 		if err != nil {
 			t.Fatalf("renderBoardSpecPage(%s): %v", mode, err)
 		}

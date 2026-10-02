@@ -75,7 +75,7 @@ test.describe("tool view exit: the diagram designer's exit affordance and Escape
     await expect(exit).toBeVisible();
     await expect(exit).toHaveAttribute("href", boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(exit).toContainText(SHOWCASE.DESIGN_SPEC);
-    await expect(page.locator(".site-nav")).not.toContainText("back to board");
+    await expect(page.locator(".topbar-nav")).not.toContainText("back to board");
 
     await exit.click();
     await expectDesignSpecBoardRestored(page);

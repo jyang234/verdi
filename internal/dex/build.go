@@ -53,6 +53,13 @@ type Options struct {
 
 // Build renders and writes the full dex site to opts.OutDir.
 func Build(ctx context.Context, opts Options) error {
+	return build(ctx, opts, embeddedStyleCSS)
+}
+
+// build is Build over the committed stylesheet's source (styleSource), the
+// one input a package test replaces to drive a refused stylesheet through
+// the whole build.
+func build(ctx context.Context, opts Options, styleSource func() ([]byte, error)) error {
 	if opts.Root == "" {
 		return fmt.Errorf("dex: Build: Root must not be empty")
 	}
@@ -159,7 +166,7 @@ func Build(ctx context.Context, opts Options) error {
 	if err := writeHome(opts.OutDir, stamp, mdl); err != nil {
 		return err
 	}
-	if err := writeStaticAssets(opts.OutDir); err != nil {
+	if err := writeStaticAssets(opts.OutDir, styleSource); err != nil {
 		return err
 	}
 

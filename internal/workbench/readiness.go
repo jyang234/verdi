@@ -39,8 +39,9 @@ var errReadinessNoSpec = errors.New(
 // "not an unpinned whole spec ref" refusal would arrive as a 503, the
 // wrong code for a malformed query, after a derivation attempt the
 // handler never had to make). A loader error (an unknown spec, a
-// derivation failure) is a 503 naming the error's own text.
-func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFunc {
+// derivation failure) is a 503 naming the error's own text. root is the
+// serving checkout, for every page's top bar facts (renderPage).
+func readinessHandler(root string, loader ReadinessLoader, defaultSpec string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -51,15 +52,15 @@ func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFu
 		if name := r.URL.Query().Get("spec"); name != "" {
 			parsed, err := artifact.ParseRef("spec/" + name)
 			if err != nil {
-				renderError(w, http.StatusBadRequest, err)
+				renderError(r.Context(), w, root, http.StatusBadRequest, err)
 				return
 			}
 			if parsed.Pinned() {
-				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries a commit pin", name))
+				renderError(r.Context(), w, root, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries a commit pin", name))
 				return
 			}
 			if parsed.Fragment() {
-				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries an object fragment", name))
+				renderError(r.Context(), w, root, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries an object fragment", name))
 				return
 			}
 			// The parsed ref's own canonical spelling, never the raw query
@@ -71,22 +72,22 @@ func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFu
 		}
 
 		if loader == nil {
-			renderError(w, http.StatusServiceUnavailable, errReadinessNotWired)
+			renderError(r.Context(), w, root, http.StatusServiceUnavailable, errReadinessNotWired)
 			return
 		}
 		if ref == "" {
-			renderError(w, http.StatusServiceUnavailable, errReadinessNoSpec)
+			renderError(r.Context(), w, root, http.StatusServiceUnavailable, errReadinessNoSpec)
 			return
 		}
 
 		snap, err := loader.Load(r.Context(), ref)
 		if err != nil {
-			renderError(w, http.StatusServiceUnavailable, err)
+			renderError(r.Context(), w, root, http.StatusServiceUnavailable, err)
 			return
 		}
-		out, err := renderReadiness(snap)
+		out, err := renderReadiness(r.Context(), root, snap)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
