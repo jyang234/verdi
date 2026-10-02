@@ -121,6 +121,9 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 			b.renderBranchGone(w, r, branch, rt)
 			return
 		}
+		if b.refusedSwitch(w, r, branch, rt) {
+			return
+		}
 		s, err := b.server(r.Context(), branch)
 		switch {
 		case err == nil:
@@ -135,6 +138,45 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 			b.renderCutFailure(w, r, branch, err, rt)
 		}
 	}
+}
+
+// refusedSwitch answers a branch switch (POST api/git-switch) beneath /b/
+// for a local branch that is not the serving checkout's own, before
+// dispatch ensures that branch's managed worktree, and reports whether it
+// answered. Such a board's instance always refuses the switch (the branch
+// is the address, dc-1; actionGitSwitch), so ensuring the worktree first
+// would leave a cut behind a refusal, a mutation a refusal never leaves
+// (ledger SI-341 (3), SI-325 (3)). The branch checked out at the serving
+// root dispatches into the serving instance, which can switch; a branch
+// with no local ref keeps its remote-only or no-ref answer. Both fall
+// through. A failed read refuses too, before any mutation, naming the
+// failure.
+func (b *branchBoards) refusedSwitch(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	if rt.suffix != routeBoardAPI || r.Method != http.MethodPost || r.PathValue("action") != "git-switch" {
+		return false
+	}
+	ctx := r.Context()
+	local, err := gitx.HasLocalBranch(ctx, b.root, branch)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve branch %s before a branch switch: %v", branch, err))
+		return true
+	}
+	if !local {
+		return false
+	}
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before a branch switch: %v", err))
+		return true
+	}
+	if current == branch {
+		return false
+	}
+	// The per-branch instance's own refusal, word for word
+	// (actionGitSwitch), answered before any worktree is cut.
+	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(
+		"this board serves branch %s at its own /b/ address — the branch is the address here, so switching this working tree is not available; open the other branch's board from the directory instead", branch))
+	return true
 }
 
 // validBranchSegment reports whether branch (the decoded path segment) is
