@@ -129,6 +129,23 @@ func TestDifferingGovernedInputs(t *testing.T) {
 		{"a nested store, an edited spec", "store", func(t *testing.T, root string) {
 			write(t, root, ".verdi/specs/active/s/spec.md", "edited\n")
 		}, []string{".verdi/specs/active/s/spec.md"}},
+		// Symlinks under a governed path (re-review RR-A2): the
+		// preconditions read through a link, so it is never skipped.
+		{"an untracked symlink under a governed path is named", "", func(t *testing.T, root string) {
+			symlink(t, "../../../elsewhere.txt", filepath.Join(root, ".verdi", "obligations", "s", "ac-2--static.md"))
+		}, []string{".verdi/obligations/s/ac-2--static.md"}},
+		{"a symlinked directory under a governed path differs", "", func(t *testing.T, root string) {
+			other := t.TempDir()
+			write(t, other, "x.md", "x\n")
+			symlink(t, other, filepath.Join(root, ".verdi", "policy", "overlays"))
+		}, []string{".verdi/policy/overlays"}},
+		{"a tracked file replaced by a symlink whose target differs", "", func(t *testing.T, root string) {
+			p := filepath.Join(root, ".verdi", "obligations", "s", "ac-1--static.md")
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			symlink(t, "../../../elsewhere.txt", p)
+		}, []string{".verdi/obligations/s/ac-1--static.md"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,6 +200,58 @@ func TestDifferingGovernedInputs(t *testing.T) {
 		})
 	}
 
+	// Pinned as it stands, and left to BL-142: a symlink the base tracks
+	// under a governed path always differs, since the working tree's side
+	// hashes the link's target while the base's blob is the link itself,
+	// so build start refuses with exit 2 (re-review s4).
+	t.Run("a base that tracks a symlink under a governed path always differs (BL-142)", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: committed, Message: "base"}})
+		symlink(t, "constitution.md", filepath.Join(repo.Dir, ".verdi", "policy", "alias.md"))
+		gitTestOutput(t, repo.Dir, "add", "--", ".verdi/policy/alias.md")
+		gitTestOutput(t, repo.Dir, "commit", "-q", "-m", "a tracked symlink")
+		base := strings.TrimSpace(gitTestOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		got, err := differingGovernedInputs(ctx, repo.Dir, base, g)
+		if err != nil {
+			t.Fatalf("differingGovernedInputs: %v", err)
+		}
+		if !slices.Equal(got.worktree, []string{".verdi/policy/alias.md"}) || got.head != nil {
+			t.Fatalf("differingGovernedInputs = %+v, want the tracked symlink named in the working tree only", got)
+		}
+	})
+
+	// A store root whose own path holds a glob metacharacter is never read
+	// as part of the pattern (re-review RR-A3, probe P-A5).
+	for _, tt := range []struct {
+		name   string
+		change func(t *testing.T, root string)
+		want   []string
+	}{
+		{"a root holding [x], identical with a second active spec", func(*testing.T, string) {}, nil},
+		{"a root holding [x], an untracked active spec added", func(t *testing.T, root string) {
+			write(t, root, ".verdi/specs/active/u/spec.md", "an untracked superseding spec\n")
+		}, []string{".verdi/specs/active/u/spec.md"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{".verdi/specs/active/t/spec.md": "t\n"}
+			for rel, content := range committed {
+				files[rel] = content
+			}
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "base"}})
+			root := filepath.Join(t.TempDir(), "br[x]ket")
+			if err := os.Rename(repo.Dir, root); err != nil {
+				t.Fatal(err)
+			}
+			tt.change(t, root)
+			got, err := differingGovernedInputs(ctx, root, repo.Head, g)
+			if err != nil {
+				t.Fatalf("differingGovernedInputs: %v", err)
+			}
+			if !slices.Equal(got.worktree, tt.want) || got.head != nil {
+				t.Fatalf("differingGovernedInputs = %+v, want working tree %v and HEAD nil", got, tt.want)
+			}
+		})
+	}
+
 	t.Run("an unresolvable base is an error", func(t *testing.T) {
 		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: committed, Message: "base"}})
 		if got, err := differingGovernedInputs(ctx, repo.Dir, strings.Repeat("0", 40), g); err == nil {
@@ -223,5 +292,13 @@ func TestProjectionInputs(t *testing.T) {
 				t.Fatalf("projectionInputs = %+v, want trees %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// symlink creates link pointing at target, failing the test on error.
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
 	}
 }

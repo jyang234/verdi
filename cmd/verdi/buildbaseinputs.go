@@ -260,24 +260,23 @@ func (g governedInputs) worktreeFiles(root string) ([]string, error) {
 			return nil, fmt.Errorf("reading %s: %w", tree, err)
 		}
 	}
+	// The glob is matched within root (os.DirFS), so a metacharacter in
+	// root's own path is never read as part of the pattern (re-review
+	// RR-A3). Its matches are slash paths relative to root.
 	for _, glob := range g.globs {
-		matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(glob)))
+		matches, err := fs.Glob(os.DirFS(root), glob)
 		if err != nil {
 			return nil, fmt.Errorf("matching %s: %w", glob, err)
 		}
-		for _, m := range matches {
-			info, err := os.Lstat(m)
+		for _, rel := range matches {
+			info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
 			if err != nil {
-				return nil, fmt.Errorf("reading %s: %w", m, err)
+				return nil, fmt.Errorf("reading %s: %w", rel, err)
 			}
 			if info.IsDir() {
 				continue
 			}
-			rel, err := filepath.Rel(root, m)
-			if err != nil {
-				return nil, err
-			}
-			seen[filepath.ToSlash(rel)] = true
+			seen[rel] = true
 		}
 	}
 	files := make([]string, 0, len(seen))
