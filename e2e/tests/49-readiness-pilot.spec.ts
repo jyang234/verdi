@@ -83,6 +83,9 @@ const ATTENTION_QUEUE = [
   "success/contributor/attestation",
   "success/contributor/behavioral",
   "success/contributor/static",
+  "success/coverage/ac-1",
+  "success/coverage/ac-2",
+  "success/coverage/ac-3",
   "context/disclosure/repository-remote-unknown",
   SEMANTIC_ID,
   "review/role/merge/attestation/author-vouch",
@@ -101,6 +104,7 @@ const COMPLETED_CHECKS = [
   "shape/mutation",
   "shape/outcome",
   "shape/problem",
+  "success/criteria",
   "context/mechanical/action:make-verify#complete",
   "context/mechanical/configuration:go-version#complete",
   "review/eventual-derivation",
@@ -311,7 +315,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   // "Show fewer"; collapsing hides it again. No event is recorded.
   const more = page.locator("details.readiness-more");
   const summary = more.locator(".readiness-more-summary");
-  await expect(summary).toHaveText(/18 more items\s*Show fewer/); // both spans in DOM…
+  await expect(summary).toHaveText(/21 more items\s*Show fewer/); // both spans in DOM…
   await expect(more.locator(".readiness-more-closed")).toBeVisible();
   await expect(more.locator(".readiness-more-open")).toBeHidden();
 
@@ -321,8 +325,8 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   await expect(more.locator(".readiness-more-open")).toBeVisible();
   await expect(more.locator(".readiness-more-closed")).toBeHidden();
   const revealed = more.locator("[data-concern-id]");
-  await expect(revealed).toHaveCount(18);
-  for (let i = 0; i < 18; i++) {
+  await expect(revealed).toHaveCount(21);
+  for (let i = 0; i < 21; i++) {
     await expect(revealed.nth(i)).toHaveAttribute(
       "data-concern-id",
       ATTENTION_QUEUE[i + 3],
