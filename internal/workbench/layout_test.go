@@ -87,6 +87,15 @@ func TestRenderPage_BarSlotsRenderInTheBar(t *testing.T) {
 	if strings.Count(page, "probe-chip") != 1 || strings.Count(page, "probe-control") != 1 {
 		t.Fatalf("a slot rendered outside the bar or twice:\n%s", page)
 	}
+
+	// The next page that fills no slot carries none of the previous page's.
+	next, err := renderPage(context.Background(), "", pageData{Title: "Disclosures", Nav: `<a href="/">index</a>`, BodyHTML: "<p>body</p>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(next, []byte("probe-")) || bytes.Contains(next, []byte("topbar-controls")) {
+		t.Fatalf("a slot leaked into the next page:\n%s", next)
+	}
 }
 
 // TestSharedLayoutRoutesFillNoBarSlot drives the shared-layout routes

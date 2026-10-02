@@ -141,8 +141,10 @@ func TestDeriveSuccessCoverage(t *testing.T) {
 		in.Journey.Lifecycle.Class = "story"
 		in.Shape.DeclaredObjectIDs = []string{"ac-1", "ac-2"}
 		in.Success = SuccessFacts{CriterionIDs: []string{"ac-1", "ac-2"}, UncoveredCriteria: []string{"ac-2"}}
-		if _, err := Derive(in); err == nil || !strings.Contains(err.Error(), "only to a feature") {
-			t.Fatalf("Derive(story with uncovered criteria) error = %v, want the features-only refusal", err)
+		// The input is refused before anything is derived; Snapshot.Validate
+		// refuses the same row again (TestValidateSuccessFamilies).
+		if _, err := Derive(in); err == nil || !strings.Contains(err.Error(), "only to a feature") || strings.Contains(err.Error(), "derived invalid snapshot") {
+			t.Fatalf("Derive(story with uncovered criteria) error = %v, want the input's features-only refusal", err)
 		}
 		in.Success.UncoveredCriteria = []string{}
 		for _, c := range mustDerive(t, in).AllConcerns {
