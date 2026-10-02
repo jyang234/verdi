@@ -188,19 +188,19 @@ func TestStrictFixtureReportIsCurrent(t *testing.T) {
 // TestLintStrict_NolintProbe runs the pinned golangci-lint with
 // .golangci.strict.yml, as make lint-strict runs it, over the //nolint probe
 // module, and proves which directive shapes suppress a gated finding there
-// (spec/strict-lint-gate-v2 ac-3, dc-4; ledger SI-337). A bare //nolint, the
+// (spec/strict-lint-gate-v2 ac-3, dc-4; ledger SI-337). A bare directive, the
 // same after a space, //nolint:all, //nolint:unused,all, and
-// //nolint:gochecknoglobals each suppress the gochecknoglobals finding beside
-// them, so the witness's refusal of the first four follows real suppression;
-// //nolint:unused and a mid-comment mention suppress nothing gated. On a
-// callee's doc comment, contextcheck's name in an ungated directive's reason
-// or inside another linter's name, and contextcheck's request flag, each
-// suppress contextcheck's finding at the call, so the witness counts them;
-// the same directive without that name, with it capitalised, or a blank line
-// away from the doc, and the request flag's shape without the flag, suppress
-// nothing. Every finding must be in a reported_*.go file, exactly one in
-// each, from the linter the file's name says, and none in a suppressed_*.go
-// file.
+// gochecknoglobals' own name each suppress the gochecknoglobals finding
+// beside them, so the witness's refusal of the first four follows real
+// suppression; a directive naming only unused, and a mid-comment mention,
+// suppress nothing gated. On a callee's doc comment, contextcheck's name in
+// an ungated directive's reason or inside another linter's name, and
+// contextcheck's request flag, each suppress contextcheck's finding at the
+// call, so the witness counts them; the same directive without that name,
+// with it capitalised, or a blank line away from the doc, and the request
+// flag's shape without the flag, suppress nothing. Every finding must be in
+// a reported_*.go file, exactly one in each, from the linter the file's name
+// says, and none in a suppressed_*.go file.
 func TestLintStrict_NolintProbe(t *testing.T) {
 	findings := lintStrictFixture(t, NolintProbeDir, probeUnshown)
 
