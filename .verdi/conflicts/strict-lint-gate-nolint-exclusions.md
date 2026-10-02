@@ -6,7 +6,7 @@ owners: [platform-team]
 status: superseded
 links:
   - { type: challenges, ref: spec/strict-lint-gate }
-frozen: { at: 2026-10-01, commit: 0c42bb3f3d23ce26258ed38807d8190962351f88 }
+frozen: { at: 2026-10-01, commit: 45ac10e7adcc9cb7c2198dfbde8dde8f43e86f48 }
 ---
 # Conflict: strict-lint-gate's exclusion count misses source directives
 
