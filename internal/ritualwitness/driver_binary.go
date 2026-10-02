@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,8 +31,71 @@ type Binary struct {
 	Args []string
 	// Env is extra environment, appended to the test process's own, which
 	// carries the fixture's git configuration isolation, and to
-	// GOTRACEBACK=single, which Env may override.
+	// GOTRACEBACK=single, which Env may override. It may not set a
+	// variable the CI field pins (ciEnvKeys).
 	Env []string
+	// CI is the continuous-integration environment the binary runs under.
+	// Every run sets CI, GITHUB_ACTIONS, and GITHUB_BASE_REF to exactly
+	// these values, empty ones included, and never inherits them from the
+	// test process, so a verb that reads them (close's publish guard, for
+	// one) behaves the same locally and in CI. The zero value is a run
+	// outside CI.
+	CI CIEnv
+	// Stdin is the binary's standard input; nil is the null device.
+	Stdin io.Reader
+	// ExtraFiles are open files the binary inherits as file descriptors 3
+	// and up, in order (os/exec's Cmd.ExtraFiles), for a verb that reads
+	// one, such as context execution's controller socket. The caller owns
+	// and closes them.
+	ExtraFiles []*os.File
+}
+
+// CIEnv is the CI environment a Binary run sees, one field per variable.
+type CIEnv struct {
+	// CI is the generic "running in CI" marker.
+	CI string
+	// GitHubActions is GITHUB_ACTIONS, GitHub Actions' own marker.
+	GitHubActions string
+	// GitHubBaseRef is GITHUB_BASE_REF, a pull request's target branch.
+	GitHubBaseRef string
+}
+
+// ciEnvKeys are the variables a Binary run takes from its CI field.
+var ciEnvKeys = []string{"CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF"}
+
+// pairs returns c as KEY=value pairs, in ciEnvKeys' order.
+func (c CIEnv) pairs() []string {
+	return []string{"CI=" + c.CI, "GITHUB_ACTIONS=" + c.GitHubActions, "GITHUB_BASE_REF=" + c.GitHubBaseRef}
+}
+
+// ciEnvKey returns the CI variable kv (a KEY=value pair) sets, or "".
+func ciEnvKey(kv string) string {
+	key, _, _ := strings.Cut(kv, "=")
+	for _, k := range ciEnvKeys {
+		if key == k {
+			return k
+		}
+	}
+	return ""
+}
+
+// environ is the binary's environment: the test process's own without the
+// CI variables, GOTRACEBACK=single, Env, and the CI field's values.
+func (d Binary) environ() ([]string, error) {
+	for _, kv := range d.Env {
+		if k := ciEnvKey(kv); k != "" {
+			return nil, fmt.Errorf("ritualwitness: Binary: Env sets %s; set it through the CI field, which every run pins", k)
+		}
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if ciEnvKey(kv) == "" {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "GOTRACEBACK=single")
+	env = append(env, d.Env...)
+	return append(env, d.CI.pairs()...), nil
 }
 
 // Run implements Driver. A non-zero exit returns its code with an error
@@ -41,18 +105,25 @@ type Binary struct {
 // which is no verb's exit class, so RunOn refuses the run instead of
 // judging it a refusal (ledger SI-334 (4)). The child runs with
 // GOTRACEBACK=single, so an ambient setting cannot hide or reshape the
-// trace the detection reads; the fixture's own Env still wins.
+// trace the detection reads; the fixture's own Env still wins. An Env
+// that sets a variable the CI field pins runs nothing and returns -1.
 func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if d.Path == "" {
 		return -1, CommandLog{}, errors.New("ritualwitness: Binary: no binary path")
 	}
+	env, err := d.environ()
+	if err != nil {
+		return -1, CommandLog{}, err
+	}
 	cmd := exec.CommandContext(ctx, d.Path, d.Args...)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), "GOTRACEBACK=single"), d.Env...)
+	cmd.Env = env
+	cmd.Stdin = d.Stdin
+	cmd.ExtraFiles = d.ExtraFiles
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err == nil {
 		return 0, CommandLog{}, nil
 	}

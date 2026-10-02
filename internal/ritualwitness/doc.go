@@ -9,7 +9,7 @@
 // Like internal/fixturegit, this is a Go test helper, not a production
 // package (PLAN.md §4). The pieces: Build and BuildWith (fixture.go) seed
 // a fixture; Capture (sensor.go) takes a Snapshot; Driver and its
-// InProcess, Binary, and Workbench implementations (driver*.go) run a
+// InProcess, Binary, Workbench, and MCP implementations (driver*.go) run a
 // ritual and report its exit and git command log; Evaluate
 // (evaluate*.go) judges a before/after pair and the log against a
 // Declaration; Run and RunOn (harness.go) compose them; Outcome
@@ -26,7 +26,12 @@
 // Go panic trace or a line beginning "fatal error: " to -1; Workbench
 // follows no redirect; and a witness of a refused declaration (index carry
 // refused) asserts the refusal's own reason — the words of Result.Err —
-// never exit 2 alone (ledger SI-334 (3), (4); re-review RR-B1).
+// never exit 2 alone (ledger SI-334 (3), (4); re-review RR-B1). MCP maps a
+// tool result whose isError is false to 0, one whose isError is true or a
+// JSON-RPC error to 2, and a transport failure or a response that is
+// neither to -1 (ledger SI-341 (5)). Binary sets CI, GITHUB_ACTIONS, and
+// GITHUB_BASE_REF on every run from its CI field, never from the test
+// process, so a verb that reads them behaves the same locally and in CI.
 //
 // # Sensed
 //

@@ -3,6 +3,7 @@ package ritualwitness
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime/debug"
@@ -44,9 +45,33 @@ func TestMain(m *testing.M) {
 // deterministically on every platform and under -race, unlike a deadlock,
 // whose detection the race runtime can withhold; spec "fatal-words" is a
 // refusal that mentions a fatal error mid-line, exiting 2; spec
-// "gotraceback" prints its GOTRACEBACK and exits 1.
+// "gotraceback" prints its GOTRACEBACK and exits 1; spec "stdin" prints
+// what it read from standard input and exits 1; spec "fd3" writes a line
+// to file descriptor 3 and exits 0, or exits 3 when it cannot; spec
+// "cienv" prints CI, GITHUB_ACTIONS, and GITHUB_BASE_REF, each with
+// whether it is set at all, and exits 1.
 func helperVerb(spec string) int {
 	switch spec {
+	case "stdin":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper: reading stdin:", err)
+			return 3
+		}
+		fmt.Fprintf(os.Stderr, "stdin=%q\n", data)
+		return 1
+	case "fd3":
+		if _, err := os.NewFile(3, "fd3").WriteString("written to fd 3\n"); err != nil {
+			fmt.Fprintln(os.Stderr, "helper: writing fd 3:", err)
+			return 3
+		}
+		return 0
+	case "cienv":
+		for _, k := range []string{"CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF"} {
+			v, ok := os.LookupEnv(k)
+			fmt.Fprintf(os.Stderr, "%s=%q set=%v\n", k, v, ok)
+		}
+		return 1
 	case "panic":
 		panic("helper verb panicked")
 	case "panic-words":
