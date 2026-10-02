@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,10 +38,13 @@ func TestMain(m *testing.M) {
 // named, then writes a line to stdout and to stderr and exits <exit>. Spec
 // "panic" panics, which the Go runtime reports with a trace and exit 2;
 // spec "panic-words" is a refusal whose own words begin "panic: " but that
-// carries no trace, exiting 2; spec "deadlock" blocks forever, which the
-// runtime reports as "fatal error: all goroutines are asleep" and exit 2;
-// spec "fatal-words" is a refusal that mentions a fatal error mid-line,
-// exiting 2; spec "gotraceback" prints its GOTRACEBACK and exits 1.
+// carries no trace, exiting 2; spec "stack-overflow" recurses past a
+// 64 KiB stack limit, which the runtime reports as "fatal error: stack
+// overflow" with a trace and exit 2 — a real runtime fatal error, reached
+// deterministically on every platform and under -race, unlike a deadlock,
+// whose detection the race runtime can withhold; spec "fatal-words" is a
+// refusal that mentions a fatal error mid-line, exiting 2; spec
+// "gotraceback" prints its GOTRACEBACK and exits 1.
 func helperVerb(spec string) int {
 	switch spec {
 	case "panic":
@@ -48,8 +52,9 @@ func helperVerb(spec string) int {
 	case "panic-words":
 		fmt.Fprintln(os.Stderr, "panic: the refusal's own words, not a trace")
 		return 2
-	case "deadlock":
-		<-make(chan int)
+	case "stack-overflow":
+		debug.SetMaxStack(64 << 10)
+		return overflowStack(0)
 	case "fatal-words":
 		fmt.Fprintln(os.Stderr, "close: refused: the index holds a fatal error: foreign-staged.txt is staged")
 		return 2
@@ -72,4 +77,17 @@ func helperVerb(spec string) int {
 	fmt.Println("helper stdout")
 	fmt.Fprintln(os.Stderr, "helper stderr")
 	return exit
+}
+
+// overflowStack recurses until the goroutine's stack exceeds its limit.
+// Every frame holds a buffer the next call reads, so no frame can be
+// elided; the guard on n, which never holds, keeps the recursion from
+// being unconditional.
+func overflowStack(n int) int {
+	if n < 0 {
+		return 0
+	}
+	var frame [512]byte
+	frame[n%len(frame)] = byte(n)
+	return overflowStack(n+1) + int(frame[(n+1)%len(frame)])
 }

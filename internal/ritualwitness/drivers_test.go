@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
@@ -30,6 +31,25 @@ func selfBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return exe
+}
+
+// helperBound bounds every exec of the helper verb: a helper that never
+// exits is killed through the driver's context and its test fails within
+// the bound, naming it, instead of at the package timeout.
+const helperBound = 60 * time.Second
+
+// boundedContext returns parent bounded by helperBound, and fails the test,
+// after everything else it reports, when that deadline was reached.
+func boundedContext(t *testing.T, parent context.Context) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(parent, helperBound)
+	t.Cleanup(func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Errorf("the helper verb did not exit within %s, so the driver killed it", helperBound)
+		}
+		cancel()
+	})
+	return ctx
 }
 
 // TestBinary_Run drives a real subprocess: the exit code is the
@@ -60,7 +80,7 @@ func TestBinary_Run(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			exit, log, err := tt.d.Run(ctx, fx.Dir)
+			exit, log, err := tt.d.Run(boundedContext(t, ctx), fx.Dir)
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
@@ -127,7 +147,7 @@ func TestBinary_CrashIsNoVerbsExit(t *testing.T) {
 	}{
 		{"a panic under an ambient GOTRACEBACK=system", "system", []string{helperEnv + "=panic"}, -1, []string{"panicked", "goroutine 1 [running]:"}},
 		{"a panic under an ambient GOTRACEBACK=none", "none", []string{helperEnv + "=panic"}, -1, []string{"panicked", "goroutine 1 [running]:"}},
-		{"a runtime fatal error (deadlock)", "", []string{helperEnv + "=deadlock"}, -1, []string{"crashed", "fatal error: all goroutines are asleep"}},
+		{"a runtime fatal error (stack overflow)", "", []string{helperEnv + "=stack-overflow"}, -1, []string{"crashed", "fatal error: stack overflow"}},
 		{"a refusal that mentions a fatal error mid-line", "", []string{helperEnv + "=fatal-words"}, 2, []string{"exited 2", "holds a fatal error"}},
 		{"the child's GOTRACEBACK is single over an ambient one", "system", []string{helperEnv + "=gotraceback"}, 1, []string{"GOTRACEBACK=single"}},
 		{"the fixture's own Env still wins", "system", []string{helperEnv + "=gotraceback", "GOTRACEBACK=crash"}, 1, []string{"GOTRACEBACK=crash"}},
@@ -137,7 +157,7 @@ func TestBinary_CrashIsNoVerbsExit(t *testing.T) {
 			if tt.ambient != "" {
 				t.Setenv("GOTRACEBACK", tt.ambient)
 			}
-			exit, log, err := Binary{Path: exe, Env: tt.env}.Run(ctx, fx.Dir)
+			exit, log, err := Binary{Path: exe, Env: tt.env}.Run(boundedContext(t, ctx), fx.Dir)
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
@@ -162,7 +182,7 @@ func TestGoCrash(t *testing.T) {
 		want   bool
 	}{
 		{"a panic trace", "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n", true},
-		{"a runtime fatal error", "fatal error: all goroutines are asleep - deadlock!\n\ngoroutine 1 [chan receive]:\n", true},
+		{"a runtime fatal error", "runtime: goroutine stack exceeds 65536-byte limit\nfatal error: stack overflow\n\nruntime stack:\n", true},
 		{"a fatal error after other output", "verdi: starting\nfatal error: concurrent map writes\n", true},
 		{"a fatal error mid-line", "close: refused: the index holds a fatal error: x\n", false},
 		{"a refusal's panic words alone", "panic: the refusal's own words, not a trace\n", false},
@@ -182,7 +202,7 @@ func TestGoCrash(t *testing.T) {
 func TestBinary_RunOnReportsTheLogUnavailable(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
-	res := RunOn(t, ctx, fx, Binary{Path: selfBinary(t), Env: []string{helperEnv + "=0:made-by-binary"}}, branchDecl())
+	res := RunOn(t, boundedContext(t, ctx), fx, Binary{Path: selfBinary(t), Env: []string{helperEnv + "=0:made-by-binary"}}, branchDecl())
 	want := []Verdict{
 		v("command_log", Unattributable, "the driver supplied no git command log"),
 		v("refs_create", Unattributable, "refs/heads/made-by-binary created"),
