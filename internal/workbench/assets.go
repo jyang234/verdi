@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/topbar.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -29,11 +29,13 @@ func mermaidHandler() http.HandlerFunc {
 	}
 }
 
-// styleCSSHandler serves internal/dex's composed stylesheet — the same
-// bytes dex writes to its static site, chroma light/dark palettes and all
-// (dex.StyleCSS) — so the workbench's shared class-based code rendering is
-// coloured and equally dark-mode-correct without owning a second stylesheet
-// (the same one-copy-two-surfaces pattern as the vendored mermaid.min.js).
+// styleCSSHandler serves internal/dex's composed stylesheet, chroma
+// light/dark palettes and all (dex.StyleCSS) — the docs site's copy is the
+// same composition with the workbench-only blocks stripped (SI-322), so
+// these bytes keep those blocks — so the workbench's shared class-based
+// code rendering is coloured and equally dark-mode-correct without owning
+// a second stylesheet (the same one-copy-two-surfaces pattern as the
+// vendored mermaid.min.js).
 func styleCSSHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -89,6 +91,14 @@ func boardDiagramJSHandler() http.HandlerFunc {
 // posture as the board scripts.
 func readinessJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/readiness.js")
+}
+
+// topBarJSHandler serves the top bar's one JS file
+// (spec/chrome-and-tokens-v2), referenced from every workbench page —
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (spec/workbench-redesign co-1; TestTopBarAsset_ServedWithinBudget).
+func topBarJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/topbar.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {

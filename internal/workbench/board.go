@@ -47,18 +47,18 @@ func boardHandler(root string, mdl *model.Model) http.HandlerFunc {
 
 		path, err := boardio.BoardStatePath(root, key)
 		if err != nil {
-			renderError(w, http.StatusBadRequest, err)
+			renderError(r.Context(), w, root, http.StatusBadRequest, err)
 			return
 		}
 		board, err := boardio.LoadBoardState(path)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
 		annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		byID := make(map[string]*artifact.Annotation, len(annotations))
@@ -92,9 +92,10 @@ func boardHandler(root string, mdl *model.Model) http.HandlerFunc {
 			clientState.Stickies = append(clientState.Stickies, sv)
 		}
 
-		out, err := renderBoardPage(clientState, classWords{m: mdl})
+		bar := branchBarFacts(r.Context(), root, boardPageTitle(key))
+		out, err := renderBoardPage(r.Context(), clientState, classWords{m: mdl}, bar)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -137,14 +138,7 @@ var boardPageTemplate = template.Must(template.New("board").Funcs(shellFuncs).Pa
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="board-page">
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a></nav>
-</header>
-<header class="page-header board-head">
-<h1>Board: {{.Key}}</h1>
-<div id="autosave-status" role="status" aria-live="polite"></div>
-</header>
+{{.TopBar}}
 {{.Body}}
 {{buildFooter}}
 <script>
@@ -156,7 +150,15 @@ window.__BOARD__ = {{.StateJSON}};
 </html>
 `))
 
-func renderBoardPage(state boardClientState, words classWords) ([]byte, error) {
+// boardPageTitle is the v0 board page's title, its h1.
+func boardPageTitle(key string) string {
+	return "Board: " + key
+}
+
+// renderBoardPage renders the v0 board page; bar is its top bar's facts
+// (SI-323 (4): the v0 board is a page verdi serve renders), drawn as the
+// bar with the index link and the autosave status (its id unchanged).
+func renderBoardPage(ctx context.Context, state boardClientState, words classWords, bar barFacts) ([]byte, error) {
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
@@ -168,15 +170,24 @@ func renderBoardPage(state boardClientState, words classWords) ([]byte, error) {
 
 	data := struct {
 		Key       string
+		TopBar    template.HTML
 		Body      template.HTML
 		StateJSON template.JS
 		KeyJSON   template.JS
+		Bar       barFacts
 	}{
-		Key:       state.Key,
+		Key: state.Key,
+		TopBar: renderTopBar(&bar, topBarOptions{
+			Heading:  true,
+			Nav:      `<a href="/">index</a>`,
+			Controls: `<div id="autosave-status" role="status" aria-live="polite"></div>`,
+		}),
 		Body:      template.HTML(boardPageBody(state, words)),
 		StateJSON: template.JS(stateJSON),
 		KeyJSON:   template.JS(keyJSON),
+		Bar:       bar,
 	}
+	observeBar(ctx, data.Bar)
 
 	var buf bytes.Buffer
 	if err := boardPageTemplate.Execute(&buf, data); err != nil {

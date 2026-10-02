@@ -615,6 +615,11 @@
   // having been stopped.
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape" || !state.exitHref) return;
+    // The top bar's posture popover owns an Escape while it is open
+    // (topbar.js closes it and marks the keystroke taken): stand down when
+    // it is open, or when that handler already took the keystroke —
+    // whichever of the two listeners runs first.
+    if (ev.defaultPrevented || document.querySelector("details.topbar-posture[open]")) return;
     var modalBackdrop = document.getElementById("modal-backdrop");
     if (modalBackdrop && !modalBackdrop.hidden) return;
     if (document.querySelector(".diagram-rename-input")) return;

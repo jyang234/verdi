@@ -41,7 +41,7 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 
 		ix, err := index.Build(root)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		entry, ok := ix.Get(ref)
@@ -52,23 +52,23 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 
 		data, err := os.ReadFile(entry.Path)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		fm, _, err := artifact.SplitFrontmatter(data)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		meta, err := artifactview.DecodeMeta(entry.Kind, fm)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
 		bodyHTML, err := render.RenderBody(entry.Kind, entry.DiagramClass, entry.Body)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -94,9 +94,9 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 			DispositionsHTML: render.DispositionsTable(meta.Dispositions),
 			ExtraHTML:        extra,
 		}
-		out, err := renderPage(page)
+		out, err := renderPage(r.Context(), root, page)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -7,6 +7,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -191,16 +192,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellF
 </head>
 <body class="board-page boardv2-page mode-{{.Mode}}">
 <a class="skip-link" href="#boardv2-region">Skip to the board</a>
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a>{{if .DocumentHref}} · <a href="{{.DocumentHref}}" data-testid="board-tab-document">Document</a>{{end}}</nav>
-</header>
-<header class="page-header board-head">
-<h1>{{.Title}}</h1>
-<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
-<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>
-<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>
-</header>
+{{.TopBar}}
 <main id="boardv2-region">
 {{.Region}}
 </main>
@@ -219,15 +211,9 @@ window.__BOARDV2__ = {{.StateJSON}};
 // state mirrors exactly what /snapshot serves, so the initial page needs
 // no bootstrap fetch and the first conditional poll compares against a
 // genuine revision token.
-func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
-	region := renderBoardRegion(p, git, asd)
-	revision := snapshotRevision(&asdSnapshot{
-		HTML:        region,
-		BaseDigest:  asd.BaseDigest,
-		BaseSpecB64: asd.BaseSpecB64,
-		Git:         git,
-		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
-	})
+func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
+	snap := newASDSnapshot(p, git, asd)
+	region, revision := snap.HTML, snap.Revision
 	payload := boardClientPayload{
 		Spec:          p.Spec,
 		Mode:          string(p.Mode),
@@ -253,38 +239,51 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		return nil, fmt.Errorf("workbench: board state: %w", err)
 	}
 
-	// StatusBadge stays the bare state id (it addresses the badge's CSS
-	// class and testid); StatusBadgeLabel is the model's display word for
-	// it (spec/vocabulary-surfaces ac-2), falling back to the id when the
-	// projection carries no rename.
-	badge := terminalStatusBadge(p.Status)
-	badgeLabel := badge
-	if badge != "" && p.StatusLabel != "" {
-		badgeLabel = p.StatusLabel
+	// The top bar (spec/chrome-and-tokens-v2 ac-1; SI-323 (5)): its nav
+	// keeps the index link and the Wall and Document switch; its controls
+	// slot carries Commit & push in authoring mode — the page's one write
+	// to the record, moved from the rail with its id unchanged (dc-3) —
+	// and the autosave status and live region; the last action result is
+	// the bar's trailing row, outside the swapped region.
+	nav := `<a href="/">index</a>`
+	controls := ""
+	if p.DocumentHref != "" {
+		// The Wall and Document switch, in the controls slot (dc-3), with
+		// the same two labels the Document page's switch carries.
+		controls += `<nav class="topbar-tabs" aria-label="Wall or Document"><span class="current" aria-current="page">Wall</span><a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a></nav>`
 	}
+	if p.Mode == modeAuthoring {
+		controls += `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
+	}
+	controls += `<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
+		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`
 	data := struct {
-		Name             string
-		Title            string
-		Mode             string
-		ModeLabel        string
-		StatusBadge      string
-		StatusBadgeLabel string
-		DocumentHref     string
-		Region           template.HTML
-		Dialogs          template.HTML
-		StateJSON        template.JS
+		Name      string
+		Title     string
+		Mode      string
+		TopBar    template.HTML
+		Region    template.HTML
+		Dialogs   template.HTML
+		StateJSON template.JS
+		// Bar is the top bar's facts (SI-323), which TopBar draws.
+		Bar barFacts
 	}{
-		Name:             p.Spec,
-		Title:            p.Title,
-		Mode:             string(p.Mode),
-		ModeLabel:        modeStampLabel(p),
-		StatusBadge:      badge,
-		StatusBadgeLabel: badgeLabel,
-		DocumentHref:     p.DocumentHref,
-		Region:           template.HTML(region),
-		Dialogs:          template.HTML(renderBoardDialogs(p)),
-		StateJSON:        template.JS(stateJSON),
+		Name:  p.Spec,
+		Title: p.Title,
+		Mode:  string(p.Mode),
+		TopBar: renderTopBar(&snap.bar, topBarOptions{
+			Heading:  true,
+			Nav:      template.HTML(nav),      //nolint:gosec // the index link
+			Controls: template.HTML(controls), //nolint:gosec // fixed control markup and the escaped document href
+			Tail:     `<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>`,
+			Refresh:  true,
+		}),
+		Region:    template.HTML(region),
+		Dialogs:   template.HTML(renderBoardDialogs(p)),
+		StateJSON: template.JS(stateJSON),
+		Bar:       snap.bar,
 	}
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering board page: %w", err)
@@ -311,9 +310,11 @@ func terminalStatusBadge(status string) string {
 	return ""
 }
 
-// renderBoardRegion renders the posture header, four-area shell,
-// placards, canvas, and side rail — the one projection region the page,
-// the fragment, the snapshot, and every mutation response share.
+// renderBoardRegion renders the four-area shell, placards, canvas, and
+// side rail — the one projection region the page, the fragment, the
+// snapshot, and every mutation response share. The posture is not here:
+// it is the top bar's posture group, which the snapshot carries as its
+// own fragment (asdPostureHTML; SI-323 (3)).
 func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
@@ -359,7 +360,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		b.WriteString(`</div>`)
 	}
 
-	writeASDPosture(&b, p, git, asd)
 	writeASDShell(&b, asd)
 	// .asd-main wraps the board half (case file + canvas + rail) so the
 	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside
@@ -662,7 +662,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if proto {
 			typeLabel = p.words.word(s.Type)
 		}
-		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
+		cls := "sticky sticky--" + stickyTypeClass(s.Type)
+		if proto && inStubsBand(s.X) {
+			// A story or spike sticky parked in the stubs band (dc-6) wears
+			// the hand (spec/chrome-and-tokens-v2 ac-3, read literally);
+			// moved out, it is typeset like every other sticky. The mark is
+			// the server's, by the band's own rule, and the region swap
+			// every move triggers re-draws it.
+			cls += " sticky--parked"
+		}
+		b.WriteString(`<div class="` + cls + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
@@ -965,6 +974,25 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`</div>`)
 }
 
+// overlapsColumn reports whether a card whose left edge is x overlaps
+// col: the band is occupied by geometry, so a dragged-away sticky stops
+// counting.
+func overlapsColumn(col boardlayout.ZoneColumn, x float64) bool {
+	return x < float64(col.X+col.Width) && float64(col.X) < x+boardlayout.CardWidth
+}
+
+// inStubsBand reports whether a sticky whose left edge is x sits in the
+// stubs band — the one rule the zone labels count the band occupied by
+// and the parked sticky's hand voice keys on, so the two never disagree.
+func inStubsBand(x float64) bool {
+	for _, col := range boardlayout.ZoneColumns() {
+		if col.Kind == boardlayout.ZoneStub {
+			return overlapsColumn(col, x)
+		}
+	}
+	return false
+}
+
 // writeCaseClassTag stamps the spec's class on the case-file lockup
 // (owner directive: a wall must say whether it is a feature or a story —
 // 02 §Kind registry's split is invisible without it). "feature" for the
@@ -1170,20 +1198,11 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 	// whose footprint currently sits in the band (a dragged-away sticky
 	// stops counting — the label follows the paper, not its history).
 	sc := boardlayout.ScratchColumn()
-	inBand := func(col boardlayout.ZoneColumn, x float64) bool {
-		return x < float64(col.X+col.Width) && float64(col.X) < x+boardlayout.CardWidth
-	}
-	var stubCol boardlayout.ZoneColumn
-	for _, col := range boardlayout.ZoneColumns() {
-		if col.Kind == boardlayout.ZoneStub {
-			stubCol = col
-		}
-	}
 	for _, st := range p.Stickies {
-		if inBand(sc, st.X) {
+		if overlapsColumn(sc, st.X) {
 			occupied[boardlayout.ZoneScratch] = true
 		}
-		if inBand(stubCol, st.X) {
+		if inStubsBand(st.X) {
 			occupied[boardlayout.ZoneStub] = true
 		}
 	}
@@ -1347,8 +1366,9 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 }
 
 // writeGitPanel renders the board-owned git affordance (05 §Workbench:
-// commit/push button, persistent uncommitted-changes indicator,
-// branch switcher behind the guard).
+// the persistent uncommitted-changes indicator and the branch switcher
+// behind the guard). The commit/push button is the top bar's
+// (renderBoardSpecPage; spec/chrome-and-tokens-v2 dc-3).
 func writeGitPanel(b *strings.Builder, git *boardGitState) {
 	esc := stdhtml.EscapeString
 	b.WriteString(`<section class="git-panel" id="asd-git"><h2>Working tree</h2>`)
@@ -1357,8 +1377,6 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 		b.WriteString(` hidden`)
 	}
 	b.WriteString(`>uncommitted changes</span>`)
-	// The page's most consequential action wears primary weight.
-	b.WriteString(`<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`)
 	b.WriteString(`<div class="branch-row"><span class="branch-label">branch</span>`)
 	b.WriteString(`<button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu">` + esc(git.Branch) + `</button></div>`)
 	b.WriteString(`<div role="menu" class="branch-menu" id="branch-menu" hidden aria-label="Switch branch">`)

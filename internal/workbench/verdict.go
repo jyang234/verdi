@@ -44,14 +44,14 @@ func verdictHandler(root string, mdl *model.Model) http.HandlerFunc {
 		}
 		spec, err := storyresolve.Resolve(root, storyArg)
 		if err != nil {
-			renderError(w, http.StatusNotFound, err)
+			renderError(r.Context(), w, root, http.StatusNotFound, err)
 			return
 		}
 
 		derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 		commits, err := listSnapshotCommits(derivedRoot)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -66,7 +66,7 @@ func verdictHandler(root string, mdl *model.Model) http.HandlerFunc {
 			recA, errA := loadSnapshot(derivedRoot, a)
 			recB, errB := loadSnapshot(derivedRoot, b)
 			if errA != nil || errB != nil {
-				renderError(w, http.StatusNotFound, firstErr(errA, errB))
+				renderError(r.Context(), w, root, http.StatusNotFound, firstErr(errA, errB))
 				return
 			}
 			writeSnapshotDiff(&extra, spec, a, recA, b, recB)
@@ -80,9 +80,9 @@ func verdictHandler(root string, mdl *model.Model) http.HandlerFunc {
 			BodyHTML:  "",
 			ExtraHTML: template.HTML(extra.String()),
 		}
-		out, err := renderPage(page)
+		out, err := renderPage(r.Context(), root, page)
 		if err != nil {
-			renderError(w, http.StatusInternalServerError, err)
+			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

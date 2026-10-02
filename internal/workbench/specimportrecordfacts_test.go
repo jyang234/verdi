@@ -71,7 +71,7 @@ func TestRenderSpecImportRecord_FormatFacts(t *testing.T) {
 				ImportCommit:       "abc123",
 				CurrentSpecMatches: true,
 			}
-			out, err := renderSpecImportRecord(view, "design/widget", "widget")
+			out, err := renderSpecImportRecord(t.Context(), "", view, "design/widget", "widget")
 			if err != nil {
 				t.Fatalf("render: %v", err)
 			}

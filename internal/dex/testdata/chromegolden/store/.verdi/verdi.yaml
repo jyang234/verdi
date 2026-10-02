@@ -1,0 +1,8 @@
+schema: verdi.layout/v1
+forge: gitlab
+providers:
+  jira:
+    base_url: https://example.atlassian.net
+    rollup_field: customfield_00000
+services:
+  discovery: flowmap

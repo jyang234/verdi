@@ -98,6 +98,9 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 		home.Model = deps.Model
 	}
 	mux.HandleFunc("/healthz", healthHandler())
+	// The browser asks for /favicon.ico on every page view; answer it
+	// without rendering a not-found page (faviconHandler).
+	mux.HandleFunc("/favicon.ico", faviconHandler())
 	mux.HandleFunc("/", indexHandler(root, home, deps.Disclosures))
 
 	// Corpus artifact pages (05 §Workbench: server-rendered, goldmark +
@@ -128,7 +131,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// Deps.ReadinessDefaultSpec (nil loader, or neither name, discloses an
 	// honest 503). Method checks live in the handler, matching the
 	// method-prefix note above.
-	mux.HandleFunc("/readiness", readinessHandler(deps.ReadinessLoader, deps.ReadinessDefaultSpec))
+	mux.HandleFunc("/readiness", readinessHandler(root, deps.ReadinessLoader, deps.ReadinessDefaultSpec))
 
 	// The mechanical spec importer's browser adapter (spec-import-contract
 	// "Browser routes"; specimport.go): the import page, the two strict
@@ -201,4 +204,5 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/specdocument.js", specDocumentJSHandler())
 	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
 	mux.HandleFunc("/assets/readiness.js", readinessJSHandler())
+	mux.HandleFunc("/assets/topbar.js", topBarJSHandler())
 }

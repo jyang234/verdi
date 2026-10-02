@@ -1216,7 +1216,7 @@ func checkObjSupersedeBoards(t *testing.T, got objSupersedeStoreInfo) {
 			continue
 		}
 		pages[v.URL] = page
-		if title := "<h1>" + objSupersedeBoardTitle[v.Spec] + "</h1>"; !strings.Contains(page, title) {
+		if title := `data-testid="topbar-title">` + objSupersedeBoardTitle[v.Spec] + "</h1>"; !strings.Contains(page, title) {
 			t.Errorf("%s board %s lacks %s", view.role, v.URL, title)
 		}
 		if !strings.Contains(page, `data-testid="asd-posture-tree" data-dirty="clean"`) {

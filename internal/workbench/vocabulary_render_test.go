@@ -115,7 +115,7 @@ func TestBoardRender_TerminalStatusBadgeModelVocabulary(t *testing.T) {
 	}
 	proj.applyModelVocabulary(vocabTestModel())
 
-	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), proj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestBoardRender_CreateReceiptVerbModelVocabulary(t *testing.T) {
 
 	renamed := receiptProj()
 	renamed.applyModelVocabulary(vocabTestModel())
-	page, err := renderBoardSpecPage(renamed, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), renamed, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestBoardRender_CreateReceiptVerbModelVocabulary(t *testing.T) {
 		t.Fatal("receipt tracker sentence still speaks the retired bare verb accept")
 	}
 
-	plainPage, err := renderBoardSpecPage(receiptProj(), &boardGitState{}, testASDView())
+	plainPage, err := renderBoardSpecPage(t.Context(), receiptProj(), &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage plain: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestBoardRender_RegionParityNoRenames(t *testing.T) {
 func TestBoardRender_PageWordsPayloadModelVocabulary(t *testing.T) {
 	proj := vocabProseProjection(modeAuthoring)
 	proj.applyModelVocabulary(vocabTestModel())
-	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+	page, err := renderBoardSpecPage(t.Context(), proj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -363,13 +363,13 @@ func TestBoardRender_PageWordsPayloadModelVocabulary(t *testing.T) {
 
 	// Parity: with no renames the page is byte-identical to no model at
 	// all — no words key, today's consequence literals.
-	plainPage, err := renderBoardSpecPage(vocabProseProjection(modeAuthoring), &boardGitState{}, testASDView())
+	plainPage, err := renderBoardSpecPage(t.Context(), vocabProseProjection(modeAuthoring), &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage plain: %v", err)
 	}
 	canonical := vocabProseProjection(modeAuthoring)
 	canonical.applyModelVocabulary(model.Canonical())
-	canonicalPage, err := renderBoardSpecPage(canonical, &boardGitState{}, testASDView())
+	canonicalPage, err := renderBoardSpecPage(t.Context(), canonical, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage canonical: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestRenderBoardPageV0_ModelVocabulary(t *testing.T) {
 		},
 	}
 
-	renamed, err := renderBoardPage(state, classWords{m: vocabTestModel()})
+	renamed, err := renderBoardPage(t.Context(), state, classWords{m: vocabTestModel()}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage: %v", err)
 	}
@@ -444,11 +444,11 @@ func TestRenderBoardPageV0_ModelVocabulary(t *testing.T) {
 		}
 	}
 
-	plain, err := renderBoardPage(state, classWords{})
+	plain, err := renderBoardPage(t.Context(), state, classWords{}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage plain: %v", err)
 	}
-	canonical, err := renderBoardPage(state, classWords{m: model.Canonical()})
+	canonical, err := renderBoardPage(t.Context(), state, classWords{m: model.Canonical()}, barFacts{})
 	if err != nil {
 		t.Fatalf("renderBoardPage canonical: %v", err)
 	}

@@ -421,9 +421,12 @@ func writeDesignFailure(w http.ResponseWriter, failure *DesignFailure) {
 // mutationProjection is the fresh projection every non-operational
 // mutation response carries (§4.3: success renders only after the
 // operation AND a fresh projection both verify; a stale refusal returns a
-// fresh projection so the browser can reload honestly).
+// fresh projection so the browser can reload honestly). Posture is the
+// snapshot's posture fragment (SI-323 (3)): the revision covers it, so a
+// client adopting the revision must also have the posture it covers.
 type mutationProjection struct {
 	HTML        string `json:"html"`
+	Posture     string `json:"posture"`
 	Revision    string `json:"revision"`
 	BaseDigest  string `json:"base_digest"`
 	BaseSpecB64 string `json:"base_spec_b64"`
@@ -803,6 +806,7 @@ func (s *boardSpecServer) writeMutationOutcome(w http.ResponseWriter, r *http.Re
 	}
 	projection := mutationProjection{
 		HTML:        snap.HTML,
+		Posture:     snap.Posture,
 		Revision:    snap.Revision,
 		BaseDigest:  snap.BaseDigest,
 		BaseSpecB64: snap.BaseSpecB64,

@@ -21,6 +21,7 @@ package workbench
 // stylesheet's uppercase mono label face within this page only.
 
 import (
+	"context"
 	"fmt"
 	stdhtml "html"
 	"html/template"
@@ -134,7 +135,7 @@ const specImportCSS = `<style>
 // markup is complete without JavaScript (the noscript note names the
 // CLI); the script owns file reading, request composition, invalidation
 // and the two fetches. Nothing is served checked.
-func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
+func renderSpecImportPage(ctx context.Context, root string, mdl *model.Model) ([]byte, error) {
 	esc := stdhtml.EscapeString
 	words := classWords{m: mdl}
 	featureWord := words.word("feature")
@@ -248,7 +249,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`</section>`)
 	b.WriteString(`</div>`)
 
-	return renderPage(pageData{
+	return renderPage(ctx, root, pageData{
 		Title:     "Import existing spec",
 		Nav:       template.HTML(`<span class="current">import</span>`),
 		BodyHTML:  template.HTML(b.String()),
@@ -260,7 +261,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 // verified RecordView: the explanation of what the record is (and is not),
 // the current-spec disclosure, the verified import facts, and the recorded
 // sources, fields, mappings and coverage.
-func renderSpecImportRecord(view specimport.RecordView, branch, slug string) ([]byte, error) {
+func renderSpecImportRecord(ctx context.Context, root string, view specimport.RecordView, branch, slug string) ([]byte, error) {
 	esc := stdhtml.EscapeString
 	rec := view.Record
 	var b strings.Builder
@@ -376,7 +377,7 @@ func renderSpecImportRecord(view specimport.RecordView, branch, slug string) ([]
 	b.WriteString(`<p><a data-testid="record-board-link" href="` + esc(BranchBoardHref(branch, slug)) + `">Open the board</a></p>`)
 	b.WriteString(`</section>`)
 
-	return renderPage(pageData{
+	return renderPage(ctx, root, pageData{
 		Title:    "Source record: " + rec.SpecRef,
 		Nav:      template.HTML(`<a href="` + routeSpecImportPage + `">import</a>`),
 		BodyHTML: template.HTML(b.String()),
@@ -408,7 +409,7 @@ func recordFormatFacts(rec specimport.Record) (format, profileDigest string) {
 
 // renderSpecImportRecordInvalid is the record view's 400: a malformed
 // query, named, with a way back — distinct from unavailable proof.
-func renderSpecImportRecordInvalid(w http.ResponseWriter, reason string) {
+func renderSpecImportRecordInvalid(ctx context.Context, w http.ResponseWriter, root, reason string) {
 	var body strings.Builder
 	body.WriteString(`<div class="error-page" role="alert" data-testid="import-record-invalid">`)
 	body.WriteString(`<p class="error-message"><strong>Malformed record request.</strong></p>`)
@@ -416,7 +417,7 @@ func renderSpecImportRecordInvalid(w http.ResponseWriter, reason string) {
 	body.WriteString(`<pre class="error-detail">` + stdhtml.EscapeString(reason) + `</pre>`)
 	writeBackToDirectory(&body)
 	body.WriteString(`</div>`)
-	writeSpecImportPage(w, http.StatusBadRequest, "Source record", body.String())
+	writeSpecImportPage(ctx, w, root, http.StatusBadRequest, "Source record", body.String())
 }
 
 // renderSpecImportRecordUnavailable renders the provenance-mismatch (or
@@ -424,7 +425,7 @@ func renderSpecImportRecordInvalid(w http.ResponseWriter, reason string) {
 // proof is unavailable, malformed or does not verify — deliberately not
 // the changed-current-spec disclosure, which only a VERIFIED record can
 // carry.
-func renderSpecImportRecordUnavailable(w http.ResponseWriter, status int, code, detail, branch, slug string) {
+func renderSpecImportRecordUnavailable(ctx context.Context, w http.ResponseWriter, root string, status int, code, detail, branch, slug string) {
 	esc := stdhtml.EscapeString
 	var body strings.Builder
 	body.WriteString(`<div class="error-page" role="alert" data-testid="import-record-unavailable" data-code="` + esc(code) + `">`)
@@ -437,14 +438,15 @@ func renderSpecImportRecordUnavailable(w http.ResponseWriter, status int, code, 
 	}
 	writeBackToDirectory(&body)
 	body.WriteString(`</div>`)
-	writeSpecImportPage(w, status, "Source record", body.String())
+	writeSpecImportPage(ctx, w, root, status, "Source record", body.String())
 }
 
 // writeSpecImportPage writes bodyHTML through the shared shell at status,
 // falling back to a bare text error if the shell itself fails — the same
-// loud-stays-loud posture errorpage.go and notfound.go take.
-func writeSpecImportPage(w http.ResponseWriter, status int, title, bodyHTML string) {
-	out, err := renderPage(pageData{
+// loud-stays-loud posture errorpage.go and notfound.go take. root is the
+// serving checkout, for the page's top bar facts (renderPage).
+func writeSpecImportPage(ctx context.Context, w http.ResponseWriter, root string, status int, title, bodyHTML string) {
+	out, err := renderPage(ctx, root, pageData{
 		Title:    title,
 		Nav:      template.HTML(`<a href="` + routeSpecImportPage + `">import</a>`),
 		BodyHTML: template.HTML(bodyHTML),

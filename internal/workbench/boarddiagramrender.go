@@ -16,6 +16,7 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -67,17 +68,7 @@ var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Funcs
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="board-page diagram-editor-page mode-{{.Mode}}">
-<header class="site-head">
-<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a> <a href="/a/diagram/{{.Name}}">artifact</a></nav>
-</header>
-<header class="page-header board-head">
-<a class="diagram-exit-link" data-testid="diagram-exit" href="{{.ExitHref}}">&larr; {{.ExitLabel}}</a>
-<h1>{{.Title}}</h1>
-<span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
-<span class="badge badge-{{.Status}} diagram-status-badge" data-testid="diagram-status-badge">proposal · {{.Status}}</span>
-<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
-</header>
+{{.TopBar}}
 <div id="diagram-editor-region">
 {{.Region}}
 </div>
@@ -93,7 +84,7 @@ window.__DIAGRAM__ = {{.StateJSON}};
 `))
 
 // renderDiagramEditorPage renders the full editor page.
-func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
+func renderDiagramEditorPage(ctx context.Context, v *diagramEditorView) ([]byte, error) {
 	available, _, nodes, edges := opsStateOf(v)
 	payload := diagramClientPayload{
 		Name:         v.Name,
@@ -109,33 +100,40 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		return nil, fmt.Errorf("workbench: diagram editor state: %w", err)
 	}
 
-	title := v.Title
-	if title == "" {
-		title = v.Name
-	}
+	// The top bar (spec/chrome-and-tokens-v2 ac-1): the editor's mode
+	// stamp and status badge as its chips; its explicit exit (tool-view-
+	// exit ac-1) leading the controls slot, distinct from the nav's index
+	// and artifact links; the autosave status beside it.
+	esc := stdhtml.EscapeString
+	chips := `<span class="board-mode-tag board-mode-tag--` + esc(string(v.Mode)) + `">` + esc(diagramModeStampLabels[v.Mode]) + `</span>` +
+		`<span class="badge badge-` + esc(v.Status) + ` diagram-status-badge" data-testid="diagram-status-badge">proposal · ` + esc(v.Status) + `</span>`
+	controls := `<a class="diagram-exit-link" data-testid="diagram-exit" href="` + esc(v.Exit.Href) + `">&larr; ` + esc(v.Exit.Label) + `</a>` +
+		`<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>`
+	nav := `<a href="/">index</a> <a href="/a/diagram/` + esc(v.Name) + `">artifact</a>`
 	data := struct {
 		Name      string
-		Title     string
-		Status    string
 		Mode      string
-		ModeLabel string
-		ExitHref  string
-		ExitLabel string
+		TopBar    template.HTML
 		Region    template.HTML
 		Dialogs   template.HTML
 		StateJSON template.JS
+		// Bar is the top bar's facts, which TopBar draws.
+		Bar barFacts
 	}{
-		Name:      v.Name,
-		Title:     title,
-		Status:    v.Status,
-		Mode:      string(v.Mode),
-		ModeLabel: diagramModeStampLabels[v.Mode],
-		ExitHref:  v.Exit.Href,
-		ExitLabel: v.Exit.Label,
+		Name: v.Name,
+		Mode: string(v.Mode),
+		TopBar: renderTopBar(&v.Bar, topBarOptions{
+			Heading:  true,
+			Nav:      template.HTML(nav),      //nolint:gosec // the index link and the escaped artifact name
+			Chips:    template.HTML(chips),    //nolint:gosec // escaped mode and status
+			Controls: template.HTML(controls), //nolint:gosec // the escaped exit target and label
+		}),
 		Region:    template.HTML(renderDiagramEditorRegion(v)),
 		Dialogs:   template.HTML(renderDiagramEditorDialogs(v)),
 		StateJSON: template.JS(stateJSON),
+		Bar:       v.Bar,
 	}
+	observeBar(ctx, data.Bar)
 	var buf bytes.Buffer
 	if err := diagramEditorPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering diagram editor page: %w", err)
