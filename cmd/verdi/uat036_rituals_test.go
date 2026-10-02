@@ -109,9 +109,11 @@ func uat036Rituals(t *testing.T, bin string) []uat036Ritual {
 // known effect carried to R3 (backlog BL-141).
 //
 // Beside the fixture's foreign entry at the repository root, each run also
-// stages storeForeignFile inside .verdi/, outside every listed ritual's
-// declared stage paths, so a commit naming a pathspec wider than the
-// ritual's own paths (the whole .verdi/, say) cannot pass.
+// stages storeForeignFile directly inside .verdi/, outside every listed
+// ritual's declared stage paths, so a commit whose pathspec is the whole
+// .verdi/ cannot pass. A pathspec wider than the ritual's own paths but
+// narrower than .verdi/ (.verdi/specs/, say) holds no foreign entry here,
+// so this test does not tell it apart.
 func TestUAT036_RitualsNeverCarryForeignEntries(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	ctx := context.Background()
