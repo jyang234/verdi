@@ -85,6 +85,7 @@ type controlServer struct {
 	emptyGlance        *emptyGlanceFixture
 	vocab              *vocabFixture
 	readinessAllProven *readinessAllProvenFixture
+	readinessPage      *readinessPageFixture
 	unprovenBoard      *unprovenBoardFixture
 	specImport         *specImportFixture
 	readinessPilot     *readinessPilotFixture
@@ -102,6 +103,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		emptyGlance:        newEmptyGlanceFixture(),
 		vocab:              newVocabFixture(moduleRoot),
 		readinessAllProven: newReadinessAllProvenFixture(),
+		readinessPage:      newReadinessPageFixture(moduleRoot),
 		unprovenBoard:      newUnprovenBoardFixture(moduleRoot),
 		specImport:         newSpecImportFixture(moduleRoot),
 		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
@@ -124,6 +126,11 @@ func (c *controlServer) handler() http.Handler {
 	// snapshot — the browser posture the shared mixed snapshot can never
 	// show.
 	mux.HandleFunc("/readiness-all-proven-fixture", c.readinessAllProven.handler)
+	// The isolated readiness-page fixtures (readinesspagefixture.go): the
+	// real workbench handler over five derived snapshots, named by
+	// ?spec=<name> — the page at steps 2, 3, and 4, the solo-author
+	// human-review posture, and the three states side by side.
+	mux.HandleFunc("/readiness-page-fixture", c.readinessPage.handler)
 	// The isolated no-default-branch board (unprovenboard.go): the shipped
 	// binary's own `verdi serve` over a real no-remote store — the unproven
 	// lifecycle posture the shared (provably-defaulted) store can never show.
