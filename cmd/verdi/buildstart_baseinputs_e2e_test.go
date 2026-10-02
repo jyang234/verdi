@@ -84,14 +84,15 @@ func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 		strings.Replace(buildQualityBlock(), "claim: claim", "claim: a claim edited only on HEAD's branch", 1))
 	adoptedWithProjection := withFile(policy, "AGENTS.md", "# the managed projection, as the base carries it\n")
 	tests := []struct {
-		name      string
-		layers    []map[string]string
-		from      int
-		head      map[string]string
-		dirty     map[string]string // uncommitted working-tree writes
-		branch    bool              // feature/widget-story exists before the run
-		wantExit  int
-		wantNamed []string // stderr names each
+		name       string
+		layers     []map[string]string
+		from       int
+		head       map[string]string
+		dirty      map[string]string // uncommitted working-tree writes
+		branch     bool              // feature/widget-story exists before the run
+		wantExit   int
+		wantNamed  []string // stderr names each
+		wantAbsent []string // stderr names none
 	}{
 		{name: "a pre-adoption HEAD against an adopted base (P7)", layers: []map[string]string{story, policy}, from: 1,
 			wantExit: 2, wantNamed: append([]string{"differs from the base"}, policyPaths...)},
@@ -123,6 +124,13 @@ func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 			wantExit: 2, wantNamed: []string{"--context-request is required after constitution adoption"}},
 		{name: "the collision check runs before the conflict gate", layers: []map[string]string{story, policy}, branch: true,
 			wantExit: 2, wantNamed: []string{"feature/widget-story already exists as refs/heads/feature/widget-story"}},
+		// Re-review RR-A4: ledger SI-334 (2) runs the collision check before
+		// the governed-input check, so with both failing the collision is
+		// the refusal.
+		{name: "a collision and a governed difference: the collision refuses", layers: []map[string]string{story}, branch: true,
+			dirty: map[string]string{obligation: edited}, wantExit: 2,
+			wantNamed:  []string{"feature/widget-story already exists as refs/heads/feature/widget-story"},
+			wantAbsent: []string{"differs from the base"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -148,6 +156,11 @@ func TestBuildStart_JudgesPreconditionsOnlyAgainstItsBase(t *testing.T) {
 			for _, want := range tt.wantNamed {
 				if !strings.Contains(stderr, want) {
 					t.Errorf("stderr = %q, want it to name %q", stderr, want)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(stderr, absent) {
+					t.Errorf("stderr = %q, want no %q", stderr, absent)
 				}
 			}
 			if code == 0 {
