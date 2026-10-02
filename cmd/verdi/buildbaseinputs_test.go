@@ -14,7 +14,8 @@ import (
 
 // TestBuildGovernedInputs (ledger SI-334 (2)): build start's governed
 // inputs are the spec's directory, its obligations, the policy store, and
-// the store manifest the conflict gate reads, plus what the cascade check
+// the store manifest and model the conflict gate's store load reads (ledger
+// SI-336), plus what the cascade check
 // reads — every active spec's spec.md and the story's re-affirmations —
 // only when the spec implements a feature, the one case the cascade check
 // reads anything. The instruction-projection files join them in a second
@@ -32,10 +33,10 @@ func TestBuildGovernedInputs(t *testing.T) {
 		wantGlobs []string
 	}{
 		{"a story implementing a feature", implementing,
-			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml", ".verdi/reaffirmations/jira-widget-1"},
+			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml", ".verdi/model.yaml", ".verdi/reaffirmations/jira-widget-1"},
 			[]string{".verdi/specs/active/*/spec.md"}},
 		{"a spec implementing nothing", standalone,
-			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml"}, nil},
+			[]string{".verdi/specs/active/widget-story", ".verdi/obligations/widget-story", ".verdi/policy", ".verdi/verdi.yaml", ".verdi/model.yaml"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

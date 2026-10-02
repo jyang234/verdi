@@ -43,9 +43,9 @@ type governedInputs struct {
 // the context compile's spec at HEAD), its obligations (the
 // obligation-quality check's <ac>--<kind>.md files, and the compile's
 // bound obligations at HEAD), the policy store (the conflict gate's
-// adoption probe and authority), and the store manifest (the conflict
-// gate's provider, internal/readinessload.NewConflictProvider's
-// store.Open) — and, when the spec implements a feature, what the cascade
+// adoption probe and authority), and the store manifest and model (the
+// conflict gate's provider loads both through store.Open,
+// internal/readinessload.NewConflictProvider; ledger SI-336) — and, when the spec implements a feature, what the cascade
 // check then reads: every active spec's spec.md (its scan for a
 // superseding spec, which also holds the compile's parent features) and
 // the story's re-affirmation records. A spec implementing no feature gives
@@ -56,6 +56,7 @@ func buildGovernedInputs(specName string, spec *artifact.SpecFrontmatter) govern
 		path.Join(".verdi", "obligations", specName),
 		path.Join(".verdi", "policy"),
 		path.Join(".verdi", "verdi.yaml"),
+		path.Join(".verdi", "model.yaml"),
 	}}
 	if len(evidence.ImplementsByFeature(spec.Links)) > 0 {
 		g.trees = append(g.trees, path.Join(".verdi", "reaffirmations", store.RefSlug(spec.Story)))

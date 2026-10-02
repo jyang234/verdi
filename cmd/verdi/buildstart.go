@@ -281,6 +281,35 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		return 2
 	}
 
+	// Ledger SI-336: in an adopted store the conflict gate judges the
+	// checkout itself — runConflictGate pins the request's expected
+	// repository to the current branch and HEAD, and the context compile
+	// reads HEAD's committed tree and the working tree — so build start runs
+	// the gate only when HEAD is the base commit, where the cut switches to
+	// a branch at that same commit. Adoption is probed after the governed
+	// inputs agree, so it is the base's. An unadopted store runs no gate and
+	// still cuts from the base while HEAD is elsewhere (UAT-023).
+	currentBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	commit, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	adopted, aerr := policyconflict.ProbeAdoption(root)
+	if aerr != nil {
+		fmt.Fprintln(stderr, "build start: probing policy-conflict adoption:", aerr)
+		return 2
+	}
+	if adopted && commit != base.Commit {
+		fmt.Fprintf(stderr, "build start: refused: HEAD is %s, not the base %s @ %s; in an adopted store the conflict gate judges the checkout, so build start runs it only with HEAD at the base commit (ledger SI-336)\n",
+			commit, base.Ref, base.Commit)
+		return 2
+	}
+
 	if ok, reason, cerr := checkCascadeReaffirmation(root, spec); cerr != nil {
 		fmt.Fprintln(stderr, "build start:", cerr)
 		return 2
@@ -311,16 +340,6 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		}
 	}
 
-	currentBranch, err := gitx.CurrentBranch(ctx, root)
-	if err != nil {
-		fmt.Fprintln(stderr, "build start:", err)
-		return 2
-	}
-	commit, err := gitx.RevParse(ctx, root, "HEAD")
-	if err != nil {
-		fmt.Fprintln(stderr, "build start:", err)
-		return 2
-	}
 	conflict, err := runConflictGate(ctx, root, conflictGateInput{
 		RequestPath: requestPath,
 		Phase:       contextcompile.PhaseBuild,
