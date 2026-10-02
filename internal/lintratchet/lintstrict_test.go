@@ -52,7 +52,16 @@ func makefileLintPin(t *testing.T, root string) string {
 const (
 	findingsUnshown = "this run cannot show that the strict configuration reports each gated linter's violation"
 	captureUnshown  = "this run cannot check that the committed capture testdata/reports/strictfixture.json is still what that golangci-lint reports over the strict fixture module"
+	probeUnshown    = "this run cannot show which //nolint shapes in the probe module suppress a gated finding"
 )
+
+// nolintProbeDir is the //nolint probe module, relative to the repository
+// root: each file but doc.go holds one gochecknoglobals violation under one
+// directive shape, and is named suppressed_*.go when the pinned golangci-lint
+// is expected to suppress that finding, reported_*.go when it is expected to
+// report it. (A comment line of this package must not begin with that
+// directive's name, which golangci-lint would read as a bare directive.)
+const nolintProbeDir = "internal/lintratchet/testdata/nolintprobe"
 
 // pinnedGolangciLint returns the path of golangci-lint at the Makefile's
 // pinned version, and skips the test when that binary is absent (not on
@@ -102,18 +111,18 @@ func strictLintRun(ctx context.Context, bin, dir, config, report string, pattern
 
 // lintStrictFixture runs the pinned golangci-lint with .golangci.strict.yml,
 // for linux/amd64 and with --issues-exit-code=0 as make lint-strict runs it,
-// over the committed fixture module, and returns its findings. It skips the
-// test when the pinned binary is absent, saying the run cannot show
-// unshown.
-func lintStrictFixture(t *testing.T, unshown string) []Finding {
+// over the committed fixture module at dir, relative to the repository root,
+// and returns its findings. It skips the test when the pinned binary is
+// absent, saying the run cannot show unshown.
+func lintStrictFixture(t *testing.T, dir, unshown string) []Finding {
 	t.Helper()
 	root := repoRoot(t)
 	bin := pinnedGolangciLint(t, root, unshown)
 
 	report := filepath.Join(t.TempDir(), "report.json")
-	cmd := strictLintRun(t.Context(), bin, filepath.Join(root, filepath.FromSlash(strictFixtureDir)), filepath.Join(root, ".golangci.strict.yml"), report, "./...")
+	cmd := strictLintRun(t.Context(), bin, filepath.Join(root, filepath.FromSlash(dir)), filepath.Join(root, ".golangci.strict.yml"), report, "./...")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("golangci-lint run over %s: %v\n%s", strictFixtureDir, err, out)
+		t.Fatalf("golangci-lint run over %s: %v\n%s", dir, err, out)
 	}
 	data, err := os.ReadFile(report)
 	if err != nil {
@@ -134,7 +143,7 @@ func lintStrictFixture(t *testing.T, unshown string) []Finding {
 // ac-1). A gated linter's violation going unreported, a finding in the clean
 // file, or any extra finding fails it.
 func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
-	findings := lintStrictFixture(t, findingsUnshown)
+	findings := lintStrictFixture(t, strictFixtureDir, findingsUnshown)
 
 	gated := []string{"containedctx", "contextcheck", "errorlint", "gochecknoglobals", "noctx"}
 	byLinter := map[string][]Finding{}
@@ -174,7 +183,7 @@ func TestLintStrict_ReportsGroundRuleFindings(t *testing.T) {
 // S1-B1), so a stale capture would measure exclusions against messages the
 // linter no longer prints. capture.sh strictfixture re-captures it.
 func TestStrictFixtureReportIsCurrent(t *testing.T) {
-	live := lintStrictFixture(t, captureUnshown)
+	live := lintStrictFixture(t, strictFixtureDir, captureUnshown)
 	captured, err := ParseReport(mustRead(t, capturedReport("strictfixture")))
 	if err != nil {
 		t.Fatalf("parsing the captured strict fixture report: %v", err)
@@ -184,19 +193,74 @@ func TestStrictFixtureReportIsCurrent(t *testing.T) {
 	}
 }
 
+// TestLintStrict_NolintProbe runs the pinned golangci-lint with
+// .golangci.strict.yml, as make lint-strict runs it, over the //nolint probe
+// module, and proves which directive shapes suppress a gated finding there
+// (spec/strict-lint-gate-v2 ac-3, dc-4): a bare //nolint, the same after a
+// space, //nolint:all, //nolint:unused,all, and //nolint:gochecknoglobals
+// each suppress the gochecknoglobals finding beside them, so the witness's
+// refusal of the first four follows real suppression; //nolint:unused and a
+// mid-comment mention suppress nothing gated. Every finding must be
+// gochecknoglobals' in a reported_*.go file, exactly one in each, and none in
+// a suppressed_*.go file.
+func TestLintStrict_NolintProbe(t *testing.T) {
+	findings := lintStrictFixture(t, nolintProbeDir, probeUnshown)
+
+	entries, err := os.ReadDir(filepath.Join(repoRoot(t), filepath.FromSlash(nolintProbeDir)))
+	if err != nil {
+		t.Fatalf("reading the probe module: %v", err)
+	}
+	want := map[string]int{} // findings per file
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case e.IsDir() || !strings.HasSuffix(name, ".go") || name == "doc.go":
+		case strings.HasPrefix(name, "reported_"):
+			want[name] = 1
+		case strings.HasPrefix(name, "suppressed_"):
+			want[name] = 0
+		default:
+			t.Fatalf("probe file %s is named neither suppressed_*.go nor reported_*.go", name)
+		}
+	}
+	got := map[string]int{}
+	for _, f := range findings {
+		if path.Dir(f.File) != nolintProbeDir || f.Key.Linter != "gochecknoglobals" {
+			t.Errorf("finding outside the probe's gochecknoglobals findings: %+v", f)
+			continue
+		}
+		got[path.Base(f.File)]++
+	}
+	for name, n := range want {
+		if got[name] != n {
+			t.Errorf("%s: golangci-lint reported %d gochecknoglobals finding(s), want %d", name, got[name], n)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("%s: a finding in a file that is not a probe file", name)
+		}
+	}
+}
+
 // TestPinnedLintSkipReasons re-runs, in this test binary and with no
 // golangci-lint on PATH, each test that needs the pinned golangci-lint, and
-// proves each skips naming its own claim the run then cannot show, never the
-// other's (re-review finding S1-RR3).
+// proves each skips naming its own claim the run then cannot show, never
+// another's (re-review finding S1-RR3).
 func TestPinnedLintSkipReasons(t *testing.T) {
 	const (
 		findingsReason = "so this run cannot show that the strict configuration reports each gated linter's violation"
 		captureReason  = "so this run cannot check that the committed capture testdata/reports/strictfixture.json is still what that golangci-lint reports over the strict fixture module"
+		probeReason    = "so this run cannot show which //nolint shapes in the probe module suppress a gated finding"
 	)
 	noLint := t.TempDir()
-	cases := []struct{ test, want, notWant string }{
-		{test: "TestLintStrict_ReportsGroundRuleFindings", want: findingsReason, notWant: captureReason},
-		{test: "TestStrictFixtureReportIsCurrent", want: captureReason, notWant: findingsReason},
+	cases := []struct {
+		test, want string
+		notWant    []string
+	}{
+		{test: "TestLintStrict_ReportsGroundRuleFindings", want: findingsReason, notWant: []string{captureReason, probeReason}},
+		{test: "TestStrictFixtureReportIsCurrent", want: captureReason, notWant: []string{findingsReason, probeReason}},
+		{test: "TestLintStrict_NolintProbe", want: probeReason, notWant: []string{findingsReason, captureReason}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.test, func(t *testing.T) {
@@ -210,7 +274,7 @@ func TestPinnedLintSkipReasons(t *testing.T) {
 			if !strings.Contains(got, "--- SKIP: "+tc.test) {
 				t.Fatalf("%s did not skip without golangci-lint on PATH:\n%s", tc.test, got)
 			}
-			if !strings.Contains(got, tc.want) || strings.Contains(got, tc.notWant) {
+			if !strings.Contains(got, tc.want) || slices.ContainsFunc(tc.notWant, func(r string) bool { return strings.Contains(got, r) }) {
 				t.Fatalf("%s's skip reason does not say %q alone:\n%s", tc.test, tc.want, got)
 			}
 		})
