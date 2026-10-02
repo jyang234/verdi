@@ -694,6 +694,59 @@ func TestStrictConfigGatedLinters(t *testing.T) {
 	}
 }
 
+// TestNolintProbeProblems covers the tie between the probe module's file
+// names and the witness's reading (review finding S3-3): a sound module has
+// no problem, and each way a probe file departs from its name is one,
+// naming the file.
+func TestNolintProbeProblems(t *testing.T) {
+	const (
+		counted  = "package p\n\nvar a int //nolint:gochecknoglobals // a reason\n"
+		refused  = "package p\n\nvar a int //nolint:unused,all\n"
+		ungated  = "package p\n\nvar a int //nolint:unused\n"
+		noneRead = "package p\n\nvar a int // a mention of nolint mid-comment\n"
+		ownRead  = "package p\n\n//nolint:contextchecks\nfunc f() {}\n"
+	)
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  []string // a substring of each problem, one each
+	}{
+		{name: "a sound module", files: map[string]string{"doc.go": "package p\n", "suppressed_counted.go": counted, "suppressed_refused.go": refused, "suppressed_contextcheck.go": ownRead, "reported_ungated.go": ungated, "reported_none.go": noneRead, "notes.txt": "", "sub/x.go": "package sub\n"}},
+		{name: "a suppressed file holding an ungated directive", files: map[string]string{"suppressed_counted.go": counted, "suppressed_ungated.go": ungated, "reported_none.go": noneRead}, want: []string{"suppressed_ungated.go:3: golangci-lint suppresses the gated finding under \"//nolint:unused\", which the witness neither refuses nor counts"}},
+		{name: "a suppressed file holding no directive", files: map[string]string{"suppressed_none.go": noneRead, "reported_none.go": noneRead}, want: []string{"suppressed_none.go holds no //nolint directive the witness reads"}},
+		{name: "a reported file holding a counted directive", files: map[string]string{"suppressed_counted.go": counted, "reported_counted.go": counted}, want: []string{"reported_counted.go:3: golangci-lint reports the gated finding under \"//nolint:gochecknoglobals // a reason\", which the witness nonetheless refuses or counts"}},
+		{name: "a reported file holding a refused directive", files: map[string]string{"suppressed_counted.go": counted, "reported_refused.go": refused}, want: []string{"reported_refused.go:3: golangci-lint reports the gated finding under \"//nolint:unused,all\""}},
+		{name: "a file whose name has neither kind", files: map[string]string{"suppressed_counted.go": counted, "reported_none.go": noneRead, "probe_x.go": counted}, want: []string{"probe_x.go is named neither suppressed_*.go nor reported_*.go"}},
+		{name: "no reported file", files: map[string]string{"suppressed_counted.go": counted}, want: []string{"the probe module holds no reported_*.go file"}},
+		{name: "no suppressed file", files: map[string]string{"reported_none.go": noneRead}, want: []string{"the probe module holds no suppressed_*.go file"}},
+		{name: "no probe file", files: map[string]string{"doc.go": "package p\n"}, want: []string{"holds no suppressed_*.go file", "holds no reported_*.go file"}},
+	}
+	gated := []string{"contextcheck", "gochecknoglobals"}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tc.files {
+				p := filepath.Join(dir, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			problems := nolintProbeProblems(t, dir, gated)
+			if len(problems) != len(tc.want) {
+				t.Fatalf("problems = %q, want %d, one containing each of %q", problems, len(tc.want), tc.want)
+			}
+			for _, w := range tc.want {
+				if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, w) }) {
+					t.Fatalf("problems = %q, want one containing %q", problems, w)
+				}
+			}
+		})
+	}
+}
+
 // TestContextcheckDocDirective covers contextcheck's own reading of one line
 // of a function declaration's doc comment (ledger SI-337): its nolint
 // pattern, one optional whitespace character after the //, with its name
