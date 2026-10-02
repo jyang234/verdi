@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -100,7 +101,8 @@ func Build(t testing.TB, ctx context.Context, state SeedState) *Fixture {
 // the commit the default branch resolves to before state's working-tree
 // and index layer is laid over them. base maps repository-relative slash
 // paths to content; a path that collides with the fixture's own
-// (baseCollision) fails the test.
+// (baseCollision), or that the seed commit does not track (a base
+// .gitignore can ignore one), fails the test.
 func BuildWith(t testing.TB, ctx context.Context, state SeedState, base map[string]string) *Fixture {
 	t.Helper()
 	if err := baseCollision(base); err != nil {
@@ -117,6 +119,20 @@ func BuildWith(t testing.TB, ctx context.Context, state SeedState, base map[stri
 		files[path] = content
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "seed"}})
+	tracked := make(map[string]bool)
+	for _, path := range strings.Split(runGitFixture(t, ctx, repo.Dir, "ls-tree", "-r", "-z", "--name-only", repo.Head), "\x00") {
+		tracked[path] = true
+	}
+	var untracked []string
+	for path := range base {
+		if !tracked[path] {
+			untracked = append(untracked, path)
+		}
+	}
+	if len(untracked) > 0 {
+		sort.Strings(untracked)
+		t.Fatalf("ritualwitness: BuildWith: the seed commit does not track base file(s) %s", strings.Join(untracked, ", "))
+	}
 
 	runGitFixture(t, ctx, repo.Dir, "branch", SideBranch)
 	runGitFixture(t, ctx, repo.Dir, "worktree", "add", "--quiet", "--detach", RegisteredWorktree, repo.Head)

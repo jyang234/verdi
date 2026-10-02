@@ -42,6 +42,28 @@ func TestBuildWith_TracksTheBaseFilesAtTheSeedCommit(t *testing.T) {
 	}
 }
 
+// TestBuildWith_RefusesABaseFileTheSeedCommitDoesNotTrack (R4-B4): a base
+// file the seed commit leaves untracked — here one a base-supplied nested
+// .gitignore ignores — fails BuildWith, naming it, rather than leaving the
+// ritual a store that is not at the default branch's commit.
+func TestBuildWith_RefusesABaseFileTheSeedCommitDoesNotTrack(t *testing.T) {
+	ctx := context.Background()
+	rec := &fatalRecorder{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		BuildWith(rec, ctx, SeedClean, map[string]string{
+			".verdi/.gitignore":       "*.json\n",
+			".verdi/store-state.json": "{}\n",
+			".verdi/verdi.yaml":       "schema: verdi.layout/v1\n",
+		})
+	}()
+	<-done
+	if got := rec.message(); !strings.Contains(got, ".verdi/store-state.json") || strings.Contains(got, ".verdi/verdi.yaml") {
+		t.Fatalf("BuildWith failed with %q, want it to name only the untracked .verdi/store-state.json", got)
+	}
+}
+
 // TestBuildWith_NilBaseIsBuild: Build is BuildWith with no base files, so
 // both seed the same commit.
 func TestBuildWith_NilBaseIsBuild(t *testing.T) {
