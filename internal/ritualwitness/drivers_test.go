@@ -2,11 +2,16 @@ package ritualwitness
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	ws "github.com/jyang234/verdi/internal/writescope"
@@ -243,6 +248,66 @@ func TestWorkbench_RunOnReportsTheLogUnavailable(t *testing.T) {
 	}
 	if got := Outcome(res.Verdicts); got != Unproven {
 		t.Fatalf("Outcome = %s, want unproven", got)
+	}
+}
+
+// fatalRecorder is a testing.TB whose Fatalf records its message and ends
+// the calling goroutine, as a real test's Fatalf does, so a test can watch
+// RunOn refuse a run without failing itself.
+type fatalRecorder struct {
+	testing.TB
+	mu    sync.Mutex
+	fatal string
+}
+
+func (r *fatalRecorder) Helper() {}
+
+func (r *fatalRecorder) Fatalf(format string, args ...any) {
+	r.mu.Lock()
+	r.fatal = fmt.Sprintf(format, args...)
+	r.mu.Unlock()
+	runtime.Goexit()
+}
+
+func (r *fatalRecorder) message() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fatal
+}
+
+// TestRunOn_RefusesAnExitNoVerbHas: a driver exit outside 0..2 (one that
+// never got an exit, or one no verb uses) fails the run in RunOn itself,
+// before any judgment; a verb's exit is judged.
+func TestRunOn_RefusesAnExitNoVerbHas(t *testing.T) {
+	ctx := context.Background()
+	for _, exit := range []int{-1, 3, 0, 2} {
+		t.Run(strconv.Itoa(exit), func(t *testing.T) {
+			fx := Build(t, ctx, SeedClean)
+			d := InProcess{Fn: func(context.Context, string) (int, error) {
+				if exit == 0 {
+					return 0, nil
+				}
+				return exit, errors.New("the driver's own error")
+			}}
+			rec := &fatalRecorder{TB: t}
+			var res Result
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				res = RunOn(rec, ctx, fx, d, branchDecl())
+			}()
+			<-done
+			got := rec.message()
+			if verbExit(exit) {
+				if got != "" || res.Exit != exit {
+					t.Fatalf("RunOn on exit %d = %+v, fatal %q; want it judged", exit, res, got)
+				}
+				return
+			}
+			if !strings.Contains(got, fmt.Sprintf("the driver reported exit %d, which is no verb's exit class", exit)) {
+				t.Fatalf("RunOn on exit %d failed with %q, want it refused as no verb's exit", exit, got)
+			}
+		})
 	}
 }
 
