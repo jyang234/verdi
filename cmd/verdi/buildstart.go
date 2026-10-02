@@ -236,6 +236,50 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		return 2
 	}
 
+	// UAT-023: the build branch is cut from the resolved default branch,
+	// never from whatever HEAD the checkout sits on — the same resolution
+	// and disclosure design start uses (resolveBranchBase, dc-7/I-130). It
+	// is cut at the resolved commit, not the ref's name, so the checkout
+	// sets no upstream to the default branch (a config write build start's
+	// declaration does not make), and the baseline is regenerated for that
+	// commit, the build branch's own. The base is resolved, and the branch
+	// name checked, before every precondition below (ledger SI-334 (2)).
+	base, ok := resolveBranchBaseResolution(ctx, root, "build start", stdout, stderr)
+	if !ok {
+		return 2
+	}
+	branch := "feature/" + specRef.Name
+
+	// UAT-031's build-start half (ledger SI-333): a build branch that
+	// already exists, locally or on the remote the base resolves from, is
+	// refused before the cut, never cut a second time beside the remote's.
+	// The refusal keeps build start's existing convention for a branch
+	// that already exists — exit 2, operational, naming the branch and
+	// "already exists" (TestBuildCommandsFromATCRunway_Refusals) — which
+	// git's own checkout -b gave the local case before this check.
+	if collision, cerr := buildBranchCollision(ctx, root, branch, base); cerr != nil {
+		fmt.Fprintln(stderr, "build start:", cerr)
+		return 2
+	} else if collision != "" {
+		fmt.Fprintf(stderr, "build start: %s already exists as %s; a build branch is cut once (UAT-031)\n", branch, collision)
+		return 2
+	}
+
+	// Ledger SI-334 (2): the preconditions below read the working tree, and
+	// the cut carries the base's tree, so they are judged only where the
+	// two agree at every path they read (buildbaseinputs.go). Anything else
+	// is refused before any effect, naming the paths.
+	differing, derr := differingGovernedInputs(ctx, root, base.Commit, buildGovernedInputs(specRef.Name, spec))
+	if derr != nil {
+		fmt.Fprintln(stderr, "build start:", derr)
+		return 2
+	}
+	if len(differing) > 0 {
+		fmt.Fprintf(stderr, "build start: refused: the working tree differs from the base %s @ %s at %s; build start judges its preconditions only against the content its branch is cut from (ledger SI-334)\n",
+			base.Ref, shortSHA(base.Commit), strings.Join(differing, ", "))
+		return 2
+	}
+
 	if ok, reason, cerr := checkCascadeReaffirmation(root, spec); cerr != nil {
 		fmt.Fprintln(stderr, "build start:", cerr)
 		return 2
@@ -244,9 +288,9 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		return 1
 	}
 
-	// Obligation-quality is the final pre-effect build precondition. It runs
-	// after acceptance and cascade proof, but before RevParse, branch creation,
-	// or baseline work. Feature ACs remain exempt: obligations are story-only.
+	// Obligation-quality runs after acceptance and cascade proof, but before
+	// the conflict gate, branch creation, or baseline work. Feature ACs
+	// remain exempt: obligations are story-only.
 	if spec.Class == artifact.ClassStory {
 		debts, qerr := buildObligationQualityDebts(ctx, root, specRef.Name, spec)
 		if qerr != nil {
@@ -292,35 +336,6 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 		if conflict.Result.Report.Verdict != policyconflict.VerdictPass {
 			return 1
 		}
-	}
-
-	// UAT-023: the build branch is cut from the resolved default branch,
-	// never from whatever HEAD the checkout sits on — the same resolution
-	// and disclosure design start uses (resolveBranchBase, dc-7/I-130),
-	// read after every precondition and before the one mutation. It is cut
-	// at the resolved commit, not the ref's name, so the checkout sets no
-	// upstream to the default branch (a config write build start's
-	// declaration does not make), and the baseline is regenerated for that
-	// commit, the build branch's own.
-	base, ok := resolveBranchBaseResolution(ctx, root, "build start", stdout, stderr)
-	if !ok {
-		return 2
-	}
-	branch := "feature/" + specRef.Name
-
-	// UAT-031's build-start half (ledger SI-333): a build branch that
-	// already exists, locally or on the remote the base resolves from, is
-	// refused before the cut, never cut a second time beside the remote's.
-	// The refusal keeps build start's existing convention for a branch
-	// that already exists — exit 2, operational, naming the branch and
-	// "already exists" (TestBuildCommandsFromATCRunway_Refusals) — which
-	// git's own checkout -b gave the local case before this check.
-	if collision, cerr := buildBranchCollision(ctx, root, branch, base); cerr != nil {
-		fmt.Fprintln(stderr, "build start:", cerr)
-		return 2
-	} else if collision != "" {
-		fmt.Fprintf(stderr, "build start: %s already exists as %s; a build branch is cut once (UAT-031)\n", branch, collision)
-		return 2
 	}
 
 	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, base.Commit); err != nil {
