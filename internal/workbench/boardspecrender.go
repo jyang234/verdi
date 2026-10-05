@@ -569,9 +569,19 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		title := designscaffold.HumanizeName(sv.Slug)
 		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr +
 			` data-acs="` + esc(strings.Join(sv.AcceptanceCriteria, ",")) + `" data-resolves="` + esc(strings.Join(sv.Resolves, ",")) + `" style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
+		// The slug is the card's first line, inside the card
+		// (spec/wall-canvas-v2 ac-1): this span's bytes are a hook the Go
+		// pins and the scoping specs share, so the redesign restyles it
+		// and never rewrites it. The pin that follows anchors the stub's
+		// projected coverage yarn and starts no thread (dc-3; SI-350 (8)):
+		// a span, not a `.yarn-handle` button, with no pointer handler.
 		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
+		b.WriteString(`<span class="stub-pushpin" aria-hidden="true"></span>`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(kindLabel) + `</span><span class="card-kind-id">declared</span></span>`)
 		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
+		// The meta line projects the same declared bindings the data
+		// attributes above carry (handoff: `resolves oq-2 · claims no AC yet`).
+		b.WriteString(`<p class="stub-meta" data-testid="stub-meta-` + esc(sv.Slug) + `">` + esc(stubMetaText(sv.Resolves, sv.AcceptanceCriteria)) + `</p>`)
 		// A stub is a rendered board object too (spec/badge-computes dc-3:
 		// a dangling stub reference anchors to the stub's own card) — its
 		// chip row rides the card in every mode, before the sealed wall's
@@ -699,6 +709,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if authoring {
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
 		}
+		// The footer line names the paper and what the wall offers it
+		// (spec/wall-canvas-v2 ac-1; handoff "Sticky").
+		b.WriteString(`<span class="sticky-foot">` + esc(stickyFootText(authoring, domainLive)) + `</span>`)
 		b.WriteString(`</div>`)
 	}
 
