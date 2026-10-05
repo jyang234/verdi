@@ -14,6 +14,7 @@ import (
 	"github.com/jyang234/verdi/internal/ritualwitness"
 	"github.com/jyang234/verdi/internal/workbench"
 	ws "github.com/jyang234/verdi/internal/writescope"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // The workbench rows of TestRitualEffects_EveryDeclaredRitual: every
@@ -96,10 +97,9 @@ func seedDraftBranch(t *testing.T, ctx context.Context, fx *ritualwitness.Fixtur
 }
 
 // managedWorktreePath is where the /b/ mount cuts branch's managed
-// worktree (wtmanager's naming: a design/ branch's name without the
-// prefix).
+// worktree under the fixture: wtmanager's own mapping.
 func managedWorktreePath(fx *ritualwitness.Fixture, branch string) string {
-	return filepath.Join(fx.Dir, ".verdi", "data", "worktrees", strings.TrimPrefix(branch, "design/"))
+	return wtmanager.WorktreePath(fx.Dir, branch)
 }
 
 // dispatchSeed returns the seeding of one /b/ dispatch branch for branch:

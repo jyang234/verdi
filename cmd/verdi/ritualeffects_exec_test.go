@@ -96,16 +96,21 @@ const (
 	specImportDirtyAdvice = "commit or remove them before preview/apply"
 )
 
+// specImportExitDisclosure is what spec import's refusal rows disclose:
+// one refusal, two exit classes (backlog BL-156).
+const specImportExitDisclosure = "spec import's dirty-context refusal exits 1 on the CLI and 2 on the workbench and MCP surfaces for the same refusal (backlog BL-156); each row asserts its own surface's exit"
+
 // specImportCases are spec_import's three surfaces, a whole-tree guard
 // (ledger SI-349 (2)): import refuses a checkout with any uncommitted or
 // untracked path, preview and apply alike. In both seeded states each
 // surface's own preview refuses (asserted while the case is prepared), and
 // so does its apply, which names a digest no preview made, with the
 // dirty-context words and nothing remaining. The CLI refusal exits 1 and
-// the workbench and MCP refusals exit 2 (backlog BL-156); those two, under
-// the scoped declaration, carry SI-348 (2)'s named allowance. Over a
-// pristine tree each surface previews and then applies a ready request
-// under a draft-write design-assistance policy, and completes.
+// the workbench and MCP refusals exit 2 (backlog BL-156, disclosed with
+// each run); those two, under the scoped declaration, carry SI-348 (2)'s
+// named allowance. Over a pristine tree each surface previews and then
+// applies a ready request under a draft-write design-assistance policy,
+// and completes.
 func specImportCases(t *testing.T, bin string) map[ws.Verb][]ritualCase {
 	policyStore := designImportPolicyFiles(t, "draft-write")
 	// preview runs one surface's preview of request in fx and returns its
@@ -214,7 +219,7 @@ func specImportCases(t *testing.T, bin string) map[ws.Verb][]ritualCase {
 	table := map[ws.Verb][]ritualCase{}
 	for _, s := range surfaces {
 		table[s.verb] = []ritualCase{
-			{path: pathRoot, ritual: "spec_import", base: policyStore, driver: s.driver(false), want: s.guard},
+			{path: pathRoot, ritual: "spec_import", base: policyStore, driver: s.driver(false), want: s.guard, disclosure: specImportExitDisclosure},
 			{path: pathRoot + pristineSuffix, ritual: "spec_import", base: policyStore, pristine: true, driver: s.driver(true), want: always(completes())},
 		}
 	}
@@ -380,16 +385,30 @@ func (r contextExecutionRun) driver(ctx context.Context, t *testing.T, bin strin
 		Env: []string{"ANTHROPIC_API_KEY=" + claudeE2EAPIKey}}
 }
 
+// The workload binding the execution rituals' rows refuse (SI-351 (1)):
+// the registered definition's workload, bound under a digest that is not
+// its own.
+const (
+	experimentWorkloadID       = "request-mix"
+	experimentMismatchedDigest = "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+)
+
 // experimentBindingRefusal is the execution rituals' refusal (ledger
-// SI-349 (3)): the earliest deterministic refusal that precedes every
-// effect and is the same on every platform. The verb checks the run's input
-// bindings against the accepted definition's locked digests before it
+// SI-349 (3), SI-351 (1)): the earliest deterministic refusal that precedes
+// every effect and is the same on every platform. The verb checks the run's
+// input bindings against the accepted definition's locked digests before it
 // resolves policy or reaches the runner, whose isolation profile is where
 // the platforms part (SI-131 (c), SI-136 (c)); a binding whose workload
 // digest is not the definition's is refused there, operationally (exit
-// 2), with nothing written. start, resume, and the MCP tool share it.
+// 2), with nothing written, in the binding slot's own words (SI-354 (6)),
+// JSON-quoted as the answer carries them. start, resume, and the MCP tool
+// share it. The execution rituals are declared to complete, so it stands
+// in for their completion (SI-348 (1), SI-354 (3)).
 func experimentBindingRefusal() ritualRun {
-	return refuses(2, `"classification":"operational","code":"input-binding-invalid"`, "experimentapp: execution input bindings:")
+	slot := `experimentrun: input binding slot \"workload\" identity {\"` + experimentWorkloadID + `\",\"` + experimentMismatchedDigest +
+		`\"}, want {\"` + experimentWorkloadID + `\",\"sha256:`
+	return standingInForCompletion(refuses(2, `"classification":"operational","code":"input-binding-invalid"`, "experimentapp: execution input bindings: "+slot),
+		executionCompletionGap)
 }
 
 // experimentFixture builds the registered, accepted experiment the
@@ -456,9 +475,12 @@ func experimentBindings(t *testing.T, root string) (string, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mismatched := "sha256:" + strings.Repeat("7", 64)
+	mismatched := experimentMismatchedDigest
 	if definition.Workload.Digest == mismatched {
 		t.Fatalf("the definition's workload digest is the mismatched one %s", mismatched)
+	}
+	if definition.Workload.ID != experimentWorkloadID {
+		t.Fatalf("the definition's workload is %q, want %q, which the refusal's words name", definition.Workload.ID, experimentWorkloadID)
 	}
 	doc, err := experimentrun.EncodeInputBindings(experimentrun.InputBindings{Schema: experimentrun.InputBindingSchema, Inputs: []experimentrun.InputBinding{
 		{Slot: experimentrun.InputSlotContract, ID: definition.Contract.ID, Digest: definition.Contract.Digest, Path: wave5CContractPath},

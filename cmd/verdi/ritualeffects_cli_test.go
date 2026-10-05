@@ -44,14 +44,16 @@ const closeCountersignUnproven = "countersign verdict is unproven; witnesses: li
 const closeDisclosure = "close's completion, and so its failure unwind, is unproven (ledger SI-349 (1), backlog BL-44): in the clean-index state every dc-3 path refuses at the closure gate's countersign condition, before any cut, with nothing remaining"
 
 // closeRefusals is close's expectation (SI-349 (1)): in SeedFull it
-// refuses the staged foreign entry (exit 2); in SeedClean the closure
-// gate refuses (exit 1) at its countersign condition, gateCondition.
+// refuses the staged foreign entry (exit 2), as declared; in SeedClean,
+// where close is declared to complete, the closure gate refuses (exit 1)
+// at its countersign condition, gateCondition, standing in for that
+// completion (SI-354 (3)).
 func closeRefusals(gateCondition string) func(ritualwitness.SeedState) ritualRun {
 	return func(state ritualwitness.SeedState) ritualRun {
 		if state == ritualwitness.SeedFull {
 			return refuses(2, closeStagedRefusal)
 		}
-		return refuses(1, gateCondition, closeCountersignUnproven)
+		return standingInForCompletion(refuses(1, gateCondition, closeCountersignUnproven), closeCompletionGap)
 	}
 }
 
