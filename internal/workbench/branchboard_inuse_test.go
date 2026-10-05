@@ -355,3 +355,67 @@ func TestBranchBoards_CheckedOutHereArm(t *testing.T) {
 		})
 	}
 }
+
+// TestResolvedWorktreePath is resolvedWorktreePath's table (R3C-A5): the
+// longest existing prefix of the path is resolved through its symbolic
+// links and the missing tail kept verbatim beneath it, so a worktree path
+// compares equal to git's report of it however the root is spelled, even
+// once its directory is gone.
+func TestResolvedWorktreePath(t *testing.T) {
+	real := resolvedPath(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Join(real, "present"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, path, want string
+	}{
+		{"an existing path through a link", filepath.Join(link, "present"), filepath.Join(real, "present")},
+		{"a missing tail beneath a link", filepath.Join(link, "gone", "worktrees", "two-b"), filepath.Join(real, "gone", "worktrees", "two-b")},
+		{"an unclean path", link + "/present/../gone/", filepath.Join(real, "gone")},
+		{"a relative path", "no-such-dir/x", filepath.Join(resolvedPath(t, cwd), "no-such-dir", "x")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolvedWorktreePath(tt.path); got != tt.want {
+				t.Fatalf("resolvedWorktreePath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBranchBoards_HeldElsewhere_StaleManagedWorktreeAnyRootSpelling is
+// R3C-A5: the branch's own managed worktree, its directory deleted without
+// a prune, is still the branch's own, not another worktree's, whether the
+// serving root is spelled resolved or through a symbolic link.
+func TestBranchBoards_HeldElsewhere_StaleManagedWorktreeAnyRootSpelling(t *testing.T) {
+	ctx := context.Background()
+	root := resolvedPath(t, newBranchBoardFixture(t))
+	managed, err := wtmanager.EnsureWorktree(ctx, root, "design/two-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(managed); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "root-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []struct{ name, root string }{{"resolved", root}, {"through a link", link}} {
+		t.Run(spelling.name, func(t *testing.T) {
+			spelled := spelling.root
+			got, err := newBranchBoards(spelled, Deps{}, nil).heldElsewhere(ctx, "design/two-b")
+			if err != nil || got != "" {
+				t.Fatalf("heldElsewhere over root %s = %q, %v; want the branch's own managed worktree, not another's", spelled, got, err)
+			}
+		})
+	}
+}
