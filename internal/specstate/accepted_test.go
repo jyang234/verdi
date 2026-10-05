@@ -249,7 +249,7 @@ func TestStoreTreePaths_MatchesThePlainListings_Integration(t *testing.T) {
 // pinnedResolve resolves candidate in a request that pinned root's
 // accepted HEAD inside a read session, counting what the resolve itself
 // reads (the pin's own resolution is made before the census attaches).
-func pinnedResolve(t *testing.T, root string, candidate Candidate) (Result, error, readcensus.Budget) {
+func pinnedResolve(t *testing.T, root string, candidate Candidate) (Result, readcensus.Budget, error) {
 	t.Helper()
 	ctx, release := gitx.WithReadSession(context.Background(), root)
 	defer release()
@@ -261,7 +261,7 @@ func pinnedResolve(t *testing.T, root string, candidate Candidate) (Result, erro
 	if strings.HasPrefix(branch.Ref, "origin/") {
 		full = "refs/remotes/" + branch.Ref
 	}
-	return result, err, census.Budget(readcensus.Accepted{Spellings: []string{branch.Ref, full}, IDs: []string{branch.Tip, branch.Commit}})
+	return result, census.Budget(readcensus.Accepted{Spellings: []string{branch.Ref, full}, IDs: []string{branch.Tip, branch.Commit}}), err
 }
 
 // TestProjector_PinnedReadsMatchTheRef_Integration (ledger SI-356): in a
@@ -292,7 +292,7 @@ func TestProjector_PinnedReadsMatchTheRef_Integration(t *testing.T) {
 			repo := originRepo(t, tc.files)
 			want, wantErr := Projector{git: realGitReader{}}.Resolve(context.Background(), repo.Dir, tc.candidate)
 			for _, round := range []string{"first", "cached"} {
-				got, err, budget := pinnedResolve(t, repo.Dir, tc.candidate)
+				got, budget, err := pinnedResolve(t, repo.Dir, tc.candidate)
 				if errText(err) != errText(wantErr) || !reflect.DeepEqual(got, want) {
 					t.Fatalf("%s pinned Resolve = (%+v, %v), unpinned (%+v, %v)", round, got, err, want, wantErr)
 				}
@@ -315,7 +315,7 @@ func TestProjector_PinnedReadFailsAsTheRefDoes_Integration(t *testing.T) {
 	if wantErr == nil {
 		t.Fatal("the unpinned Resolve succeeded; the fixture did not break the read")
 	}
-	_, err, _ := pinnedResolve(t, repo.Dir, candidate)
+	_, _, err := pinnedResolve(t, repo.Dir, candidate)
 	if errText(err) != errText(wantErr) {
 		t.Fatalf("pinned Resolve error:\n got: %v\nwant: %v", err, wantErr)
 	}
@@ -329,4 +329,48 @@ func errText(err error) string {
 		return "<nil>"
 	}
 	return err.Error()
+}
+
+// TestProjector_OnlyAPinnedScanListsTheWholeTree (ledger SI-356): a corpus
+// scan in a request that pinned its accepted HEAD enumerates the tree once
+// (`ls-tree -rz --full-tree <commit>`); every other scan runs the two
+// plain listings it always ran, so the git reads of an unpinned caller —
+// lint for the disclosures view, whose cache key covers exactly those
+// reads — do not change.
+func TestProjector_OnlyAPinnedScanListsTheWholeTree(t *testing.T) {
+	listings := func(c *readcensus.Census) []string {
+		var out []string
+		for _, e := range c.Events() {
+			if e.Kind == readcensus.Exec && len(e.Args) > 1 && e.Args[0] == "ls-tree" && strings.HasPrefix(e.Args[1], "-r") {
+				out = append(out, strings.Join(e.Args, " "))
+			}
+		}
+		return out
+	}
+	candidate := Candidate{Path: memoPredPath, Content: []byte(memoPred)}
+
+	unpinnedRepo := originRepo(t, map[string]string{memoPredPath: memoPred})
+	unpinned := &readcensus.Census{}
+	if _, err := NewProjector().Resolve(gitx.WithObserver(context.Background(), unpinned), unpinnedRepo.Dir, candidate); err != nil {
+		t.Fatal(err)
+	}
+	wantPlain := []string{
+		"ls-tree -r --name-only " + unpinnedRepo.Head + " -- " + specZonesPrefix,
+		"ls-tree -r --name-only " + unpinnedRepo.Head + " -- " + conflictsDir(),
+	}
+	if got := listings(unpinned); !reflect.DeepEqual(got, wantPlain) {
+		t.Fatalf("an unpinned scan listed %q, want the two plain listings %q", got, wantPlain)
+	}
+
+	pinnedRepo := originRepo(t, map[string]string{memoPredPath: memoPred, "other.txt": "x\n"})
+	ctx, release := gitx.WithReadSession(context.Background(), pinnedRepo.Dir)
+	defer release()
+	ctx = WithAcceptedHead(ctx, pinnedRepo.Dir)
+	pinned := &readcensus.Census{}
+	if _, err := NewProjector().Resolve(gitx.WithObserver(ctx, pinned), pinnedRepo.Dir, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := listings(pinned), []string{"ls-tree -rz --full-tree " + pinnedRepo.Head}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("a pinned scan listed %q, want the one whole-tree listing %q", got, want)
+	}
 }

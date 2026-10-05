@@ -251,10 +251,16 @@ func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
 // why exclusion belongs at lookup time instead) — and then every conflict
 // record (scanConflicts), at the same revision. rev is what every read
 // names: the default branch's ref, or the commit it resolved to when the
-// scan is cached (see successors). Both lists come from one enumeration of
-// the tree when they can (storeTreePaths).
-func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*successorCorpus, error) {
-	paths, conflictPaths, listed, err := p.storeTreePaths(ctx, root, rev)
+// scan is cached (see successors). In a request that pinned its accepted
+// HEAD (pinned), both lists come from one enumeration of the tree when
+// they can (storeTreePaths); every other scan lists as it always has.
+func (p Projector) scanSuccessors(ctx context.Context, root, rev string, pinned bool) (*successorCorpus, error) {
+	var paths, conflictPaths []string
+	var listed bool
+	var err error
+	if pinned {
+		paths, conflictPaths, listed, err = p.storeTreePaths(ctx, root, rev)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
 	}
@@ -364,8 +370,11 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*succe
 // ls-tree -r --name-only <rev> -- .verdi/specs` and `-- .verdi/conflicts`
 // list, from one listing of the whole tree (gitx.LsTreeEntries): the
 // accepted tree enumerated once per projection, not once per directory
-// (Wave 6 §5.3; ledger SI-356) — and, inside a read session, the same
-// listing every other reader of that commit's tree shares. It answers only
+// (Wave 6 §5.3; ledger SI-356) — and, inside the projection's read
+// session, the same listing every other reader of that commit's tree
+// shares. Only a scan pinned to a request's accepted HEAD lists this way
+// (scanSuccessors' pinned): every other caller's git reads are what they
+// always were, which the disclosures view's cache key relies on. It answers only
 // where that listing is exactly the two plain ones: rev is a full object
 // id (a listing of a ref name would resolve the ref again), root is its
 // repository's top level (the plain listings name paths from root, the
@@ -445,21 +454,22 @@ func plainListingQuotes(p string) bool {
 // seen, never one naming the commit id.
 func (p Projector) successors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
 	if p.corpora == nil {
-		return p.scanSuccessors(ctx, root, branch.Ref)
+		return p.scanSuccessors(ctx, root, branch.Ref, false)
 	}
 	commit := branch.Commit
-	if commit == "" {
+	pinned := commit != ""
+	if !pinned {
 		resolved, err := p.git.RevParse(ctx, root, branch.Ref+"^{commit}")
 		if err != nil || resolved == "" {
-			return p.scanSuccessors(ctx, root, branch.Ref)
+			return p.scanSuccessors(ctx, root, branch.Ref, false)
 		}
 		commit = resolved
 	}
 	corpus, err := p.corpora.get(ctx, corpusKey{root: root, commit: commit}, func() (*successorCorpus, error) {
-		return p.scanSuccessors(ctx, root, commit)
+		return p.scanSuccessors(ctx, root, commit, pinned)
 	})
 	if err != nil {
-		return p.scanSuccessors(ctx, root, branch.Ref)
+		return p.scanSuccessors(ctx, root, branch.Ref, false)
 	}
 	return corpus, nil
 }

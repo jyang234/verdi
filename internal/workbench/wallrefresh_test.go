@@ -227,19 +227,23 @@ func TestResolvePostureHeads_PinnedAcceptedHead(t *testing.T) {
 	tip := wall.acc.IDs[0]
 	for _, tc := range []struct {
 		name     string
-		ctx      context.Context
+		pinned   bool
 		wantRevs []string
 	}{
-		{name: "pinned", ctx: specstate.WithAcceptedHead(context.Background(), wall.root), wantRevs: []string{"HEAD"}},
-		{name: "unpinned", ctx: context.Background(), wantRevs: []string{"HEAD", "origin/main"}},
+		{name: "pinned", pinned: true, wantRevs: []string{"HEAD"}},
+		{name: "unpinned", wantRevs: []string{"HEAD", "origin/main"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			git, _, err := s.gitState(tc.ctx)
+			ctx := context.Background()
+			if tc.pinned {
+				ctx = specstate.WithAcceptedHead(ctx, wall.root)
+			}
+			git, _, err := s.gitState(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			rd := &countingPostureReader{}
-			heads := resolvePostureHeads(tc.ctx, wall.root, git, rd)
+			heads := resolvePostureHeads(ctx, wall.root, git, rd)
 			if heads.accepted != tip || heads.acceptedWhy != "" {
 				t.Fatalf("accepted HEAD = (%q, %q), want %s", heads.accepted, heads.acceptedWhy, tip)
 			}

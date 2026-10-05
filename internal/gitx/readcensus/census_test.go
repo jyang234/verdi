@@ -10,7 +10,10 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
-var acc = Accepted{Spellings: []string{"origin/main", "refs/remotes/origin/main"}, IDs: []string{strings.Repeat("a", 40)}}
+// originMain is the accepted HEAD the tables count against.
+func originMain() Accepted {
+	return Accepted{Spellings: []string{"origin/main", "refs/remotes/origin/main"}, IDs: []string{strings.Repeat("a", 40)}}
+}
 
 func census(events ...Event) *Census {
 	c := &Census{}
@@ -109,7 +112,7 @@ func TestBudget_CountsEachRule(t *testing.T) {
 		}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := census(tc.events...).Budget(acc); !reflect.DeepEqual(got, tc.want) {
+			if got := census(tc.events...).Budget(originMain()); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("budget =\n%+v\nwant\n%+v", got, tc.want)
 			}
 		})
@@ -119,7 +122,7 @@ func TestBudget_CountsEachRule(t *testing.T) {
 // TestBudget_EmptyCensus: a census that saw nothing counts nothing.
 func TestBudget_EmptyCensus(t *testing.T) {
 	var c Census
-	if got := c.Budget(acc); !reflect.DeepEqual(got, Budget{}) {
+	if got := c.Budget(originMain()); !reflect.DeepEqual(got, Budget{}) {
 		t.Fatalf("empty budget = %+v", got)
 	}
 	if chains, explicit, operand := (Budget{}).Resolutions(); chains != 0 || explicit != 0 || operand != 0 {
