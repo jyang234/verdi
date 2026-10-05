@@ -67,6 +67,8 @@ func sessionRepo(t *testing.T) *fixturegit.Repo {
 			"dir/sibling.md":      "sibling\n",
 			"large.txt":           large,
 			"with space/file.txt": "spaced\n",
+			"crname\r":            "a name ending in a carriage return\n",
+			"crdir\r/inner.md":    "inside a directory whose name ends in a carriage return\n",
 			"changes.txt":         "first\n",
 		}, Message: "first"},
 		{Files: map[string]string{"changes.txt": "second\n"}, Message: "second"},
@@ -113,6 +115,11 @@ func sessionPaths() []string {
 		"./plain.txt", "dir/../plain.txt", // relative forms
 		"*.txt", "dir/*.md", // pathspec magic
 		"", // no path at all
+		// Control characters (P1R-2): `cat-file --batch` strips a CR before
+		// its line's LF and a NUL ends git's C string, so a batched read of
+		// these would answer for a different name than the exec reads.
+		"plain.txt\r", "crname\r", "crname", "crdir\r/inner.md", "crdir\r", "dir\r/sibling.md",
+		"plain.txt\x00ignored", "dir/sibling.md\x01",
 	}
 }
 
@@ -358,5 +365,74 @@ func TestReadSession_FallsBackWhenTheBatchDies(t *testing.T) {
 	}
 	if obs.count("cat-file") != 0 || obs.count("show") != 3 {
 		t.Fatalf("reads after the batch died launched %v, want their own shows and no new batch", obs.argv)
+	}
+}
+
+// sha256Repo builds a two-commit repository in git's SHA-256 object
+// format, with fixturegit's fixed identity and date. It skips when the
+// local git cannot create one (the format arrived in git 2.29).
+func sha256Repo(t *testing.T) (dir string, heads []string) {
+	t.Helper()
+	dir = t.TempDir()
+	init := exec.CommandContext(t.Context(), "git", "init", "--quiet", "--object-format=sha256", "--initial-branch=main", dir)
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Skipf("the local git cannot create a SHA-256 repository, so this differential cannot run here: %v\n%s", err, out)
+	}
+	env := append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_AUTHOR_DATE=1704067200 +0000",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_COMMITTER_DATE=1704067200 +0000")
+	for i, files := range []map[string]string{
+		{"plain.txt": "plain\n", "dir/sibling.md": "sibling\n", "tool.sh": "#!/bin/sh\n"},
+		{"changes.txt": "second\n", "dir/nested/deep.md": "deep\n"},
+	} {
+		for rel, content := range files {
+			full := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, args := range [][]string{{"add", "-A"}, {"commit", "--quiet", "--no-verify", "-m", "layer"}} {
+			cmd := exec.CommandContext(t.Context(), "git", args...)
+			cmd.Dir, cmd.Env = dir, env
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v (layer %d): %v\n%s", args, i, err, out)
+			}
+		}
+		heads = append(heads, gitT(t, dir, "rev-parse", "HEAD"))
+	}
+	return dir, heads
+}
+
+// TestReadSession_SHA256MatchesExec (P1R-2): in a SHA-256 repository every
+// session answer still equals the exec's, error text included. BlobAt's
+// exec path reads only 40-hex ls-tree records, so its session shortcut
+// must not answer there.
+func TestReadSession_SHA256MatchesExec(t *testing.T) {
+	dir, heads := sha256Repo(t)
+	ctx, release := WithReadSession(context.Background(), dir)
+	defer release()
+	for _, rev := range []string{"HEAD", "HEAD~1", heads[0], "no-such-ref"} {
+		for _, p := range []string{"plain.txt", "dir/sibling.md", "dir/nested/deep.md", "changes.txt", "tool.sh", "dir", "missing.txt", "plain.txt\r"} {
+			want, wantErr := Show(context.Background(), dir, rev, p)
+			got, gotErr := Show(ctx, dir, rev, p)
+			if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+				t.Errorf("Show(%s, %q) in a SHA-256 session = (%q, %v), want (%q, %v)", rev, p, got, gotErr, want, wantErr)
+			}
+			wantOID, wantFound, wantErr := BlobAt(context.Background(), dir, rev, p)
+			gotOID, gotFound, gotErr := BlobAt(ctx, dir, rev, p)
+			if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+				t.Errorf("BlobAt(%s, %q) in a SHA-256 session = (%q, %v, %v), want (%q, %v, %v)", rev, p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+			}
+		}
+	}
+	for _, c := range append([]string{heads[0][:7], strings.Repeat("0", 64)}, heads...) {
+		want, wantErr := ReachableFromHEAD(context.Background(), dir, c, "HEAD")
+		got, gotErr := ReachableFromHEAD(ctx, dir, c, "HEAD")
+		if got != want || errText(gotErr) != errText(wantErr) {
+			t.Errorf("ReachableFromHEAD(%s) in a SHA-256 session = (%v, %v), want (%v, %v)", c, got, gotErr, want, wantErr)
+		}
 	}
 }

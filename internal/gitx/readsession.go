@@ -65,20 +65,30 @@ type reachWalk struct {
 //
 //   - Show's and BlobAt's reads are answered from one long-lived
 //     `git cat-file --batch` process instead of a process per read;
-//   - each ref resolution (a `symbolic-ref --short -q`, `show-ref --verify
-//     --quiet` or `rev-parse --verify` read) runs once, and its answer is
-//     replayed for the rest of the request — the accepted ref is resolved
-//     once per load, not once per consumer;
+//   - a ref read whose argv repeats one already run in this request — the
+//     same `symbolic-ref --short -q <ref>`, `show-ref --verify --quiet
+//     <ref>`, `rev-parse --verify <rev>` or `rev-parse --verify -q <rev>`
+//     — is answered from that run instead of running again. Only identical
+//     argv is merged: `rev-parse --verify origin/main` and `rev-parse
+//     --verify origin/main^{commit}` are two reads, and every git command
+//     that names a ref as an operand (a `rev-list <ref> -- <path>`, a
+//     batched `<ref>:<path>`) still resolves it inside git;
 //   - ReachableFromHEAD answers a full commit id that one `git rev-list`
 //     walk of head found reachable, instead of running a rev-parse and a
 //     merge-base per commit (BL-157).
 //
+// Like the replayed ref reads, the walk answers from the request's own
+// snapshot of history: a ref or commit that another process moves after
+// the session first read it is seen by the next request, not this one.
+//
 // Every shortcut answers only its happy path and is byte-for-byte what
 // the per-read exec answers: a blob's bytes, a plain file's blob id, a
 // commit proven reachable. Anything else — an object that is missing, not
-// a blob, not a plain file, an unusual path, a commit the walk did not
-// reach, a failed batch process or walk — takes the original exec path, so
-// every error and every negative is exactly what it was.
+// a blob, not a plain file, an unusual path or a name carrying a control
+// character, a repository whose object ids are not SHA-1 (for BlobAt), a
+// commit the walk did not reach, a failed batch process or walk — takes
+// the original exec path, so every error and every negative is exactly
+// what it was.
 //
 // The session caches nothing across requests (spec/readiness-recovery-v2
 // co-2): it dies with the returned release function, which the caller
@@ -171,15 +181,16 @@ func (s *readSession) blob(ctx context.Context, rev, filePath string) ([]byte, b
 // id of a 100644 or 100755 entry, or found == false when the parent tree
 // has no entry by that name. ok == false hands every other case — an
 // unusual path, a dir that is not the work tree's top level (ls-tree's
-// paths are relative to it), a parent that is not a tree, an entry that is
-// not a plain file — to the exec path.
+// paths are relative to it), a parent that is not a tree, a repository
+// whose ids are not 40-hex SHA-1 (BlobAt's own ls-tree record pattern
+// reads only those), an entry that is not a plain file — to the exec path.
 func (s *readSession) blobAt(ctx context.Context, ref, filePath string) (oid string, found, ok bool) {
 	if !plainRepoPath(filePath) || !s.isTopLevel(ctx) {
 		return "", false, false
 	}
 	dir, base := path.Split(filePath)
 	tree, ok := s.object(ctx, ref+":"+strings.TrimSuffix(dir, "/"))
-	if !ok || tree.typ != "tree" {
+	if !ok || tree.typ != "tree" || len(tree.oid) != 40 {
 		return "", false, false
 	}
 	entries, err := parseTree(tree.data, len(tree.oid)/2)
@@ -197,9 +208,10 @@ func (s *readSession) blobAt(ctx context.Context, ref, filePath string) (oid str
 }
 
 // plainRepoPath accepts a repository-relative path with no pathspec
-// magic, no empty, "." or ".." segment, and no leading or trailing slash.
+// magic, no control character (the exec path cannot even pass a NUL to
+// git), no empty, "." or ".." segment, and no leading or trailing slash.
 func plainRepoPath(p string) bool {
-	if p == "" || strings.ContainsAny(p, "*?[\\:\n") {
+	if p == "" || strings.ContainsAny(p, "*?[\\:") || hasControl(p) {
 		return false
 	}
 	for _, seg := range strings.Split(p, "/") {
@@ -260,10 +272,14 @@ type batchObject struct {
 
 // object reads name through the session's batch process, starting it on
 // first use. ok == false means the batch did not return an object: the
-// name is missing or ambiguous, or the process failed — in which case the
-// session stops batching and every later read takes the exec path.
+// name carries a control character, is missing or ambiguous, or the
+// process failed — in which case the session stops batching and every
+// later read takes the exec path. A control character is refused before
+// it reaches the batch: `cat-file --batch` reads one name per line and
+// strips a carriage return before the line feed, so `<rev>:a\r` would
+// answer for `a`, while the exec path names `a\r` itself.
 func (s *readSession) object(ctx context.Context, name string) (batchObject, bool) {
-	if strings.ContainsAny(name, "\n") {
+	if hasControl(name) {
 		return batchObject{}, false
 	}
 	s.batchMu.Lock()
@@ -287,6 +303,16 @@ func (s *readSession) object(ctx context.Context, name string) (batchObject, boo
 		return batchObject{}, false
 	}
 	return obj, found
+}
+
+// hasControl reports whether name holds an ASCII control byte (C0 or DEL).
+func hasControl(name string) bool {
+	for i := 0; i < len(name); i++ {
+		if name[i] < 0x20 || name[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // catFileBatch is one running `git cat-file --batch`.
