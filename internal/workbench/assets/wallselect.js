@@ -131,25 +131,25 @@
     return out;
   }
 
-  function ensureOverlay(c) {
+  // drawOverlay traces the selection's threads above the cards: a halo in
+  // the wall's own colour under a heavier stroke in the thread's colour,
+  // and larger knots — the same curve the base layer drew, so the two
+  // layers can never disagree. The overlay exists only while there is a
+  // thread to trace: with nothing selected the region's markup is exactly
+  // the server's (spec 38 pins a drawer's open-and-close as a no-op).
+  function drawOverlay(c, hot) {
     var svg = c.querySelector("svg.yarn-overlay");
+    if (!hot.length) {
+      if (svg) svg.remove();
+      return;
+    }
     if (!svg) {
       svg = document.createElementNS(SVG, "svg");
       svg.setAttribute("class", "yarn-overlay");
       svg.setAttribute("aria-hidden", "true");
       c.appendChild(svg);
     }
-    return svg;
-  }
-
-  // drawOverlay traces the selection's threads above the cards: a halo in
-  // the wall's own colour under a heavier stroke in the thread's colour,
-  // and larger knots — the same curve the base layer drew, so the two
-  // layers can never disagree.
-  function drawOverlay(c, hot) {
-    var svg = ensureOverlay(c);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    if (!hot.length) return;
     var threads = baseThreads();
     for (var i = 0; i < hot.length; i++) {
       var t = threads[hot[i].index];

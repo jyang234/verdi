@@ -177,6 +177,10 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
   const zIndexOf = (el: Locator) => el.evaluate((node) => Number(getComputedStyle(node).zIndex));
   const cardZ = await zIndexOf(page.getByTestId("card-co-1"));
   expect(await zIndexOf(base)).toBeLessThan(cardZ);
+  // With nothing selected there is no overlay at all: the region's markup
+  // stays the server's (spec 38 reads it back byte for byte around a
+  // drawer's open and close).
+  await expect(page.locator("#board-canvas svg.yarn-overlay")).toHaveCount(0);
   await expect(overlayThreads(page)).toHaveCount(0);
   await page.getByTestId("card-ac-1").click();
   await expect(page.getByTestId("card-ac-1")).toHaveAttribute("data-selected", "true");
@@ -188,7 +192,7 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
   expect(await overlayThreads(page).getAttribute("d")).toBe(await covers.getAttribute("d"));
   await canvas(page).click({ position: { x: 300, y: 520 } });
   await expect(page.locator("#board-canvas [data-selected]")).toHaveCount(0);
-  await expect(overlayThreads(page)).toHaveCount(0);
+  await expect(page.locator("#board-canvas svg.yarn-overlay")).toHaveCount(0);
 }
 
 test.describe("wall-canvas", () => {
