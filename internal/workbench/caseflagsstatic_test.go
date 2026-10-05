@@ -159,7 +159,7 @@ func TestSizeSmell_NothingConsumesTheBadge(t *testing.T) {
 // obligation: the badge and its drawer content are produced entirely
 // server-side, and no client script measures or injects a viewport
 // dimension into badge state. Witnessed two ways: (a) in every client
-// asset under assets/ (boardspec.js and every asset added since —
+// asset the server embeds (boardspec.js and every asset added since —
 // spec/wall-canvas-v2 co-1 ships new behaviour in new assets, so a guard
 // reading boardspec.js alone would stop seeing it), no source line that
 // reads a viewport dimension (window.innerHeight and equivalents —
@@ -170,7 +170,7 @@ func TestSizeSmell_NothingConsumesTheBadge(t *testing.T) {
 // over the compute's badgeView), so no drawer field can originate outside
 // the record.
 func TestSizeSmell_NoClientViewportFeedsBadgeState(t *testing.T) {
-	assets, err := workbenchAssets(os.DirFS("assets"))
+	assets, err := workbenchAssets(embeddedAssets)
 	if err != nil {
 		t.Fatal(err)
 	}
