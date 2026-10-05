@@ -1,0 +1,106 @@
+{
+  "ByObject": {
+    "ac-2": [
+      {
+        "source": "fold:empty-slot",
+        "label": "empty slot",
+        "target": "ac-2",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "13fed27d7b363195d44dd8be89db2bff23bf0ae8"
+          },
+          {
+            "name": "record:16219044c9d6d41de9a0de9464ed24d49283b40c/verdicts.json",
+            "path": ".verdi/data/derived/spec--stale-decline/16219044c9d6d41de9a0de9464ed24d49283b40c/verdicts.json",
+            "revision": "sha256:957959e94ae615e9d062b4e373dd48213f6db325f30483c2803e8807e589d0b7"
+          },
+          {
+            "name": "record:f6dd4c4df724c0b16cae435e96f7e34ac94026c9/verdicts.json",
+            "path": ".verdi/data/derived/spec--stale-decline/f6dd4c4df724c0b16cae435e96f7e34ac94026c9/verdicts.json",
+            "revision": "sha256:92f38d1e9ea0bab48c8bd98f56eea8f979e350dcea7877378e23a30d1ab349fb"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "behavioral: 1 current record",
+          "static: no current record"
+        ]
+      }
+    ],
+    "ac-4": [
+      {
+        "source": "fold:empty-slot",
+        "label": "empty slot",
+        "target": "ac-4",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "13fed27d7b363195d44dd8be89db2bff23bf0ae8"
+          },
+          {
+            "name": "record:16219044c9d6d41de9a0de9464ed24d49283b40c/verdicts.json",
+            "path": ".verdi/data/derived/spec--stale-decline/16219044c9d6d41de9a0de9464ed24d49283b40c/verdicts.json",
+            "revision": "sha256:957959e94ae615e9d062b4e373dd48213f6db325f30483c2803e8807e589d0b7"
+          },
+          {
+            "name": "record:f6dd4c4df724c0b16cae435e96f7e34ac94026c9/verdicts.json",
+            "path": ".verdi/data/derived/spec--stale-decline/f6dd4c4df724c0b16cae435e96f7e34ac94026c9/verdicts.json",
+            "revision": "sha256:92f38d1e9ea0bab48c8bd98f56eea8f979e350dcea7877378e23a30d1ab349fb"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "runtime: no current record"
+        ]
+      }
+    ]
+  },
+  "CaseFile": null,
+  "Disclosures": null,
+  "EvidenceSlots": {
+    "ac-1": [
+      {
+        "Kind": "static",
+        "Empty": false,
+        "Records": 1
+      }
+    ],
+    "ac-2": [
+      {
+        "Kind": "static",
+        "Empty": true,
+        "Records": 0
+      },
+      {
+        "Kind": "behavioral",
+        "Empty": false,
+        "Records": 1
+      }
+    ],
+    "ac-3": [
+      {
+        "Kind": "behavioral",
+        "Empty": false,
+        "Records": 1
+      }
+    ],
+    "ac-4": [
+      {
+        "Kind": "runtime",
+        "Empty": true,
+        "Records": 0
+      }
+    ]
+  }
+}

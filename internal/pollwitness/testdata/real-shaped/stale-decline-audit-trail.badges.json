@@ -1,0 +1,58 @@
+{
+  "ByObject": {
+    "ac-1": [
+      {
+        "source": "fold:empty-slot",
+        "label": "2 empty slots",
+        "target": "ac-1",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline-audit-trail",
+            "revision": "absent"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline-audit-trail/spec.md",
+            "revision": "sha256:a73a689d7116a91a09e3b797d75b5244623963c6c25b5fa1f17d5e7c93b85046"
+          }
+        ],
+        "records": [
+          "attestation: no attestation file on disk",
+          "static: no current record"
+        ]
+      }
+    ]
+  },
+  "CaseFile": [
+    {
+      "source": "lint:VL-003",
+      "label": "context[] \"adr/0002-outbox-events@2e10778b86d0c726323a81274…",
+      "inputs": [
+        {
+          "name": "spec",
+          "path": ".verdi/specs/active/stale-decline-audit-trail/spec.md",
+          "revision": "sha256:a73a689d7116a91a09e3b797d75b5244623963c6c25b5fa1f17d5e7c93b85046"
+        }
+      ],
+      "records": [
+        "context[] \"adr/0002-outbox-events@2e10778b86d0c726323a81274d8f3897b7f54e3e\" pins commit 2e10778b86d0c726323a81274d8f3897b7f54e3e, which is not reachable from HEAD in this repository's history"
+      ]
+    }
+  ],
+  "Disclosures": null,
+  "EvidenceSlots": {
+    "ac-1": [
+      {
+        "Kind": "static",
+        "Empty": true,
+        "Records": 0
+      },
+      {
+        "Kind": "attestation",
+        "Empty": true,
+        "Records": 0
+      }
+    ]
+  }
+}
