@@ -627,11 +627,16 @@ func TestBranchBoard_FailedCut_DisclosedErrorPage(t *testing.T) {
 }
 
 // TestBranchBoard_GitSwitch_RefusesOnFixedBranch: the branch switcher's
-// git-switch action refuses on a per-branch instance — the branch is the
-// address under /b/ (dc-1), and re-pointing the managed worktree would
+// git-switch action refuses beneath a per-branch board's /b/ address — the
+// branch is the address (dc-1), and re-pointing the managed worktree would
 // break the seam's branch<->path mapping. Here the managed worktree
 // already exists (an earlier GET cut it), and the refusal leaves it on its
-// branch.
+// branch. design/two-a still has its local ref and is not the serving
+// checkout's branch, so the dispatch's refusedSwitch answers this request
+// before the cached instance sees it. The instance's own guard
+// (actionGitSwitch's fixedBranch refusal) is reached only once
+// refusedSwitch lets a request through, which
+// TestBranchBoard_GitSwitch_InstanceGuardRefuses pins.
 func TestBranchBoard_GitSwitch_RefusesOnFixedBranch(t *testing.T) {
 	root := newBranchBoardFixture(t)
 	h := NewHandler(root)
@@ -655,6 +660,74 @@ func TestBranchBoard_GitSwitch_RefusesOnFixedBranch(t *testing.T) {
 	}
 	if branch != "design/two-a" {
 		t.Errorf("managed worktree switched to %q", branch)
+	}
+}
+
+// TestBranchBoard_GitSwitch_InstanceGuardRefuses pins the per-branch
+// instance's own refusal (actionGitSwitch on an instance with a
+// fixedBranch), which refusedSwitch otherwise answers first (R3ab review
+// R3-A1). The managed worktree for design/two-a exists and its instance is
+// cached. The branch is then renamed, so design/two-a has no local ref and
+// refusedSwitch lets the switch through to that cached instance. Its guard
+// alone refuses, with 403, and leaves the managed worktree on the renamed
+// branch; without it, the switch would re-point the worktree.
+func TestBranchBoard_GitSwitch_InstanceGuardRefuses(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+		t.Fatalf("GET /b/ board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	wt := filepath.Join(root, ".verdi", "data", "worktrees", "two-a")
+	runGitBB(t, root, "branch", "-m", "design/two-a", "design/renamed")
+	if branch, err := gitx.CurrentBranch(ctx, wt); err != nil || branch != "design/renamed" {
+		t.Fatalf("after the rename the managed worktree is on %q (%v), want design/renamed", branch, err)
+	}
+	if local, err := gitx.HasLocalBranch(ctx, root, "design/two-a"); err != nil || local {
+		t.Fatalf("design/two-a still resolves locally (%v, %v), so refusedSwitch would answer first", local, err)
+	}
+
+	rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/git-switch", `{"branch":"design/two-b"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("git-switch on the cached per-branch instance = %d, want 403\n%s", rec.Code, rec.Body.String())
+	}
+	if want := fmt.Sprintf(fixedBranchSwitchRefusal, "design/two-a"); !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("git-switch refusal = %s, want %q", rec.Body.String(), want)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, wt); err != nil || branch != "design/renamed" {
+		t.Errorf("the managed worktree is on %q (%v) after the refused switch, want design/renamed", branch, err)
+	}
+	assertServingCheckoutClean(t, root)
+}
+
+// TestBranchBoard_GitSwitch_RefusesABranchCheckedOutElsewhere pins
+// git-switch for a branch checked out in another, unmanaged linked
+// worktree (R3ab review R3-A3). refusedSwitch refuses it with 403, so the
+// serving checkout, to which the dispatch would otherwise hand the
+// request, keeps its branch, and nothing is cut. Every other /b/ route in
+// that state is open (backlog BL-150) and is not pinned here.
+func TestBranchBoard_GitSwitch_RefusesABranchCheckedOutElsewhere(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	runGitBB(t, root, "worktree", "add", "--quiet", elsewhere, "design/two-b")
+	// The serving checkout carries draft-a and is not on main, so a switch
+	// it served would show.
+	runGitBB(t, root, "checkout", "--quiet", "design/draft-a")
+	before := repoGitState(t, root)
+
+	rec := bPost(t, NewHandler(root), "/b/design%2Ftwo-b/board/spec/draft-a/api/git-switch", `{"branch":"main"}`)
+	if want := fmt.Sprintf(fixedBranchSwitchRefusal, "design/two-b"); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("git-switch for a branch checked out elsewhere = %d %s, want 403 %q", rec.Code, rec.Body.String(), want)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, root); err != nil || branch != "design/draft-a" {
+		t.Errorf("the serving checkout is on %q (%v) after the refused switch, want design/draft-a", branch, err)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, elsewhere); err != nil || branch != "design/two-b" {
+		t.Errorf("the other worktree is on %q (%v) after the refused switch, want design/two-b", branch, err)
+	}
+	if after := repoGitState(t, root); after != before {
+		t.Errorf("the refused switch changed git state:\nbefore\n%s\nafter\n%s", before, after)
 	}
 }
 
