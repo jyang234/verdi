@@ -42,12 +42,12 @@ import (
 	stdhtml "html"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/pathcanon"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
@@ -283,40 +283,17 @@ func (b *branchBoards) heldElsewhere(ctx context.Context, branch string) (string
 	if err != nil {
 		return "", err
 	}
-	managed := resolvedWorktreePath(wtmanager.WorktreePath(b.root, branch))
+	managed := pathcanon.Canonical(wtmanager.WorktreePath(b.root, branch))
 	for _, e := range entries {
 		if e.Branch != branch {
 			continue
 		}
-		if resolvedWorktreePath(e.Path) == managed {
+		if pathcanon.Canonical(e.Path) == managed {
 			return "", nil
 		}
 		return e.Path, nil
 	}
 	return "", nil
-}
-
-// resolvedWorktreePath is path absolute and cleaned, with its longest
-// existing prefix resolved through its symbolic links and any missing tail
-// kept verbatim beneath it, so a worktree path git reports compares equal
-// to the same path spelled through a symbolic link (a macOS temporary
-// directory resolves under /private), even once the worktree's directory
-// is gone (R3C-A5): the answer never depends on how the root is spelled.
-func resolvedWorktreePath(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	var tail []string
-	for dir := abs; ; dir = filepath.Dir(dir) {
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(append([]string{resolved}, tail...)...)
-		}
-		if filepath.Dir(dir) == dir {
-			return abs
-		}
-		tail = append([]string{filepath.Base(dir)}, tail...)
-	}
 }
 
 // serveCheckedOutHere answers wtmanager's ErrCheckedOutHere: git refused
