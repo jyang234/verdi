@@ -79,6 +79,12 @@ type pageData struct {
 	// TopBar is the rendered top bar (renderTopBar), the one header row
 	// every page opens with (ac-1).
 	TopBar template.HTML
+	// BarChips and BarControls are the page's own additions to its top bar
+	// (G6; SI-339 (9)): chips drawn after the title, and the bar's controls
+	// slot, each pre-rendered by the page's renderer. A page that fills
+	// neither renders byte-identically to a page without the slots.
+	BarChips    template.HTML
+	BarControls template.HTML
 }
 
 var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<!doctype html>
@@ -121,7 +127,7 @@ var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<
 func renderPage(ctx context.Context, root string, data pageData) ([]byte, error) {
 	data.Bar = branchBarFacts(ctx, root, data.Title)
 	observeBar(ctx, data.Bar)
-	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Heading: true, Surface: data.Surface, Nav: data.Nav})
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Heading: true, Surface: data.Surface, Nav: data.Nav, Chips: data.BarChips, Controls: data.BarControls})
 	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {

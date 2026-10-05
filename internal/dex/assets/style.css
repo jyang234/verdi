@@ -4317,6 +4317,438 @@ body:not(.board-page) > footer.site-foot,
 .sticky--parked.sticky--spike .sticky-editor { font-family: var(--hand); font-style: normal; font-size: 0.98rem; }
 /* verdi:workbench-only:end */
 /* verdi:workbench-only:begin */
+/* == The readiness page in the design's layout (spec/readiness-page-v2;
+   ledger SI-339; handoff screen 3b) ======================================
+   Every rule here hangs off .readiness-standalone, the hook only the
+   standalone readiness page carries (or the bar's own wall link): the
+   wall shell reuses the readiness-* classes above, and the bar's posture
+   popover reuses .readiness-tech and .readiness-tech-facts on every page,
+   so the shared base rules stay as they are and are only overridden
+   under the hook. Served by the workbench and stripped from the docs
+   site's copy (SI-322); tokens only (SI-326); nothing here truncates —
+   long values wrap, step labels included. */
+
+/* the page takes the shell's whole column: the two-column body below
+   needs more than the prose measure */
+.content:has(> .readiness-standalone) { max-width: none; }
+.readiness-standalone { max-width: none; }
+
+/* ---- where you are: the title row, then the step and the purpose ---- */
+.readiness-standalone .readiness-orient {
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.6fr);
+  gap: 1rem 2rem;
+  margin: 0 0 1.2rem;
+}
+.readiness-standalone .readiness-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 0 0 0.4rem;
+}
+.readiness-standalone .readiness-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+/* the class chip: the bar's chip, beside the body title (the bar carries
+   none here — this page is not about one spec's bytes) */
+.readiness-standalone .readiness-class-chip {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.6;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-class-chip--feature { color: var(--accent); }
+.readiness-standalone .readiness-class-chip--story { color: var(--authored); }
+.readiness-standalone .readiness-class-chip--spike { color: var(--st-waived); }
+.readiness-standalone .readiness-refs {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.readiness-standalone .readiness-refs .readiness-ref {
+  font-size: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.readiness-standalone .readiness-dot { margin: 0 6px; color: var(--rule); }
+.readiness-standalone .readiness-wall-absent {
+  margin: 0.4rem 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--st-pending);
+}
+/* the stamp's HEAD is one long word: it wraps inside the stamp at 320 px
+   rather than running past the viewport */
+.readiness-standalone .readiness-stale { min-width: 0; }
+.readiness-standalone .readiness-stale-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---- the four-step stepper: a 4-column grid, each station topped by
+   its state's colour, the current step on its state's tint ---- */
+.readiness-standalone .readiness-rail { margin: 0 0 0.6rem; }
+.readiness-standalone .readiness-rail-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  border-top: 0;
+  border-bottom: 0;
+}
+.readiness-standalone .readiness-station + .readiness-station { border-left: 0; }
+.readiness-standalone .readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  padding: 12px 14px 14px;
+  border-top: 4px solid var(--rule);
+  border-radius: 0 0 6px 6px;
+  background: var(--card);
+  color: var(--ink);
+}
+.readiness-standalone .readiness-station[data-state="proven"] .readiness-station-link { border-top-color: var(--st-evidenced); }
+.readiness-standalone .readiness-station[data-state="violated-with-witness"] .readiness-station-link { border-top-color: var(--st-violated); }
+.readiness-standalone .readiness-station[data-state="unproven"] .readiness-station-link { border-top-color: var(--st-pending); }
+.readiness-standalone .readiness-station--focus[data-state="unproven"] .readiness-station-link { background: var(--st-pending-tint); }
+.readiness-standalone .readiness-station--focus[data-state="violated-with-witness"] .readiness-station-link { background: var(--st-violated-tint); }
+.readiness-standalone .readiness-station-link:hover { background: var(--panel); }
+.readiness-standalone .readiness-station-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.readiness-standalone .readiness-station-num { font-size: 11px; color: var(--ink); }
+.readiness-standalone .readiness-station-head .readiness-state { margin-left: auto; }
+.readiness-standalone .readiness-station-label {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.readiness-standalone .readiness-station-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.readiness-standalone .readiness-station-line {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+/* on the current step's tint the muted ink falls under 4.5:1 (axe,
+   wcag2aa): its secondary text reads in full ink there */
+.readiness-standalone .readiness-station--focus .readiness-station-id,
+.readiness-standalone .readiness-station--focus .readiness-station-line { color: var(--ink); }
+
+/* the state chip everywhere on this page: the handoff's mono uppercase
+   badge, kept a bordered pill (dashed when unproven) so colour is never
+   the only signal, wrapping rather than truncating */
+.readiness-standalone .readiness-state {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the ordering sentence ---- */
+.readiness-standalone .readiness-order {
+  margin: 0 0 1.4rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+
+/* ---- two columns: Focus next; Known problems and Completed checks ---- */
+.readiness-standalone .readiness-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.readiness-standalone .readiness-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 0.5rem;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.readiness-standalone .readiness-heading--violated { color: var(--st-violated); }
+.readiness-standalone .readiness-heading--proven { color: var(--st-evidenced); }
+.readiness-standalone .readiness-queue-note,
+.readiness-standalone .readiness-completed-note {
+  margin: 0 0 0.4rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-queue { margin: 0; }
+.readiness-standalone .readiness-queue-list { gap: 0; border-top: 1px solid var(--rule); }
+
+/* a focus row: rank, then the copy; the state chip sits at the row's
+   right, placed by the copy's own grid whatever its reading order */
+.readiness-standalone .readiness-card {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: start;
+  padding: 12px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  box-shadow: none;
+}
+.readiness-standalone .readiness-rank {
+  display: block;
+  width: auto;
+  height: auto;
+  padding-top: 2px;
+  border: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: start;
+}
+.readiness-standalone .readiness-copy > * { grid-column: 1; }
+.readiness-standalone .readiness-copy > .readiness-state {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  justify-self: end;
+}
+.readiness-standalone .readiness-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-concern--unproven .readiness-stage { color: var(--st-pending); }
+.readiness-standalone .readiness-concern--violated-with-witness .readiness-stage { color: var(--st-violated); }
+.readiness-standalone .readiness-concern--proven .readiness-stage { color: var(--st-evidenced); }
+.readiness-standalone .readiness-when {
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-human-review {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--authored);
+}
+.readiness-standalone .readiness-human-review-formal {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.readiness-standalone .readiness-human-review-formal code {
+  font-size: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.readiness-standalone .readiness-summary {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+/* the handoff's "do" cue before the guidance line: decoration, with no
+   alternative text, so the primary line's accessible text is the
+   guidance alone */
+.readiness-standalone .readiness-guidance::before {
+  content: "do" / "";
+  display: inline-block;
+  margin-right: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  vertical-align: 0.1em;
+}
+.readiness-standalone .readiness-tech { margin: 2px 0 0; }
+.readiness-standalone .readiness-tech > summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-decoration: underline dotted;
+}
+.readiness-standalone .readiness-fact { font-size: 0.8rem; overflow-wrap: anywhere; }
+.readiness-standalone .readiness-dest { margin: 6px 0 0; }
+
+/* the one inline disclosure of the later steps' concerns: the handoff's
+   dashed button, a native summary */
+.readiness-standalone .readiness-more { margin: 10px 0 0; }
+.readiness-standalone .readiness-more-summary {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-solid);
+}
+.readiness-standalone .readiness-more-summary:hover { color: var(--accent); border-color: var(--accent); }
+.readiness-standalone .readiness-queue-rest { margin-top: 10px; }
+
+/* ---- known problems in later steps: each a link to its one row ---- */
+.readiness-standalone .readiness-known { margin: 0 0 1.6rem; }
+.readiness-standalone .readiness-known-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+.readiness-standalone .readiness-known-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  text-decoration: none;
+}
+.readiness-standalone .readiness-known-link:hover .readiness-known-text,
+.readiness-standalone .readiness-known-link:focus-visible .readiness-known-text { text-decoration: underline; }
+.readiness-standalone .readiness-known-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-standalone .readiness-known-link .readiness-stage { color: var(--st-violated); }
+.readiness-standalone .readiness-known-link .readiness-state {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-self: end;
+}
+.readiness-standalone .readiness-known-text {
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.readiness-standalone .readiness-known-empty { margin: 0; font-size: 13.5px; color: var(--muted-solid); }
+
+/* ---- completed checks: quiet rows, everything proven ---- */
+.readiness-standalone .readiness-completed { border-top: 0; padding-top: 0; }
+.readiness-standalone .readiness-completed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+.readiness-standalone .readiness-row {
+  display: block;
+  padding: 8px 0;
+  border-top: 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+}
+.readiness-standalone .readiness-row .readiness-summary { font-size: 13.5px; font-weight: 400; }
+.readiness-standalone .readiness-completed-empty { margin: 0; font-size: 13.5px; color: var(--muted-solid); }
+
+/* the lists' items carry the area anchors, the rows their own: both
+   land below the top of the viewport */
+.readiness-standalone .readiness-queue-list > li,
+.readiness-standalone .readiness-completed-list > li,
+.readiness-standalone .readiness-card,
+.readiness-standalone .readiness-row { scroll-margin-top: 1rem; }
+
+/* ---- the bar's wall link: the handoff's primary button, as a link ---- */
+.topbar-controls .readiness-wall-link {
+  display: inline-block;
+  border: 1px solid var(--accent);
+  text-decoration: none;
+}
+.topbar-controls .readiness-wall-link:hover,
+.topbar-controls .readiness-wall-link:focus-visible { border-color: var(--accent-strong); }
+
+/* ---- narrow widths and 200 % zoom: one column; the stepper stacks to
+   two columns, then one, and stays in flow (the shared rule pins the
+   rail below 720 px; a stacked stepper would hide the page) ---- */
+@media (max-width: 900px) {
+  .readiness-standalone .readiness-columns { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+@media (max-width: 720px) {
+  .readiness-standalone .readiness-orient { grid-template-columns: minmax(0, 1fr); }
+  .readiness-standalone .readiness-rail {
+    position: static;
+    border-bottom: 0;
+    background: transparent;
+    margin: 0 0 0.6rem;
+  }
+  .readiness-standalone .readiness-rail-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .readiness-standalone .readiness-station { flex: none; }
+  .readiness-standalone .readiness-station-link { padding: 10px 12px 12px; }
+  .readiness-standalone .readiness-station-label { font-size: 15px; }
+  .readiness-standalone .readiness-queue-list > li,
+  .readiness-standalone .readiness-completed-list > li,
+  .readiness-standalone .readiness-card,
+  .readiness-standalone .readiness-row { scroll-margin-top: 1rem; }
+}
+@media (max-width: 480px) {
+  .readiness-standalone .readiness-rail-list { grid-template-columns: minmax(0, 1fr); }
+  .readiness-standalone .readiness-card { grid-template-columns: 24px minmax(0, 1fr); }
+  .readiness-standalone .readiness-copy { grid-template-columns: minmax(0, 1fr); }
+  .readiness-standalone .readiness-copy > .readiness-state,
+  .readiness-standalone .readiness-known-link .readiness-state {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+  .readiness-standalone .readiness-known-link { grid-template-columns: minmax(0, 1fr); }
+}
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
 /* == The Document page's chrome (spec/document-page-v2; ledger SI-340,
    SI-343) == The temporal stamp and the identity card above the shared
    body, the contents rail beside it, the id chips the page's script draws

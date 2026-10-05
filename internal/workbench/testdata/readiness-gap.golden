@@ -7,7 +7,6 @@ wall-only:
   context/policy
   review/acceptance
   review/worktree
-  success/criteria
 loader-only:
   context/verdict
   review/action

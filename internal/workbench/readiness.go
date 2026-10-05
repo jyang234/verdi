@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // errReadinessNotWired is the existing (pre-loader) 503 disclosure body,
@@ -28,20 +29,38 @@ var errReadinessNotWired = errors.New(
 var errReadinessNoSpec = errors.New(
 	"no spec was named: add ?spec=<name> to derive readiness for one active spec, or start verdi serve with --context-request to name a default")
 
-// readinessHandler serves GET /readiness by deriving readiness through
-// loader for the request's own ref: ?spec=<name> when present, else
-// defaultSpec when non-empty, else neither — a 503 disclosing that no
-// spec was named (a process with no loader at all keeps the existing
-// 503 disclosure unchanged). A ?spec= that is not one whole spec name — malformed, or
+// readinessRoute is GET /readiness's dependency set: root, the serving
+// checkout, for every page's top bar facts (renderPage); mdl, the store's
+// resolved operating model the shared layout's other pages receive (G4),
+// whose display words the page's class chip speaks (renderReadiness); the
+// per-request loader; and the default spec.
+type readinessRoute struct {
+	root        string
+	mdl         *model.Model
+	loader      ReadinessLoader
+	defaultSpec string
+}
+
+// newReadinessRoute takes the route's dependencies from deps, whose Model
+// RegisterRoutesWithHome has already resolved from the store.
+func newReadinessRoute(root string, deps Deps) readinessRoute {
+	return readinessRoute{root: root, mdl: deps.Model, loader: deps.ReadinessLoader, defaultSpec: deps.ReadinessDefaultSpec}
+}
+
+// handler serves GET /readiness by deriving readiness through the loader
+// for the request's own ref: ?spec=<name> when present, else the default
+// spec when non-empty, else neither — a 503 disclosing that no spec was
+// named (a process with no loader at all keeps the existing 503 disclosure
+// unchanged). A ?spec= that is not one whole spec name — malformed, or
 // carrying a commit pin or an object fragment, both of which select part
 // of a spec rather than the spec the loader derives — is a 400 disclosing
 // which of those it was, and never reaches the loader (the loader's own
 // "not an unpinned whole spec ref" refusal would arrive as a 503, the
 // wrong code for a malformed query, after a derivation attempt the
 // handler never had to make). A loader error (an unknown spec, a
-// derivation failure) is a 503 naming the error's own text. root is the
-// serving checkout, for every page's top bar facts (renderPage).
-func readinessHandler(root string, loader ReadinessLoader, defaultSpec string) http.HandlerFunc {
+// derivation failure) is a 503 naming the error's own text.
+func (rt readinessRoute) handler() http.HandlerFunc {
+	root, mdl, loader, defaultSpec := rt.root, rt.mdl, rt.loader, rt.defaultSpec
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -85,7 +104,7 @@ func readinessHandler(root string, loader ReadinessLoader, defaultSpec string) h
 			renderError(r.Context(), w, root, http.StatusServiceUnavailable, err)
 			return
 		}
-		out, err := renderReadiness(r.Context(), root, snap)
+		out, err := renderReadiness(r.Context(), root, mdl, snap)
 		if err != nil {
 			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
