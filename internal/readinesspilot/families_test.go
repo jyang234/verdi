@@ -361,81 +361,89 @@ func TestDeriveObject(t *testing.T) {
 	}
 }
 
-// objectCases lists, for every family of the closed concern-identity
+// objectFamilyDeclared is the declared object ids objectFamilyCases
+// collide with. Each is also the text of some non-object segment in a case
+// — a stub slug, a verb, a role, an exemption id, a conflict id, a sticky
+// id, a disclosure code, an evidence kind — which never names an object.
+func objectFamilyDeclared() map[string]bool {
+	return map[string]bool{
+		"ac-1": true, "oq-1": true, "dc-1": true, "co-1": true,
+		"close": true, "merge": true, "attestation": true, "countersign": true, "author-vouch": true,
+		"static": true, "mechanical": true, "go-toolchain": true, "semantic-1": true,
+		"legacy-service-go": true, "solo-principal-collapse": true, "unknown": true,
+	}
+}
+
+// objectCase is one id of objectFamilyCases. at is the segment at the
+// family's object-bearing position, or "" for a family (or an id shape)
+// with none: Validate accepts exactly it as a stored Object, and objectOf
+// returns it exactly when it is declared.
+type objectCase struct {
+	id   string
+	at   string
+	want string
+}
+
+// objectFamilyCases lists, for every family of the closed concern-identity
 // vocabulary, ids whose segments textually equal a declared object id,
 // with the Object SI-345 (1) gives them: the declared id at the family's
 // object-bearing segment (shape/question/<oq>, success/coverage/<ac>, and
 // the blocker codes outcome-floor/<ac>, question-claimed/<oq> and
-// obligation-quality/<ac>/<kind>), and nowhere else. Every declared id
-// below is also the text of some non-object segment — a stub slug, a
-// verb, a role, an exemption id, a conflict id, a sticky id, a disclosure
-// code, an evidence kind — which never names an object.
-var objectDeclared = map[string]bool{
-	"ac-1": true, "oq-1": true, "dc-1": true, "co-1": true,
-	"close": true, "merge": true, "attestation": true, "countersign": true, "author-vouch": true,
-	"static": true, "mechanical": true, "go-toolchain": true, "semantic-1": true,
-	"legacy-service-go": true, "solo-principal-collapse": true, "unknown": true,
-}
-
-// at is the segment at the family's object-bearing position, or "" for
-// a family (or an id shape) with none: Validate accepts exactly it as a
-// stored Object, and objectOf returns it exactly when it is declared.
-var objectCases = []struct {
-	id   string
-	at   string
-	want string
-}{
-	{id: "shape/problem", want: ""},
-	{id: "shape/outcome", want: ""},
-	{id: "shape/provenance", want: ""},
-	{id: "shape/mutation", want: ""},
-	{id: "shape/board", want: ""},
-	{id: "shape/question/oq-1", at: "oq-1", want: "oq-1"},
-	{id: "shape/question/oq-1x", at: "oq-1x", want: ""},
-	{id: "shape/question/oq-9", at: "oq-9", want: ""},
-	// A question id spanning two segments is not one segment's object.
-	{id: "shape/question/oq-1/dc-1", want: ""},
-	// Board sticky ids share the namespace; a sticky is not an object.
-	{id: "shape/board/question/oq-1", want: ""},
-	{id: "shape/board/agent-task/dc-1", want: ""},
-	{id: "success/criteria", want: ""},
-	{id: "success/coverage/ac-1", at: "ac-1", want: "ac-1"},
-	{id: "success/coverage/ac-12", at: "ac-12", want: ""},
-	{id: "success/contributor/static", want: ""},
-	{id: "success/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
-	// The kind segment is never the object, even when it equals one.
-	{id: "success/blocker/obligation-quality/ac-9/dc-1", at: "ac-9", want: ""},
-	{id: "success/blocker/stub-unreconciled/dc-1", want: ""},
-	{id: "context/verdict", want: ""},
-	{id: "context/mechanical/mechanical/go-toolchain", want: ""},
-	{id: "context/mechanical/dc-1", want: ""},
-	{id: "context/semantic/semantic-1", want: ""},
-	{id: "context/semantic/co-1", want: ""},
-	{id: "context/disclosure/solo-principal-collapse", want: ""},
-	{id: "review/blocker/outcome-floor/ac-1", at: "ac-1", want: "ac-1"},
-	{id: "review/blocker/question-claimed/oq-1", at: "oq-1", want: "oq-1"},
-	{id: "review/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
-	// A blocker code's shape is exact: a tail moves no segment into place.
-	{id: "review/blocker/outcome-floor/ac-1/dc-1", want: ""},
-	{id: "review/blocker/question-claimed/oq-1/dc-1", want: ""},
-	{id: "review/blocker/obligation-quality/ac-1", want: ""},
-	// Stub slugs, verbs, roles, exemption ids and conflict ids.
-	{id: "review/blocker/stub-unreconciled/dc-1", want: ""},
-	{id: "review/blocker/principal-resolution-unproven/close", want: ""},
-	{id: "review/blocker/obligation-countersign-unproven/close/attestation/countersign", want: ""},
-	{id: "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch", want: ""},
-	{id: "review/blocker/forge-facts-unavailable/close", want: ""},
-	{id: "review/blocker/lifecycle-state-unproven/unknown", want: ""},
-	{id: "review/blocker/exemption-ineffective/legacy-service-go", want: ""},
-	{id: "review/blocker/exemption-ineffective/dc-1", want: ""},
-	{id: "review/blocker/conflict-mechanical/go-toolchain", want: ""},
-	{id: "review/blocker/conflict-mechanical/ac-1", want: ""},
-	{id: "review/blocker/conflict-semantic/semantic-1", want: ""},
-	{id: "review/blocker/conflict-semantic/oq-1", want: ""},
-	{id: "review/role/close/attestation/countersign", want: ""},
-	{id: "review/role/merge/attestation/author-vouch", want: ""},
-	{id: "review/action", want: ""},
-	{id: "review/eventual-derivation", want: ""},
+// obligation-quality/<ac>/<kind>), and nowhere else.
+func objectFamilyCases() []objectCase {
+	return []objectCase{
+		{id: "shape/problem", want: ""},
+		{id: "shape/outcome", want: ""},
+		{id: "shape/provenance", want: ""},
+		{id: "shape/mutation", want: ""},
+		{id: "shape/board", want: ""},
+		{id: "shape/question/oq-1", at: "oq-1", want: "oq-1"},
+		{id: "shape/question/oq-1x", at: "oq-1x", want: ""},
+		{id: "shape/question/oq-9", at: "oq-9", want: ""},
+		// A question id spanning two segments is not one segment's object.
+		{id: "shape/question/oq-1/dc-1", want: ""},
+		// Board sticky ids share the namespace; a sticky is not an object.
+		{id: "shape/board/question/oq-1", want: ""},
+		{id: "shape/board/agent-task/dc-1", want: ""},
+		{id: "success/criteria", want: ""},
+		{id: "success/coverage/ac-1", at: "ac-1", want: "ac-1"},
+		{id: "success/coverage/ac-12", at: "ac-12", want: ""},
+		{id: "success/contributor/static", want: ""},
+		{id: "success/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
+		// The kind segment is never the object, even when it equals one.
+		{id: "success/blocker/obligation-quality/ac-9/dc-1", at: "ac-9", want: ""},
+		{id: "success/blocker/stub-unreconciled/dc-1", want: ""},
+		{id: "context/verdict", want: ""},
+		{id: "context/mechanical/mechanical/go-toolchain", want: ""},
+		{id: "context/mechanical/dc-1", want: ""},
+		{id: "context/semantic/semantic-1", want: ""},
+		{id: "context/semantic/co-1", want: ""},
+		{id: "context/disclosure/solo-principal-collapse", want: ""},
+		{id: "review/blocker/outcome-floor/ac-1", at: "ac-1", want: "ac-1"},
+		{id: "review/blocker/question-claimed/oq-1", at: "oq-1", want: "oq-1"},
+		{id: "review/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
+		// A blocker code's shape is exact: a tail moves no segment into place.
+		{id: "review/blocker/outcome-floor/ac-1/dc-1", want: ""},
+		{id: "review/blocker/question-claimed/oq-1/dc-1", want: ""},
+		{id: "review/blocker/obligation-quality/ac-1", want: ""},
+		// Stub slugs, verbs, roles, exemption ids and conflict ids.
+		{id: "review/blocker/stub-unreconciled/dc-1", want: ""},
+		{id: "review/blocker/principal-resolution-unproven/close", want: ""},
+		{id: "review/blocker/obligation-countersign-unproven/close/attestation/countersign", want: ""},
+		{id: "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch", want: ""},
+		{id: "review/blocker/forge-facts-unavailable/close", want: ""},
+		{id: "review/blocker/lifecycle-state-unproven/unknown", want: ""},
+		{id: "review/blocker/exemption-ineffective/legacy-service-go", want: ""},
+		{id: "review/blocker/exemption-ineffective/dc-1", want: ""},
+		{id: "review/blocker/conflict-mechanical/go-toolchain", want: ""},
+		{id: "review/blocker/conflict-mechanical/ac-1", want: ""},
+		{id: "review/blocker/conflict-semantic/semantic-1", want: ""},
+		{id: "review/blocker/conflict-semantic/oq-1", want: ""},
+		{id: "review/role/close/attestation/countersign", want: ""},
+		{id: "review/role/merge/attestation/author-vouch", want: ""},
+		{id: "review/action", want: ""},
+		{id: "review/eventual-derivation", want: ""},
+	}
 }
 
 // TestObjectOf pins SI-345 (1) family by family: each listed id's segments
@@ -445,8 +453,9 @@ var objectCases = []struct {
 func TestObjectOf(t *testing.T) {
 	t.Parallel()
 
+	declared := objectFamilyDeclared()
 	covered := map[concernFamily]bool{}
-	for _, tt := range objectCases {
+	for _, tt := range objectFamilyCases() {
 		family := classifyConcern(tt.id)
 		if family == familyUnknown {
 			t.Fatalf("case %q is outside the closed concern-identity vocabulary", tt.id)
@@ -455,7 +464,7 @@ func TestObjectOf(t *testing.T) {
 		if tt.want != "" && tt.want != tt.at {
 			t.Fatalf("case %q: want %q is not its object-bearing segment %q", tt.id, tt.want, tt.at)
 		}
-		if got := objectOf(tt.id, objectDeclared); got != tt.want {
+		if got := objectOf(tt.id, declared); got != tt.want {
 			t.Errorf("objectOf(%q) = %q, want %q", tt.id, got, tt.want)
 		}
 		if tt.want == "" {
@@ -482,7 +491,7 @@ func TestObjectOf(t *testing.T) {
 func TestValidateObjectFollowsTheFamilyPosition(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range objectCases {
+	for _, tt := range objectFamilyCases() {
 		base := objectConcern(t, tt.id)
 		if err := base.validate(); err != nil {
 			t.Fatalf("concern %q without an Object: validate() = %v", tt.id, err)
