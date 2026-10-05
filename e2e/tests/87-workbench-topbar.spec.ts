@@ -103,11 +103,13 @@ const PAGES: WorkbenchPage[] = [
     title: TITLES.draft,
   },
   {
+    // spec/document-page-v2 ac-4 fixed the Document body's own overflow
+    // (354 px at 320, 99 px at 200 % before it): no base figure, so the
+    // page has no horizontal scroll at all.
     name: "Document page",
     path: () => boardPath(SHOWCASE.DESIGN_SPEC) + "/document",
     spec: true,
     title: TITLES.design,
-    overflow: { at320: 354, at200: 99 },
   },
   { name: "diagram editor", path: () => diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL), spec: false, title: TITLES.diagram },
   {

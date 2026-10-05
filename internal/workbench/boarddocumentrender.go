@@ -10,11 +10,21 @@ import (
 )
 
 // The Document tab's page: a reading surface beside the board's working
-// surface. The tab strip stays minimal (index · Board · Document), the
-// kind switch and the three controls are plain links and buttons — the
-// page is fully usable before its script loads (the kind switch and the
-// download are ordinary GETs; only Refresh and Copy need JS) — and the
-// rendered document carries the page: its own h1 is the page's h1.
+// surface (spec/document-page-v2; ledger SI-340, SI-343; the redesign
+// handoff's Screen 4). The bar carries the Wall and Document switch with
+// Copy and Download (SI-340 (13)); the page head keeps the kind switch,
+// Refresh, and the status line; then the chrome the page states around
+// the shared body, every piece server-rendered from the page's facts so
+// it reads before any script runs (ac-4): the temporal stamp — the state
+// words and the commit in the authored or accepted token, with a slot the
+// browser fills with the refreshed time (dc-2) — and the identity card,
+// together one named region landmark, and the contents rail beside the
+// body. The body is the shared renderer's,
+// byte for byte (ac-3): the stamp and the card sit above it, the rail
+// beside it, and nothing is placed between its own h1 and its sections
+// (SI-340 (3)). The id chips are never rendered here: the chip anchors
+// ride a JSON script and /assets/documentpage.js draws them (dc-1), so a
+// script-less reader never meets a chip that cannot work.
 var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -27,20 +37,37 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 <a class="skip-link" href="#document-region">Skip to the document</a>
 {{.TopBar}}
 <header class="document-head">
-<p class="eyebrow"><code>{{.Ref}}</code> · document</p>
 <nav class="document-kinds" aria-label="Document kind">{{range .Kinds}}{{if .Current}}<span class="current" aria-current="page" data-testid="document-kind-{{.Kind}}">{{.Label}}</span>{{else}}<a href="{{.Href}}" data-testid="document-kind-{{.Kind}}">{{.Label}}</a>{{end}}{{end}}</nav>
 <div class="document-actions">
 <button type="button" id="document-refresh" data-testid="document-refresh">Refresh</button>
-<button type="button" id="document-copy" data-testid="document-copy">Copy Markdown</button>
-<a id="document-download" data-testid="document-download" href="{{.DownloadHref}}" download="{{.DownloadName}}">Download {{.DownloadName}}</a>
 <span id="document-status" class="document-status" role="status" aria-live="polite"></span>
 </div>
 </header>
-<main id="document-region" class="content document-region" data-revision="{{.Revision}}" data-snapshot-href="{{.SnapshotHref}}" data-testid="document-region">{{.HTML}}</main>
+<div class="document-layout">
+<div class="document-grid">
+<section class="document-lead" aria-label="Stamp and identity" data-testid="document-lead">
+<p id="document-stamp" class="document-stamp document-stamp--{{.Facts.Stamp.State}}" data-testid="document-stamp" data-state="{{.Facts.Stamp.State}}" data-commit="{{.Facts.Stamp.Commit}}"><span class="document-stamp-dot" aria-hidden="true"></span><span class="document-stamp-words" data-testid="document-stamp-words">{{.Facts.Stamp.Words}}</span><span class="document-stamp-sep" aria-hidden="true">·</span><span class="document-stamp-at">commit <code data-testid="document-stamp-commit" title="{{.Facts.Stamp.Commit}}">{{.CommitShort}}</code></span><span id="document-refreshed" class="document-stamp-refreshed" data-testid="document-refreshed"></span></p>
+<dl id="document-identity" class="document-identity" data-testid="document-identity">
+<dt>ref</dt><dd data-testid="document-identity-ref"><code>{{.Facts.Identity.Ref}}</code></dd>
+<dt>class</dt><dd data-testid="document-identity-class"{{if .Facts.Identity.ClassLabel}}>{{.Facts.Identity.ClassLabel}}{{else}} data-state="none">not declared{{end}}</dd>
+<dt>branch</dt><dd data-testid="document-identity-branch"{{if .Facts.Identity.Branch.Unproven}} data-state="unproven" title="{{.Facts.Identity.Branch.Unproven}}">{{.Facts.Identity.Branch.Text}}<span class="document-identity-why">{{.Facts.Identity.Branch.Unproven}}</span>{{else if .Facts.Identity.Detached}} data-state="proven" data-detached="true">detached HEAD{{else}} data-state="proven">{{.Facts.Identity.Branch.Text}}{{end}}</dd>
+<dt>owners</dt><dd data-testid="document-identity-owners"{{if .Facts.Identity.Owners}}>{{range $i, $o := .Facts.Identity.Owners}}{{if $i}}, {{end}}{{$o}}{{end}}{{else}} data-state="none">none declared{{end}}</dd>
+<dt>files</dt><dd data-testid="document-identity-files">{{range .Facts.Identity.Files}}<code>{{.}}</code>{{end}}</dd>
+</dl>
+</section>
+<nav class="document-rail" aria-label="Contents" data-testid="document-contents">
+<span class="document-contents-label" aria-hidden="true">contents</span>
+<ol id="document-contents-list" class="document-contents-list">{{range .Facts.Rail}}<li data-testid="document-contents-{{.ID}}"{{if .Count}} data-count="{{.Count}}"{{end}}><a href="#{{.ID}}"><span class="document-contents-text">{{.Text}}</span>{{if .Count}}<span class="document-contents-count" data-testid="document-contents-{{.ID}}-count">{{.Count}}</span>{{end}}</a></li>{{end}}</ol>
+</nav>
+<main id="document-region" class="content document-region" data-revision="{{.Revision}}" data-snapshot-href="{{.SnapshotHref}}" data-board-href="{{.BoardHref}}" data-testid="document-region">{{.HTML}}</main>
+</div>
+</div>
 <pre id="document-markdown" class="document-source" hidden>
 {{.Markdown}}</pre>
+<script type="application/json" id="document-chips">{{.Facts.Chips}}</script>
 {{buildFooter}}
 <script src="/assets/specdocument.js"></script>
+<script src="/assets/documentpage.js"></script>
 </body>
 </html>
 `))
@@ -66,6 +93,23 @@ type documentPageData struct {
 	// page's one h1), and the index, Board, and Document links in its nav.
 	Bar    barFacts
 	TopBar template.HTML
+	// Facts is the page's chrome facts (spec/document-page-v2, SI-340):
+	// the stamp, identity card, contents rail, and chip anchors, the same
+	// value the snapshot carries, for the chrome around the body.
+	Facts documentPageFacts
+	// CommitShort is the stamp's commit as the eye reads it (shortCommit);
+	// the full commit rides the stamp's data attribute and title.
+	CommitShort string
+}
+
+// shortCommit is the commit as the stamp shows it: its first eight
+// characters, the handoff's abbreviation, or the whole value when it is
+// no longer than that.
+func shortCommit(commit string) string {
+	if len(commit) > 8 {
+		return commit[:8]
+	}
+	return commit
 }
 
 // renderBoardDocumentPage builds the Document tab. Every sibling link is
@@ -78,7 +122,29 @@ type documentPageData struct {
 // exactly one newline there, so without it a Markdown that began with
 // "\n" would lose that byte on the way to the clipboard.
 func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap documentSnapshot, bar barFacts) ([]byte, error) {
-	boardHref := strings.TrimSuffix(requestPath, "/document")
+	data := documentPageView(requestPath, name, snap, bar)
+	esc := stdhtml.EscapeString
+	// The Wall and Document switch, in the bar's controls slot (dc-3), with
+	// the wall's own two labels, then Copy and Download (SI-340 (13)): the
+	// handoff's bar, the ids the page's. The download's file name rides
+	// its title and its download attribute.
+	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + esc(data.BoardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>` +
+		`<button type="button" class="document-action" id="document-copy" data-testid="document-copy">Copy Markdown</button>` +
+		`<a class="document-action" id="document-download" data-testid="document-download" href="` + esc(data.DownloadHref) + `" download="` + esc(data.DownloadName) + `" title="` + esc(data.DownloadName) + `">Download .md</a>`
+	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // every value in the controls is escaped above; the markup is this renderer's own
+	observeBar(ctx, data.Bar)
+	var buf bytes.Buffer
+	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("workbench: rendering document page: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// documentPageView is the page template's data for snap under requestPath:
+// every sibling link derived from the request path, the body and its
+// revision as the snapshot carries them, the bar's facts, and the page's
+// chrome facts. The top bar's markup is renderBoardDocumentPage's.
+func documentPageView(requestPath, name string, snap documentSnapshot, bar barFacts) documentPageData {
 	kinds := []documentKindLink{
 		{Kind: "spec", Label: "Spec"},
 		{Kind: "plan", Label: "Plan"},
@@ -88,10 +154,10 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		kinds[i].Href = requestPath + "?kind=" + kinds[i].Kind
 		kinds[i].Current = kinds[i].Kind == snap.Kind
 	}
-	data := documentPageData{
+	return documentPageData{
 		Title:        name + " — document · verdi workbench",
 		Ref:          snap.Ref,
-		BoardHref:    boardHref,
+		BoardHref:    strings.TrimSuffix(requestPath, "/document"),
 		Kinds:        kinds,
 		DownloadHref: requestPath + "?format=md&kind=" + snap.Kind,
 		DownloadName: name + "-" + snap.Kind + ".md",
@@ -100,15 +166,7 @@ func renderBoardDocumentPage(ctx context.Context, requestPath, name string, snap
 		HTML:         template.HTML(snap.HTML), //nolint:gosec // the fragment is our own renderer's output (specdoc.RenderHTML over escaped object text)
 		Markdown:     snap.Markdown,
 		Bar:          bar,
+		Facts:        snap.Facts,
+		CommitShort:  shortCommit(snap.Facts.Stamp.Commit),
 	}
-	// The Wall and Document switch, in the bar's controls slot (dc-3), with
-	// the wall's own two labels; the ids stay the page's.
-	controls := `<nav class="topbar-tabs" aria-label="Wall or Document"><a href="` + stdhtml.EscapeString(boardHref) + `" data-testid="document-tab-board">Wall</a><span class="current" aria-current="page" data-testid="document-tab-document">Document</span></nav>`
-	data.TopBar = renderTopBar(&data.Bar, topBarOptions{Nav: `<a href="/">index</a>`, Controls: template.HTML(controls)}) //nolint:gosec // the escaped board href and the current marker
-	observeBar(ctx, data.Bar)
-	var buf bytes.Buffer
-	if err := boardDocumentPageTemplate.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("workbench: rendering document page: %w", err)
-	}
-	return buf.Bytes(), nil
 }

@@ -3975,16 +3975,15 @@ body:not(.board-page) .topbar { margin-left: 0; margin-right: 0; }
 body:not(.board-page) > .page-body,
 body:not(.board-page) > footer.site-foot,
 .document-page > .document-head,
-.document-page > .document-region {
+.document-page > .document-layout {
   margin-left: max(2rem, calc((100% - 74rem) / 2 + 2rem));
   margin-right: max(2rem, calc((100% - 74rem) / 2 + 2rem));
 }
-.document-page > .document-region { margin-right: 2rem; }
 @media (max-width: 60rem) {
   body:not(.board-page) > .page-body,
   body:not(.board-page) > footer.site-foot,
   .document-page > .document-head,
-  .document-page > .document-region { margin-left: 1rem; margin-right: 1rem; }
+  .document-page > .document-layout { margin-left: 1rem; margin-right: 1rem; }
 }
 .topbar-wordmark {
   flex: none;
@@ -4316,4 +4315,202 @@ body:not(.board-page) > footer.site-foot,
 .sticky--parked.sticky--spike .sticky-body,
 .sticky--parked.sticky--story .sticky-editor,
 .sticky--parked.sticky--spike .sticky-editor { font-family: var(--hand); font-style: normal; font-size: 0.98rem; }
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == The Document page's chrome (spec/document-page-v2; ledger SI-340,
+   SI-343) == The temporal stamp and the identity card above the shared
+   body, the contents rail beside it, the id chips the page's script draws
+   at the body's object anchors, and Copy and Download in the bar — the
+   redesign handoff's Screen 4 (3c), tokens only (SI-326). The layout is a
+   grid inside its own size container, so a page zoomed to 200 % folds to
+   one column exactly as a narrow viewport does (Wave 6 §5.2), and the
+   body's intrinsically wide runs — a full commit, the engine digest, the
+   evidence table — wrap or scroll inside their own box, never the page.
+   Stripped from the docs site's copy (SI-322). */
+.document-page > .document-layout { container-type: inline-size; container-name: document; }
+.document-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 70ch) 240px;
+  grid-template-areas: "lead rail" "body rail";
+  column-gap: 72px;
+  justify-content: center;
+  padding: 0 0 2.5rem;
+}
+.document-grid > .document-lead { grid-area: lead; min-width: 0; }
+.document-grid > .document-region { grid-area: body; }
+.document-grid > .document-rail {
+  grid-area: rail;
+  align-self: start;
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  min-width: 0;
+}
+.document-page .document-head { margin-bottom: 1.4rem; }
+
+/* ---- the temporal stamp: the state words and the commit, drawn in the
+   authored token for a proposal and the accepted chip's token for the
+   accepted record (SI-340 (6)); the refreshed time is the script's and
+   its slot hides while empty, so the script-less page reads the state and
+   the commit alone (ac-4) ---- */
+.document-stamp {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  max-width: 100%;
+  margin: 0 0 1rem;
+  padding: 6px 12px;
+  border: 1px solid var(--muted-solid);
+  border-left-width: 3px;
+  border-radius: 3px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+  line-height: 1.5;
+}
+.document-stamp-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.document-stamp--proposed { border-color: var(--authored); background: var(--authored-tint); color: var(--authored); }
+.document-stamp--accepted { border-color: var(--st-evidenced); background: var(--st-evidenced-tint); color: var(--st-evidenced); }
+.document-stamp code { font-size: inherit; color: inherit; background: transparent; border: 0; padding: 0; }
+.document-stamp-sep { opacity: 0.7; }
+.document-stamp-refreshed:empty { display: none; }
+.document-stamp-refreshed::before { content: "\00b7"; margin-right: 0.6rem; opacity: 0.7; }
+
+/* ---- the identity card: a dl grid in the card token (handoff: mono
+   uppercase keys, mono values), every value free to wrap at 320 px ---- */
+.document-identity {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 20px;
+  align-items: baseline;
+  margin: 0 0 1.6rem;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 14px;
+}
+.document-identity dt {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.document-identity dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.document-identity dd code { font-size: inherit; background: transparent; border: 0; padding: 0; }
+.document-identity dd code + code::before { content: " "; }
+.document-identity dd[data-state="none"] { color: var(--muted-solid); }
+.document-identity dd[data-state="unproven"],
+.document-identity dd[data-detached="true"] { color: var(--st-pending); }
+.document-identity-why { display: block; font-size: 12px; color: var(--st-pending); }
+
+/* ---- the contents rail: the body's sections with their counts, sticky
+   beside the body at desktop widths; folded above the body as a wrapped
+   row when the layout is one column ---- */
+.document-rail { border-left: 1px solid var(--rule); padding-left: 14px; font-size: 13.5px; }
+.document-contents-label {
+  display: block;
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.document-contents-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.document-contents-list a {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 3px 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.document-contents-list a:hover,
+.document-contents-list a:focus-visible { color: var(--accent); }
+.document-contents-text { min-width: 0; overflow-wrap: anywhere; }
+.document-contents-count { font-family: var(--mono); font-size: 10.5px; color: var(--muted-solid); }
+
+/* ---- the id chips (dc-1): drawn by the script at the body's own object
+   anchors, each in the wall's colour for its kind ---- */
+.document-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  margin-left: 0.45rem;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-transform: none;
+  color: var(--muted-solid);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.document-chip:hover,
+.document-chip:focus-visible { background: var(--card); }
+.document-chip--acceptance-criterion { color: var(--st-evidenced); }
+.document-chip--constraint { color: var(--st-violated); }
+.document-chip--decision { color: var(--authored); }
+.document-chip--open-question { color: var(--st-waived); }
+
+/* ---- the body at 320 px and 200 % zoom (ac-4): its unbreakable mono
+   runs wrap inside the column, and a wide table or code block scrolls
+   inside its own box (Wave 6 §5.2) ---- */
+.document-page .document-region { max-width: 100%; min-width: 0; }
+.document-page .document-region h1,
+.document-page .document-region h2,
+.document-page .document-region h3,
+.document-page .document-region p,
+.document-page .document-region li,
+.document-page .document-region td,
+.document-page .document-region th,
+.document-page .document-region code,
+.document-page .document-region a { overflow-wrap: anywhere; }
+.document-page .document-region table { display: block; max-width: 100%; overflow-x: auto; }
+.document-page .document-region table code { overflow-wrap: normal; }
+.document-page .document-region pre { max-width: 100%; overflow-x: auto; }
+
+/* ---- Copy and Download in the bar's controls slot (SI-340 (13)), in
+   the tabs' own dress ---- */
+.topbar-controls .document-action {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 6px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar-controls .document-action:hover,
+.topbar-controls .document-action:focus-visible { border-color: var(--accent); color: var(--accent); }
+
+/* one column when the layout is narrower than the two columns need —
+   a narrow viewport or a page zoomed to 200 % alike — with the rail
+   folded above the body as a wrapped row of links */
+@container document (max-width: 940px) {
+  .document-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "lead" "rail" "body";
+  }
+  .document-grid > .document-rail { position: static; max-height: none; overflow: visible; margin-bottom: 1.6rem; }
+  .document-contents-list { flex-direction: row; flex-wrap: wrap; gap: 0.2rem 1rem; }
+  .document-contents-list a { gap: 0.35rem; }
+}
 /* verdi:workbench-only:end */

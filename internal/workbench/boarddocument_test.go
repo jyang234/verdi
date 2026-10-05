@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/specdoc"
 )
 
 // The Document tab (spec/spec-documents, wave 2 task 5): a reading of a
@@ -239,13 +241,14 @@ func TestBoardDocument_DownloadMatchesSnapshotMarkdown(t *testing.T) {
 		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
 	}
 	var decoded struct {
-		Revision    string   `json:"revision"`
-		HTML        string   `json:"html"`
-		Markdown    string   `json:"markdown"`
-		Kind        string   `json:"kind"`
-		Ref         string   `json:"ref"`
-		Proposed    bool     `json:"proposed"`
-		Disclosures []string `json:"disclosures"`
+		Revision    string            `json:"revision"`
+		HTML        string            `json:"html"`
+		Markdown    string            `json:"markdown"`
+		Kind        string            `json:"kind"`
+		Ref         string            `json:"ref"`
+		Proposed    bool              `json:"proposed"`
+		Disclosures []string          `json:"disclosures"`
+		Facts       documentPageFacts `json:"facts"`
 	}
 	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
 		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)
@@ -482,13 +485,14 @@ func TestBoardDocument_ReadinessLoaderErrorBecomesDisclosure(t *testing.T) {
 		t.Fatalf("snapshot: %d\n%s", snap.code, snap.body)
 	}
 	var decoded struct {
-		Revision    string   `json:"revision"`
-		HTML        string   `json:"html"`
-		Markdown    string   `json:"markdown"`
-		Kind        string   `json:"kind"`
-		Ref         string   `json:"ref"`
-		Proposed    bool     `json:"proposed"`
-		Disclosures []string `json:"disclosures"`
+		Revision    string            `json:"revision"`
+		HTML        string            `json:"html"`
+		Markdown    string            `json:"markdown"`
+		Kind        string            `json:"kind"`
+		Ref         string            `json:"ref"`
+		Proposed    bool              `json:"proposed"`
+		Disclosures []string          `json:"disclosures"`
+		Facts       documentPageFacts `json:"facts"`
 	}
 	if err := decodeStrictJSON(t, snap.body, &decoded); err != nil {
 		t.Fatalf("snapshot decode: %v\n%s", err, snap.body)
@@ -691,5 +695,28 @@ func TestBoardDocument_DownloadHonoursIfNoneMatch(t *testing.T) {
 	rec = conditional(t, "/board/spec/"+name+"/document", first.etag)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="document-region"`) {
 		t.Fatalf("page route must stay unconditional: %d", rec.Code)
+	}
+}
+
+// TestDocumentPageView_CarriesTheFacts (renderer hand-off): the page
+// template's data carries the snapshot's facts for the chrome to render,
+// beside the body it frames.
+func TestDocumentPageView_CarriesTheFacts(t *testing.T) {
+	_, repo, name := newAcceptedWallFixture(t)
+	s := &boardSpecServer{root: repo.Dir}
+	snap, res, err := s.loadDocumentPage(t.Context(), name, specdoc.KindSpec)
+	if err != nil {
+		t.Fatalf("loadDocumentPage: %v", err)
+	}
+	bar := s.documentBarFacts(t.Context(), name, res, snap.checkout)
+	data := documentPageView("/board/spec/"+name+"/document", name, snap, bar)
+	if !reflect.DeepEqual(data.Facts, snap.Facts) {
+		t.Fatalf("view facts %+v, want the snapshot's %+v", data.Facts, snap.Facts)
+	}
+	if string(data.HTML) != snap.HTML || data.Markdown != snap.Markdown || data.Revision != snap.Revision {
+		t.Fatal("the view must carry the snapshot's body and revision unchanged")
+	}
+	if empty := documentPageView("/board/spec/"+name+"/document", name, documentSnapshot{Kind: "spec"}, bar); !reflect.DeepEqual(empty.Facts, documentPageFacts{}) {
+		t.Fatalf("a snapshot without facts gives a view without facts, got %+v", empty.Facts)
 	}
 }
