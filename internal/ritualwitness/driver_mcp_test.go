@@ -81,6 +81,10 @@ func TestMCP_Run(t *testing.T) {
 			[]string{"JSON-RPC error -32601", "method not found"}},
 		{"a JSON-RPC error with a null id is exit 2", &mcpFake{answer: `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error","data":"x"}}`}, nil, 2,
 			[]string{"JSON-RPC error -32700", "parse error"}},
+		{"a JSON-RPC error with another request's id is malformed", &mcpFake{answer: `{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"method not found"}}`}, nil, -1,
+			[]string{"malformed response", "id 2 answers no request sent"}},
+		{"a JSON-RPC error without an id is malformed", &mcpFake{answer: `{"jsonrpc":"2.0","error":{"code":-32601,"message":"method not found"}}`}, nil, -1,
+			[]string{"malformed response", "answers no request sent"}},
 		{"a line that is not JSON is malformed", &mcpFake{answer: `not json`}, nil, -1, []string{"malformed response"}},
 		{"an unknown envelope field is malformed", &mcpFake{answer: `{"jsonrpc":"2.0","id":1,"result":{"content":[]},"extra":1}`}, nil, -1, []string{"malformed response"}},
 		{"an unknown result field is malformed", &mcpFake{answer: mcpResult(`{"content":[],"structuredContent":{}}`)}, nil, -1, []string{"malformed response"}},
@@ -206,7 +210,9 @@ func TestMCP_RunIsBoundedByTheContext(t *testing.T) {
 }
 
 // verdiMCP serves one connection with the repository's own MCP server
-// over root, as `verdi mcp` does (story dc-1).
+// core over root (story dc-1): mcpserve.ServeConn over
+// mcpserve.NewServer(root), without the writer lock, loaders, and forge
+// `verdi mcp` also wires (MCP's doc).
 func verdiMCP(ctx context.Context, root string, r io.Reader, w io.Writer) error {
 	return mcpserve.ServeConn(ctx, r, w, mcpserve.NewServer(root))
 }

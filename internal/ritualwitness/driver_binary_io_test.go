@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // TestBinary_StdinAndExtraFiles: Stdin is the binary's standard input
@@ -319,6 +321,51 @@ func TestBinary_PinsTheCIEnvironment(t *testing.T) {
 			t.Fatalf("a refused Env still ran the binary (branch listing %q, %v)", out, gerr)
 		}
 	})
+}
+
+// TestPinCIEnv_KeepsAmbientCIFromInProcessReads: under PinCIEnv every
+// variable CIEnv names holds its field's value, empty ones set empty, in
+// the test process itself, so an ambient CI_DEFAULT_BRANCH no longer
+// reaches specstate's default-branch read, which code an in-process driver
+// runs (the MCP server's tools) makes (R3ab review R3-B4).
+func TestPinCIEnv_KeepsAmbientCIFromInProcessReads(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	for _, branch := range []string{"ambient-default", "field-default"} {
+		if _, err := plainGit(ctx, fx.Dir, "branch", branch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CI_DEFAULT_BRANCH", "ambient-default")
+	// The control: unpinned, the ambient value is what the read sees.
+	if b, ok := specstate.ResolveDefaultBranch(ctx, fx.Dir); !ok || b.Name != "ambient-default" {
+		t.Fatalf("unpinned, the default branch reads %+v (resolved %v), want the ambient ambient-default", b, ok)
+	}
+	for _, tt := range []struct {
+		name string
+		ci   CIEnv
+		want specstate.Branch
+	}{
+		{"the zero CIEnv hides the ambient value", CIEnv{}, specstate.Branch{Name: "main", Ref: "origin/main"}},
+		{"the CI field is what the read sees", CIEnv{CIDefaultBranch: "field-default"}, specstate.Branch{Name: "field-default", Ref: "field-default"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			PinCIEnv(t, tt.ci)
+			want := map[string]string{}
+			for _, kv := range tt.ci.pairs() {
+				k, v, _ := strings.Cut(kv, "=")
+				want[k] = v
+			}
+			for _, k := range ciEnvKeys() {
+				if got, ok := os.LookupEnv(k); !ok || got != want[k] {
+					t.Errorf("under PinCIEnv %s = %q (set %v), want %q set", k, got, ok, want[k])
+				}
+			}
+			if b, ok := specstate.ResolveDefaultBranch(ctx, fx.Dir); !ok || b != tt.want {
+				t.Fatalf("under PinCIEnv the default branch reads %+v (resolved %v), want %+v", b, ok, tt.want)
+			}
+		})
+	}
 }
 
 // ciVariableName matches a string literal naming a CI-context variable:

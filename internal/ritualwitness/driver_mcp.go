@@ -13,10 +13,27 @@ import (
 )
 
 // MCP is the MCP-server Driver (spec/ritual-effect-witness dc-1, ledger
-// SI-341 (5)): Serve runs the server in process for the fixture directory,
-// over one end of an in-memory pipe, as `verdi mcp` serves one connection
-// (mcpserve.ServeConn over mcpserve.NewServer(root), for one), and Run
-// sends it one JSON-RPC tools/call request over the other end.
+// SI-341 (5)): Serve runs a server in process for the fixture directory,
+// over one end of an in-memory pipe, and Run sends it one JSON-RPC
+// tools/call request over the other end.
+//
+// A Serve of mcpserve.ServeConn over mcpserve.NewServer(root) runs the
+// server core `verdi mcp` serves, not all of `verdi mcp` (R3ab review
+// R3-B6). Standalone, `verdi mcp` also holds .verdi/data/writer.lock while
+// it serves, and wires the readiness loader (get_document's readiness),
+// the recovery loader (get_recovery), and a best-effort forge (with the
+// review-unavailable disclosure when a configured forge is unreachable)
+// into the server's Backend; with a workbench serving, it pipes to that
+// server's socket instead. A case whose tool reads one of these wires the
+// same into the server its Serve builds, or discloses the difference.
+//
+// The server runs in the test process, so the code under test reads the
+// test process's own environment. Binary's CI field never reaches it: the
+// CI-context variables, CI_DEFAULT_BRANCH among them (specstate's default
+// branch, which the experiment and constitution tools read, among others),
+// are whatever the test process holds. A case driving MCP pins the same
+// set itself with PinCIEnv before Run (ledger SI-344 (2); R3ab review
+// R3-B4).
 //
 // The MCP server has no exit codes of its own. A tool result whose isError
 // is false is exit 0. A result whose isError is true, or a JSON-RPC error,

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -135,6 +136,23 @@ func (c CIEnv) pairs() []string {
 		pairs[i] = key + "=" + v.Field(i).String()
 	}
 	return pairs
+}
+
+// PinCIEnv sets, for the rest of t, every variable CIEnv names in the test
+// process's own environment to ci's value for it, empty ones included, as
+// Binary sets them for the binary. It uses t.Setenv, so neither t nor an
+// ancestor may run in parallel. Binary's CI field reaches only the binary
+// it starts, while an in-process driver (MCP, Workbench, InProcess) runs
+// code that reads the test process's environment, the MCP server's
+// default-branch read of CI_DEFAULT_BRANCH among it: a case driving one
+// calls PinCIEnv so that code sees the same CI context locally and in CI
+// (ledger SI-344 (2); R3ab review R3-B4).
+func PinCIEnv(t testing.TB, ci CIEnv) {
+	t.Helper()
+	for _, kv := range ci.pairs() {
+		key, value, _ := strings.Cut(kv, "=")
+		t.Setenv(key, value)
+	}
 }
 
 // environ is the binary's environment: the test process's own without the
