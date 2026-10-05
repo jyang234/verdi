@@ -56,8 +56,10 @@ func gitBB(dir string, args ...string) (string, error) {
 }
 
 // checkoutFiles is every regular file under dir but .git, with its digest:
-// a write the serving instance made anywhere in its checkout, ignored data
-// zone included, shows here.
+// a file the serving instance wrote anywhere in its checkout, tracked,
+// untracked, or ignored, shows here. Directories are not listed: the
+// worktree manager's own empty data-zone directories are no mutation
+// (ledger SI-354 (1c)).
 func checkoutFiles(t *testing.T, dir string) string {
 	t.Helper()
 	var lines []string
@@ -103,10 +105,12 @@ func servingWithWork(t *testing.T, root string) {
 	}
 }
 
-// requireNothingChanged fails unless the request changed nothing in git or
-// on disk: refs, the worktree list and admin entries, the serving
-// checkout's working tree, index, files, and branch, and no managed
-// worktree cut for design/two-b.
+// requireNothingChanged fails unless the refusal came before any mutation
+// (ledger SI-354 (1c)): no ref, index, or worktree registration (the
+// worktree list and admin entries) changed, no tracked, untracked, or
+// ignored file of the serving checkout changed, its branch held, and no
+// managed worktree was cut for design/two-b. The server's own empty
+// data-zone directories are not a mutation.
 func requireNothingChanged(t *testing.T, root, gitBefore, workBefore, filesBefore string) {
 	t.Helper()
 	if after := repoGitState(t, root); after != gitBefore {
@@ -156,9 +160,10 @@ func wantAnswer(class inUseRouteClass, status int, msg string) (int, string) {
 // 500 cut failure). The branch switch and Commit and push are refused
 // earlier, before any cut (SI-341 (3), SI-348 (3)), with their own 403 and
 // 400: no gitx primitive reports a mid-operation holder before the cut, so
-// those two classes cannot reach the 409 (lane R3c fix report). Nothing
-// changes in git or on disk on any class. Run it under each git the build
-// meets.
+// those two classes cannot reach the 409 (SI-354 (1a)). Every class refuses
+// before any mutation in SI-354 (1c)'s sense: no ref, index, worktree
+// registration, or file of either checkout changes. Run it under each git
+// the build meets.
 func TestBranchBoard_InUseByGitElsewhere_RefusesBeforeAnyMutation(t *testing.T) {
 	holders := []struct {
 		name string
@@ -383,5 +388,45 @@ func TestBranchBoards_HeldElsewhere_StaleManagedWorktreeAnyRootSpelling(t *testi
 				t.Fatalf("heldElsewhere over root %s = %q, %v; want the branch's own managed worktree, not another's", spelled, got, err)
 			}
 		})
+	}
+}
+
+// TestBranchBoard_StaleManagedWorktree_DisclosesGitsRefusal is the board's
+// answer when the branch's own managed worktree was deleted without a
+// prune (R3C2-A1): git refuses to cut at a path it still registers, which
+// is no in-use answer, so the dispatch discloses the failed cut, a 500
+// naming git's own refusal (dc-2), not SI-347's 409, whichever git is
+// installed and however the root is spelled.
+func TestBranchBoard_StaleManagedWorktree_DisclosesGitsRefusal(t *testing.T) {
+	ctx := context.Background()
+	root := resolvedPath(t, newBranchBoardFixture(t))
+	managed, err := wtmanager.EnsureWorktree(ctx, root, "design/two-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(managed); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "root-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []struct{ name, root string }{{"resolved", root}, {"through a link", link}} {
+		for _, class := range []inUseRouteClass{
+			{"the board page", http.MethodGet, "/b/design%2Ftwo-b/board/spec/draft-b", ""},
+			{"a typed mutation", http.MethodPost, "/b/design%2Ftwo-b/board/spec/draft-b/api/sticky", `{"text":"x","type":"comment"}`},
+		} {
+			t.Run(spelling.name+"/"+class.name, func(t *testing.T) {
+				rec := serve(spelling.root, class)
+				got := rec.Body.String()
+				if rec.Code != http.StatusInternalServerError || !strings.Contains(got, "could not prepare the working tree for branch design/two-b") ||
+					!strings.Contains(got, "is a missing but already registered worktree") {
+					t.Fatalf("%s %s = %d %s, want 500 disclosing git's refusal of the missing registered worktree", class.method, class.target, rec.Code, got)
+				}
+				if _, err := os.Stat(managed); !os.IsNotExist(err) {
+					t.Errorf("the failed cut left %s behind (stat err %v)", managed, err)
+				}
+			})
+		}
 	}
 }

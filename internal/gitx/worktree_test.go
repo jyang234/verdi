@@ -408,8 +408,9 @@ func TestPushAndHasRemote(t *testing.T) {
 // over both wordings git gives a branch in use by another worktree (ledger
 // SI-354 (1)): "is already checked out at" before git 2.42, and "is
 // already used by worktree at" from git 2.42 on, which CI's git prints.
-// Both are the typed ErrBranchCheckedOut; any other refusal keeps git's
-// own words. A stand-in git answers dir's current branch as main and
+// Both are the typed ErrBranchCheckedOut; any other refusal, such as a
+// missing but still registered worktree at the path, keeps git's own
+// words. A stand-in git answers dir's current branch as main and
 // refuses the add, so each wording is pinned whatever git is installed.
 func TestWorktreeAdd_InUseElsewhere_TypedRefusal(t *testing.T) {
 	ctx := context.Background()
@@ -421,6 +422,10 @@ func TestWorktreeAdd_InUseElsewhere_TypedRefusal(t *testing.T) {
 		{"git before 2.42", "Preparing worktree (checking out 'design/x')\nfatal: 'design/x' is already checked out at '/elsewhere'", true},
 		{"git 2.42 and later", "Preparing worktree (checking out 'design/x')\nfatal: 'design/x' is already used by worktree at '/elsewhere'", true},
 		{"another refusal", "fatal: invalid reference: design/x", false},
+		// A managed worktree whose directory was deleted without a prune:
+		// git refuses the path, not the branch, and that refusal is no
+		// in-use answer, so it keeps git's own words.
+		{"a missing but registered worktree at the path", "Preparing worktree (checking out 'design/x')\nfatal: '/root/.verdi/data/worktrees/x' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -442,8 +447,8 @@ func TestWorktreeAdd_InUseElsewhere_TypedRefusal(t *testing.T) {
 			if got := errors.Is(err, ErrBranchCheckedOut); got != tt.typed {
 				t.Fatalf("errors.Is(%v, ErrBranchCheckedOut) = %v, want %v", err, got, tt.typed)
 			}
-			if !tt.typed && !strings.Contains(err.Error(), "invalid reference: design/x") {
-				t.Fatalf("WorktreeAdd error = %v, want git's own words", err)
+			if last := tt.stderr[strings.LastIndex(tt.stderr, "fatal: "):]; !tt.typed && !strings.Contains(err.Error(), strings.SplitN(last, "\n", 2)[0]) {
+				t.Fatalf("WorktreeAdd error = %v, want git's own words %q", err, last)
 			}
 		})
 	}
