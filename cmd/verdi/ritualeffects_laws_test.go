@@ -66,6 +66,12 @@ func TestRitualRunViolations(t *testing.T) {
 				Before:   ritualwitness.Snapshot{Refs: map[string]ritualwitness.Ref{}},
 				After:    ritualwitness.Snapshot{Refs: map[string]ritualwitness.Ref{"refs/heads/close/x": {Object: "abc"}}},
 				Verdicts: []ritualwitness.Verdict{within}}, "the refusal left refs changed"},
+		{"a refusal that changed the index", "close", refuses(1, "refusing"),
+			ritualwitness.Result{Exit: 1, Err: answered("refusing"),
+				After:    ritualwitness.Snapshot{Index: []ritualwitness.IndexEntry{{Tag: "H", Mode: "100644", Object: "abc", Path: "staged.txt"}}},
+				Verdicts: []ritualwitness.Verdict{within}}, "the refusal left the index changed"},
+		{"a refusal naming an empty word", "close", refuses(2, "refusing", ""),
+			ritualwitness.Result{Exit: 2, Err: answered("close: refusing"), Verdicts: []ritualwitness.Verdict{within}}, `want its own words ""`},
 		{"a refusal that created a commit", "close", refuses(1, "refusing"),
 			ritualwitness.Result{Exit: 1, Err: answered("refusing"),
 				After:    ritualwitness.Snapshot{Commits: map[string]ritualwitness.CommitObject{"abc": {}}},
@@ -141,6 +147,8 @@ func TestCheckRitualCoverage(t *testing.T) {
 		}, []string{"names ritual recover, but the registry declares gc"}},
 		{"a /b/ verb missing its first use", nil, func(m map[ws.Verb][]ritualCase) { m[pageB] = dropPath(m[pageB], pathBFirstUse) },
 			[]string{pageB.String(), `no case for publication path "b-first-use"`}},
+		{"a /b/ verb missing its existing managed worktree", nil, func(m map[ws.Verb][]ritualCase) { m[pageB] = dropPath(m[pageB], pathBExisting) },
+			[]string{pageB.String(), `no case for publication path "b-existing"`}},
 		{"a /b/ verb missing its branch checked out here", nil, func(m map[ws.Verb][]ritualCase) { m[createB] = dropPath(m[createB], pathBHere) },
 			[]string{createB.String(), `no case for publication path "b-here"`}},
 		{"a /b/ verb missing its branch held elsewhere", nil, func(m map[ws.Verb][]ritualCase) { m[pageB] = dropPath(m[pageB], pathBElsewhere) },
@@ -240,5 +248,53 @@ func TestRitualEffectsGaps(t *testing.T) {
 				t.Fatalf("open gaps = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestRitualEffectsTable_StandInsNameEachGap feeds every expectation of
+// the producer's own table, per case and state, into the abstain decision
+// with a command log on every run, so only the completion gaps can stay
+// open (ledger SI-354 (3)). Exactly two are open, close's and the
+// execution rituals', and each is marked on exactly the rows that stand in
+// for it: close's four paths in the clean-index state, where close is
+// declared to complete, and the execution rituals' three verbs in both
+// states. A row that lost its mark, or a mark on another row, fails here.
+func TestRitualEffectsTable_StandInsNameEachGap(t *testing.T) {
+	table := ritualEffectsTable(t, "/nonexistent/verdi")
+	var g ritualEffectsGaps
+	marked := map[string][]string{}
+	for _, verb := range sortedVerbs(table) {
+		for _, c := range table[verb] {
+			for _, state := range c.states() {
+				want := c.want(state)
+				g.record(want, ritualwitness.Result{Log: ritualwitness.CommandLog{OK: true}})
+				if want.unprovenCompletion != "" {
+					marked[want.unprovenCompletion] = append(marked[want.unprovenCompletion], verb.String()+" "+c.path+" "+state.String())
+				}
+			}
+		}
+	}
+	if got, want := g.open(), []string{closeCompletionGap, executionCompletionGap}; !slices.Equal(got, want) {
+		t.Fatalf("open gaps = %q, want exactly %q", got, want)
+	}
+	wantMarked := map[string][]string{
+		closeCompletionGap: {"cli:close ci clean", "cli:close feature clean", "cli:close force-local clean", "cli:close unwind clean"},
+		executionCompletionGap: {
+			"cli:experiment resume input-binding-refusal full", "cli:experiment resume input-binding-refusal clean",
+			"cli:experiment start input-binding-refusal full", "cli:experiment start input-binding-refusal clean",
+			"mcp:experiment input-binding-refusal full", "mcp:experiment input-binding-refusal clean",
+		},
+	}
+	for gap, rows := range wantMarked {
+		got := slices.Clone(marked[gap])
+		slices.Sort(got)
+		want := slices.Clone(rows)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("rows marked as standing in for %q = %q, want %q", gap, got, want)
+		}
+	}
+	if len(marked) != len(wantMarked) {
+		t.Errorf("rows are marked for %d gap(s), want %d: %v", len(marked), len(wantMarked), marked)
 	}
 }
