@@ -31,11 +31,9 @@ var errReadinessNoSpec = errors.New(
 
 // readinessRoute is GET /readiness's dependency set: root, the serving
 // checkout, for every page's top bar facts (renderPage); mdl, the store's
-// resolved operating model the shared layout's other pages receive (G4);
-// the per-request loader; and the default spec. mdl is carried for the
-// readiness page's plain-vocabulary labels, which lane F4-presentation
-// renders; nothing reads it yet, so today's page renders the same bytes
-// whatever model it holds.
+// resolved operating model the shared layout's other pages receive (G4),
+// whose display words the page's class chip speaks (renderReadiness); the
+// per-request loader; and the default spec.
 type readinessRoute struct {
 	root        string
 	mdl         *model.Model
@@ -62,7 +60,7 @@ func newReadinessRoute(root string, deps Deps) readinessRoute {
 // handler never had to make). A loader error (an unknown spec, a
 // derivation failure) is a 503 naming the error's own text.
 func (rt readinessRoute) handler() http.HandlerFunc {
-	root, loader, defaultSpec := rt.root, rt.loader, rt.defaultSpec
+	root, mdl, loader, defaultSpec := rt.root, rt.mdl, rt.loader, rt.defaultSpec
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -106,7 +104,7 @@ func (rt readinessRoute) handler() http.HandlerFunc {
 			renderError(r.Context(), w, root, http.StatusServiceUnavailable, err)
 			return
 		}
-		out, err := renderReadiness(r.Context(), root, snap)
+		out, err := renderReadiness(r.Context(), root, mdl, snap)
 		if err != nil {
 			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
