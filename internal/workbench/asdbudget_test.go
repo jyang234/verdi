@@ -6,11 +6,15 @@ package workbench
 
 import (
 	"bytes"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestBoardSpecASDAssetBudget(t *testing.T) {
@@ -55,4 +59,156 @@ func TestTopBarAsset_ServedWithinBudget(t *testing.T) {
 	if post.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /assets/topbar.js = %d, want 405", post.Code)
 	}
+}
+
+// TestWorkbenchAssets_EveryAssetWithinItsCeiling is spec/wall-canvas-v2
+// co-1's structural gate, written generically so a new asset is covered
+// the moment it lands under assets/, with no edit here: every asset is at
+// most 64 KiB (SI-168; parent co-1), and boardspec.js does not grow past
+// its size when the story started (122 974 B). An asset that predates the
+// ceiling and exceeds it is held to its own recorded ceiling
+// (grandfatheredAssetCeilings), never waved through.
+func TestWorkbenchAssets_EveryAssetWithinItsCeiling(t *testing.T) {
+	assets, err := workbenchAssets(os.DirFS("assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, a := range assets {
+		seen[a.name] = true
+		if err := assetBudgetError(a.name, len(a.data)); err != nil {
+			t.Error(err)
+		}
+	}
+	for name := range grandfatheredAssetCeilings {
+		if !seen[name] {
+			t.Errorf("grandfathered asset %s is not under assets/: drop its entry rather than keep a dead exception", name)
+		}
+	}
+	if !seen["boardspec.js"] {
+		t.Fatal("assets/boardspec.js was not enumerated: the ratchet would be vacuous")
+	}
+}
+
+// TestAssetBudgetError pins the ceilings' arithmetic at their edges: an
+// asset exactly at its ceiling passes, one byte more is refused, and a new
+// asset never borrows a grandfathered ceiling.
+func TestAssetBudgetError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int
+		ok   bool
+	}{
+		{"boardspec.js", 122974, true},
+		{"boardspec.js", 122975, false}, // the ratchet allows no growth
+		{"boardspec.js", 1, true},
+		{"wallselect.js", 64 * 1024, true},
+		{"wallselect.js", 64*1024 + 1, false},
+		{"specimport.js", 96 * 1024, true},
+		{"specimport.js", 96*1024 + 1, false},
+		{"wallselect.js", 0, false},
+		{"sub/boardspec.js", 64*1024 + 1, false}, // a ceiling is keyed by path, not base name
+	} {
+		err := assetBudgetError(tc.name, tc.size)
+		if (err == nil) != tc.ok {
+			t.Errorf("assetBudgetError(%q, %d) = %v, want ok=%v", tc.name, tc.size, err, tc.ok)
+		}
+	}
+}
+
+// TestWorkbenchAssets_EnumeratesEveryFile: the enumeration every
+// generic asset guard reads returns every file under the root, nested
+// ones included, in path order — so no guard can skip an asset added
+// later — and fails loudly on an unreadable root.
+func TestWorkbenchAssets_EnumeratesEveryFile(t *testing.T) {
+	fsys := fstest.MapFS{
+		"boardspec.js":       {Data: []byte("a")},
+		"wallselect.js":      {Data: []byte("bb")},
+		"wall/minimap.js":    {Data: []byte("ccc")},
+		"wall/empty-dir/.gk": {Data: []byte("d")},
+	}
+	assets, err := workbenchAssets(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range assets {
+		got = append(got, a.name+"="+string(a.data))
+	}
+	want := []string{"boardspec.js=a", "wall/empty-dir/.gk=d", "wall/minimap.js=ccc", "wallselect.js=bb"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("workbenchAssets = %v, want %v", got, want)
+	}
+	if _, err := workbenchAssets(os.DirFS(filepath.Join(t.TempDir(), "absent"))); err == nil {
+		t.Error("workbenchAssets over a missing root succeeded, want an error")
+	}
+}
+
+// assetCeiling is the per-asset byte ceiling: no JavaScript asset above
+// 64 KiB uncompressed (Wave 6 §5.3, SI-168; spec/workbench-redesign co-1,
+// spec/wall-canvas-v2 co-1).
+const assetCeiling = 64 * 1024
+
+// boardSpecJSCeiling is boardspec.js's size when spec/wall-canvas-v2 was
+// cut (393639fb): "boardspec.js does not grow" (co-1, parent co-1).
+const boardSpecJSCeiling = 122974
+
+// grandfatheredAssetCeilings holds the assets that predate the 64 KiB
+// ceiling and exceed it, each to its own recorded ceiling, keyed by path
+// under assets/: boardspec.js to the no-growth ratchet, and specimport.js
+// to the 96 KiB structural ceiling its own story set
+// (TestSpecImport_HomeAndPageDiscoverable). Closed: a new asset is never added
+// here — it meets assetCeiling.
+var grandfatheredAssetCeilings = map[string]int{
+	"boardspec.js":  boardSpecJSCeiling,
+	"specimport.js": 96 * 1024,
+}
+
+// assetBudgetError reports whether an asset of size bytes at name (its
+// path under assets/) is within its ceiling: non-empty, and at most its
+// grandfathered ceiling or else assetCeiling.
+func assetBudgetError(name string, size int) error {
+	ceiling := assetCeiling
+	if c, ok := grandfatheredAssetCeilings[name]; ok {
+		ceiling = c
+	}
+	if size == 0 {
+		return fmt.Errorf("assets/%s is empty", name)
+	}
+	if size > ceiling {
+		return fmt.Errorf("assets/%s is %d bytes, over its %d-byte ceiling", name, size, ceiling)
+	}
+	return nil
+}
+
+// workbenchAsset is one file under the workbench's assets/ directory.
+type workbenchAsset struct {
+	name string // slash path under the root
+	data []byte
+}
+
+// workbenchAssets reads every regular file under fsys's root, nested
+// ones included, in path order: the one enumeration every generic asset
+// guard in this package reads, so an asset added later is covered without
+// editing any guard.
+func workbenchAssets(fsys fs.FS) ([]workbenchAsset, error) {
+	var out []workbenchAsset
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		out = append(out, workbenchAsset{name: path, data: data})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enumerating workbench assets: %w", err)
+	}
+	return out, nil
 }
