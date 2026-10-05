@@ -20,6 +20,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 const (
@@ -554,11 +555,12 @@ func writeSlotWallDerived(storeRoot, commit string) error {
 // The wall-canvas fixture walls (spec/wall-canvas-v2 ac-1, whose
 // behavioral obligation runs "over a fixture wall carrying every card
 // kind and every receipt"; SI-350 (11)). One feature draft, provisioned
-// twice under two names so each Playwright file owns its own wall and
-// passes when run alone (BL-98): 89-wall-canvas.spec.ts takes
-// canvasWallSpecName and 90-wall-keyboard.spec.ts canvasKeysSpecName.
-// The constants live in those spec files (fixtures.ts is F7's), so a
-// change here changes them together.
+// twice under two names so each Playwright file owns its own wall and,
+// through the wall's two paths below, can pass when run alone (BL-98):
+// 89-wall-canvas.spec.ts takes canvasWallSpecName and
+// 90-wall-keyboard.spec.ts canvasKeysSpecName. The constants live in
+// those spec files (fixtures.ts is F7's), so a change here changes them
+// together.
 //
 // Each instance carries, from the store's own state alone:
 //   - object cards ac-1, ac-2 (acceptance criteria), co-1, dc-1, oq-1;
@@ -577,15 +579,44 @@ func writeSlotWallDerived(storeRoot, commit string) error {
 //     shape/question/oq-1 (unresolved), and the stub by
 //     review/blocker/stub-unreconciled/<slug> (unresolved).
 //
-// It is committed on the serving branch (designBranch), not on a branch
-// of its own: the wall renders at /board/spec/<name> from the serving
-// checkout, whose readiness snapshot shares the wall's branch and head.
-// The flip side, disclosed for the presentation lanes: the serving
-// branch is not design/<name>, so the wall offers reading and scratch
-// annotations, never typed spec writes (loadBoard's DomainRefusal).
+// Each wall is served at two addresses, and a test picks the one its
+// criterion needs (F2G-1):
+//
+//   - The serving path, /board/spec/<name> (canvasWallServingPath,
+//     canvasKeysServingPath). The wall is committed on the serving branch
+//     (designBranch) and renders from the serving checkout, whose
+//     readiness snapshot shares the wall's branch and head (SI-338). That
+//     branch is not design/<name>, so the wall renders under loadBoard's
+//     DomainRefusal: reading and scratch annotations only, with no
+//     object-card pin, no Correct stub, no sticky Graduate, and no typed
+//     spec write. ac-1 (cards, receipts, marks) and ac-2 (selection) read
+//     this path.
+//   - The writable path, /b/design%2F<name>/board/spec/<name>
+//     (canvasWallWritablePath, canvasKeysWritablePath). Each wall has its
+//     own local namesake branch, design/<name>, cut at the serving
+//     branch's tip after the walls' commit, so it carries the same wall.
+//     Its managed worktree is pre-cut and seeded with the same untracked
+//     half (provisionCanvasWallBranches), so the wall renders whole there
+//     with its domain live: pins, Correct stub, sticky Graduate and typed
+//     writes. ac-3 to ac-6 (toolbar, drag-to-thread, slots and edit,
+//     keyboard) write through this path. A typed write lands in that
+//     wall's own worktree only (the spec and its design-provenance
+//     record), never in the serving checkout or the other wall's
+//     worktree, and moves no ref. The branch is cut before the later
+//     provisioners add their commits to the serving branch, so its tree
+//     lacks their fixtures (diagrams, family links); the corpus on main
+//     and every fixture above are there.
+//
+// The spec files keep their own copies of these four paths (SI-350 (11)),
+// so the names and values stay stable; TestCanvasWallPaths pins them.
 const (
 	canvasWallSpecName = "decline-canvas-wall"
 	canvasKeysSpecName = "decline-canvas-keys"
+
+	canvasWallServingPath  = "/board/spec/" + canvasWallSpecName
+	canvasWallWritablePath = "/b/design%2F" + canvasWallSpecName + "/board/spec/" + canvasWallSpecName
+	canvasKeysServingPath  = "/board/spec/" + canvasKeysSpecName
+	canvasKeysWritablePath = "/b/design%2F" + canvasKeysSpecName + "/board/spec/" + canvasKeysSpecName
 
 	canvasWallStubSlug        = "notice-retraction"
 	canvasWallADRRef          = "adr/0001-outbox-events"
@@ -593,19 +624,28 @@ const (
 	canvasWallObligationTitle = "a Playwright test retracts a stale notice on every channel"
 )
 
-// canvasWall is one wall-canvas fixture instance: its spec name and its
-// one sticky's fixed annotation id (an a-<ULID>, distinct per instance).
+// canvasWall is one wall-canvas fixture instance: its spec name, its one
+// sticky's fixed annotation id (an a-<ULID>, distinct per instance), and
+// its two addresses.
 type canvasWall struct {
-	name     string
-	stickyID string
+	name         string
+	stickyID     string
+	servingPath  string
+	writablePath string
+}
+
+// branch is the wall's own writable branch: its namesake design branch,
+// the only branch on which the board's domain is live for the wall.
+func (w canvasWall) branch() string {
+	return "design/" + w.name
 }
 
 // canvasWalls is every wall-canvas fixture instance, in provisioning
 // order.
 func canvasWalls() []canvasWall {
 	return []canvasWall{
-		{name: canvasWallSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000001"},
-		{name: canvasKeysSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000002"},
+		{name: canvasWallSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000001", servingPath: canvasWallServingPath, writablePath: canvasWallWritablePath},
+		{name: canvasKeysSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000002", servingPath: canvasKeysServingPath, writablePath: canvasKeysWritablePath},
 	}
 }
 
@@ -747,6 +787,46 @@ func writeCanvasWallScratch(storeRoot, commit string, w canvasWall) error {
 	}
 	if err := boardio.AppendAnnotation(boardio.AnnotationsDir(storeRoot), boardio.AnnotationFileForBoard(store.RefSlug(w.name)), sticky); err != nil {
 		return fmt.Errorf("wall-canvas fixture %s: %w", w.name, err)
+	}
+	return nil
+}
+
+// provisionCanvasWallBranches gives each wall-canvas fixture wall its
+// writable path (F2G-1). For each wall it:
+//
+//   - cuts the wall's own local namesake branch, design/<name>, at the
+//     serving branch's current tip (no checkout moves, nothing is pushed:
+//     the statusless draft's precedent above);
+//   - pre-cuts that branch's managed worktree through the worktree-manager
+//     seam `verdi serve` itself uses on a branch's first /b/ request
+//     (wtmanager.EnsureWorktree), at its deterministic path inside the
+//     ignored data zone, so the serving checkout's git status is
+//     undisturbed;
+//   - seeds the worktree's untracked half (writeCanvasWallScratch): the
+//     static record keyed by commit and the wall's sticky.
+//
+// The pre-cut is what makes the wall whole on its writable path: a
+// worktree cut lazily on first request checks out no data zone, so the
+// wall would lack its sticky (and so its Graduate) and its static record
+// (provision_showcase_draft.go's precedent). At serve time EnsureWorktree
+// finds the path present and reuses it, so no request pays the cut. The
+// worktrees live under the harness's scratch store, which the harness
+// removes on exit.
+//
+// Call it with the serving branch checked out at its final fixture commit
+// for the walls, so each branch carries the walls exactly as committed.
+func provisionCanvasWallBranches(ctx context.Context, storeRoot, commit string) error {
+	for _, w := range canvasWalls() {
+		if err := runGit(ctx, storeRoot, nil, "branch", w.branch(), designBranch); err != nil {
+			return fmt.Errorf("wall-canvas fixture %s: cutting %s: %w", w.name, w.branch(), err)
+		}
+		worktree, err := wtmanager.EnsureWorktree(ctx, storeRoot, w.branch())
+		if err != nil {
+			return fmt.Errorf("wall-canvas fixture %s: pre-cutting %s's managed worktree: %w", w.name, w.branch(), err)
+		}
+		if err := writeCanvasWallScratch(worktree, commit, w); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1110,10 +1190,11 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 		filepath.Join(".verdi", "specs", "active", sweepPartialSpecName, "spec.md"): sweepSpec(sweepPartialSpecName, sweepOutcomeV1),
 	}
 	// The wall-canvas fixture walls (spec/wall-canvas-v2 ac-1): committed
-	// here, on the serving branch, so each renders at its unprefixed
-	// address from the serving checkout — the checkout the readiness
-	// loader derives from, so the snapshot's branch and head are the
-	// wall's own (SI-338).
+	// here, on the serving branch, so each renders at its serving path
+	// from the serving checkout — the checkout the readiness loader
+	// derives from, so the snapshot's branch and head are the wall's own
+	// (SI-338). Each wall's writable branch is cut from this branch after
+	// both fixture commits (provisionCanvasWallBranches, below).
 	for _, w := range canvasWalls() {
 		wallFiles, err := canvasWallFiles(w.name, mainSHA)
 		if err != nil {
@@ -1200,6 +1281,12 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 		if err := writeCanvasWallScratch(storeRoot, mainSHA, w); err != nil {
 			return "", err
 		}
+	}
+	// Each wall-canvas fixture wall's writable path (F2G-1): its namesake
+	// branch, cut here at the serving branch's tip after the walls'
+	// commit, and its pre-cut, seeded managed worktree.
+	if err := provisionCanvasWallBranches(ctx, storeRoot, mainSHA); err != nil {
+		return "", err
 	}
 
 	feedPath = filepath.Join(scratch, "review-feed.json")
