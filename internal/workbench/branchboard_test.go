@@ -1065,7 +1065,12 @@ func TestBranchBoard_GitCommit_FirstUseRefusesBeforeTheCut(t *testing.T) {
 		if after, err := gitx.RevParse(ctx, root, "refs/heads/design/draft-a"); err != nil || after == tip {
 			t.Errorf("design/draft-a is at %s (%v) after the commit, want it moved from %s", after, err, tip)
 		}
-		assertServingCheckoutClean(t, root)
+		if branch, err := gitx.CurrentBranch(ctx, root); err != nil || branch != "main" {
+			t.Errorf("the serving checkout is on %q (%v) after the commit, want main", branch, err)
+		}
+		if dirty, err := gitx.StatusDirty(ctx, root); err != nil || dirty {
+			t.Errorf("the serving checkout is dirty (%v, %v) after the managed worktree's commit", dirty, err)
+		}
 	})
 
 	for _, tc := range []struct {
