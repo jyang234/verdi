@@ -78,6 +78,17 @@
 // working-tree file write is not a git mutation (parent dc-6) and is
 // reported within with that reason, needing no attribution.
 //
+// @checked-out is the branch checked out, before the run, in the checkout
+// the ritual acts on (ledger SI-348 (4)): the main worktree's by default,
+// or, when a test names one in Fixture.Acting, a linked worktree's — a /b/
+// route's managed worktree — so a ritual acting there moves its own branch
+// within refs_move, and the root's branch is not @checked-out for it. An
+// acting checkout that is no worktree registered before the run binds no
+// branch (EvaluateIn). The main worktree's own readings of an @checked-out
+// move (its index's tree difference, the hand-back exception) apply only
+// when the ritual acts there; changes inside a linked worktree stay that
+// worktree's.
+//
 // A created commit belongs to a worktree the ritual added (SI-329 (5′))
 // only when it was made after the add — the commit the worktree started at
 // does not reach it; an unknown start owns nothing — and either the
