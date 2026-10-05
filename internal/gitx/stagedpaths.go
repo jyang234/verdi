@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// stagedPathsArgs is the ONE git invocation StagedPaths makes, spelled out
-// here so the reasoning for each token stays attached to it.
+// stagedPathsArgs is the ONE git invocation StagedPaths makes (behind the
+// global --no-optional-locks, below), spelled out here so the reasoning for
+// each token stays attached to it.
 //
 // `git status --porcelain` — NOT `git diff --cached` and NOT
 // `git diff-index --cached` — is the primitive, because this guard is a
@@ -38,7 +39,8 @@ import (
 // the working directory or status.relativePaths, and it reports index-vs-HEAD
 // differences it is not asked to suppress. The two explicit flags buy a cost
 // reduction and a parsing guarantee, nothing about correctness, and the
-// global --no-optional-locks keeps the read a read:
+// global --no-optional-locks that StagedPaths puts in front of them keeps
+// the read a read:
 //
 //   - --no-optional-locks: `git status` otherwise refreshes a stale index
 //     and writes it back (BL-105; ledger SI-352), so a read path — the
@@ -61,7 +63,7 @@ import (
 // --untracked-files=no exists to drop, overriding an operator's own explicit
 // "do not scan submodules" setting, in a guard that runs inside other people's
 // repositories.
-var stagedPathsArgs = []string{"--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=no"}
+var stagedPathsArgs = []string{"status", "--porcelain", "-z", "--untracked-files=no"}
 
 // StagedPaths returns the repository-relative paths whose index entries
 // differ from HEAD, sorted so callers can report them deterministically.
@@ -77,7 +79,7 @@ var stagedPathsArgs = []string{"--no-optional-locks", "status", "--porcelain", "
 // they are legal alongside the rituals that consult this, which refuse only on
 // index entries a subsequent `git commit` would silently absorb.
 func StagedPaths(ctx context.Context, dir string) ([]string, error) {
-	out, err := run(ctx, dir, stagedPathsArgs...)
+	out, err := run(ctx, dir, append([]string{"--no-optional-locks"}, stagedPathsArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("gitx: StagedPaths(%s): %w", dir, err)
 	}

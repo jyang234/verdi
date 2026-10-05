@@ -48,8 +48,8 @@ func TestStatusReads_NeverWriteTheIndex(t *testing.T) {
 		read    func(ctx context.Context, dir string) error
 		rewrite bool
 	}{
-		{name: "control: status without --no-optional-locks rewrites the index", rewrite: true, read: func(_ context.Context, dir string) error {
-			cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+		{name: "control: status without --no-optional-locks rewrites the index", rewrite: true, read: func(ctx context.Context, dir string) error {
+			cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
 			cmd.Dir = dir
 			return cmd.Run()
 		}},

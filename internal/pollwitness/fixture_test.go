@@ -265,7 +265,7 @@ func commitEnv() []string {
 
 func git(t *testing.T, dir string, env []string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -275,7 +275,7 @@ func git(t *testing.T, dir string, env []string, args ...string) {
 
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

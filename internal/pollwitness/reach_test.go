@@ -51,7 +51,7 @@ func TestPollWitness_BadgeReachabilityIsOneWalk(t *testing.T) {
 						case len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor":
 							checked++
 							commit, head := args[2], args[3]
-							if fullCommitID.MatchString(commit) && isAncestor(repo.Dir, commit, head) {
+							if fullCommitID.MatchString(commit) && isAncestor(t, repo.Dir, commit, head) {
 								t.Errorf("the badge compute ran a merge-base for %s, which its walk of %s reaches", commit, head)
 							}
 						}
@@ -71,8 +71,9 @@ func TestPollWitness_BadgeReachabilityIsOneWalk(t *testing.T) {
 	}
 }
 
-func isAncestor(dir, commit, head string) bool {
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", commit, head)
+func isAncestor(t *testing.T, dir, commit, head string) bool {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", "merge-base", "--is-ancestor", commit, head)
 	cmd.Dir = dir
 	return cmd.Run() == nil
 }
