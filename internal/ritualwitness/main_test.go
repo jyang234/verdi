@@ -57,6 +57,8 @@ func TestMain(m *testing.M) {
 // "gotraceback" prints its GOTRACEBACK and exits 1; spec "stdin" prints
 // what it read from standard input and exits 1; spec "fd3" writes a line
 // to file descriptor 3 and exits 0, or exits 3 when it cannot; spec
+// "fd3-inherited" exits 0 when its file descriptor 3 is inherited
+// (inheritedFD3), 4 when it is not, and 3 when it cannot tell; spec
 // "cienv" prints every variable the Binary driver pins (ciEnvKeys), each
 // with whether it is set at all, and exits 1; spec "orphan" starts a
 // grandchild (spec "linger") that inherits its stdout and stderr, writes
@@ -97,6 +99,17 @@ func helperVerb(spec string) int {
 		if _, err := os.NewFile(3, "fd3").WriteString("written to fd 3\n"); err != nil {
 			fmt.Fprintln(os.Stderr, "helper: writing fd 3:", err)
 			return 3
+		}
+		return 0
+	case "fd3-inherited":
+		inherited, err := inheritedFD3()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper:", err)
+			return 3
+		}
+		if !inherited {
+			fmt.Fprintln(os.Stderr, "helper: file descriptor 3 is not inherited")
+			return 4
 		}
 		return 0
 	case "cienv":

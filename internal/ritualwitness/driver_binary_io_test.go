@@ -2,6 +2,8 @@ package ritualwitness
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -14,30 +16,56 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
 // TestBinary_StdinAndExtraFiles: Stdin is the binary's standard input
-// (the null device when nil), and ExtraFiles reach it as file descriptors
-// 3 and up, as a verb reading a controller socket needs; without them, fd
-// 3 is not open in the child.
+// (the null device when nil; an *os.File as is; any other reader copied in
+// through a pipe the driver owns), and ExtraFiles reach it as file
+// descriptors 3 and up, as a verb reading a controller socket needs;
+// without them, fd 3 is not open in the child.
 func TestBinary_StdinAndExtraFiles(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
 	exe := selfBinary(t)
 	for _, tt := range []struct {
 		name     string
-		stdin    io.Reader
+		spec     string
+		stdin    func(t *testing.T) io.Reader
 		wantExit int
 		wantErr  string
 	}{
-		{"stdin reaches the binary", strings.NewReader("a request on stdin\n"), 1, `stdin="a request on stdin\n"`},
-		{"no stdin reads as empty", nil, 1, `stdin=""`},
+		{"stdin reaches the binary", "stdin", func(*testing.T) io.Reader { return strings.NewReader("a request on stdin\n") }, 1, `stdin="a request on stdin\n"`},
+		{"no stdin reads as empty", "stdin", func(*testing.T) io.Reader { return nil }, 1, `stdin=""`},
+		{"an *os.File is the binary's standard input", "stdin", func(t *testing.T) io.Reader {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = r.Close() })
+			if _, err := w.WriteString("a request in a file\n"); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}, 1, `stdin="a request in a file\n"`},
+		// The binary reads none of an input larger than a pipe's buffer and
+		// exits: the copy ends at the closed pipe, which is the binary's
+		// choice, not a fault, so the run is clean.
+		{"input the binary leaves unread is a clean run", "0", func(*testing.T) io.Reader { return strings.NewReader(strings.Repeat("x", 1<<20)) }, 0, ""},
+		{"a reader that fails is no verb's exit", "0", func(*testing.T) io.Reader {
+			r, w := io.Pipe()
+			_ = w.CloseWithError(errors.New("the request source failed"))
+			return r
+		}, -1, "feeding its standard input: the request source failed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			exit, log, err := Binary{Path: exe, Env: []string{helperEnv + "=stdin"}, Stdin: tt.stdin}.Run(boundedContext(t, ctx), fx.Dir)
-			if exit != tt.wantExit || err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			exit, log, err := Binary{Path: exe, Env: []string{helperEnv + "=" + tt.spec}, Stdin: tt.stdin(t)}.Run(boundedContext(t, ctx), fx.Dir)
+			if exit != tt.wantExit || (err == nil) != (tt.wantErr == "") || (err != nil && !strings.Contains(err.Error(), tt.wantErr)) {
 				t.Fatalf("Run = (%d, %v), want exit %d naming %q", exit, err, tt.wantExit, tt.wantErr)
 			}
 			if log.OK || log.Calls != nil {
@@ -69,11 +97,133 @@ func TestBinary_StdinAndExtraFiles(t *testing.T) {
 	})
 
 	t.Run("without extra files fd 3 is not open", func(t *testing.T) {
+		skipOnInheritedFD3(t)
 		exit, _, err := Binary{Path: exe, Env: []string{helperEnv + "=fd3"}}.Run(boundedContext(t, ctx), fx.Dir)
 		if exit != 3 || err == nil || !strings.Contains(err.Error(), "writing fd 3") {
 			t.Fatalf("Run = (%d, %v), want the helper's exit 3 failing to write fd 3", exit, err)
 		}
 	})
+}
+
+// inheritedFD3 reports whether this process's file descriptor 3 is open
+// without close-on-exec, so a process it starts inherits it. Go opens every
+// descriptor of its own close-on-exec, so such a descriptor came from the
+// process that started this one (or was handed on deliberately).
+func inheritedFD3() (bool, error) {
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, 3, syscall.F_GETFD, 0)
+	switch {
+	case errno == syscall.EBADF:
+		return false, nil
+	case errno != 0:
+		return false, fmt.Errorf("reading file descriptor 3's flags: %w", errno)
+	}
+	return flags&syscall.FD_CLOEXEC == 0, nil
+}
+
+// skipOnInheritedFD3 skips t, with the reason, when this test process
+// itself holds an inherited file descriptor 3: every binary it starts
+// inherits that descriptor too, so fd 3's absence in the child cannot be
+// shown. Go's own os/exec TestExtraFiles skips the same way when the test
+// runs with unexpected descriptors open (R3ab review R3-B7).
+func skipOnInheritedFD3(t *testing.T) {
+	t.Helper()
+	inherited, err := inheritedFD3()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inherited {
+		t.Skip("this test process inherited an open file descriptor 3 (not close-on-exec), which every binary it starts inherits too, so fd 3's absence cannot be shown here")
+	}
+}
+
+// TestInheritedFD3: a process handed a descriptor as fd 3 (ExtraFiles,
+// which clears close-on-exec in the child) reads it as inherited, and one
+// handed none does not, so skipOnInheritedFD3 skips exactly when the child
+// would inherit fd 3.
+func TestInheritedFD3(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	exe := selfBinary(t)
+	t.Run("a descriptor handed on as fd 3 is inherited", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Close(); _ = w.Close() }()
+		if exit, _, err := (Binary{Path: exe, Env: []string{helperEnv + "=fd3-inherited"}, ExtraFiles: []*os.File{w}}).Run(boundedContext(t, ctx), fx.Dir); exit != 0 || err != nil {
+			t.Fatalf("Run = (%d, %v), want the helper's exit 0 reading fd 3 as inherited", exit, err)
+		}
+	})
+	t.Run("no fd 3 is not inherited", func(t *testing.T) {
+		skipOnInheritedFD3(t)
+		if exit, _, err := (Binary{Path: exe, Env: []string{helperEnv + "=fd3-inherited"}}).Run(boundedContext(t, ctx), fx.Dir); exit != 4 || err == nil {
+			t.Fatalf("Run = (%d, %v), want the helper's exit 4 reading no inherited fd 3", exit, err)
+		}
+	})
+}
+
+// TestBinary_StdinThatNeverEndsIsBounded: a Stdin reader that never reaches
+// EOF (here an io.Pipe nobody closes) cannot hold Run past its bounds
+// (R3ab review R3-B1). A binary that exits at once returns -1 by the time
+// its context ends, naming the standard input that never ended, and one
+// that outlives its context is killed and returns -1 naming the context.
+// Each case releases the reader only after Run returns, or after the bound
+// has passed, so a hang fails the test instead of the package.
+func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	exe := selfBinary(t)
+	const runFor = 2 * time.Second
+	bound := runFor + binaryWaitDelay + 10*time.Second
+	for _, tt := range []struct {
+		name, spec string
+		wantErr    []string
+	}{
+		{"a binary that exits at once", "0", []string{"exited 0", "standard input never reached EOF"}},
+		{"a binary that outlives its context", "linger", []string{"context", "killed"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r, w := io.Pipe()
+			defer func() { _ = w.Close() }()
+			runCtx, cancel := context.WithTimeout(ctx, runFor)
+			defer cancel()
+			type result struct {
+				exit int
+				err  error
+			}
+			done := make(chan result, 1)
+			start := time.Now()
+			go func() {
+				exit, _, err := Binary{Path: exe, Env: []string{helperEnv + "=" + tt.spec}, Stdin: r}.Run(runCtx, fx.Dir)
+				done <- result{exit, err}
+			}()
+			var got result
+			select {
+			case got = <-done:
+			case <-time.After(bound):
+				_ = w.Close()
+				select {
+				case got = <-done:
+				case <-time.After(helperBound):
+				}
+				t.Fatalf("Run was still blocked %s after it began, past its bound; released, it returned (%d, %v)", bound, got.exit, got.err)
+			}
+			if elapsed := time.Since(start); elapsed > bound {
+				t.Fatalf("Run returned after %s, past its bound %s", elapsed, bound)
+			}
+			if got.exit != -1 || got.err == nil {
+				t.Fatalf("Run = (%d, %v), want -1, no verb's exit", got.exit, got.err)
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(got.err.Error(), want) {
+					t.Errorf("err = %q, want it to name %q", got.err, want)
+				}
+			}
+			if strings.Contains(got.err.Error(), "left its output open") {
+				t.Errorf("err = %q names output left open, which is not the cause", got.err)
+			}
+		})
+	}
 }
 
 // allCIEnv returns a CIEnv whose every field is value(key), key being the

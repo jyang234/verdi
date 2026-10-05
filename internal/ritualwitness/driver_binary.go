@@ -44,7 +44,16 @@ type Binary struct {
 	// resolution, the forge and CI-ref facts) behaves the same locally and
 	// in CI. The zero value is a run outside CI.
 	CI CIEnv
-	// Stdin is the binary's standard input; nil is the null device.
+	// Stdin is the binary's standard input; nil is the null device. An
+	// *os.File is handed to the binary as is. Any other reader is copied
+	// into the binary through a pipe the driver owns, and the copy ends at
+	// the reader's EOF or when the binary stops reading. When the binary
+	// exits 0 before the copy ends, Run waits for it until the context ends
+	// or binaryWaitDelay passes, then abandons it and returns -1, naming
+	// the standard input that never reached EOF. On any other end of the
+	// run, Run abandons the copy at once. An abandoned copy stays blocked
+	// in the reader's Read until that returns, so a caller ends a reader it
+	// owns (closes an io.Pipe's writer, say) once Run returns.
 	Stdin io.Reader
 	// ExtraFiles are open files the binary inherits as file descriptors 3
 	// and up, in order (os/exec's Cmd.ExtraFiles), for a verb that reads
@@ -102,7 +111,9 @@ type CIEnv struct {
 
 // binaryWaitDelay bounds how long Run waits, after the binary exits or its
 // context ends, for the binary's output to close: a process the binary
-// started can hold stdout and stderr open after the binary is gone.
+// started can hold stdout and stderr open after the binary is gone. It
+// also bounds, after a clean exit, the wait for the copy of a Stdin reader
+// to end (stdinFeed).
 const binaryWaitDelay = 5 * time.Second
 
 // ciEnvKeys returns every variable CIEnv pins, in field order.
@@ -160,9 +171,11 @@ func (d Binary) environ() ([]string, error) {
 // trace the detection reads; the fixture's own Env still wins. An Env
 // that sets a variable the CI field pins runs nothing and returns -1. A
 // binary that exits cleanly while a process it started still holds its
-// output returns -1 once binaryWaitDelay passes, and a binary that
-// outlives its context is killed and its output closed within that delay
-// too, so neither hangs the run.
+// output returns -1 once binaryWaitDelay passes; a binary that exits 0
+// while its Stdin has not reached EOF returns -1 once the context ends or
+// binaryWaitDelay passes (Stdin); and a binary that outlives its context
+// is killed, its output closed within that delay, and returns -1 naming
+// the context. None of them hangs the run.
 func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if d.Path == "" {
 		return -1, CommandLog{}, errors.New("ritualwitness: Binary: no binary path")
@@ -171,16 +184,31 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if err != nil {
 		return -1, CommandLog{}, err
 	}
+	stdin, feed, err := stdinFor(d.Stdin)
+	if err != nil {
+		return -1, CommandLog{}, err
+	}
 	cmd := exec.CommandContext(ctx, d.Path, d.Args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	cmd.Stdin = d.Stdin
+	cmd.Stdin = stdin
 	cmd.ExtraFiles = d.ExtraFiles
 	cmd.WaitDelay = binaryWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
+	if err = cmd.Start(); err != nil {
+		feed.abandon()
+		return -1, CommandLog{}, fmt.Errorf("ritualwitness: running %s: %w", d.Path, err)
+	}
+	feed.start(d.Stdin)
+	err = cmd.Wait()
+	if err != nil {
+		feed.abandon()
+	} else if stdinErr := feed.wait(ctx); stdinErr != nil {
+		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s exited 0, but %w, which is no verb's exit",
+			filepath.Base(d.Path), strings.Join(d.Args, " "), stdinErr)
+	}
 	if err == nil {
 		return 0, CommandLog{}, nil
 	}
@@ -197,6 +225,10 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if errors.Is(err, exec.ErrWaitDelay) {
 		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s exited but left its output open past %s (a process it started still holds it), which is no verb's exit: %w",
 			filepath.Base(d.Path), strings.Join(d.Args, " "), binaryWaitDelay, err)
+	}
+	if ctx.Err() != nil {
+		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s did not exit before its context ended (%w), so the driver killed it, which is no verb's exit: %w",
+			filepath.Base(d.Path), strings.Join(d.Args, " "), ctx.Err(), err)
 	}
 	return -1, CommandLog{}, fmt.Errorf("ritualwitness: running %s: %w", d.Path, err)
 }
