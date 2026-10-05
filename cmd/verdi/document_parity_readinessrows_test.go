@@ -147,6 +147,9 @@ func TestDocumentParity_CoverageAndCriteriaRowsOnFourSurfaces(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), `data-concern-id="`+tc.row+`"`) {
 				t.Fatalf("the readiness page lacks the %s row:\n%s", tc.row, rec.Body.String())
 			}
+			if tc.absent != "" && strings.Contains(rec.Body.String(), `data-concern-id="`+tc.absent+`"`) {
+				t.Fatalf("the readiness page carries %s, whose criterion a stub lists:\n%s", tc.absent, rec.Body.String())
+			}
 		})
 	}
 }
