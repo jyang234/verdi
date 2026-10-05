@@ -50,10 +50,9 @@ const pristineSuffix = "-pristine"
 // paths, the whole-tree guards' completion cases (SI-341 (2), SI-349
 // (2)), the two gc and recover paths, the execution rituals' refusals
 // (SI-348 (1), SI-349 (3)), and SI-347's refusal of a /b/ branch held by
-// another worktree on every /b/ route whose declaration reads a refusal
-// as conforming (heldElsewhereVerbs). A path below a verb cannot register
-// itself (SI-341 (7)), so this list is the disclosed seam where a new one
-// must be added.
+// another worktree on every /b/ route (heldElsewhereVerbs). A path below a
+// verb cannot register itself (SI-341 (7)), so this list is the disclosed
+// seam where a new one must be added.
 func namedPaths() map[ws.Verb][]string {
 	paths := map[ws.Verb][]string{
 		ws.CLI("close"):                                              {"ci", "force-local", "feature", "unwind"},
@@ -80,16 +79,15 @@ func namedPaths() map[ws.Verb][]string {
 }
 
 // heldElsewhereVerbs are the /b/ routes the producer drives over a branch
-// held by another worktree (ledger SI-347): every one whose declaration
-// reads a refusal before any mutation as conforming (managed_worktree's
-// no_commit, Commit and push's carried, the switch's refused). Disclosed,
-// not driven: scaffold_branch's three /b/ actions, whose scoped
-// declaration would read that refusal as outside (SI-329 (3′)) and which
-// no ruling allows (SI-348 (2) names whole-tree guards); the workbench's
-// own pins cover the refusal per route class
-// (TestBranchBoard_CheckedOutElsewhere_EveryRouteClassRefuses).
+// held by another worktree, all thirteen (ledger SI-347, SI-351 (2)): each
+// refuses with 409 before any mutation. scaffold_branch's three actions
+// are declared scoped, so their refusal reads as SI-348 (2)'s one named
+// verdict, which their cases allow (SI-351 (2)).
 func heldElsewhereVerbs() []string {
 	return []string{
+		"/b/{branch}/board/spec/{name}/api/create",
+		"/b/{branch}/board/spec/{name}/api/revise",
+		"/b/{branch}/board/spec/{name}/api/stub-instantiate",
 		"/b/{branch}/board/spec/{name}",
 		"/b/{branch}/board/spec/{name}/api/{action}",
 		"/b/{branch}/board/spec/{name}/api/git-commit",

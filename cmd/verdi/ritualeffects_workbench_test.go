@@ -181,9 +181,15 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 		route := "/board/spec/" + fromStubFeatureName + "/api/" + s.action
 		add("/board/spec/{name}/api/"+s.action, ritualCase{path: pathRoot, ritual: "scaffold_branch", base: fromStubEffectsStore(),
 			driver: wb(http.MethodPost, route, s.body, nil), want: always(completes())})
-		for _, p := range dispatchPaths() {
+		for _, p := range append(dispatchPaths(), pathBElsewhere) {
+			want := always(completes())
+			if p == pathBElsewhere {
+				// SI-347's refusal under the scoped declaration: SI-348 (2)'s
+				// one named verdict, allowed here by SI-351 (2).
+				want = always(allowingScopedRefusal(heldElsewhereRefusal(ritualwitness.SideBranch)))
+			}
 			add("/b/{branch}/board/spec/{name}/api/"+s.action, ritualCase{path: p, ritual: "scaffold_branch", base: fromStubEffectsStore(),
-				seed: dispatchSeed(p, ritualwitness.SideBranch), driver: wb(http.MethodPost, bPath(ritualwitness.SideBranch, route), s.body, nil), want: always(completes())})
+				seed: dispatchSeed(p, ritualwitness.SideBranch), driver: wb(http.MethodPost, bPath(ritualwitness.SideBranch, route), s.body, nil), want: want})
 		}
 	}
 
