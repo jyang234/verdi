@@ -50,10 +50,11 @@ type Destination struct {
 //
 // Guidance is the row's source-derived corrective guidance (SI-338 (1);
 // Wave 6 §3.1): non-empty exactly when the row is not proven, empty when it
-// is. Object is the declared object id that one segment of the row's id
-// names (SI-338 (2)), or empty when no segment names one. Neither is a new
-// fact: both are pure functions of the derivation's own inputs, and no
-// document byte, gate, verdict, or lifecycle input reads them.
+// is. Object is the declared object id at the row's family's
+// object-bearing segment (SI-338 (2); SI-345 (1); objectSegment), or empty
+// when the family carries none or that segment is undeclared. Neither is
+// a new fact: both are pure functions of the derivation's own inputs, and
+// no document byte, gate, verdict, or lifecycle input reads them.
 type Concern struct {
 	ID          string
 	Area        AreaID
@@ -293,8 +294,8 @@ func (c Concern) validate() error {
 	} else if c.Guidance == "" || containsControl(c.Guidance) {
 		return fmt.Errorf("concern %q unresolved concern guidance must be non-empty and control-free", c.ID)
 	}
-	if c.Object != "" && !namesSegment(c.ID, c.Object) {
-		return fmt.Errorf("concern %q object %q is not one of its id's object segments", c.ID, c.Object)
+	if c.Object != "" && c.Object != objectSegment(c.ID) {
+		return fmt.Errorf("concern %q object %q is not its id's object-bearing segment", c.ID, c.Object)
 	}
 	if err := validateWitnesses(fmt.Sprintf("concern %q witnesses", c.ID), c.Witnesses); err != nil {
 		return err
@@ -496,16 +497,35 @@ func (c Concern) validateFamilyPosture() error {
 	return nil
 }
 
-// namesSegment reports whether object equals one of id's segments after
-// its two family segments — exactly, never by prefix.
-func namesSegment(id, object string) bool {
+// objectSegment returns the one segment of id at its family's
+// object-bearing position, or "" for a family that carries no object
+// (SI-345 (1)): <oq> in shape/question/<oq>, <ac> in success/coverage/<ac>,
+// and, in either blocker family, the object of the journey blocker codes
+// outcome-floor/<ac>, question-claimed/<oq> and
+// obligation-quality/<ac>/<kind>. Each shape is exact, so an object is
+// always one whole segment. Every other segment — a stub slug, verb, role,
+// exemption id, conflict id, sticky id, disclosure code, or evidence kind —
+// names no object even when its text equals a declared object id: stub
+// slugs and object ids share one textual namespace. objectOf derives an
+// Object from it and Validate admits no other.
+func objectSegment(id string) string {
 	parts := strings.Split(id, "/")
-	for i := 2; i < len(parts); i++ {
-		if parts[i] == object {
-			return true
+	switch classifyConcern(id) {
+	case familyShapeQuestion:
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	case familySuccessCoverage:
+		return parts[2]
+	case familySuccessBlocker, familyReviewBlocker:
+		switch {
+		case len(parts) == 4 && (parts[2] == "outcome-floor" || parts[2] == "question-claimed"):
+			return parts[3]
+		case len(parts) == 5 && parts[2] == "obligation-quality":
+			return parts[3]
 		}
 	}
-	return false
+	return ""
 }
 
 func validWorkClass(class journey.BlockerClass) bool {

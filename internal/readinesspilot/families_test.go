@@ -291,10 +291,11 @@ func TestValidateSuccessFamilies(t *testing.T) {
 	}
 }
 
-// TestDeriveObject is SI-338 (2): Object is the declared object id that
-// one segment of the concern id names, matched exactly (never by prefix)
-// against the declared object ids, otherwise empty. Every family whose id
-// carries an object is listed.
+// TestDeriveObject is SI-338 (2) as SI-345 (1) refines it: Object is the
+// declared object id at the family's object-bearing segment, matched
+// exactly (never by prefix) against the declared object ids, otherwise
+// empty. Every family whose id carries an object is listed, and a stub
+// slug equal to a declared id names no object.
 func TestDeriveObject(t *testing.T) {
 	t.Parallel()
 
@@ -318,9 +319,11 @@ func TestDeriveObject(t *testing.T) {
 		{ID: "question-claimed/oq-10", Reason: journey.ReasonQuestionClaimedBySpike, Class: journey.ClassMechanical,
 			Witnesses: []string{"oq-10 is claimed"}, Owner: owner,
 			ClearingCondition: "probe resolves oq-10", Transition: "close"},
-		{ID: "stub-unreconciled/probe", Reason: journey.ReasonStubUnreconciled, Class: journey.ClassMechanical,
-			Witnesses: []string{"stub probe"}, Owner: owner,
-			ClearingCondition: "reconcile stub probe", Transition: "close"},
+		// A stub slug shares the object ids' textual namespace: this stub's
+		// slug equals the declared decision dc-1, which it is not (SI-345 (1)).
+		{ID: "stub-unreconciled/dc-1", Reason: journey.ReasonStubUnreconciled, Class: journey.ClassMechanical,
+			Witnesses: []string{"stub dc-1"}, Owner: owner,
+			ClearingCondition: "reconcile stub dc-1", Transition: "close"},
 	}
 	if err := in.Journey.Validate(); err != nil {
 		t.Fatalf("journey fixture Validate() = %v", err)
@@ -337,7 +340,7 @@ func TestDeriveObject(t *testing.T) {
 		{id: "success/blocker/obligation-quality/ac-12/static", want: "ac-12"},
 		{id: "review/blocker/outcome-floor/ac-12", want: "ac-12"},
 		{id: "review/blocker/question-claimed/oq-10", want: "oq-10"},
-		{id: "review/blocker/stub-unreconciled/probe", want: ""},
+		{id: "review/blocker/stub-unreconciled/dc-1", want: ""},
 		{id: "shape/problem", want: ""},
 		{id: "shape/provenance", want: ""},
 		{id: "success/criteria", want: ""},
@@ -358,32 +361,170 @@ func TestDeriveObject(t *testing.T) {
 	}
 }
 
+// objectCases lists, for every family of the closed concern-identity
+// vocabulary, ids whose segments textually equal a declared object id,
+// with the Object SI-345 (1) gives them: the declared id at the family's
+// object-bearing segment (shape/question/<oq>, success/coverage/<ac>, and
+// the blocker codes outcome-floor/<ac>, question-claimed/<oq> and
+// obligation-quality/<ac>/<kind>), and nowhere else. Every declared id
+// below is also the text of some non-object segment — a stub slug, a
+// verb, a role, an exemption id, a conflict id, a sticky id, a disclosure
+// code, an evidence kind — which never names an object.
+var objectDeclared = map[string]bool{
+	"ac-1": true, "oq-1": true, "dc-1": true, "co-1": true,
+	"close": true, "merge": true, "attestation": true, "countersign": true, "author-vouch": true,
+	"static": true, "mechanical": true, "go-toolchain": true, "semantic-1": true,
+	"legacy-service-go": true, "solo-principal-collapse": true, "unknown": true,
+}
+
+// at is the segment at the family's object-bearing position, or "" for
+// a family (or an id shape) with none: Validate accepts exactly it as a
+// stored Object, and objectOf returns it exactly when it is declared.
+var objectCases = []struct {
+	id   string
+	at   string
+	want string
+}{
+	{id: "shape/problem", want: ""},
+	{id: "shape/outcome", want: ""},
+	{id: "shape/provenance", want: ""},
+	{id: "shape/mutation", want: ""},
+	{id: "shape/board", want: ""},
+	{id: "shape/question/oq-1", at: "oq-1", want: "oq-1"},
+	{id: "shape/question/oq-1x", at: "oq-1x", want: ""},
+	{id: "shape/question/oq-9", at: "oq-9", want: ""},
+	// A question id spanning two segments is not one segment's object.
+	{id: "shape/question/oq-1/dc-1", want: ""},
+	// Board sticky ids share the namespace; a sticky is not an object.
+	{id: "shape/board/question/oq-1", want: ""},
+	{id: "shape/board/agent-task/dc-1", want: ""},
+	{id: "success/criteria", want: ""},
+	{id: "success/coverage/ac-1", at: "ac-1", want: "ac-1"},
+	{id: "success/coverage/ac-12", at: "ac-12", want: ""},
+	{id: "success/contributor/static", want: ""},
+	{id: "success/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
+	// The kind segment is never the object, even when it equals one.
+	{id: "success/blocker/obligation-quality/ac-9/dc-1", at: "ac-9", want: ""},
+	{id: "success/blocker/stub-unreconciled/dc-1", want: ""},
+	{id: "context/verdict", want: ""},
+	{id: "context/mechanical/mechanical/go-toolchain", want: ""},
+	{id: "context/mechanical/dc-1", want: ""},
+	{id: "context/semantic/semantic-1", want: ""},
+	{id: "context/semantic/co-1", want: ""},
+	{id: "context/disclosure/solo-principal-collapse", want: ""},
+	{id: "review/blocker/outcome-floor/ac-1", at: "ac-1", want: "ac-1"},
+	{id: "review/blocker/question-claimed/oq-1", at: "oq-1", want: "oq-1"},
+	{id: "review/blocker/obligation-quality/ac-1/static", at: "ac-1", want: "ac-1"},
+	// A blocker code's shape is exact: a tail moves no segment into place.
+	{id: "review/blocker/outcome-floor/ac-1/dc-1", want: ""},
+	{id: "review/blocker/question-claimed/oq-1/dc-1", want: ""},
+	{id: "review/blocker/obligation-quality/ac-1", want: ""},
+	// Stub slugs, verbs, roles, exemption ids and conflict ids.
+	{id: "review/blocker/stub-unreconciled/dc-1", want: ""},
+	{id: "review/blocker/principal-resolution-unproven/close", want: ""},
+	{id: "review/blocker/obligation-countersign-unproven/close/attestation/countersign", want: ""},
+	{id: "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch", want: ""},
+	{id: "review/blocker/forge-facts-unavailable/close", want: ""},
+	{id: "review/blocker/lifecycle-state-unproven/unknown", want: ""},
+	{id: "review/blocker/exemption-ineffective/legacy-service-go", want: ""},
+	{id: "review/blocker/exemption-ineffective/dc-1", want: ""},
+	{id: "review/blocker/conflict-mechanical/go-toolchain", want: ""},
+	{id: "review/blocker/conflict-mechanical/ac-1", want: ""},
+	{id: "review/blocker/conflict-semantic/semantic-1", want: ""},
+	{id: "review/blocker/conflict-semantic/oq-1", want: ""},
+	{id: "review/role/close/attestation/countersign", want: ""},
+	{id: "review/role/merge/attestation/author-vouch", want: ""},
+	{id: "review/action", want: ""},
+	{id: "review/eventual-derivation", want: ""},
+}
+
+// TestObjectOf pins SI-345 (1) family by family: each listed id's segments
+// equal declared ids, and only the family's object-bearing segment names
+// one. The table covers every family of the closed vocabulary, so a new
+// family without a case fails here.
 func TestObjectOf(t *testing.T) {
 	t.Parallel()
 
-	declared := map[string]bool{"ac-1": true, "ac-12": true, "oq-1": true}
-	tests := []struct {
-		id   string
-		want string
-	}{
-		{id: "success/coverage/ac-12", want: "ac-12"},
-		{id: "success/coverage/ac-1", want: "ac-1"},
-		{id: "success/coverage/ac-123", want: ""},
-		{id: "shape/question/oq-1", want: "oq-1"},
-		{id: "shape/question/oq-1x", want: ""},
-		{id: "success/blocker/obligation-quality/ac-12/static", want: "ac-12"},
-		// The family segments themselves never name an object.
-		{id: "shape/problem", want: ""},
-		{id: "review/role/close/attestation/countersign", want: ""},
-	}
-	for _, tt := range tests {
-		if got := objectOf(tt.id, declared); got != tt.want {
+	covered := map[concernFamily]bool{}
+	for _, tt := range objectCases {
+		family := classifyConcern(tt.id)
+		if family == familyUnknown {
+			t.Fatalf("case %q is outside the closed concern-identity vocabulary", tt.id)
+		}
+		covered[family] = true
+		if tt.want != "" && tt.want != tt.at {
+			t.Fatalf("case %q: want %q is not its object-bearing segment %q", tt.id, tt.want, tt.at)
+		}
+		if got := objectOf(tt.id, objectDeclared); got != tt.want {
 			t.Errorf("objectOf(%q) = %q, want %q", tt.id, got, tt.want)
 		}
+		if tt.want == "" {
+			continue
+		}
+		// The object-bearing segment names an object only when declared.
+		if got := objectOf(tt.id, map[string]bool{}); got != "" {
+			t.Errorf("objectOf(%q) with no declared ids = %q, want empty", tt.id, got)
+		}
 	}
-	if got := objectOf("success/coverage/ac-1", nil); got != "" {
-		t.Fatalf("objectOf with no declared ids = %q, want empty", got)
+	for family := familyUnknown + 1; family < familyEnd; family++ {
+		if !covered[family] {
+			t.Errorf("family %d has no Object case", family)
+		}
 	}
+}
+
+// TestValidateObjectFollowsTheFamilyPosition: Validate enforces SI-345
+// (1)'s positions, so a stored Object can never sit at a non-object
+// segment — every segment text of every case above, and the whole id,
+// set as the Object is refused unless it is the segment at the family's
+// object-bearing position. (Validate sees no declared ids; Derive matches
+// that segment against them.)
+func TestValidateObjectFollowsTheFamilyPosition(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range objectCases {
+		base := objectConcern(t, tt.id)
+		if err := base.validate(); err != nil {
+			t.Fatalf("concern %q without an Object: validate() = %v", tt.id, err)
+		}
+		segments := strings.Split(tt.id, "/")
+		for _, object := range append(segments, tt.id) {
+			c := base
+			c.Object = object
+			err := c.validate()
+			if object == tt.at {
+				if err != nil {
+					t.Errorf("concern %q Object %q: validate() = %v, want accepted", tt.id, object, err)
+				}
+				continue
+			}
+			if err == nil || !strings.Contains(err.Error(), "object") {
+				t.Errorf("concern %q Object %q: validate() = %v, want an object refusal", tt.id, object, err)
+			}
+		}
+	}
+}
+
+// objectConcern is a valid unresolved concern with id, its area, blocking
+// rule, work class and family posture taken from the closed vocabulary.
+func objectConcern(t *testing.T, id string) Concern {
+	t.Helper()
+	area, journeyDerived, blocking, err := concernIdentity(id, TimingCurrent)
+	if err != nil {
+		t.Fatalf("concernIdentity(%q) = %v", id, err)
+	}
+	state := StateViolated
+	if classifyConcern(id) == familySuccessCoverage {
+		state = StateUnproven
+	}
+	c := validConcern(id, area, state, blocking, TimingCurrent)
+	if journeyDerived {
+		c.WorkClass = journey.ClassMechanical
+	}
+	c.Witnesses = []string{"witness"}
+	c.Guidance = "Correct it."
+	c.Destination.CLI = []string{"verdi", "journey"}
+	return c
 }
 
 func TestValidateObjectNamesOneSegment(t *testing.T) {

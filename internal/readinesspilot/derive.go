@@ -663,15 +663,13 @@ func validateSuccessFacts(class string, declaredObjectIDs []string, facts Succes
 	return nil
 }
 
-// objectOf returns the declared object id that one segment of id names
-// after its two family segments, matched exactly (never by prefix) against
-// declared, or "" when none does (SI-338 (2)).
+// objectOf returns the declared object id at id's object-bearing segment
+// (objectSegment), matched exactly (never by prefix) against declared, or
+// "" when the family carries no object or that segment is not declared
+// (SI-338 (2) as SI-345 (1) refines it).
 func objectOf(id string, declared map[string]bool) string {
-	parts := strings.Split(id, "/")
-	for i := 2; i < len(parts); i++ {
-		if declared[parts[i]] {
-			return parts[i]
-		}
+	if segment := objectSegment(id); declared[segment] {
+		return segment
 	}
 	return ""
 }
