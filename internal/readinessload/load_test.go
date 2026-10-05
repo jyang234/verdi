@@ -822,8 +822,8 @@ func TestLoad_CrossSourceIdentityMismatches(t *testing.T) {
 		repo, ref := readinessRepo(t, "feature")
 		checkoutBranch(t, repo.Dir, "design/feature-alpha")
 		requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
-		l := loader{projectJourney: func(ctx context.Context, cfg *store.Config, arg string, extras journey.Extras) (journey.Record, error) {
-			record, err := journey.NewProjector().ProjectWith(ctx, cfg, arg, extras)
+		l := loader{projectJourney: func(ctx context.Context, cfg *store.Config, facts journey.Facts, extras journey.Extras) (journey.Record, error) {
+			record, err := journey.NewProjector().ProjectFacts(ctx, cfg, facts, extras)
 			record.Target.Ref = "spec/other"
 			return record, err
 		}, newConflictProvider: passProviderFactory(t, repo.Dir)}

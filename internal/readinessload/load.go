@@ -104,7 +104,7 @@ func (l Loader) Load(ctx context.Context, ref string) (readinesspilot.Snapshot, 
 type loader struct {
 	readFile            func(string) ([]byte, error)
 	gatherFacts         func(context.Context, *store.Config, string) (journey.Facts, error)
-	projectJourney      func(context.Context, *store.Config, string, journey.Extras) (journey.Record, error)
+	projectJourney      func(context.Context, *store.Config, journey.Facts, journey.Extras) (journey.Record, error)
 	newConflictProvider func(context.Context, string, policyconflict.Request, JudgeMode, ActorsResolver) (policyconflict.VerdictProvider, error)
 	readAnnotations     func(string) ([]*artifact.Annotation, error)
 }
@@ -385,11 +385,14 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	if conflictUnavailable == "" {
 		conflictPtr = &report
 	}
+	// The journey is projected over the facts gathered above, never a
+	// second gather (ledger SI-352, lane P1 (a)): one load, one set of
+	// repository and lifecycle facts, and no cross-request reuse (co-2).
 	projectJourney := l.projectJourney
 	if projectJourney == nil {
-		projectJourney = projector.ProjectWith
+		projectJourney = projector.ProjectFacts
 	}
-	record, err := projectJourney(ctx, cfg, ref, journey.Extras{Conflict: conflictPtr})
+	record, err := projectJourney(ctx, cfg, facts, journey.Extras{Conflict: conflictPtr})
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: projecting journey: %w", err)
 	}
