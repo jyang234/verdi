@@ -93,8 +93,39 @@ func pinWall(t *testing.T, root, golden string) {
 		t.Errorf("the board Document tab's Readiness section differs from the CLI composition's:\n--- board ---\n%s\n--- cli ---\n%s", got, section)
 	}
 	checkGolden(t, golden+".readiness-page.html", []byte(mainRegion(t, get(t, h, "/readiness?spec="+name))))
+	checkGolden(t, golden+".document-snapshot.json", documentSnapshot(t, h, root, name))
 
 	checkGolden(t, golden+".badges.json", marshal(t, badges(t, root, name)))
+}
+
+// documentSnapshot is the Document page's poll — its snapshot, whose
+// revision token covers every fact the page renders (Wave 6 §5.1), served
+// with the production loader wired, as `verdi serve` serves it (BL-158) —
+// checked to carry that token as its validator. The JSON is pinned byte
+// for byte, the token with it (lane P2; ledger SI-356), except that the
+// checkout's own path — which a disclosure may name and which is a fact
+// about the machine, not about the derivation — reads <root>.
+func documentSnapshot(t *testing.T, h http.Handler, root, name string) []byte {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/"+name+"/document/snapshot", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET the Document snapshot = %d\n%s", rec.Code, rec.Body.String())
+	}
+	var wire struct {
+		Revision string `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("decoding the Document snapshot: %v", err)
+	}
+	if wire.Revision == "" || rec.Header().Get("ETag") != `"`+wire.Revision+`"` {
+		t.Fatalf("the Document snapshot's ETag %q does not carry its revision %q", rec.Header().Get("ETag"), wire.Revision)
+	}
+	body := rec.Body.Bytes()
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		body = bytes.ReplaceAll(body, []byte(real), []byte("<root>"))
+	}
+	return bytes.ReplaceAll(body, []byte(root), []byte("<root>"))
 }
 
 // cliReadiness mirrors `verdi spec doc spec/<name>` (cmd/verdi/specdoc.go):
