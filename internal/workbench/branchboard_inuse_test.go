@@ -45,7 +45,7 @@ func inUseRouteClasses() []inUseRouteClass {
 // combined output and error, for a step expected to stop (a rebase whose
 // exec fails).
 func gitBB(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=Verdi Fixture", "GIT_AUTHOR_EMAIL=fixture@verdi.invalid",

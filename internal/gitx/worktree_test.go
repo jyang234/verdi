@@ -463,12 +463,12 @@ func TestWorktreeAdd_HeldMidOperation(t *testing.T) {
 	}{
 		{"checked out", func(*testing.T, string) {}},
 		{"mid-rebase", func(t *testing.T, wt string) {
-			if out, err := gitInDir(wt, "rebase", "--force-rebase", "--exec", "false", "main"); err == nil {
+			if out, err := gitInDir(ctx, wt, "rebase", "--force-rebase", "--exec", "false", "main"); err == nil {
 				t.Fatalf("the rebase did not stop:\n%s", out)
 			}
 		}},
 		{"mid-bisect", func(t *testing.T, wt string) {
-			if out, err := gitInDir(wt, "bisect", "start", "HEAD", "HEAD~2"); err != nil {
+			if out, err := gitInDir(ctx, wt, "bisect", "start", "HEAD", "HEAD~2"); err != nil {
 				t.Fatalf("git bisect start: %v\n%s", err, out)
 			}
 		}},
@@ -476,18 +476,18 @@ func TestWorktreeAdd_HeldMidOperation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := buildRepo(t)
-			if out, err := gitInDir(repo.Dir, "branch", "design/held", "main"); err != nil {
+			if out, err := gitInDir(ctx, repo.Dir, "branch", "design/held", "main"); err != nil {
 				t.Fatalf("git branch: %v\n%s", err, out)
 			}
 			wt := filepath.Join(t.TempDir(), "holder")
-			if out, err := gitInDir(repo.Dir, "worktree", "add", "--quiet", wt, "design/held"); err != nil {
+			if out, err := gitInDir(ctx, repo.Dir, "worktree", "add", "--quiet", wt, "design/held"); err != nil {
 				t.Fatalf("git worktree add: %v\n%s", err, out)
 			}
 			if err := os.WriteFile(filepath.Join(wt, "held.txt"), []byte("held\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			for _, args := range [][]string{{"add", "held.txt"}, {"commit", "--quiet", "-m", "held"}} {
-				if out, err := gitInDir(wt, args...); err != nil {
+				if out, err := gitInDir(ctx, wt, args...); err != nil {
 					t.Fatalf("git %v: %v\n%s", args, err, out)
 				}
 			}
@@ -507,8 +507,8 @@ func TestWorktreeAdd_HeldMidOperation(t *testing.T) {
 
 // gitInDir runs git in dir with a fixed identity and no editor, returning
 // its combined output.
-func gitInDir(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+func gitInDir(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=Verdi Fixture", "GIT_AUTHOR_EMAIL=fixture@verdi.invalid",
