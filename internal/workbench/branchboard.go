@@ -22,7 +22,10 @@
 //   - branch checked out in any other worktree (an unmanaged linked one, or
 //     another serve's managed one) -> refused with 409 before any
 //     mutation, naming that worktree (ledger SI-347): it is another
-//     checkout's working tree, served by neither instance;
+//     checkout's working tree, served by neither instance; a worktree
+//     mid-rebase or mid-bisect on the branch, which porcelain reports
+//     detached, holds it too, and git's own in-use answer at the cut is
+//     the same 409 (SI-354 (1));
 //   - remote-tracking ref only   -> a sealed read-only render of that
 //     ref's committed content, remoteness disclosed, no worktree cut, no
 //     local branch minted (dc-4);
@@ -66,11 +69,11 @@ type branchBoards struct {
 	deps Deps
 
 	// serving is the unprefixed routes' own board instance. When a /b/
-	// branch is already checked out at the serving root itself
-	// (wtmanager.ErrCheckedOutHere), that checkout IS the branch's working
-	// tree, so requests dispatch into this same instance — same tree, same
-	// writeMu — rather than erroring or minting a second writer over the
-	// same files.
+	// branch is checked out at the serving root itself (git's in-use
+	// answer, wtmanager.ErrCheckedOutHere, with the serving checkout on the
+	// branch), that checkout IS the branch's working tree, so requests
+	// dispatch into this same instance — same tree, same writeMu — rather
+	// than erroring or minting a second writer over the same files.
 	serving *boardSpecServer
 
 	// mu guards servers. Per-branch instances are singletons: the board's
@@ -138,7 +141,7 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 		case err == nil:
 			rt.handler(s)(w, r)
 		case errors.Is(err, wtmanager.ErrCheckedOutHere):
-			rt.handler(b.serving)(w, r)
+			b.serveCheckedOutHere(w, r, branch, rt)
 		case errors.Is(err, wtmanager.ErrNotLocalBranch):
 			b.serveRemoteOrGone(w, r, branch, rt)
 		default:
@@ -306,6 +309,34 @@ func resolvedWorktreePath(path string) string {
 	}
 	return filepath.Clean(path)
 }
+
+// serveCheckedOutHere answers wtmanager's ErrCheckedOutHere: git refused
+// the cut because branch is in use by a worktree (ledger SI-354 (1)). Only
+// when the serving checkout itself is on branch is that checkout the
+// branch's working tree, so only then does the serving instance answer.
+// Any other holder is SI-347's refusal, a 409 given before any mutation: a
+// worktree mid-rebase or mid-bisect on branch, which porcelain reports
+// detached, so refusedElsewhere could not name it; git names it in its own
+// refusal, which the worktree-manager seam does not carry, so the answer
+// states that git reports the branch in use by another worktree. A failed
+// read refuses too, before any mutation, naming the failure.
+func (b *branchBoards) serveCheckedOutHere(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) {
+	current, err := gitx.CurrentBranch(r.Context(), b.root)
+	if err != nil {
+		b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before serving branch %s's board: %v", branch, err))
+		return
+	}
+	if current != branch {
+		b.renderBranchNotice(w, r, rt, http.StatusConflict, fmt.Sprintf(inUseElsewhereRefusal, branch))
+		return
+	}
+	rt.handler(b.serving)(w, r)
+}
+
+// inUseElsewhereRefusal is SI-347's refusal of a /b/ request for a branch
+// git reports in use by another worktree that porcelain does not list as
+// holding it (ledger SI-354 (1)), formatted with the branch.
+const inUseElsewhereRefusal = "git reports branch %s in use by another worktree (checked out there, or mid-rebase or mid-bisect on it), though no worktree lists it as its branch: this server serves a branch only from its own checkout or from the branch's managed worktree under its own data zone, so it refuses rather than read or change another checkout's files; finish or abort that worktree's rebase or bisect, or open the branch's board from a serve rooted in that worktree"
 
 // fixedBranchSwitchRefusal is the one refusal of a branch switch on a
 // per-branch board, formatted with that board's branch: actionGitSwitch
