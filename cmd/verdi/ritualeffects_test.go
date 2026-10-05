@@ -35,6 +35,9 @@ const (
 	pathBFirstUse = "b-first-use"
 	pathBExisting = "b-existing"
 	pathBHere     = "b-here"
+	// pathBElsewhere is the /b/ branch checked out in another worktree,
+	// which every /b/ route refuses before any mutation (ledger SI-347).
+	pathBElsewhere = "b-elsewhere"
 )
 
 // pristineSuffix names a whole-tree guard's extra completion case, run
@@ -44,12 +47,15 @@ const pristineSuffix = "-pristine"
 // namedPaths pins, per verb, the publication paths dc-3 and the ledger
 // name beyond a verb's dispatch branches (SI-341 (7)): close's four, the
 // two design start paths, stub instantiation's CLI path, the propose
-// paths, the whole-tree guards' completion cases (SI-341 (2)), the two
-// gc and recover paths, and the execution rituals' refusals (SI-348 (1)).
-// A path below a verb cannot register itself (SI-341 (7)), so this list is
-// the disclosed seam where a new one must be added.
+// paths, the whole-tree guards' completion cases (SI-341 (2), SI-349
+// (2)), the two gc and recover paths, the execution rituals' refusals
+// (SI-348 (1), SI-349 (3)), and SI-347's refusal of a /b/ branch held by
+// another worktree on every /b/ route whose declaration reads a refusal
+// as conforming (heldElsewhereVerbs). A path below a verb cannot register
+// itself (SI-341 (7)), so this list is the disclosed seam where a new one
+// must be added.
 func namedPaths() map[ws.Verb][]string {
-	return map[ws.Verb][]string{
+	paths := map[ws.Verb][]string{
 		ws.CLI("close"):                                              {"ci", "force-local", "feature", "unwind"},
 		ws.CLI("design start"):                                       {"plain", "supersedes"},
 		ws.CLI("design start --from-stub"):                           {"cli"},
@@ -65,6 +71,35 @@ func namedPaths() map[ws.Verb][]string {
 		ws.MCP("import_apply"):                                       {pathRoot, pathRoot + pristineSuffix},
 		ws.Workbench("/board/spec/{name}/api/git-switch"):            {pathRoot, pathRoot + pristineSuffix},
 		ws.Workbench("/b/{branch}/board/spec/{name}/api/git-switch"): {pathBHere + pristineSuffix},
+	}
+	for _, route := range heldElsewhereVerbs() {
+		v := ws.Workbench(route)
+		paths[v] = append(paths[v], pathBElsewhere)
+	}
+	return paths
+}
+
+// heldElsewhereVerbs are the /b/ routes the producer drives over a branch
+// held by another worktree (ledger SI-347): every one whose declaration
+// reads a refusal before any mutation as conforming (managed_worktree's
+// no_commit, Commit and push's carried, the switch's refused). Disclosed,
+// not driven: scaffold_branch's three /b/ actions, whose scoped
+// declaration would read that refusal as outside (SI-329 (3′)) and which
+// no ruling allows (SI-348 (2) names whole-tree guards); the workbench's
+// own pins cover the refusal per route class
+// (TestBranchBoard_CheckedOutElsewhere_EveryRouteClassRefuses).
+func heldElsewhereVerbs() []string {
+	return []string{
+		"/b/{branch}/board/spec/{name}",
+		"/b/{branch}/board/spec/{name}/api/{action}",
+		"/b/{branch}/board/spec/{name}/api/git-commit",
+		"/b/{branch}/board/spec/{name}/api/git-switch",
+		"/b/{branch}/board/spec/{name}/document",
+		"/b/{branch}/board/spec/{name}/document/snapshot",
+		"/b/{branch}/board/spec/{name}/fragment",
+		"/b/{branch}/board/spec/{name}/peek",
+		"/b/{branch}/board/spec/{name}/pinsearch",
+		"/b/{branch}/board/spec/{name}/snapshot",
 	}
 }
 

@@ -115,8 +115,18 @@ func dispatchSeed(path, branch string) func(*testing.T, context.Context, *ritual
 			fx.Acting = wt
 		case pathBHere:
 			gitTestOutput(t, fx.Dir, "checkout", "-q", branch)
+		case pathBElsewhere:
+			gitTestOutput(t, fx.Dir, "worktree", "add", "-q", filepath.Join(t.TempDir(), "elsewhere"), branch)
 		}
 	}
+}
+
+// heldElsewhereRefusal is SI-347's refusal of a /b/ route for a branch
+// another worktree holds, before any mutation: 409, naming the branch (the
+// holder's path, which follows it, is the workbench pins' to check).
+func heldElsewhereRefusal(branch string) ritualRun {
+	return refuses(2, "answered 409: ", "branch "+branch+" is checked out in another worktree, ",
+		"this server serves a branch only from its own checkout or from the branch")
 }
 
 // thenSeed runs each seeding in order.
@@ -190,9 +200,13 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 		{"/b/{branch}/board/spec/{name}/snapshot", http.MethodGet, draftBoard + "/snapshot", ""},
 	}
 	for _, m := range managed {
-		for _, p := range dispatchPaths() {
+		for _, p := range append(dispatchPaths(), pathBElsewhere) {
+			want := always(completes())
+			if p == pathBElsewhere {
+				want = always(heldElsewhereRefusal(r3cDraftBranch))
+			}
 			add(m.verb, ritualCase{path: p, ritual: "managed_worktree", base: map[string]string{".verdi/verdi.yaml": minimalManifestYAML},
-				seed: thenSeed(withDraft, dispatchSeed(p, r3cDraftBranch)), driver: wb(m.method, bPath(r3cDraftBranch, m.route), m.body, nil), want: always(completes())})
+				seed: thenSeed(withDraft, dispatchSeed(p, r3cDraftBranch)), driver: wb(m.method, bPath(r3cDraftBranch, m.route), m.body, nil), want: want})
 		}
 	}
 
@@ -207,13 +221,15 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 	}
 	add("/board/spec/{name}/api/git-commit", ritualCase{path: pathRoot, ritual: ws.RitualBoardCommitPush, base: map[string]string{".verdi/verdi.yaml": minimalManifestYAML},
 		seed: thenSeed(withDraft, checkoutDraft), driver: wb(http.MethodPost, draftBoard+"/api/git-commit", commitBody, nil), want: always(completes())})
-	for _, p := range dispatchPaths() {
+	for _, p := range append(dispatchPaths(), pathBElsewhere) {
 		c := ritualCase{path: p, ritual: ws.RitualBoardCommitPush, base: map[string]string{".verdi/verdi.yaml": minimalManifestYAML},
 			seed:   thenSeed(withDraft, dispatchSeed(p, r3cDraftBranch)),
 			driver: wb(http.MethodPost, bPath(r3cDraftBranch, draftBoard+"/api/git-commit"), commitBody, nil), want: always(completes())}
 		switch p {
 		case pathBFirstUse:
 			c.want = always(refuses(2, `answered 400: {"error":"nothing to commit: branch `+r3cDraftBranch+` has no working tree of its own here yet, so it carries no uncommitted change`))
+		case pathBElsewhere:
+			c.want = always(heldElsewhereRefusal(r3cDraftBranch))
 		case pathBExisting:
 			c.seed = thenSeed(c.seed, func(t *testing.T, _ context.Context, fx *ritualwitness.Fixture) {
 				note := filepath.Join(managedWorktreePath(fx, r3cDraftBranch), ".verdi", "specs", "active", r3cDraftName, "notes.md")
@@ -238,7 +254,7 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 		seed: thenSeed(withDraft, checkoutDraft), driver: wb(http.MethodPost, draftBoard+"/api/git-switch", switchBody, nil), want: always(guard)})
 	add("/board/spec/{name}/api/git-switch", ritualCase{path: pathRoot + pristineSuffix, ritual: "board_switch", base: map[string]string{".verdi/verdi.yaml": minimalManifestYAML},
 		pristine: true, seed: thenSeed(withDraft, checkoutDraft), driver: wb(http.MethodPost, draftBoard+"/api/git-switch", switchBody, nil), want: always(completes())})
-	for _, p := range append(dispatchPaths(), pathBHere+pristineSuffix) {
+	for _, p := range append(dispatchPaths(), pathBHere+pristineSuffix, pathBElsewhere) {
 		c := ritualCase{path: p, ritual: "board_switch", base: map[string]string{".verdi/verdi.yaml": minimalManifestYAML},
 			seed:   thenSeed(withDraft, dispatchSeed(strings.TrimSuffix(p, pristineSuffix), r3cDraftBranch)),
 			driver: wb(http.MethodPost, bPath(r3cDraftBranch, draftBoard+"/api/git-switch"), switchBody, nil), want: always(fixed)}
@@ -247,6 +263,8 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 			c.want = always(guard)
 		case pathBHere + pristineSuffix:
 			c.pristine, c.want = true, always(completes())
+		case pathBElsewhere:
+			c.want = always(heldElsewhereRefusal(r3cDraftBranch))
 		}
 		add("/b/{branch}/board/spec/{name}/api/git-switch", c)
 	}
