@@ -2,15 +2,18 @@ import { test, expect, request, type Page } from "@playwright/test";
 import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
 import { addSticky, expectAutosaved } from "./helpers";
 
-// The Wave 3.5 readiness pilot cockpit (GET /readiness), F-01 corrected
-// form (SI-125): orientation first ("where am I?"), the four-step
-// process rail with plain labels, a ranked focus list showing the top
-// three priorities with the exact remainder behind one inline
-// disclosure, and completed checks holding every proven fact. The page
-// is a GET-only view of readiness derived fresh for each request
+// The readiness page (GET /readiness) in the design's layout
+// (spec/readiness-page-v2; SI-339): orientation first ("where am I?"),
+// the four-step stepper with plain labels, a ranked focus list showing
+// every concern of the current step with the later steps' concerns
+// behind one inline disclosure, the later steps' known problems as links,
+// and completed checks holding every proven fact. The page is a GET-only
+// view of readiness derived fresh for each request
 // (spec/readiness-recovery ac-2 — the stamp names the HEAD the request
 // looked at); the only interactive state is the ephemeral open state of
-// native disclosures.
+// native disclosures. The page's own layout producers live in
+// 93-readiness-page.spec.ts; this file keeps the pilot's exact-array
+// oracles over the pilot store.
 //
 // Closed instrumentation vocabulary (unchanged): readiness-opened,
 // area-inspected, concern-inspected, board-link-followed,
@@ -181,9 +184,11 @@ async function allProvenReadinessURL(page: Page): Promise<string> {
 const BOARD_LINK_CONCERN = "shape/question/oq-1";
 const BOARD_LINK_AREA = "shape-proposal";
 
+// The plain triad (SI-339 (10)): Proven; Violated, its witness in the
+// row's technical details; Not enough evidence yet.
 const PLAIN_LABELS: Record<string, string> = {
-  proven: "Ready",
-  "violated-with-witness": "Needs attention",
+  proven: "Proven",
+  "violated-with-witness": "Violated",
   unproven: "Not enough evidence yet",
 };
 
@@ -282,40 +287,62 @@ test("orientation and rail answer where-am-I with plain labels", async ({
   ).toHaveCount(1);
 });
 
-test("focus list shows exactly three priorities and the exact disclosed remainder", async ({
+// The current step's concerns (the three shape-proposal rows: the
+// unclaimed question, provenance, the spike-claimed question) are the
+// visible list; every later step's concern waits behind the disclosure.
+const CURRENT_STEP_ROWS = ATTENTION_QUEUE.filter((id) =>
+  id.startsWith("shape/"),
+);
+
+// The known problems in later steps: exactly the violated concerns in
+// areas after the current focus (the two current review blockers plus the
+// eight eventual ones), each a link to its row — nothing else listed.
+const KNOWN_PROBLEMS = [
+  "review/blocker/forge-facts-unavailable/merge",
+  "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
+  ...EVENTUAL_REVIEW_BLOCKERS,
+];
+
+test("focus list shows every current-step concern and the exact disclosed remainder", async ({
   page,
 }) => {
   await page.goto(await readinessPilotURL(page));
 
-  // Exactly the first three, in the pinned order, ranked 1..3.
+  // Exactly the current step's rows, in the pinned order, ranked 1..3.
   expect(await focusIds(page)).toEqual(ATTENTION_QUEUE); // complete list is in the DOM…
   const visible = page.locator(
     ".readiness-queue [data-concern-id]:visible",
   );
+  expect(CURRENT_STEP_ROWS).toEqual(ATTENTION_QUEUE.slice(0, 3));
   await expect(visible).toHaveCount(3);
   for (let i = 0; i < 3; i++) {
     await expect(visible.nth(i)).toHaveAttribute(
       "data-concern-id",
       ATTENTION_QUEUE[i],
     );
+    await expect(visible.nth(i)).toHaveAttribute("data-timing", "now");
     await expect(visible.nth(i).locator(".readiness-rank")).toHaveText(
       String(i + 1),
     );
   }
 
-  // Downstream disclosure: exactly the violated concerns in areas after
-  // the current focus (the two current review blockers plus the eight
-  // eventual ones) — nothing else counted.
-  await expect(page.locator(".readiness-downstream")).toHaveText(
-    "Known problems in later steps: 10",
-  );
+  // Known problems in later steps: the exact later violated rows, as
+  // links to their rows, and no concern row of their own.
+  const known = page.locator("#readiness-known .readiness-known-link");
+  expect(
+    await known.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-known-concern")),
+    ),
+  ).toEqual(KNOWN_PROBLEMS);
+  await expect(page.locator("#readiness-known [data-concern-id]")).toHaveCount(0);
 
-  // The inline control carries the exact remaining count; expanding
-  // reveals the complete ordered remainder; the open control reads
-  // "Show fewer"; collapsing hides it again. No event is recorded.
+  // The inline control carries the exact remaining count and what it
+  // waits on; expanding reveals the complete ordered remainder, each row
+  // marked later; the open control reads "Show fewer"; collapsing hides
+  // it again. No event is recorded.
   const more = page.locator("details.readiness-more");
   const summary = more.locator(".readiness-more-summary");
-  await expect(summary).toHaveText(/21 more items\s*Show fewer/); // both spans in DOM…
+  await expect(summary).toHaveText(/21 more, waiting on Define the work\s*Show fewer/); // both spans in DOM…
   await expect(more.locator(".readiness-more-closed")).toBeVisible();
   await expect(more.locator(".readiness-more-open")).toBeHidden();
 
@@ -331,6 +358,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
       "data-concern-id",
       ATTENTION_QUEUE[i + 3],
     );
+    await expect(revealed.nth(i)).toHaveAttribute("data-timing", "later");
     await expect(revealed.nth(i).locator(".readiness-rank")).toHaveText(
       String(i + 4),
     );
@@ -359,12 +387,12 @@ test("focus and completed checks are lossless, disjoint, and complete", async ({
   const totalRows = await page.locator("[data-concern-id]").count();
   expect(totalRows).toBe(queueIds.length + completedIds.length);
 
-  // Completed rows carry the plain Ready label; their technical details
+  // Completed rows carry the plain Proven label; their technical details
   // retain the exact formal state.
   const firstDone = page
     .locator(".readiness-completed [data-concern-id]")
     .first();
-  await expect(firstDone.locator(".readiness-state")).toHaveText("Ready");
+  await expect(firstDone.locator(".readiness-state")).toHaveText("Proven");
   await firstDone.locator(".readiness-tech summary").click();
   await expect(firstDone.locator(".readiness-tech-facts")).toContainText(
     "proven",
@@ -446,7 +474,7 @@ test("every eventual review blocker is non-blocking with Timing eventual in its 
   for (const id of EVENTUAL_REVIEW_BLOCKERS) {
     const row = page.locator(`[data-concern-id="${id}"]`);
     await expect(row).toHaveAttribute("data-area-id", "request-review");
-    await expect(row.locator(".readiness-state")).toHaveText("Needs attention");
+    await expect(row.locator(".readiness-state")).toHaveText("Violated");
     await row.locator(".readiness-tech summary").click();
     const facts = row.locator(".readiness-tech-facts");
     await expect(facts.locator('dt:text-is("Blocking") + dd')).toHaveText(
@@ -761,18 +789,18 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
   expect(bodyRestored).toBe(bodyBefore);
 });
 
-test("420px shows exactly the first three priorities before expansion", async ({
+test("420px shows exactly the current step's concerns before expansion", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
   await page.goto(await readinessPilotURL(page));
 
   const visible = page.locator(".readiness-queue [data-concern-id]:visible");
-  await expect(visible).toHaveCount(3);
-  for (let i = 0; i < 3; i++) {
+  await expect(visible).toHaveCount(CURRENT_STEP_ROWS.length);
+  for (let i = 0; i < CURRENT_STEP_ROWS.length; i++) {
     await expect(visible.nth(i)).toHaveAttribute(
       "data-concern-id",
-      ATTENTION_QUEUE[i],
+      CURRENT_STEP_ROWS[i],
     );
   }
 });
@@ -795,7 +823,9 @@ test("the all-proven snapshot renders the honest complete posture", async ({
   await expect(page.locator(".readiness-queue [data-concern-id]")).toHaveCount(
     0,
   );
-  await expect(page.locator(".readiness-downstream")).toHaveCount(0);
+  // No current step, so no later steps: the known-problems section is
+  // not rendered rather than rendered empty.
+  await expect(page.locator("#readiness-known")).toHaveCount(0);
   await expect(page.locator(".readiness-stale")).toHaveAttribute(
     "aria-label",
     "Derivation stamp",
@@ -812,7 +842,7 @@ test("the all-proven snapshot renders the honest complete posture", async ({
   expect(completedIds).toEqual(ALL_PROVEN.concerns);
   for (const id of ALL_PROVEN.concerns) {
     const row = page.locator(`[data-concern-id="${id}"]`);
-    await expect(row.locator(".readiness-state")).toHaveText("Ready");
+    await expect(row.locator(".readiness-state")).toHaveText("Proven");
     await row.locator(".readiness-tech summary").click();
     const facts = row.locator(".readiness-tech-facts");
     await expect(facts).toContainText("proven");
@@ -891,7 +921,7 @@ test("keyboard traversal reaches technical details for every priority and comple
   );
 });
 
-test("420px: pinned rail hides nothing, anchors reveal disclosed rows, long values fit", async ({
+test("420px: the stepper hides nothing, anchors reveal disclosed rows, long values fit", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });

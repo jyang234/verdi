@@ -196,7 +196,7 @@ test("the four area labels and the three plain state words are unchanged on the 
   }
 });
 
-test("/readiness keeps the summary primary and Concern, Timing, Blocking in the disclosure", async ({
+test("/readiness leads with guidance and keeps Fact, Concern, Timing, Blocking in the disclosure", async ({
   page,
 }) => {
   await page.goto("/readiness");
@@ -212,26 +212,46 @@ test("/readiness keeps the summary primary and Concern, Timing, Blocking in the 
   // the page still derives: rows are present, and the check-context area
   // carries its verdict row in the unproven state. State is read from the
   // article's own state class and id attribute, never innerText (lane
-  // rule); no markup, CSS, JS or harness fixture is touched by this pin.
+  // rule); no harness fixture is touched by this pin.
+  //
+  // spec/readiness-page-v2 ac-2 (SI-339 (2)): an unresolved row's one
+  // primary line is its guidance, its fact filed in the disclosure; a
+  // proven row, which carries no guidance, leads with its fact. A
+  // human-review row carries its plain label between the step label and
+  // the primary line.
   expect(n).toBeGreaterThan(0);
   const unprovenContext = page.locator(
     'article[data-concern-id^="context/"].readiness-concern--unproven',
   );
   expect(await unprovenContext.count()).toBeGreaterThan(0);
+  let guided = 0;
   for (let i = 0; i < n; i++) {
     const row = rows.nth(i);
     const id = (await row.getAttribute("data-concern-id"))!;
+    const state = await formalState(row);
     const shape = await cardShape(row);
     expect(shape.stage, id).toBe(0);
-    expect(shape.primary, id).toBe(1);
+    expect(shape.summaries, id).toBe(1);
+    expect(shape.primary, id).toBeGreaterThan(shape.stage);
     expect(shape.chip, id).toBeGreaterThan(shape.primary);
+    const primary = row.locator(".readiness-copy > p.readiness-summary");
+    if (state === "proven") {
+      await expect(primary, id).not.toHaveClass(/readiness-guidance/);
+    } else {
+      await expect(primary, id).toHaveClass(/readiness-guidance/);
+      guided++;
+    }
     await row.locator(".readiness-tech summary").click();
+    await expect(row.locator('dt:text-is("Fact") + dd')).not.toHaveText("");
     await expect(row.locator('dt:text-is("Concern") + dd')).toHaveText(id);
-    await expect(row.locator('dt:text-is("Timing") + dd')).toHaveCount(1);
+    await expect(row.locator('dt:text-is("Timing") + dd')).toHaveText(
+      /^(current|eventual)$/,
+    );
     await expect(row.locator('dt:text-is("Blocking") + dd')).toHaveText(
       /^(true|false)$/,
     );
   }
+  expect(guided).toBeGreaterThan(0);
 });
 
 test("the policy setup guide points at verdi policy adopt --starter and stays read-only", async ({
