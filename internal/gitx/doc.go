@@ -17,6 +17,8 @@
 // the command and its stderr, so failures are legible without a debugger.
 // The one exception is a read session (WithReadSession): within one
 // request it answers Show's and BlobAt's reads from one batch process and
-// replays each identical ref-read argv after its first run, on their happy paths only
-// — every other answer, every error included, is still the exec's own.
+// replays each identical ref-read argv (and a full id's whole-tree
+// listing, and the directory's prefix) after its first run, on their
+// happy paths only — every other answer, every error included, is still
+// the exec's own.
 package gitx

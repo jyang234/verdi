@@ -68,11 +68,18 @@ type reachWalk struct {
 //   - a ref read whose argv repeats one already run in this request — the
 //     same `symbolic-ref --short -q <ref>`, `show-ref --verify --quiet
 //     <ref>`, `rev-parse --verify <rev>` or `rev-parse --verify -q <rev>`
-//     — is answered from that run instead of running again. Only identical
-//     argv is merged: `rev-parse --verify origin/main` and `rev-parse
-//     --verify origin/main^{commit}` are two reads, and every git command
-//     that names a ref as an operand (a `rev-list <ref> -- <path>`, a
-//     batched `<ref>:<path>`) still resolves it inside git;
+//     — is answered from that run instead of running again, and so are
+//     two reads that never change within a request: the directory's
+//     `rev-parse --show-prefix` (RepoPrefix), and the whole-tree listing
+//     of a full object id, `ls-tree -rz --full-tree <id>` (LsTreeEntries),
+//     so every reader of one commit's tree in the request shares one
+//     enumeration (Wave 6 §5.3; ledger SI-356). Only identical argv is
+//     merged: `rev-parse --verify origin/main` and `rev-parse --verify
+//     origin/main^{commit}` are two reads, and every git command that names
+//     a ref as an operand (a `rev-list <ref> -- <path>`, a batched
+//     `<ref>:<path>`) still resolves it inside git. Resolving the accepted
+//     ref once and reading at its id is the projection's own job
+//     (specstate.WithAcceptedHead), not the session's;
 //   - ReachableFromHEAD answers a full commit id that one `git rev-list`
 //     walk of head found reachable, instead of running a rev-parse and a
 //     merge-base per commit (BL-157).
@@ -95,12 +102,14 @@ type reachWalk struct {
 // defers. A context that already carries a session for dir is returned
 // unchanged with a no-op release, so a caller that composes several
 // loads into one projection can open the session once around all of
-// them.
+// them. An observer that implements SessionObserver is told of each
+// session opened, each read replayed and each object name batched.
 func WithReadSession(ctx context.Context, dir string) (context.Context, func()) {
 	if sessionFor(ctx, dir) != nil {
 		return ctx, func() {}
 	}
 	s := &readSession{dir: filepath.Clean(dir), memo: map[string]memoResult{}, reach: map[string]reachWalk{}}
+	observeSession(ctx, dir, SessionOpened, nil)
 	return context.WithValue(ctx, readSessionKey{}, s), s.release
 }
 
@@ -130,12 +139,18 @@ func (s *readSession) release() {
 	})
 }
 
-// memoizable reports whether args is one of the read-only ref-read shapes
-// a session runs once per identical argv: exactly these argument shapes,
-// so no write form of the same subcommand (`symbolic-ref HEAD <ref>`) is
-// ever replayed.
+// memoizable reports whether args is one of the read-only shapes a
+// session runs once per identical argv: exactly these argument shapes, so
+// no write form of the same subcommand (`symbolic-ref HEAD <ref>`) is ever
+// replayed. The tree listing qualifies only for a full object id, which
+// names one tree for good; a listing of a ref name is a resolution and
+// runs every time.
 func memoizable(args []string) bool {
 	switch {
+	case len(args) == 2 && args[0] == "rev-parse" && args[1] == "--show-prefix":
+		return true
+	case len(args) == 4 && args[0] == "ls-tree" && args[1] == "-rz" && args[2] == "--full-tree" && fullOIDPattern.MatchString(args[3]):
+		return true
 	case len(args) == 4 && args[0] == "symbolic-ref" && args[1] == "--short" && args[2] == "-q":
 		return true
 	case len(args) == 4 && args[0] == "show-ref" && args[1] == "--verify" && args[2] == "--quiet":
@@ -158,6 +173,7 @@ func (s *readSession) memoized(ctx context.Context, dir string, args []string) (
 	s.memoMu.Lock()
 	defer s.memoMu.Unlock()
 	if r, ok := s.memo[key]; ok {
+		observeSession(ctx, dir, SessionReplayed, args)
 		return bytes.Clone(r.out), r.err
 	}
 	out, err := execGit(ctx, dir, args...)
@@ -230,7 +246,7 @@ func (s *readSession) isTopLevel(ctx context.Context) bool {
 	s.prefixMu.Lock()
 	defer s.prefixMu.Unlock()
 	if !s.prefixKnown {
-		out, err := execGit(ctx, s.dir, "rev-parse", "--show-prefix") // RepoPrefix's read
+		out, err := s.memoized(ctx, s.dir, []string{"rev-parse", "--show-prefix"}) // RepoPrefix's read, shared with it
 		s.topLevel = err == nil && strings.TrimSpace(string(out)) == ""
 		s.prefixKnown = true
 	}
@@ -296,6 +312,7 @@ func (s *readSession) object(ctx context.Context, name string) (batchObject, boo
 		}
 		s.batch = b
 	}
+	observeSession(ctx, s.dir, SessionBatched, []string{name})
 	obj, found, err := s.batch.read(name)
 	if err != nil {
 		s.batch.stop()
