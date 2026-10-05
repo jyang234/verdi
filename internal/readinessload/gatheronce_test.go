@@ -1,6 +1,7 @@
 package readinessload
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/gitx"
 )
@@ -82,5 +84,38 @@ func TestLoad_FactsAreFreshEachLoad(t *testing.T) {
 	}
 	if !strings.Contains(after.StaleNotice, head) {
 		t.Fatalf("second load's derivation stamp = %q, want it to name the new HEAD %s", after.StaleNotice, head)
+	}
+}
+
+// TestLoad_NeverWritesTheIndex (BL-105; ledger SI-343 (3), SI-352; Wave 6
+// §5.3 "no mutation"): a readiness load is a read. After a tracked file's
+// mtime moves with its bytes unchanged — the stat drift a plain `git
+// status` refreshes and writes back — a load leaves .git/index byte for
+// byte as it was.
+func TestLoad_NeverWritesTheIndex(t *testing.T) {
+	for _, class := range []string{"feature", "story"} {
+		t.Run(class, func(t *testing.T) {
+			repo, ref := readinessRepo(t, class)
+			spec := filepath.Join(repo.Dir, ".verdi", "specs", "active", strings.TrimPrefix(ref, "spec/"), "spec.md")
+			stale := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+			if err := os.Chtimes(spec, stale, stale); err != nil {
+				t.Fatal(err)
+			}
+			index := filepath.Join(repo.Dir, ".git", "index")
+			before, err := os.ReadFile(index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(context.Background(), repo.Dir, ref, Options{}); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			after, err := os.ReadFile(index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("a readiness load rewrote .git/index: a read path took git's optional index lock")
+			}
+		})
 	}
 }

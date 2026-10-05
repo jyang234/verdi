@@ -37,8 +37,13 @@ import (
 // as backward-compatible, its paths are repository-root-relative regardless of
 // the working directory or status.relativePaths, and it reports index-vs-HEAD
 // differences it is not asked to suppress. The two explicit flags buy a cost
-// reduction and a parsing guarantee, nothing about correctness:
+// reduction and a parsing guarantee, nothing about correctness, and the
+// global --no-optional-locks keeps the read a read:
 //
+//   - --no-optional-locks: `git status` otherwise refreshes a stale index
+//     and writes it back (BL-105; ledger SI-352), so a read path — the
+//     readiness load's repository facts among them — would rewrite the
+//     checkout's .git/index. The answer is the same; only the write goes.
 //   - --untracked-files=no drops the untracked scan entirely: untracked files
 //     are legal during closure and are filtered out below anyway, and the scan
 //     is the expensive part of status on a large checkout.
@@ -56,7 +61,7 @@ import (
 // --untracked-files=no exists to drop, overriding an operator's own explicit
 // "do not scan submodules" setting, in a guard that runs inside other people's
 // repositories.
-var stagedPathsArgs = []string{"status", "--porcelain", "-z", "--untracked-files=no"}
+var stagedPathsArgs = []string{"--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=no"}
 
 // StagedPaths returns the repository-relative paths whose index entries
 // differ from HEAD, sorted so callers can report them deterministically.
