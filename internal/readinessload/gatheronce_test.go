@@ -139,7 +139,7 @@ func TestLoad_ReadsThroughOneSession(t *testing.T) {
 				switch {
 				case args[0] == "cat-file":
 					batches++
-				case args[0] == "show", args[0] == "ls-tree" && args[1] != "-r":
+				case args[0] == "show", args[0] == "ls-tree" && !strings.HasPrefix(args[1], "-r"):
 					t.Errorf("the load ran `git %s` outside its read session", key)
 				case args[0] == "symbolic-ref" || args[0] == "show-ref" || args[0] == "rev-parse" && args[1] == "--verify":
 					if seen[key] {

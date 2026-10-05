@@ -68,9 +68,28 @@ const (
 // exists: remote-tracking wins because local checkout state (e.g. a
 // retained linked worktree's stale refs/heads/<name>) is not acceptance
 // truth (see defaultbranch.go).
+//
+// Tip and Commit are set only on a branch a request pinned
+// (WithAcceptedHead): Tip is the object id Ref resolved to — what `git
+// rev-parse --verify <Ref>` prints — and Commit the commit Tip peels to
+// (`<Tip>^{commit}`). They differ only when Ref names an annotated tag's
+// object. A read of the default branch names Rev(), never Ref, so every
+// read in the request sees the one commit it resolved; Name and Ref stay
+// what a disclosure or a lint rule names.
 type Branch struct {
-	Name string
-	Ref  string
+	Name   string
+	Ref    string
+	Tip    string
+	Commit string
+}
+
+// Rev is the revision a read of the default branch names: the pinned
+// commit id when the request resolved one, else Ref.
+func (b Branch) Rev() string {
+	if b.Commit != "" {
+		return b.Commit
+	}
+	return b.Ref
 }
 
 // Baseline is the accepted-baseline identity the ratified design names

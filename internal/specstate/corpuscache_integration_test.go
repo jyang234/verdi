@@ -14,16 +14,19 @@ import (
 )
 
 // corpusScanObserver records the revision of every successor-corpus scan
-// gitx runs on a context it is attached to: the recursive ls-tree over
-// specZonesPrefix. BlobAt's own ls-tree names a single spec path, so it
-// is not counted.
+// gitx runs on a context it is attached to: the scan's first listing —
+// the whole tree of a commit (storeTreePaths, lane P2), or the recursive
+// ls-tree over specZonesPrefix at a ref. BlobAt's own ls-tree names a
+// single spec path, so it is not counted.
 type corpusScanObserver struct {
 	mu   sync.Mutex
 	revs []string
 }
 
 func (o *corpusScanObserver) Observe(dir string, args []string) {
-	if len(args) == 6 && args[0] == "ls-tree" && args[1] == "-r" && args[5] == specZonesPrefix {
+	whole := len(args) == 4 && args[0] == "ls-tree" && args[1] == "-rz" && args[2] == "--full-tree"
+	specs := len(args) == 6 && args[0] == "ls-tree" && args[1] == "-r" && args[5] == specZonesPrefix
+	if whole || specs {
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		o.revs = append(o.revs, args[3])
