@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,6 +51,15 @@ func TestReadinessPageSnapshots_Derived(t *testing.T) {
 				t.Errorf("spec/%s concern %q state %q guidance %q: guidance must be present exactly when unresolved", name, c.ID, c.State, c.Guidance)
 			}
 		}
+		// Every fixture names its own target: no row's text carries the
+		// committed sources' spec/example (review finding F4D-B2).
+		for _, c := range snap.AllConcerns {
+			for _, text := range append([]string{c.Guidance, c.Summary}, c.Witnesses...) {
+				if strings.Contains(text, "example") {
+					t.Errorf("spec/%s concern %q names example: %q", name, c.ID, text)
+				}
+			}
+		}
 		// A step before Get approval has concerns waiting on it in a later
 		// step, so the page's waiting disclosure has something to expand.
 		later := 0
@@ -81,6 +91,28 @@ func TestReadinessPageSnapshots_Derived(t *testing.T) {
 	}
 	if c := byID(readinessPageStep2, "success/blocker/obligation-quality/ac-2/runtime"); c.State != readinesspilot.StateViolated || !c.Blocking {
 		t.Errorf("step 2 success blocker = %+v", c)
+	}
+
+	// A journey blocker row's guidance is its clearing condition, so each
+	// fixture blocker carries the clearing condition journey itself
+	// produces for that blocker (internal/journey derive.go's
+	// obligation-quality and forge-facts blockers, eventual.go's outcome
+	// floor), over the fixture's own target.
+	for _, tt := range []struct{ name, id, want string }{
+		{readinessPageStep2, "success/blocker/obligation-quality/ac-2/runtime",
+			"the obligation quality for ac-2/runtime is elaborated and any positive evidence matches its producer, source, and freshness declaration"},
+		{readinessPageStep2, "review/blocker/outcome-floor/ac-2",
+			"author attestations/" + readinessPageStep2 + "/ac-2.md or land a passing outcome record for ac-2"},
+		{readinessPageStep4, "review/blocker/forge-facts-unavailable/close",
+			"forge facts become available to the projection"},
+	} {
+		if c := byID(tt.name, tt.id); c.Guidance != tt.want {
+			t.Errorf("spec/%s %q guidance = %q, want journey's clearing condition %q", tt.name, tt.id, c.Guidance, tt.want)
+		}
+	}
+	if c := byID(readinessPageStep2, "success/blocker/obligation-quality/ac-2/runtime"); !reflect.DeepEqual(c.Witnesses,
+		[]string{".verdi/obligations/" + readinessPageStep2 + "/ac-2--runtime.md: unresolved-design-debt"}) {
+		t.Errorf("step 2 obligation-quality witnesses = %q, want the fixture's own obligation path", c.Witnesses)
 	}
 
 	// The solo-author fixture: the author is the only principal, so the

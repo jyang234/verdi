@@ -6,8 +6,11 @@ package main
 // instance over the REAL workbench.NewHandlerWith wiring, its loader
 // answering five fixed snapshots by ref through the production
 // Deps.ReadinessLoader seam. Each snapshot is readinesspilot.Derive's own
-// output over a fixed input, so its guidance, objects, and human-review
-// rows are the derivation's, never fixture text:
+// output over a fixed input, so its objects and human-review rows are the
+// derivation's, and so is every row's guidance but a journey blocker
+// row's. That row's guidance is the blocker's clearing condition, which
+// the fixture writes (fixtureBlocker) exactly as journey produces it for
+// that blocker, over the fixture's own target:
 //
 //   - spec/readiness-page-step-2: the current step is Define success (a
 //     violated current success blocker, and a criterion no stub covers);
@@ -24,7 +27,12 @@ package main
 // The inputs read two committed fixtures through the module root — the
 // journey canonical record and the policy-conflict report the
 // readinesspilot package's own tests derive over — and adjust them as
-// that package's tests do. Loopback only; started lazily on the control
+// that package's tests do. Every fixture but step 2 carries that report
+// (step 3 as committed, the others with a passing verdict). Its target is
+// an accepted context: Derive accepts it, since it reads the report's
+// verdict, rows, and disclosures but never its target, while the
+// production loader refuses it (readinessload admits only a report whose
+// target is the one acceptance candidate it derives). Loopback only; started lazily on the control
 // server's GET /readiness-page-fixture and reused thereafter, so a spec
 // that warms it in its own beforeAll passes alone (BL-98). No default
 // spec: every page names its fixture with ?spec=<name>. Test-only.
@@ -277,8 +285,9 @@ func readinessPageInput(src readinessPageSources, name, title, class string, cri
 
 // fixtureBlocker builds one journey blocker carrying the canonical
 // record's own owner, with its reason's fixed class. clearing and witness
-// are formats over the blocked transition (journey's own clearing
-// conditions name it the same way), so a transition id is never prose.
+// are journey's own texts for that blocker. Where one names the blocked
+// transition it is a format over it (journey's own clearing conditions
+// name it the same way), so a transition id is never prose.
 func fixtureBlocker(src readinessPageSources, id string, reason journey.ReasonCode, transition, clearing, witness string) (journey.Blocker, error) {
 	class, err := reason.Class()
 	if err != nil {
@@ -287,24 +296,43 @@ func fixtureBlocker(src readinessPageSources, id string, reason journey.ReasonCo
 	if strings.Contains(clearing, "%s") {
 		clearing = fmt.Sprintf(clearing, transition)
 	}
+	if strings.Contains(witness, "%s") {
+		witness = fmt.Sprintf(witness, transition)
+	}
 	return journey.Blocker{
-		ID: id, Reason: reason, Class: class, Witnesses: []string{fmt.Sprintf(witness, transition)},
+		ID: id, Reason: reason, Class: class, Witnesses: []string{witness},
 		Owner: src.record.Blockers.Current[0].Owner, ClearingCondition: clearing, Transition: transition,
 	}, nil
 }
 
-// readinessPageStep2Input: Define success is the current step — the
-// canonical record's own current obligation-quality blocker for ac-2, and
-// ac-3 no stub covers — while a context verdict and an eventual review
-// blocker wait in later steps.
+// readinessPageStep2Input: Define success is the current step — a current
+// obligation-quality blocker for ac-2's runtime evidence, and ac-3 no stub
+// covers — while a context verdict and an eventual outcome-floor blocker
+// for ac-2 wait in later steps. Both blockers are the canonical record's
+// own, re-targeted at this fixture's spec: their clearing conditions and
+// witnesses are the ones journey writes for them (derive.go's
+// obligation-quality blocker; eventual.go's outcome floor, for a
+// criterion that declares attestation).
 func readinessPageStep2Input(src readinessPageSources) (readinesspilot.Input, error) {
 	in, err := readinessPageInput(src, readinessPageStep2, "Decline notice refresh", "feature", []string{"ac-1", "ac-2", "ac-3"})
 	if err != nil {
 		return in, err
 	}
 	in.Success.UncoveredCriteria = []string{"ac-3"}
-	in.Journey.Blockers.Current = []journey.Blocker{src.record.Blockers.Current[1]}
-	in.Journey.Blockers.Eventual.Items = append([]journey.Blocker{}, src.record.Blockers.Eventual.Items...)
+	quality, err := fixtureBlocker(src, "obligation-quality/ac-2/runtime", journey.ReasonObligationDesignUnresolved, "build:start",
+		"the obligation quality for ac-2/runtime is elaborated and any positive evidence matches its producer, source, and freshness declaration",
+		".verdi/obligations/"+readinessPageStep2+"/ac-2--runtime.md: unresolved-design-debt")
+	if err != nil {
+		return in, err
+	}
+	floor, err := fixtureBlocker(src, "outcome-floor/ac-2", journey.ReasonOutcomeFloorUnsatisfied, "close",
+		"author attestations/"+readinessPageStep2+"/ac-2.md or land a passing outcome record for ac-2",
+		"AC ac-2: outcome floor unsatisfied; attestation is absent")
+	if err != nil {
+		return in, err
+	}
+	in.Journey.Blockers.Current = []journey.Blocker{quality}
+	in.Journey.Blockers.Eventual.Items = []journey.Blocker{floor}
 	in.Conflict = policyconflict.Report{}
 	in.ConflictUnavailable = "no context request supplied for this derivation"
 	in.Fallbacks.Context = []string{"verdi", "context", "conflict", "--request", "<path>"}
@@ -336,14 +364,22 @@ func readinessPageStep3Input(src readinessPageSources) (readinesspilot.Input, er
 }
 
 // readinessPageStep4Input: Get approval is the current step — the
-// canonical record's own current forge-facts blocker — with every earlier
-// step proven.
+// forge-facts blocker journey writes for a proposed spec's close
+// (derive.go), with its own clearing condition and witness — with every
+// earlier step proven.
 func readinessPageStep4Input(src readinessPageSources) (readinesspilot.Input, error) {
 	in, err := readinessPageInput(src, readinessPageStep4, "Reversal propagation", "story", []string{"ac-1", "ac-2"})
 	if err != nil {
 		return in, err
 	}
-	in.Journey.Blockers.Current = []journey.Blocker{src.record.Blockers.Current[0]}
+	forge, err := fixtureBlocker(src, "forge-facts-unavailable/close", journey.ReasonForgeFactsUnavailable, "close",
+		"forge facts become available to the projection",
+		// vocab:identity — the merge-signals design document's own name and its protocol term ("merge-signaled"), plus the forge's merge state; none is the renameable `merge` transition word
+		"acceptance is merge-signaled (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md); this projection consults no forge facts, so review and merge state is unknown")
+	if err != nil {
+		return in, err
+	}
+	in.Journey.Blockers.Current = []journey.Blocker{forge}
 	in.Journey.Principals.Required = []journey.RequiredRole{{Transition: "close", Obligation: "attestation/countersign", Count: 1, Resolution: "unproven"}}
 	in.Journey.Principals.Disclosures = []string{"authenticated principal resolution and profile-contributed requirements remain unproven"}
 	return in, in.Journey.Validate()
