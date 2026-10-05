@@ -96,6 +96,12 @@ func (r Reachability) String() string {
 // graft or a promisor remote; those read as Unreachable exactly as a full
 // clone does, because this predicate keys on the shallow marker alone.
 func ReachableFromHEAD(ctx context.Context, dir, commit, head string) (Reachability, error) {
+	// Inside a read session (WithReadSession) a full commit id that the
+	// session's one walk of head reached is Reachable without a process of
+	// its own (BL-157); every other commit takes the path below unchanged.
+	if s := sessionFor(ctx, dir); s != nil && fullOIDPattern.MatchString(commit) && s.reachable(ctx, dir, commit, head) {
+		return Reachable, nil
+	}
 	exists, err := CommitExists(ctx, dir, commit)
 	if err != nil {
 		return Unreachable, err

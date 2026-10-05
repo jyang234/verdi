@@ -172,6 +172,12 @@ func mcpReadiness(t *testing.T, root, ref string) string {
 // store's operating model.
 func badges(t *testing.T, root, name string) *wallbadge.BoardBadges {
 	t.Helper()
+	return badgesCtx(t, context.Background(), root, name)
+}
+
+// badgesCtx is badges under ctx.
+func badgesCtx(t *testing.T, ctx context.Context, root, name string) *wallbadge.BoardBadges {
+	t.Helper()
 	cfg, err := store.Open(root)
 	if err != nil {
 		t.Fatalf("opening store: %v", err)
@@ -190,7 +196,7 @@ func badges(t *testing.T, root, name string) *wallbadge.BoardBadges {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	out, err := wallbadge.ComputeBadges(context.Background(), root, rel, "sha256:"+hex.EncodeToString(sum[:]), spec, nil, cfg.Model)
+	out, err := wallbadge.ComputeBadges(ctx, root, rel, "sha256:"+hex.EncodeToString(sum[:]), spec, nil, cfg.Model)
 	if err != nil {
 		t.Fatalf("ComputeBadges: %v", err)
 	}

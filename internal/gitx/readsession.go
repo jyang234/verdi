@@ -40,12 +40,22 @@ type readSession struct {
 
 	memoMu sync.Mutex
 	memo   map[string]memoResult
+
+	reachMu sync.Mutex
+	reach   map[string]reachWalk
 }
 
 // memoResult is one memoized ref read: its output and error, replayed.
 type memoResult struct {
 	out []byte
 	err error
+}
+
+// reachWalk is the set of commits one walk found reachable from a head;
+// ok is false when the walk failed and every query takes the exact path.
+type reachWalk struct {
+	commits map[string]bool
+	ok      bool
 }
 
 // WithReadSession scopes every gitx read of dir made through the returned
@@ -56,13 +66,17 @@ type memoResult struct {
 //   - each ref resolution (a `symbolic-ref --short -q`, `show-ref --verify
 //     --quiet` or `rev-parse --verify` read) runs once, and its answer is
 //     replayed for the rest of the request — the accepted ref is resolved
-//     once per load, not once per consumer.
+//     once per load, not once per consumer;
+//   - ReachableFromHEAD answers a full commit id that one `git rev-list`
+//     walk of head found reachable, instead of running a rev-parse and a
+//     merge-base per commit (BL-157).
 //
 // Every shortcut answers only its happy path and is byte-for-byte what
-// the per-read exec answers: a blob's bytes, a plain file's blob id.
-// Anything else — an object that is missing, not a blob, not a plain
-// file, an unusual path, a failed batch process — takes the original exec
-// path, so every error and every negative is exactly what it was.
+// the per-read exec answers: a blob's bytes, a plain file's blob id, a
+// commit proven reachable. Anything else — an object that is missing, not
+// a blob, not a plain file, an unusual path, a commit the walk did not
+// reach, a failed batch process or walk — takes the original exec path, so
+// every error and every negative is exactly what it was.
 //
 // The session caches nothing across requests (spec/readiness-recovery-v2
 // co-2): it dies with the returned release function, which the caller
@@ -74,7 +88,7 @@ func WithReadSession(ctx context.Context, dir string) (context.Context, func()) 
 	if sessionFor(ctx, dir) != nil {
 		return ctx, func() {}
 	}
-	s := &readSession{dir: filepath.Clean(dir), memo: map[string]memoResult{}}
+	s := &readSession{dir: filepath.Clean(dir), memo: map[string]memoResult{}, reach: map[string]reachWalk{}}
 	return context.WithValue(ctx, readSessionKey{}, s), s.release
 }
 
@@ -331,4 +345,31 @@ func (b *catFileBatch) read(name string) (batchObject, bool, error) {
 func (b *catFileBatch) stop() {
 	_ = b.stdin.Close()
 	_ = b.cmd.Wait()
+}
+
+// reachable reports whether commit is in the set one `git rev-list head`
+// walk found. The walk runs once per head per session — every commit
+// reachable from head, the same parent links `git merge-base
+// --is-ancestor` follows, grafts, replacements and a shallow boundary
+// included — so a commit in the set is proven reachable exactly as
+// ReachableFromHEAD's own per-commit path would prove it. A commit not in
+// the set, and every query after a failed walk, is left to that path.
+func (s *readSession) reachable(ctx context.Context, dir, commit, head string) bool {
+	s.reachMu.Lock()
+	defer s.reachMu.Unlock()
+	w, walked := s.reach[head]
+	if !walked {
+		out, err := execGit(ctx, dir, "rev-list", head, "--")
+		w = reachWalk{ok: err == nil}
+		if w.ok {
+			w.commits = map[string]bool{}
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				if line != "" {
+					w.commits[line] = true
+				}
+			}
+		}
+		s.reach[head] = w
+	}
+	return w.ok && w.commits[commit]
 }
