@@ -172,12 +172,17 @@ func (b *branchBoards) refusedSwitch(w http.ResponseWriter, r *http.Request, bra
 	if current == branch {
 		return false
 	}
-	// The per-branch instance's own refusal, word for word
-	// (actionGitSwitch), answered before any worktree is cut.
-	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(
-		"this board serves branch %s at its own /b/ address — the branch is the address here, so switching this working tree is not available; open the other branch's board from the directory instead", branch))
+	// The per-branch instance's own refusal (actionGitSwitch), answered
+	// before any worktree is cut.
+	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(fixedBranchSwitchRefusal, branch))
 	return true
 }
+
+// fixedBranchSwitchRefusal is the one refusal of a branch switch on a
+// per-branch board, formatted with that board's branch: actionGitSwitch
+// answers it on the branch's own instance, and refusedSwitch answers it
+// before the instance's worktree is ever cut.
+const fixedBranchSwitchRefusal = "this board serves branch %s at its own /b/ address — the branch is the address here, so switching this working tree is not available; open the other branch's board from the directory instead"
 
 // validBranchSegment reports whether branch (the decoded path segment) is
 // shaped like a name git could hold: no empty, "." or ".." path segments.

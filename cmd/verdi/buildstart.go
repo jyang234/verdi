@@ -238,7 +238,8 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 
 	// UAT-023: the build branch is cut from the resolved default branch,
 	// never from whatever HEAD the checkout sits on — the same resolution
-	// and disclosure design start uses (resolveBranchBase, dc-7/I-130). It
+	// and disclosure design start uses (resolveBranchBaseResolution,
+	// dc-7/I-130). It
 	// is cut at the resolved commit, not the ref's name, so the checkout
 	// sets no upstream to the default branch (a config write build start's
 	// declaration does not make), and the baseline is regenerated for that
