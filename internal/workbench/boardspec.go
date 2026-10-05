@@ -802,7 +802,8 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		snap, err := s.loadSnapshot(r.Context(), r.PathValue("name"))
+		refresh, err := s.projectWallRefresh(r.Context(), r.PathValue("name"), false)
+		snap := refresh.snap
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return

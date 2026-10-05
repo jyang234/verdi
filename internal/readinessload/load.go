@@ -15,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -197,12 +198,16 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	// implementers' lifecycle — shares one read session (ledger SI-352,
 	// lane P1 (c)): object reads go through one batch process, and an
 	// identical ref-read argv runs once per load and is replayed after
-	// that. Only identical argv is merged: `origin/main` and
-	// `origin/main^{commit}` are two reads, and every git command that names
-	// the accepted ref as an operand still resolves it itself. The session
-	// ends with this load; nothing it read outlives it (co-2).
+	// that. The load resolves the accepted HEAD once, to a commit id every
+	// consumer reads at — the repository facts, specstate, the journey
+	// (ledger SI-356; Wave 6 §5.3) — so no read names the accepted ref
+	// again. A caller that composes this load into its own projection
+	// (the Document page's poll, the wall's refresh) opened both already,
+	// and the load joins them. Both end with the request; nothing they
+	// read outlives it (co-2).
 	ctx, release := gitx.WithReadSession(ctx, root)
 	defer release()
+	ctx = specstate.WithAcceptedHead(ctx, root)
 
 	projector := journey.NewProjector()
 	gatherFacts := l.gatherFacts

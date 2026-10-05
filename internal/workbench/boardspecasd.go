@@ -31,6 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -754,6 +755,56 @@ type asdExpectedWire struct {
 	Checkout string `json:"checkout"`
 	Branch   string `json:"branch"`
 	Head     string `json:"head"`
+}
+
+// openProjection opens one application projection's reads of the served
+// checkout (Wave 6 §5.3; ledger SI-356): one read session, and one
+// accepted-HEAD resolution every consumer reads at. The caller defers the
+// release; nothing either holds outlives it (co-2).
+func (s *boardSpecServer) openProjection(ctx context.Context) (context.Context, func()) {
+	ctx, release := gitx.WithReadSession(ctx, s.root)
+	return specstate.WithAcceptedHead(ctx, s.root), release
+}
+
+// wallRefresh is one conditional refresh of the wall: its snapshot, and —
+// when the refresh composes it — the spec's readiness, derived in the same
+// read session against the same accepted HEAD.
+type wallRefresh struct {
+	snap *asdSnapshot
+	// readiness is the readiness snapshot when the refresh composed it
+	// and the loader derived it; readinessErr is the loader's failure.
+	// Both are zero when the refresh did not compose readiness.
+	readiness    *readinesspilot.Snapshot
+	readinessErr error
+}
+
+// projectWallRefresh is the wall's one application projection per
+// conditional refresh (Wave 6 §5.3; ledger SI-356): one read session for
+// the checkout and one accepted-HEAD resolution
+// (specstate.WithAcceptedHead) around everything the refresh derives, so
+// the wall's own projection, its badges and — when composeReadiness is
+// set and a loader is wired — the spec's readiness all read at the one
+// commit id, enumerate the accepted tree at most once between them, and
+// resolve nothing again. The /snapshot route refreshes without readiness:
+// the wall renders no readiness mark yet. It is the seam the marks lane
+// composes readiness through. Nothing outlives the call (co-2).
+func (s *boardSpecServer) projectWallRefresh(ctx context.Context, name string, composeReadiness bool) (wallRefresh, error) {
+	ctx, release := s.openProjection(ctx)
+	defer release()
+	snap, err := s.loadSnapshot(ctx, name)
+	if err != nil {
+		return wallRefresh{}, err
+	}
+	out := wallRefresh{snap: snap}
+	if composeReadiness && s.readinessLoader != nil {
+		readiness, err := s.readinessLoader.Load(ctx, "spec/"+name)
+		if err != nil {
+			out.readinessErr = err
+		} else {
+			out.readiness = &readiness
+		}
+	}
+	return out, nil
 }
 
 // loadSnapshot builds one complete snapshot: one composed page projection

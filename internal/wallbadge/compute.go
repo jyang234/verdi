@@ -8,6 +8,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // BoardBadges is ComputeBadges' full result for one spec's board.
@@ -61,9 +62,14 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 	// and the session answers each reachable full commit id from one
 	// `git rev-list` walk instead of a rev-parse and a merge-base per
 	// commit. Every finding — and so every badge — is what the per-commit
-	// checks found; the session ends with this compute.
+	// checks found. The compute resolves the accepted HEAD once, to the
+	// commit id lint's diff base and every lifecycle projection read at
+	// (ledger SI-356; Wave 6 §5.3); a wall that composes the badges into
+	// its refresh opened the session and the pin already, and this joins
+	// them. Both end with the request.
 	ctx, release := gitx.WithReadSession(ctx, root)
 	defer release()
+	ctx = specstate.WithAcceptedHead(ctx, root)
 	findings, err := lint.NewEngine().Run(ctx, root, lint.BuildContext(ctx, root), lint.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: running lint: %w", err)
