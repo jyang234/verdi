@@ -13,14 +13,18 @@ import (
 	"strings"
 )
 
-// ErrBranchCheckedOut is WorktreeAdd's typed refusal when branch is
-// already checked out in dir itself (the serving checkout). It is
-// detected PROACTIVELY — by asking git for dir's current branch before
-// `git worktree add` ever runs — so the refusal never depends on parsing
-// git's version-dependent "already checked out" stderr text (the D6-8
+// ErrBranchCheckedOut is WorktreeAdd's typed refusal when branch is in
+// use by a worktree: checked out in dir itself (the serving checkout), or
+// in use by another worktree, including one mid-rebase or mid-bisect on it
+// (ledger SI-354 (1)). The first is detected PROACTIVELY — by asking git
+// for dir's current branch before `git worktree add` ever runs — so it
+// never depends on git's version-dependent stderr text (the D6-8
 // environment-parity failure class: local git and a CI runner's git word
-// the same fatal differently, and a string match that passes on one
-// silently misclassifies on the other).
+// the same fatal differently). The second is only git's own refusal,
+// matched in both of its wordings ("is already checked out at" before git
+// 2.42, "is already used by worktree at" from 2.42 on). The sentinel
+// therefore does not say which checkout holds branch: a caller that must
+// tell dir from another worktree re-checks CurrentBranch itself.
 var ErrBranchCheckedOut = errors.New("gitx: branch is already checked out in this checkout")
 
 // StatusDirty reports whether dir's working tree has any uncommitted

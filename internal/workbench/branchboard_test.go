@@ -768,8 +768,9 @@ func workState(t *testing.T, dir string) string {
 // own, so a request the serving instance answered (the defect: git 2.34
 // reports a branch checked out elsewhere as git's own "already checked
 // out", which read as checked out here) would commit, push, or switch
-// there. Nothing changes in git or on disk: refs, the worktree list and
-// admin entries, both checkouts' working trees and indexes, and no managed
+// there. Each refuses before any mutation in SI-354 (1c)'s sense: no ref,
+// worktree registration (the worktree list and admin entries), or index
+// changes, neither checkout's working tree changes, and no managed
 // worktree is cut under the serving root.
 func TestBranchBoard_CheckedOutElsewhere_EveryRouteClassRefuses(t *testing.T) {
 	holders := []struct {
