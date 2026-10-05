@@ -24,7 +24,7 @@ func TestObjectFootprint(t *testing.T) {
 		{"a height below the footprint is raised to it", Object{Kind: ZoneReference, Height: 10}, RefCardHeight, CardWidth, 10},
 		{"a taller height is kept", Object{Kind: ZoneReference, Height: 240}, 240, CardWidth, 240},
 		{"an object card grows likewise", Object{Kind: ZoneDecision, Height: 236}, 236, CardWidth, 236},
-		{"a stub keeps its own footprint", Object{Kind: ZoneStub}, StubCardHeight, CardWidth, 0},
+		{"a stub takes the object card's footprint", Object{Kind: ZoneStub}, CardHeight, CardWidth, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, h := tc.obj.footprint()

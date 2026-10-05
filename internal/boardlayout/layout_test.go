@@ -306,9 +306,10 @@ func TestScratchColumn(t *testing.T) {
 }
 
 // The stubs zone (spec/scoping-canvas dc-6): a real layout zone —
-// Generate slots stub cards there like any kind — with its own squat
-// footprint (stub cards are typeset claims, not full object cards), and
-// the S8 properties hold across it: determinism and add-never-reflows.
+// Generate slots stub cards there like any kind — at the object card's
+// footprint (spec/wall-canvas-v2 ac-1, SI-350 (3): stub cards take the
+// design's card footprint, the same as object cards), and the S8
+// properties hold across it: determinism and add-never-reflows.
 func TestStubZone(t *testing.T) {
 	w, h := FootprintFor(ZoneStub)
 	if w != CardWidth {
@@ -317,8 +318,8 @@ func TestStubZone(t *testing.T) {
 	if h != StubCardHeight {
 		t.Errorf("stub footprint height = %v, want StubCardHeight", h)
 	}
-	if h >= CardHeight {
-		t.Errorf("StubCardHeight %v not squatter than an object card (%v) — the stub card must read as its own paper", h, CardHeight)
+	if ow, oh := FootprintFor(ZoneAC); w != ow || h != oh {
+		t.Errorf("stub footprint %v×%v differs from the object card's %v×%v — SI-350 (3) gives stub cards the object card's footprint", w, h, ow, oh)
 	}
 
 	// Two stubs slot deterministically down their own column; adding a
