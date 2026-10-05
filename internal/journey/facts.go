@@ -351,7 +351,7 @@ func (p Projector) resolveDirectSpecRef(ctx context.Context, root, name string) 
 	}
 	for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
 		zoneRelPath := store.SpecRelPath(zone, name)
-		shown, serr := p.git.Show(ctx, root, branch.Ref, zoneRelPath)
+		shown, serr := p.git.Show(ctx, root, branch.Rev(), zoneRelPath)
 		if serr == nil {
 			return zoneRelPath, shown, false, nil
 		}

@@ -192,7 +192,12 @@ func resolveDefaultHistory(ctx context.Context, root string) defaultHistory {
 	h := defaultHistory{head: unresolvedHead}
 	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
 		h.branch = branch
-		if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
+		// A request that pinned its accepted HEAD (specstate.
+		// WithAcceptedHead) already holds the id `rev-parse --verify
+		// <Ref>` printed (Wave 6 §5.3; ledger SI-356).
+		if branch.Tip != "" {
+			h.head, h.resolved = branch.Tip, true
+		} else if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
 			h.head, h.resolved = sha, true
 		}
 	}

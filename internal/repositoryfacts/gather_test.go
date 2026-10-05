@@ -3,6 +3,7 @@ package repositoryfacts
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -888,5 +889,48 @@ func TestGather_DisclosuresSortedAndDeduped(t *testing.T) {
 		if snap.Disclosures[i] <= snap.Disclosures[i-1] {
 			t.Fatalf("Disclosures = %v, not strictly ascending", snap.Disclosures)
 		}
+	}
+}
+
+// TestGather_PinnedDefaultBranchHead (ledger SI-356): a default branch a
+// request pinned carries the id its ref resolved to, and the fact states
+// it without resolving the ref again; unpinned, the ref is resolved as
+// before. A pinned Tip is stated even where resolving the ref would fail.
+func TestGather_PinnedDefaultBranchHead(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		branch     specstate.Branch
+		wantHead   string
+		wantParses []string
+	}{
+		{name: "pinned", branch: specstate.Branch{Name: "main", Ref: "origin/main", Tip: "pinnedsha", Commit: "pinnedsha"}, wantHead: "pinnedsha", wantParses: []string{"HEAD"}},
+		{name: "unpinned", branch: specstate.Branch{Name: "main", Ref: "origin/main"}, wantHead: "refsha", wantParses: []string{"HEAD", "origin/main"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			git := baseGitReader()
+			var parses []string
+			git.revParseFn = func(_ context.Context, _, rev string) (string, error) {
+				parses = append(parses, rev)
+				if rev == "HEAD" {
+					return "headsha", nil
+				}
+				if rev == "origin/main" {
+					return "refsha", nil
+				}
+				return "", errors.New("unexpected rev-parse")
+			}
+			resolveDB := func(context.Context, string) (specstate.Branch, bool) { return tt.branch, true }
+			snap, err := newGatherer(git, resolveDB, noCIEnv).Gather(context.Background(), GatherInput{Root: t.TempDir(), TargetPath: "rel/spec.md", TargetContent: []byte("x"), TargetFoundOnDisk: true})
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			want := DefaultBranchFact{Known: true, Name: "main", Ref: "origin/main", Head: tt.wantHead}
+			if snap.Facts.DefaultBranch != want {
+				t.Fatalf("DefaultBranch = %+v, want %+v", snap.Facts.DefaultBranch, want)
+			}
+			if !reflect.DeepEqual(parses, tt.wantParses) {
+				t.Fatalf("rev-parses = %q, want %q", parses, tt.wantParses)
+			}
+		})
 	}
 }
