@@ -243,7 +243,7 @@ func TestDocumentPageFacts_Rail(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc, html, res := factsDoc(t, tc.spec, tc.body, tc.kind, tc.mutate)
-			got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{git: &boardGitState{Branch: "main"}}, nil).Rail
+			got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{read: true, branch: "main"}, nil).Rail
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("rail =\n%s\nwant\n%s", railString(got), railString(tc.want))
 			}
@@ -284,7 +284,7 @@ func TestDocumentPageFacts_Chips(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			doc, html, res := factsDoc(t, factsSpec, "", tc.kind, withEvidenceAndReadiness)
 			res.RelPath = tc.relPath
-			got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{git: &boardGitState{Branch: "main"}}, nil).Chips
+			got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{read: true, branch: "main"}, nil).Chips
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("chips = %+v, want %+v", got, tc.want)
 			}
@@ -310,7 +310,7 @@ func TestDocumentPageFacts_Stamp(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc, html, res := factsDoc(t, factsSpec, "", specdoc.KindSpec, func(in *specdoc.Input) { in.Stamp.Proposed = tc.proposed })
-			if got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{git: &boardGitState{Branch: "main"}}, nil).Stamp; got != tc.want {
+			if got := newDocumentPageFacts(factsSpecName, doc, html, res, documentCheckout{read: true, branch: "main"}, nil).Stamp; got != tc.want {
 				t.Fatalf("stamp = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -343,22 +343,22 @@ links:
 		want     documentIdentity
 	}{
 		{
-			name: "on a branch", spec: factsSpec, checkout: documentCheckout{git: &boardGitState{Branch: "design/rail-fixture"}},
+			name: "on a branch", spec: factsSpec, checkout: documentCheckout{read: true, branch: "design/rail-fixture"},
 			want: documentIdentity{Ref: "spec/rail-fixture", Class: "feature", ClassLabel: "feature", Branch: provenFact("design/rail-fixture"),
 				Owners: []string{"platform-team", "docs-team"}, Files: []string{".verdi/specs/active/rail-fixture/spec.md"}},
 		},
 		{
-			name: "renamed vocabulary", spec: factsSpec, checkout: documentCheckout{git: &boardGitState{Branch: "main"}}, model: vocabTestModel(),
+			name: "renamed vocabulary", spec: factsSpec, checkout: documentCheckout{read: true, branch: "main"}, model: vocabTestModel(),
 			want: documentIdentity{Ref: "spec/rail-fixture", Class: "feature", ClassLabel: "Initiative", Branch: provenFact("main"),
 				Owners: []string{"platform-team", "docs-team"}, Files: []string{".verdi/specs/active/rail-fixture/spec.md"}},
 		},
 		{
-			name: "a spike story", spec: spike, checkout: documentCheckout{git: &boardGitState{Branch: "main"}}, model: vocabTestModel(),
+			name: "a spike story", spec: spike, checkout: documentCheckout{read: true, branch: "main"}, model: vocabTestModel(),
 			want: documentIdentity{Ref: "spec/rail-fixture", Class: "spike", ClassLabel: "Deep Dive", Branch: provenFact("main"),
 				Owners: []string{"platform-team", "docs-team"}, Files: []string{".verdi/specs/active/rail-fixture/spec.md"}},
 		},
 		{
-			name: "a detached HEAD", spec: factsSpec, checkout: documentCheckout{git: &boardGitState{}},
+			name: "a detached HEAD", spec: factsSpec, checkout: documentCheckout{read: true},
 			want: documentIdentity{Ref: "spec/rail-fixture", Class: "feature", ClassLabel: "feature", Branch: provenFact(""), Detached: true,
 				Owners: []string{"platform-team", "docs-team"}, Files: []string{".verdi/specs/active/rail-fixture/spec.md"}},
 		},
@@ -417,9 +417,9 @@ func TestDocumentPageFacts_EqualTheBar(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := tc.server(t)
-			snap, res, err := s.loadDocument(t.Context(), tc.spec, specdoc.KindSpec)
+			snap, res, err := s.loadDocumentPage(t.Context(), tc.spec, specdoc.KindSpec)
 			if err != nil {
-				t.Fatalf("loadDocument: %v", err)
+				t.Fatalf("loadDocumentPage: %v", err)
 			}
 			bar := s.documentBarFacts(t.Context(), tc.spec, res, snap.checkout)
 			f := snap.Facts

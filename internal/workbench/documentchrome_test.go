@@ -2,12 +2,14 @@ package workbench
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/gitx"
@@ -265,4 +267,130 @@ func TestDocumentSnapshot_AddsNoResolution(t *testing.T) {
 	if pollParses != aloneParses || pollStates != aloneStates {
 		t.Fatalf("the poll made %d accepted-ref rev-parses and %d specstate runs, the loader alone %d and %d", pollParses, pollStates, aloneParses, aloneStates)
 	}
+}
+
+// argvRecorder records every Git argv a request runs, through gitx's
+// observer.
+type argvRecorder struct {
+	mu   sync.Mutex
+	argv [][]string
+}
+
+func (r *argvRecorder) Observe(_ string, args []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.argv = append(r.argv, append([]string(nil), args...))
+}
+
+func (r *argvRecorder) runs() [][]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([][]string(nil), r.argv...)
+}
+
+// TestDocumentSnapshot_ReadsTheBranchAlone (SI-343 (3), review F5A-2): a
+// poll and a download read the checkout's branch and nothing else of its
+// state — one exec beyond the shared loader's own, and never a status
+// scan, which can rewrite the served checkout's index (Wave 6 §5.3: a
+// conditional refresh does no mutation).
+func TestDocumentSnapshot_ReadsTheBranchAlone(t *testing.T) {
+	_, repo, name := newAcceptedWallFixture(t)
+	s := &boardSpecServer{root: repo.Dir}
+	req := specdocload.Request{Root: repo.Dir, Name: name, Mode: specdocload.ModeWorkingTree, Kind: specdoc.KindSpec}
+	if _, err := specdocload.Load(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	alone := &argvRecorder{}
+	if _, err := specdocload.Load(gitx.WithObserver(t.Context(), alone), req); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	for _, rt := range boardSpecRoutes() {
+		mux.HandleFunc(rt.suffix, rt.handler(s))
+	}
+	for _, path := range []string{"/board/spec/" + name + "/document/snapshot", "/board/spec/" + name + "/document?format=md"} {
+		t.Run(path, func(t *testing.T) {
+			got := &argvRecorder{}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequestWithContext(gitx.WithObserver(t.Context(), got), http.MethodGet, path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s = %d\n%s", path, rec.Code, rec.Body.String())
+			}
+			branchReads := 0
+			for _, a := range got.runs() {
+				switch {
+				case strings.Join(a, " ") == "symbolic-ref --short -q HEAD":
+					branchReads++
+				case a[0] == "status" || a[0] == "for-each-ref" || (len(a) > 1 && a[1] == "status"):
+					t.Errorf("the request read more of the checkout than its branch: git %s", strings.Join(a, " "))
+				}
+			}
+			t.Logf("git execs: shared loader %d, request %d (branch reads %d)", len(alone.runs()), len(got.runs()), branchReads)
+			if branchReads != 1 || len(got.runs()) != len(alone.runs())+1 {
+				t.Fatalf("the request made %d execs with %d branch reads; want the loader's %d plus one branch read", len(got.runs()), branchReads, len(alone.runs()))
+			}
+		})
+	}
+}
+
+// TestDocumentCheckout_Reads: the poll's read (readBranch) and the page's
+// (readCheckout) state the same branch — proven, an empty text on a
+// detached HEAD, or disclosed-unproven outside a repository — and only the
+// page's carries the full Git state its top bar needs; a bar handed a
+// branch-only read discloses that instead of stating a posture.
+func TestDocumentCheckout_Reads(t *testing.T) {
+	_, repo, name := newAcceptedWallFixture(t)
+	detached := t.TempDir()
+	gitOut(t, repo.Dir, "worktree", "add", "-q", "--detach", detached, "HEAD")
+	for _, tc := range []struct {
+		name, root, unproven string
+		want                 barFact
+		detached             bool
+	}{
+		{name: "on a branch", root: repo.Dir, want: provenFact("main")},
+		{name: "a detached HEAD", root: detached, want: provenFact(""), detached: true},
+		{name: "not a repository", root: t.TempDir(), unproven: "the checkout's Git state could not be read: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &boardSpecServer{root: tc.root}
+			for read, c := range map[string]documentCheckout{"branch alone": s.readBranch(t.Context()), "full state": s.readCheckout(t.Context())} {
+				fact, detached := c.branchFact()
+				if tc.unproven != "" {
+					if !strings.HasPrefix(fact.Unproven, tc.unproven) || fact.Text != unprovenWord {
+						t.Errorf("%s: branch %+v, want disclosed-unproven", read, fact)
+					}
+					continue
+				}
+				if fact != tc.want || detached != tc.detached {
+					t.Errorf("%s: branch %+v detached %t, want %+v detached %t", read, fact, detached, tc.want, tc.detached)
+				}
+			}
+			if git, err := s.readCheckout(t.Context()).state(); tc.unproven == "" && (err != nil || git.Branch != tc.want.Text) {
+				t.Errorf("the full read's state = %+v, %v", git, err)
+			}
+			if _, err := s.readBranch(t.Context()).state(); tc.unproven == "" && !errors.Is(err, errBranchOnly) {
+				t.Errorf("the branch-alone read's state error = %v, want errBranchOnly", err)
+			}
+		})
+	}
+	t.Run("a bar handed the branch alone discloses it", func(t *testing.T) {
+		s := &boardSpecServer{root: repo.Dir}
+		snap, res, err := s.loadDocument(t.Context(), name, specdoc.KindSpec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bar := s.documentBarFacts(t.Context(), name, res, snap.checkout)
+		checkBarFacts(t, bar)
+		if bar.Spec == nil || !strings.Contains(bar.Spec.Unproven, errBranchOnly.Error()) || bar.Posture.Branch.Unproven == "" {
+			t.Fatalf("bar = %+v %+v, want its facts disclosed-unproven: the load read the branch alone", bar.Spec, bar.Posture)
+		}
+	})
+	t.Run("a value no load produced", func(t *testing.T) {
+		if fact, _ := (documentCheckout{}).branchFact(); !strings.Contains(fact.Unproven, errCheckoutNotRead.Error()) {
+			t.Fatalf("branch %+v, want disclosed-unproven: no load read it", fact)
+		}
+		if _, err := (documentCheckout{}).state(); !errors.Is(err, errCheckoutNotRead) {
+			t.Fatalf("state error %v, want errCheckoutNotRead", err)
+		}
+	})
 }

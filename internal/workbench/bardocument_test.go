@@ -45,9 +45,9 @@ func TestDocumentBarFacts_EqualTheWalls(t *testing.T) {
 				t.Fatalf("loadASD: %v", err)
 			}
 			wall := specBarFacts(proj, asd)
-			snap, res, err := s.loadDocument(t.Context(), tc.spec, specdoc.KindSpec)
+			snap, res, err := s.loadDocumentPage(t.Context(), tc.spec, specdoc.KindSpec)
 			if err != nil {
-				t.Fatalf("loadDocument: %v", err)
+				t.Fatalf("loadDocumentPage: %v", err)
 			}
 			doc := s.documentBarFacts(t.Context(), tc.spec, res, snap.checkout)
 			checkBarFacts(t, doc)
@@ -75,9 +75,9 @@ func TestDocumentBarFacts_BytesAgreeWithTheStamp(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &boardSpecServer{root: tc.root(t)}
-			snap, res, err := s.loadDocument(t.Context(), tc.spec, specdoc.KindSpec)
+			snap, res, err := s.loadDocumentPage(t.Context(), tc.spec, specdoc.KindSpec)
 			if err != nil {
-				t.Fatalf("loadDocument: %v", err)
+				t.Fatalf("loadDocumentPage: %v", err)
 			}
 			bar := s.documentBarFacts(t.Context(), tc.spec, res, snap.checkout)
 			if bar.Spec == nil || bar.Spec.Bytes.Word != tc.word || snap.Proposed != tc.proposed {
@@ -97,9 +97,9 @@ func TestDocumentBarFacts_BytesAgreeWithTheStamp(t *testing.T) {
 func TestDocumentBarFacts_StateTheLoadCouldNotResolve(t *testing.T) {
 	root := newBarFixture(t)
 	s := &boardSpecServer{root: root}
-	snap, res, err := s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
+	snap, res, err := s.loadDocumentPage(t.Context(), boardFixtureName, specdoc.KindSpec)
 	if err != nil {
-		t.Fatalf("loadDocument: %v", err)
+		t.Fatalf("loadDocumentPage: %v", err)
 	}
 	res.State = nil
 	res.Disclosures = []string{"status not resolved: the projector failed"}
@@ -247,9 +247,9 @@ func TestBarFacts_ModeCarriesTheReviewFeedDisclosure(t *testing.T) {
 				t.Fatalf("loadASD: %v", err)
 			}
 			wall := specBarFacts(proj, asd)
-			snap, res, err := tc.s.loadDocument(t.Context(), boardFixtureName, specdoc.KindSpec)
+			snap, res, err := tc.s.loadDocumentPage(t.Context(), boardFixtureName, specdoc.KindSpec)
 			if err != nil {
-				t.Fatalf("loadDocument: %v", err)
+				t.Fatalf("loadDocumentPage: %v", err)
 			}
 			doc := tc.s.documentBarFacts(t.Context(), boardFixtureName, res, snap.checkout)
 			for page, f := range map[string]barFacts{"wall": wall, "Document page": doc} {

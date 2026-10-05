@@ -704,9 +704,9 @@ func TestBoardDocument_DownloadHonoursIfNoneMatch(t *testing.T) {
 func TestDocumentPageView_CarriesTheFacts(t *testing.T) {
 	_, repo, name := newAcceptedWallFixture(t)
 	s := &boardSpecServer{root: repo.Dir}
-	snap, res, err := s.loadDocument(t.Context(), name, specdoc.KindSpec)
+	snap, res, err := s.loadDocumentPage(t.Context(), name, specdoc.KindSpec)
 	if err != nil {
-		t.Fatalf("loadDocument: %v", err)
+		t.Fatalf("loadDocumentPage: %v", err)
 	}
 	bar := s.documentBarFacts(t.Context(), name, res, snap.checkout)
 	data := documentPageView("/board/spec/"+name+"/document", name, snap, bar)

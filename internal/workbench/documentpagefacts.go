@@ -5,7 +5,7 @@ package workbench
 // temporal stamp, the identity card, the contents rail, and which object
 // anchors may carry an id chip. One value per render, built by a pure
 // function from what the page's own load already resolved (its document,
-// its HTML, its specdocload.Result, and the checkout's Git state it read):
+// its HTML, its specdocload.Result, and what it read of the checkout):
 // nothing here resolves anything, so the facts can never disagree with
 // the body they frame. The page's snapshot carries the same value and its
 // revision token covers it (SI-340 (8)), so a poll that swaps the body
@@ -113,7 +113,7 @@ func newDocumentStamp(s specdoc.Stamp) documentStamp {
 // (specBarFacts), and the branch is the checkout's as the bar reads it.
 func newDocumentIdentity(name, ref string, res specdocload.Result, checkout documentCheckout, m *model.Model) documentIdentity {
 	id := documentIdentity{Ref: ref, Owners: []string{}, Files: []string{res.RelPath}}
-	id.Branch, id.Detached = checkout.branch()
+	id.Branch, id.Detached = checkout.branchFact()
 	if fm := res.Input.Spec; fm != nil {
 		id.Owners = append(id.Owners, fm.Owners...)
 		p := projectionHead(name, fm, "", "")
