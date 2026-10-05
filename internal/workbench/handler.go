@@ -203,6 +203,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
 	mux.HandleFunc("/assets/boardspecasd.js", boardSpecASDJSHandler())
 	mux.HandleFunc("/assets/specdocument.js", specDocumentJSHandler())
+	mux.HandleFunc("/assets/documentpage.js", documentPageJSHandler())
 	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
 	mux.HandleFunc("/assets/readiness.js", readinessJSHandler())
 	mux.HandleFunc("/assets/topbar.js", topBarJSHandler())

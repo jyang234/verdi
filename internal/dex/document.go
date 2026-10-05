@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/headings"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
@@ -239,13 +240,7 @@ func writeSpecDocuments(ctx context.Context, outDir, root string, in documentInp
 // the rail into a wall of prose and defeat its sticky positioning (fix
 // round 1, F2). The headings themselves stay in the body, with their ids.
 func documentTOC(entries []TOCEntry) []TOCEntry {
-	var out []TOCEntry
-	for _, e := range entries {
-		if e.Level == 2 {
-			out = append(out, e)
-		}
-	}
-	return out
+	return headings.Sections(entries)
 }
 
 // documentViewChrome is the quiet header a reader meets before the
