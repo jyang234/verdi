@@ -258,15 +258,17 @@ func revision(rest []string) string {
 	return ""
 }
 
-// writers are the subcommands that write the index, a ref, the object
+// writer reports the subcommands that write the index, a ref, the object
 // store or the working tree in every form gitx could run them.
-var writers = map[string]bool{
-	"add": true, "am": true, "apply": true, "checkout": true, "cherry-pick": true,
-	"clean": true, "commit": true, "commit-tree": true, "fetch": true, "gc": true,
-	"merge": true, "mktree": true, "mv": true, "notes": true,
-	"pull": true, "push": true, "read-tree": true, "rebase": true, "replace": true,
-	"reset": true, "restore": true, "revert": true, "rm": true, "stash": true,
-	"switch": true, "update-index": true, "update-ref": true, "write-tree": true,
+func writer(sub string) bool {
+	switch sub {
+	case "add", "am", "apply", "checkout", "cherry-pick", "clean", "commit", "commit-tree",
+		"fetch", "gc", "merge", "mktree", "mv", "notes", "pull", "push", "read-tree", "rebase",
+		"replace", "reset", "restore", "revert", "rm", "stash", "switch", "update-index",
+		"update-ref", "write-tree":
+		return true
+	}
+	return false
 }
 
 // writes reports whether a process can write: status without
@@ -295,7 +297,7 @@ func writes(sub string, argv, rest []string) bool {
 		}
 		return true
 	}
-	return writers[sub]
+	return writer(sub)
 }
 
 // positional is rest's arguments that are not options.
