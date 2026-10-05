@@ -11,8 +11,8 @@ import (
 // run execs `git <args...>` with its working directory set to dir, returning
 // stdout on success. A non-zero exit becomes an error naming the command and
 // stderr, never a silent empty result. Inside a read session for dir
-// (WithReadSession), a ref resolution the session memoizes runs once per
-// request and is replayed after that.
+// (WithReadSession), a memoizable ref read whose identical argv already
+// ran in the request is replayed instead of run again.
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	if s := sessionFor(ctx, dir); s != nil && memoizable(args) {
 		return s.memoized(ctx, dir, args)

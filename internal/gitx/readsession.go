@@ -130,9 +130,10 @@ func (s *readSession) release() {
 	})
 }
 
-// memoizable reports whether args is one of the read-only ref resolutions
-// a session runs once: exactly these argument shapes, so no write form of
-// the same subcommand (`symbolic-ref HEAD <ref>`) is ever replayed.
+// memoizable reports whether args is one of the read-only ref-read shapes
+// a session runs once per identical argv: exactly these argument shapes,
+// so no write form of the same subcommand (`symbolic-ref HEAD <ref>`) is
+// ever replayed.
 func memoizable(args []string) bool {
 	switch {
 	case len(args) == 4 && args[0] == "symbolic-ref" && args[1] == "--short" && args[2] == "-q":

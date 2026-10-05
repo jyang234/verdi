@@ -195,9 +195,12 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 
 	// Every git read below — this load's facts, its journey, its
 	// implementers' lifecycle — shares one read session (ledger SI-352,
-	// lane P1 (c)): object reads go through one batch process and each ref
-	// resolution, the accepted ref's included, runs once per load. The
-	// session ends with this load; nothing it read outlives it (co-2).
+	// lane P1 (c)): object reads go through one batch process, and an
+	// identical ref-read argv runs once per load and is replayed after
+	// that. Only identical argv is merged: `origin/main` and
+	// `origin/main^{commit}` are two reads, and every git command that names
+	// the accepted ref as an operand still resolves it itself. The session
+	// ends with this load; nothing it read outlives it (co-2).
 	ctx, release := gitx.WithReadSession(ctx, root)
 	defer release()
 

@@ -207,9 +207,9 @@ func TestReadSession_BatchesReadsInOneProcess(t *testing.T) {
 	}
 }
 
-// TestReadSession_RefReadsRunOnce pins "the accepted ref is resolved once
-// per load": a repeated ref resolution runs one process per session, and
-// replays its answer — including a negative one — exactly.
+// TestReadSession_RefReadsRunOnce pins that an identical ref-read argv runs
+// one process per session and its answer — including a negative one — is
+// replayed exactly; distinct argv stay distinct reads.
 func TestReadSession_RefReadsRunOnce(t *testing.T) {
 	repo := sessionRepo(t)
 	gitT(t, repo.Dir, "update-ref", "refs/remotes/origin/main", repo.Head)

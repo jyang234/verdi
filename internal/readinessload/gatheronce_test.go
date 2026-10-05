@@ -122,8 +122,8 @@ func TestLoad_NeverWritesTheIndex(t *testing.T) {
 
 // TestLoad_ReadsThroughOneSession (ledger SI-352, lane P1 (c)): a load's
 // object reads go through its read session's one batch process — no
-// per-path `git show` or `git ls-tree <rev> -- <path>` — and no ref
-// resolution runs twice in one load, the accepted ref's included.
+// per-path `git show` or `git ls-tree <rev> -- <path>` — and no identical
+// ref-read argv runs twice in one load.
 func TestLoad_ReadsThroughOneSession(t *testing.T) {
 	for _, class := range []string{"feature", "story"} {
 		t.Run(class, func(t *testing.T) {
