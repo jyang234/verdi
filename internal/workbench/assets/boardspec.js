@@ -463,20 +463,27 @@
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
   }
 
-  // edgeAnchor: the point where the ray from a card's center toward
-  // `toward` crosses the card's border — threads tie to card EDGES, so
-  // yarn never runs through a card's text (it reads as strikethrough).
+  // edgeAnchor: the midpoint of the card's side facing `toward` (the
+  // dominant axis picks the side) — threads tie to card EDGES, so yarn
+  // never runs through a card's text (handoff "Yarn"; SI-350 (8)).
   function edgeAnchor(el, toward) {
     var r = rectOf(el);
     var cx = r.x + r.w / 2;
     var cy = r.y + r.h / 2;
     var dx = toward.x - cx;
     var dy = toward.y - cy;
-    if (dx === 0 && dy === 0) return { x: cx, y: cy };
-    var sx = dx !== 0 ? r.w / 2 / Math.abs(dx) : Infinity;
-    var sy = dy !== 0 ? r.h / 2 / Math.abs(dy) : Infinity;
-    var t = Math.min(sx, sy);
-    return { x: cx + dx * t, y: cy + dy * t };
+    if (Math.abs(dx) >= Math.abs(dy)) return { x: dx < 0 ? r.x : r.x + r.w, y: cy };
+    return { x: cx, y: dy < 0 ? r.y : r.y + r.h };
+  }
+
+  // pinAnchor: a stub card's pin, centred on its top edge — the anchor of
+  // its projected coverage yarn (dc-3: an anchor, never a handle).
+  function pinAnchor(el) {
+    var r = rectOf(el);
+    return { x: r.x + r.w / 2, y: r.y };
+  }
+  function anchorOf(el, toward) {
+    return el.classList.contains("stubcard") ? pinAnchor(el) : edgeAnchor(el, toward);
   }
 
   function ensureYarnSvg() {
@@ -521,13 +528,16 @@
       var offboard = !fromEl || !toEl;
       var a, b, cx, cy, knots;
       if (!offboard) {
-        a = edgeAnchor(fromEl, centerOf(toEl));
-        b = edgeAnchor(toEl, centerOf(fromEl));
+        a = anchorOf(fromEl, centerOf(toEl));
+        b = anchorOf(toEl, centerOf(fromEl));
+        // The control point sits off the chord, perpendicular, by
+        // min(70, 0.18·length) — the handoff's curve.
         var dx = b.x - a.x;
         var dy = b.y - a.y;
-        var sag = 8 + Math.sqrt(dx * dx + dy * dy) * 0.06;
-        cx = (a.x + b.x) / 2;
-        cy = (a.y + b.y) / 2 + sag;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var off = Math.min(70, len * 0.18);
+        cx = (a.x + b.x) / 2 - (dy / len) * off;
+        cy = (a.y + b.y) / 2 + (dx / len) * off;
         knots = [a, b];
       } else {
         var anchorEl = fromEl || toEl;
@@ -674,12 +684,13 @@
   // case-file placard to three lines, an object card and a stub to their
   // index-card size). When a clamp actually cuts text, that must be
   // visible, not silent: the element gets `.is-clamped` (a fade on its
-  // last line + a zoom-in cursor) and a quiet "⋯" mark in its corner, and
-  // a click opens the read-only expand dialog. The affordance appears
-  // ONLY when the text measurably overflows — a short placard stays crisp
-  // and inert. Measured on the SERVER-RENDERED text (the DOM always holds
-  // the full string; the clamp only hides it), so it re-runs after every
-  // fragment swap, on load (web fonts change wrapping), and on resize.
+  // last line) and a quiet "⋯" mark in its corner, and a click on a
+  // placard opens the read-only expand dialog (a card's click selects it;
+  // its full text is a double click away). The mark appears ONLY when the
+  // text measurably overflows — a short placard stays crisp and inert.
+  // Measured on the SERVER-RENDERED text (the DOM always holds the full
+  // string; the clamp only hides it), so it re-runs after every fragment
+  // swap, on load (web fonts change wrapping), and on resize.
   // The mark lives in the element's parent (never inside the clamped box,
   // where it would perturb -webkit-line-clamp or leak into the full text
   // the dialog reads back).
@@ -2506,23 +2517,13 @@
       return;
     }
 
-    // Click-to-expand: a clamped placard / card text / stub title opens
-    // its read-only dialog. Only truncated text carries `.is-clamped`, so
-    // a short one is inert. A reference card is excluded above (its own
-    // click is the peek, which already shows the whole artifact).
-    var clampEl = t.closest(".is-clamped[data-expandable]");
-    if (!clampEl && !t.closest("button, textarea, input, .review-sticky")) {
-      // A draggable paper captures the pointer on press, so the click's
-      // target is the paper itself, not the clamped text child underneath
-      // it (a placard, uncaptured, resolves directly above). Recover the
-      // paper's own clamped text so a click anywhere on a truncated card
-      // or stub still expands it.
-      var paper = t.closest(".objcard, .stubcard, .sticky");
-      if (paper) clampEl = paper.querySelector(".is-clamped[data-expandable]");
-    }
-    // The drag-tail guard: a completed drag's click fires on the dragged
-    // paper (dragGhost) — its clamped child must not be read as an expand.
-    if (clampEl && !(dragGhost && dragGhost.contains(clampEl))) {
+    // Click-to-expand: a clamped placard headline opens its read-only
+    // dialog. Only truncated text carries `.is-clamped`, so a short one is
+    // inert. A card's clamped text no longer expands on click: a click
+    // SELECTS the card (spec/wall-canvas-v2 ac-2, SI-350 (4) — wallselect.js),
+    // and Enter or a double click edits it.
+    var clampEl = t.closest(".placard .is-clamped[data-expandable]");
+    if (clampEl) {
       scheduleExpand(clampEl);
       return;
     }
