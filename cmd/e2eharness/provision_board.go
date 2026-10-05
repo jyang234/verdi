@@ -13,9 +13,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 const (
@@ -547,6 +551,204 @@ func writeSlotWallDerived(storeRoot, commit string) error {
 	return nil
 }
 
+// The wall-canvas fixture walls (spec/wall-canvas-v2 ac-1, whose
+// behavioral obligation runs "over a fixture wall carrying every card
+// kind and every receipt"; SI-350 (11)). One feature draft, provisioned
+// twice under two names so each Playwright file owns its own wall and
+// passes when run alone (BL-98): 89-wall-canvas.spec.ts takes
+// canvasWallSpecName and 90-wall-keyboard.spec.ts canvasKeysSpecName.
+// The constants live in those spec files (fixtures.ts is F7's), so a
+// change here changes them together.
+//
+// Each instance carries, from the store's own state alone:
+//   - object cards ac-1, ac-2 (acceptance criteria), co-1, dc-1, oq-1;
+//   - a stub card (canvasWallStubSlug, covering ac-1);
+//   - a reference card (dc-1's exempts edge to canvasWallADRRef);
+//   - a sticky card (one open board comment, canvasWallStickyBody);
+//   - every receipt: ac-1's coverage chip "covered by 1 stub" and ac-2's
+//     "no stub"; ac-1's authored behavioral obligation row (its title)
+//     and the "no obligation" rows of ac-1 static and ac-2 attestation;
+//     the evidence slots "no record" (ac-1 behavioral) and "1 record"
+//     (ac-1 static, a derived CI record at main's sha); the attestation
+//     chips "attested" (ac-1, an authored attestation file) and "no
+//     attestation" (ac-2);
+//   - the readiness mark's input (SI-338): the readiness derivation names
+//     ac-2 by success/coverage/ac-2 ("no stub"), oq-1 by its unclaimed
+//     shape/question/oq-1 (unresolved), and the stub by
+//     review/blocker/stub-unreconciled/<slug> (unresolved).
+//
+// It is committed on the serving branch (designBranch), not on a branch
+// of its own: the wall renders at /board/spec/<name> from the serving
+// checkout, whose readiness snapshot shares the wall's branch and head.
+// The flip side, disclosed for the presentation lanes: the serving
+// branch is not design/<name>, so the wall offers reading and scratch
+// annotations, never typed spec writes (loadBoard's DomainRefusal).
+const (
+	canvasWallSpecName = "decline-canvas-wall"
+	canvasKeysSpecName = "decline-canvas-keys"
+
+	canvasWallStubSlug        = "notice-retraction"
+	canvasWallADRRef          = "adr/0001-outbox-events"
+	canvasWallStickyBody      = "who signs off the retraction copy?"
+	canvasWallObligationTitle = "a Playwright test retracts a stale notice on every channel"
+)
+
+// canvasWall is one wall-canvas fixture instance: its spec name and its
+// one sticky's fixed annotation id (an a-<ULID>, distinct per instance).
+type canvasWall struct {
+	name     string
+	stickyID string
+}
+
+// canvasWalls is every wall-canvas fixture instance, in provisioning
+// order.
+var canvasWalls = []canvasWall{
+	{name: canvasWallSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000001"},
+	{name: canvasKeysSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000002"},
+}
+
+// fullSHARe is one full lowercase 40-hex commit sha.
+var fullSHARe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// canvasWallSpec is one instance's spec document.
+func canvasWallSpec(name string) string {
+	return `---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "Decline canvas wall (` + name + `)"
+status: draft
+owners: [platform-team]
+problem: { text: "a retracted decline notice still stands on some channels", anchor: "#problem" }
+outcome: { text: "every channel retracts a stale notice together", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a stale notice is retracted on every channel", evidence: [behavioral, static, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "a retraction is visible to audit", evidence: [attestation], anchor: "#ac-2" }
+constraints:
+  - { id: co-1, text: "a retraction never deletes the original notice", anchor: "#co-1" }
+decisions:
+  - { id: dc-1, text: "carry retractions as outbox events", anchor: "#dc-1",
+      links: [ { type: exempts, ref: ` + canvasWallADRRef + `, note: "retractions ride the outbox like the notices they retract" } ] }
+open_questions:
+  - { id: oq-1, text: "which channel confirms a retraction first?", anchor: "#oq-1" }
+stubs:
+  - { slug: ` + canvasWallStubSlug + `, acceptance_criteria: [ac-1] }
+---
+# Decline canvas wall (` + name + `)
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## ac-2
+
+Prose.
+
+## co-1
+
+Prose.
+
+## dc-1
+
+Prose.
+
+## oq-1
+
+Prose.
+`
+}
+
+// canvasWallFiles is one instance's committed files, keyed by store-
+// relative path: the spec, ac-1's authored behavioral obligation, and
+// ac-1's authored attestation at the fold's feature path
+// (.verdi/attestations/<feature-name>/<ac>.md). commit is main's sha,
+// which the obligation and attestation freeze at. A name that is not one
+// whole spec name, or a commit that is not a full sha, is refused.
+func canvasWallFiles(name, commit string) (map[string]string, error) {
+	ref, err := artifact.ParseRef("spec/" + name)
+	if err != nil || ref.Pinned() || ref.Fragment() || ref.Name != name {
+		return nil, fmt.Errorf("wall-canvas fixture: %q is not one whole spec name", name)
+	}
+	if !fullSHARe.MatchString(commit) {
+		return nil, fmt.Errorf("wall-canvas fixture: %q is not a full commit sha", commit)
+	}
+	obligation := `---
+id: obligation/` + name + `--ac-1--behavioral
+kind: obligation
+title: "` + canvasWallObligationTitle + `"
+owners: [platform-team]
+for_kind: behavioral
+links:
+  - { type: verifies, ref: "spec/` + name + `" }
+frozen: { at: 2026-10-05, commit: ` + commit + ` }
+---
+# ` + canvasWallObligationTitle + `
+
+Retract one stale notice and assert every channel reads it retracted.
+`
+	attestation := `---
+id: attestation/` + name + `--ac-1
+kind: attestation
+title: "ac-1 retraction attested (fixture)"
+owners: [qa-lead]
+links:
+  - { type: verifies, ref: spec/` + name + ` }
+frozen: { at: 2026-10-05, commit: ` + commit + ` }
+---
+# ac-1 attestation
+
+Existence is the record: this file fills ac-1's attestation slot.
+`
+	return map[string]string{
+		filepath.Join(".verdi", "specs", "active", name, "spec.md"):         canvasWallSpec(name),
+		filepath.Join(".verdi", "obligations", name, "ac-1--behavioral.md"): obligation,
+		filepath.Join(".verdi", "attestations", name, "ac-1.md"):            attestation,
+	}, nil
+}
+
+// writeCanvasWallScratch writes one instance's untracked state: ac-1's
+// static CI record in the derived tree at commit (main's sha, a real
+// ancestor of the serving HEAD, so the fold's ancestry filter admits it;
+// data/ is gitignored, VL-013), and the instance's one open board sticky
+// in the mutable annotation zone, through the board's own writer.
+func writeCanvasWallScratch(storeRoot, commit string, w canvasWall) error {
+	sticky := &artifact.Annotation{
+		ID:     w.stickyID,
+		TS:     "2026-10-05T09:00:00Z",
+		Author: "nadia",
+		Board:  &artifact.BoardAnchor{Story: w.name, X: float64(boardlayout.ScratchColumn().X), Y: boardlayout.ZoneOriginY},
+		Type:   artifact.AnnotationComment,
+		Body:   canvasWallStickyBody,
+		Status: artifact.AnnotationOpen,
+	}
+	if err := sticky.Validate(); err != nil {
+		return fmt.Errorf("wall-canvas fixture %s: sticky: %w", w.name, err)
+	}
+	dir := filepath.Join(storeRoot, filepath.FromSlash(store.DerivedSpecRelDir(store.RefSlug("spec/"+w.name))), commit)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("wall-canvas fixture %s: creating the derived tree: %w", w.name, err)
+	}
+	verdicts := `[
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-1"], "kind": "static", "verdict": "pass", "witness": "retraction -> every channel", "producer": "canvas-static-check", "provenance": { "source": "ci", "pipeline": "915", "job": "static-verify", "job_name": "static-verify", "commit": "` + commit + `" }, "digest": "sha256:2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f" }
+]
+`
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(verdicts), 0o644); err != nil {
+		return fmt.Errorf("wall-canvas fixture %s: writing verdicts.json: %w", w.name, err)
+	}
+	if err := boardio.AppendAnnotation(boardio.AnnotationsDir(storeRoot), boardio.AnnotationFileForBoard(store.RefSlug(w.name)), sticky); err != nil {
+		return fmt.Errorf("wall-canvas fixture %s: %w", w.name, err)
+	}
+	return nil
+}
+
 // badgeSpec renders one wall-badge fixture spec (spec/badge-computes
 // ac-5): a feature wall carrying every badge-triggering shape the e2e
 // suite asserts, all of them REAL lint-firing state, never a canned badge:
@@ -905,6 +1107,20 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 		filepath.Join(".verdi", "specs", "active", sweepStaleSpecName, "spec.md"):   sweepSpec(sweepStaleSpecName, sweepOutcomeV1),
 		filepath.Join(".verdi", "specs", "active", sweepPartialSpecName, "spec.md"): sweepSpec(sweepPartialSpecName, sweepOutcomeV1),
 	}
+	// The wall-canvas fixture walls (spec/wall-canvas-v2 ac-1): committed
+	// here, on the serving branch, so each renders at its unprefixed
+	// address from the serving checkout — the checkout the readiness
+	// loader derives from, so the snapshot's branch and head are the
+	// wall's own (SI-338).
+	for _, w := range canvasWalls {
+		wallFiles, err := canvasWallFiles(w.name, mainSHA)
+		if err != nil {
+			return "", err
+		}
+		for rel, content := range wallFiles {
+			files[rel] = content
+		}
+	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -975,6 +1191,13 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	// commit purely for narrative order — data/ is untracked either way.
 	if err := writeSlotWallDerived(storeRoot, mainSHA); err != nil {
 		return "", err
+	}
+	// The wall-canvas fixtures' untracked half (their static record and
+	// their sticky), keyed to the same main sha.
+	for _, w := range canvasWalls {
+		if err := writeCanvasWallScratch(storeRoot, mainSHA, w); err != nil {
+			return "", err
+		}
 	}
 
 	feedPath = filepath.Join(scratch, "review-feed.json")

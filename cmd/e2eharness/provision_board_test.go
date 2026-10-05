@@ -3,13 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/wallbadge"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // TestBadgeSpecDecodes proves every wall-badge fixture instance the
@@ -285,5 +293,262 @@ func TestStatuslessSpecDecodes(t *testing.T) {
 				t.Errorf("class = %q, want feature", fm.Class)
 			}
 		})
+	}
+}
+
+// testIDText returns the text content of the leaf element whose opening
+// tag carries data-testid="id" in body, and whether that element exists.
+func testIDText(body, id string) (string, bool) {
+	at := strings.Index(body, `data-testid="`+id+`"`)
+	if at < 0 {
+		return "", false
+	}
+	open := strings.Index(body[at:], ">")
+	if open < 0 {
+		return "", false
+	}
+	rest := body[at+open+1:]
+	end := strings.Index(rest, "<")
+	if end < 0 {
+		return "", false
+	}
+	return rest[:end], true
+}
+
+func TestTestIDText(t *testing.T) {
+	const body = `<div data-testid="card-ac-1" class="x"><span data-testid="coverage-ac-1" data-coverage="1">covered by 1 stub</span></div>`
+	for _, tc := range []struct {
+		id, want string
+		ok       bool
+	}{
+		{"coverage-ac-1", "covered by 1 stub", true},
+		{"card-ac-1", "", true},
+		{"coverage-ac-2", "", false},
+	} {
+		got, ok := testIDText(body, tc.id)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("testIDText(%q) = %q, %v; want %q, %v", tc.id, got, ok, tc.want, tc.ok)
+		}
+	}
+	if _, ok := testIDText(`<span data-testid="x"`, "x"); ok {
+		t.Error("an unterminated opening tag reported an element")
+	}
+}
+
+// TestCanvasWallFixture_CarriesEveryCardAndReceipt is the wall-canvas
+// fixture's whole claim (spec/wall-canvas-v2 ac-1's obligation: "a
+// fixture wall carrying every card kind and every receipt"; SI-350 (11)),
+// proved on the shared store the harness itself provisions — the exact
+// sequence `verdi serve` is pointed at — rather than a look-alike: each
+// instance renders object, stub, reference and sticky cards with the
+// obligation rows, evidence slots, attestation chips and coverage chips
+// in their existing texts, and the production readiness loader, run on
+// the serving checkout, names one of its cards by a "no stub" concern
+// and others by unresolved concerns (the readiness mark's input, SI-338
+// (2), SI-345 (1) — the store's own state, no mark code involved).
+func TestCanvasWallFixture_CarriesEveryCardAndReceipt(t *testing.T) {
+	ctx := t.Context()
+	shared, err := provisionSharedStore(ctx, absModuleRoot(t), t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("provisionSharedStore: %v", err)
+	}
+	root := shared.storeRoot
+	branch, err := gitOutput(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := gitOutput(ctx, root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := workbench.NewHandlerWith(root, workbench.Deps{})
+
+	if len(canvasWalls) != 2 || canvasWalls[0].name == canvasWalls[1].name {
+		t.Fatalf("canvasWalls = %+v, want two distinct instances (one per spec file, BL-98)", canvasWalls)
+	}
+	for _, w := range canvasWalls {
+		t.Run(w.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/board/spec/"+w.name, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /board/spec/%s = %d\n%s", w.name, rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+
+			// Every card kind.
+			for _, id := range []string{
+				"card-ac-1", "card-ac-2", "card-co-1", "card-dc-1", "card-oq-1",
+				"stub-card-" + canvasWallStubSlug,
+				"ref-card-" + strings.ReplaceAll(canvasWallADRRef, "/", "-"),
+				"sticky-" + w.stickyID,
+			} {
+				if _, ok := testIDText(body, id); !ok {
+					t.Errorf("no element data-testid=%q on the wall", id)
+				}
+			}
+			if !strings.Contains(body, `<span class="stub-tab">`+canvasWallStubSlug+`</span>`) {
+				t.Errorf("the stub card does not carry its slug %q", canvasWallStubSlug)
+			}
+			if !strings.Contains(body, `<p class="sticky-body">`+canvasWallStickyBody+`</p>`) {
+				t.Errorf("the sticky does not carry its body %q", canvasWallStickyBody)
+			}
+
+			// Every receipt, in its existing text.
+			for id, want := range map[string]string{
+				"coverage-ac-1":                    "covered by 1 stub",
+				"coverage-ac-2":                    "no stub",
+				"obligation-none-ac-1-static":      "no obligation",
+				"obligation-none-ac-2-attestation": "no obligation",
+				"slot-ac-1-behavioral":             "no record",
+				"slot-ac-1-static":                 "1 record",
+				"slot-ac-1-attestation":            "attested",
+				"slot-ac-2-attestation":            "no attestation",
+			} {
+				got, ok := testIDText(body, id)
+				if !ok || got != want {
+					t.Errorf("receipt %s = %q (present %v), want %q", id, got, ok, want)
+				}
+			}
+			if !strings.Contains(body, `>`+canvasWallObligationTitle+`</span>`) {
+				t.Errorf("ac-1's authored behavioral obligation row does not show its title %q", canvasWallObligationTitle)
+			}
+
+			// The readiness mark's input: the production loader on the
+			// serving checkout, the same branch and head the wall serves.
+			snap, err := readinessload.Load(ctx, root, "spec/"+w.name, readinessload.Options{BoardHref: workbench.BranchBoardHref})
+			if err != nil {
+				t.Fatalf("readinessload.Load: %v", err)
+			}
+			if snap.Branch != branch || snap.Head != head {
+				t.Fatalf("snapshot at %s@%s, the wall at %s@%s: a mark would be disclosed, never drawn (SI-338)", snap.Branch, snap.Head, branch, head)
+			}
+			byID := map[string]readinesspilot.Concern{}
+			unresolvedObjects := map[string]bool{}
+			for _, c := range snap.Attention {
+				byID[c.ID] = c
+				if c.Object != "" && !strings.HasPrefix(c.ID, "success/coverage/") {
+					unresolvedObjects[c.Object] = true
+				}
+			}
+			if c, ok := byID["success/coverage/ac-2"]; !ok || c.Object != "ac-2" {
+				t.Errorf("no Focus next concern success/coverage/ac-2 with Object ac-2 (the \"no stub\" card): %+v", c)
+			}
+			if _, ok := byID["success/coverage/ac-1"]; ok {
+				t.Error("covered ac-1 carries a coverage concern")
+			}
+			if !unresolvedObjects["oq-1"] {
+				t.Errorf("no unresolved Focus next concern names oq-1; objects named: %v", unresolvedObjects)
+			}
+			if _, ok := byID["review/blocker/stub-unreconciled/"+canvasWallStubSlug]; !ok {
+				t.Errorf("no Focus next concern names the stub %s", canvasWallStubSlug)
+			}
+		})
+	}
+}
+
+// TestCanvasWallFiles: each instance's committed files strict-decode as
+// the artifacts they claim to be, bound to their own spec; a malformed
+// name or commit is refused before any file is shaped.
+func TestCanvasWallFiles(t *testing.T) {
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+	for _, w := range canvasWalls {
+		t.Run(w.name, func(t *testing.T) {
+			files, err := canvasWallFiles(w.name, commit)
+			if err != nil {
+				t.Fatalf("canvasWallFiles: %v", err)
+			}
+			specRel := filepath.Join(".verdi", "specs", "active", w.name, "spec.md")
+			obligationRel := filepath.Join(".verdi", "obligations", w.name, "ac-1--behavioral.md")
+			attestationRel := filepath.Join(".verdi", "attestations", w.name, "ac-1.md")
+			if len(files) != 3 {
+				t.Fatalf("files = %v, want the spec, one obligation and one attestation", files)
+			}
+			fmBytes, _, err := artifact.SplitFrontmatter([]byte(files[specRel]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := artifact.DecodeSpec(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeSpec: %v", err)
+			}
+			if spec.ID != "spec/"+w.name || spec.Class != artifact.ClassFeature || len(spec.Stubs) != 1 || spec.Stubs[0].Slug != canvasWallStubSlug {
+				t.Errorf("spec = %s %s %+v, want the feature wall with stub %s", spec.ID, spec.Class, spec.Stubs, canvasWallStubSlug)
+			}
+			fmBytes, _, err = artifact.SplitFrontmatter([]byte(files[obligationRel]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			obligation, err := artifact.DecodeObligation(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeObligation: %v", err)
+			}
+			if obligation.ForKind != artifact.EvidenceBehavioral || obligation.Title != canvasWallObligationTitle {
+				t.Errorf("obligation = %+v", obligation)
+			}
+			fmBytes, _, err = artifact.SplitFrontmatter([]byte(files[attestationRel]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := artifact.DecodeAttestation(fmBytes); err != nil {
+				t.Fatalf("DecodeAttestation: %v", err)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, commit string }{
+		{"Not-A-Name", commit},
+		{"", commit},
+		{canvasWallSpecName, "main"},
+		{canvasWallSpecName, strings.Repeat("g", 40)},
+	} {
+		if _, err := canvasWallFiles(tc.name, tc.commit); err == nil {
+			t.Errorf("canvasWallFiles(%q, %q) succeeded, want a refusal", tc.name, tc.commit)
+		}
+	}
+}
+
+// TestWriteCanvasWallScratch: the untracked half — one static record in
+// the derived tree keyed by commit and one open board sticky — lands
+// where the fold and the board read it, strict-decodable; an unwritable
+// store fails loudly.
+func TestWriteCanvasWallScratch(t *testing.T) {
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+	root := t.TempDir()
+	w := canvasWalls[0]
+	if err := writeCanvasWallScratch(root, commit, w); err != nil {
+		t.Fatalf("writeCanvasWallScratch: %v", err)
+	}
+	verdicts, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "derived", "spec--"+w.name, commit, "verdicts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(verdicts, &raw); err != nil || len(raw) != 1 {
+		t.Fatalf("verdicts.json = %s (%v), want one record", verdicts, err)
+	}
+	record, err := artifact.DecodeEvidence(raw[0])
+	if err != nil {
+		t.Fatalf("DecodeEvidence: %v", err)
+	}
+	if record.Kind != artifact.EvidenceStatic || len(record.EvidenceFor) != 1 || record.EvidenceFor[0] != "ac-1" || record.Provenance.Commit != commit {
+		t.Errorf("record = %+v, want one static record for ac-1 at %s", record, commit)
+	}
+	annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(annotations) != 1 || annotations[0].ID != w.stickyID || annotations[0].Board == nil || annotations[0].Board.Story != w.name ||
+		annotations[0].Body != canvasWallStickyBody || annotations[0].Status != artifact.AnnotationOpen {
+		t.Errorf("annotations = %+v, want the one open board sticky %s", annotations, w.stickyID)
+	}
+
+	blocked := t.TempDir()
+	if err := os.WriteFile(filepath.Join(blocked, ".verdi"), []byte("a file, not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCanvasWallScratch(blocked, commit, w); err == nil {
+		t.Error("writeCanvasWallScratch succeeded under a file where .verdi/ must be a directory")
+	}
+	if err := writeCanvasWallScratch(t.TempDir(), commit, canvasWall{name: w.name, stickyID: "not-an-id"}); err == nil {
+		t.Error("writeCanvasWallScratch accepted a malformed sticky id")
 	}
 }
