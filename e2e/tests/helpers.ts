@@ -214,6 +214,27 @@ export async function dragToTrash(page: Page, el: Locator): Promise<void> {
   await page.mouse.up();
 }
 
+// transformRotates reports whether a computed `transform` carries a
+// rotation or a skew (spec/chrome-and-tokens-v2 ac-3; spec/wall-canvas-v2
+// ac-1 "unrotated"): a 2-D matrix with an off-diagonal term, a 3-D matrix
+// with any off-diagonal term in its upper 3×3, or a transform in a form
+// this helper does not read — never a silent pass. A pure translation
+// (the authoring wall's hover lift) is not a rotation.
+export function transformRotates(transform: string): boolean {
+  if (!transform || transform === "none") return false;
+  const m2 = transform.match(/^matrix\(([^)]+)\)$/);
+  if (m2) {
+    const [, b, c] = m2[1].split(",").map((v) => Number(v.trim()));
+    return Math.abs(b) > 1e-6 || Math.abs(c) > 1e-6;
+  }
+  const m3 = transform.match(/^matrix3d\(([^)]+)\)$/);
+  if (m3) {
+    const v = m3[1].split(",").map((s) => Number(s.trim()));
+    return [v[1], v[2], v[4], v[6], v[8], v[9]].some((x) => Math.abs(x) > 1e-6);
+  }
+  return true;
+}
+
 export async function addSticky(
   page: Page,
   text: string,

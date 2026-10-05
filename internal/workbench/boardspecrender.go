@@ -196,6 +196,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellF
 <main id="boardv2-region">
 {{.Region}}
 </main>
+<div id="wall-status" class="wall-status" data-testid="wall-status" role="status" aria-live="polite"></div>
 {{buildFooter}}
 {{.Dialogs}}
 <script>
@@ -203,6 +204,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 </script>
 <script src="/assets/boardspec.js"></script>
 <script src="/assets/boardspecasd.js"></script>
+<script src="/assets/wallselect.js"></script>
 </body>
 </html>
 `))
