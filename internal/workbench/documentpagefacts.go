@@ -131,25 +131,30 @@ func newDocumentIdentity(name, ref string, res specdocload.Result, checkout docu
 
 // documentRail lists the body's h2 sections in order, through the docs
 // site's own heading extraction (internal/headings), so each entry carries
-// the id the body gives it. An h2 that is one of the document's sections
-// carries that section's count; an h2 the body's prose adds is listed
-// without one. Sections are matched in order by their heading text,
-// searching forward, so an added h2 never shifts a count onto the wrong
-// entry and a section the body does not render as an h2 is skipped.
+// the id the body gives it. An entry is counted only when it is provably
+// the document's next section (SI-343 (1)): its text is that section's
+// heading, and no other h2 of the body carries the same text. A spec's
+// prose can render an h2 too, through a setext or indented heading, so a
+// heading text that appears more than once is ambiguous and none of its
+// entries is counted. Every other entry, the prose's own, is listed with
+// no count. Matching only ever moves to the section after the previous
+// match, so it never skips one: a section the body does not render as an
+// h2 leaves every later entry uncounted rather than guessed.
 func documentRail(doc specdoc.Document, html string) []documentRailEntry {
-	rail := []documentRailEntry{}
+	entries := headings.Sections(headings.Extract(html))
+	occurrences := make(map[string]int, len(entries))
+	for _, h := range entries {
+		occurrences[h.Text]++
+	}
+	rail := make([]documentRailEntry, 0, len(entries))
 	next := 0
-	for _, h := range headings.Sections(headings.Extract(html)) {
+	for _, h := range entries {
 		e := documentRailEntry{ID: h.ID, Text: h.Text}
-		for k := next; k < len(doc.Sections); k++ {
-			if documentSectionHeading(doc.Sections[k]) != h.Text {
-				continue
-			}
-			if n, ok := documentSectionItems(doc, doc.Sections[k]); ok {
+		if next < len(doc.Sections) && documentSectionHeading(doc.Sections[next]) == h.Text {
+			if n, ok := documentSectionItems(doc, doc.Sections[next]); ok && occurrences[h.Text] == 1 {
 				e.Count = &n
 			}
-			next = k + 1
-			break
+			next++
 		}
 		rail = append(rail, e)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/objsupersede/scenario"
 	"github.com/jyang234/verdi/internal/readinesspilot"
@@ -196,6 +197,47 @@ func TestDocumentPageFacts_Rail(t *testing.T) {
 			want: []documentRailEntry{
 				railEntry("identity", "Identity", -1), railEntry("decisions", "Decisions", 2), railEntry("an-aside", "An aside", -1),
 				railEntry("constraints", "Constraints", 1), railEntry("plan", "Plan", 1),
+			},
+		},
+		{
+			// SI-343 (1), review F5A-1 (P4): a rationale's setext heading
+			// carries a LATER section's text. The text is then ambiguous,
+			// so neither entry with it is counted, and the sections between
+			// keep their own counts.
+			name: "a rationale's setext heading with a later section's text", spec: factsSpec, kind: specdoc.KindSpec,
+			body: "# Rail fixture\n\n## dc-2\n\nThe rationale.\n\nAcceptance criteria\n---\n\nWhat we check.\n",
+			want: []documentRailEntry{
+				railEntry("identity", "Identity", -1), railEntry("problem", "Problem", -1), railEntry("outcome", "Outcome", -1),
+				railEntry("decisions", "Decisions", 2), railEntry("acceptance-criteria", "Acceptance criteria", -1),
+				railEntry("constraints", "Constraints", 1), railEntry("acceptance-criteria-1", "Acceptance criteria", -1),
+				railEntry("open-questions", "Open questions", 2), railEntry("plan", "Plan", 1),
+				railEntry("evidence", "Evidence", -1), railEntry("readiness", "Readiness", -1),
+			},
+		},
+		{
+			// SI-343 (1), review F5A-1 (P4): a constraint's detail renders
+			// an indented ATX heading with a later section's text.
+			name: "a detail's indented heading with a later section's text", spec: factsSpec, kind: specdoc.KindSpec,
+			body: "# Rail fixture\n\n## co-1\n\nWhy.\n\n ## Plan\n\nLater.\n",
+			want: []documentRailEntry{
+				railEntry("identity", "Identity", -1), railEntry("problem", "Problem", -1), railEntry("outcome", "Outcome", -1),
+				railEntry("decisions", "Decisions", 2), railEntry("constraints", "Constraints", 1), railEntry("plan", "Plan", -1),
+				railEntry("acceptance-criteria", "Acceptance criteria", 3), railEntry("open-questions", "Open questions", 2),
+				railEntry("plan-1", "Plan", -1), railEntry("evidence", "Evidence", -1), railEntry("readiness", "Readiness", -1),
+			},
+		},
+		{
+			// SI-343 (1): a match never skips the sections between it and
+			// the previous one. A rationale renders a heading with a later
+			// section's text, then opens a fence it never closes, which
+			// swallows every later section: the heading's text is then
+			// unique, yet counting it would skip Constraints, Acceptance
+			// criteria, and Open questions, so it is not counted.
+			name: "a heading that would skip the sections before it", spec: factsSpec, kind: specdoc.KindSpec,
+			body: "# Rail fixture\n\n## dc-2\n\n ## Plan\n\n```\nnever closed\n",
+			want: []documentRailEntry{
+				railEntry("identity", "Identity", -1), railEntry("problem", "Problem", -1), railEntry("outcome", "Outcome", -1),
+				railEntry("decisions", "Decisions", 2), railEntry("plan", "Plan", -1),
 			},
 		},
 	} {
@@ -470,6 +512,41 @@ func TestDocumentPageFacts_CountsTheLoadsOwnDocument(t *testing.T) {
 	}
 	if !strings.Contains(snap.Markdown, "3. three — ") {
 		t.Fatalf("the body lists the three concerns:\n%s", snap.Markdown)
+	}
+}
+
+// TestDocumentPageFacts_RailThroughThePageLoad (SI-343 (1), review F5A-1
+// P6): through the page's own load over a committed store, a rationale's
+// setext heading that repeats a later section's text leaves both entries
+// with that text uncounted, and every section between keeps its count.
+func TestDocumentPageFacts_RailThroughThePageLoad(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	spec := factsSpec + "# Rail fixture\n\n## dc-2\n\nThe rationale.\n\nAcceptance criteria\n---\n\nWhat we check.\n"
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Message: "adopt store with a rationale that repeats a section heading",
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.config/v1\nforge: none\n",
+			".verdi/specs/active/" + factsSpecName + "/spec.md": spec,
+		},
+	}})
+	snap, _, err := (&boardSpecServer{root: repo.Dir}).loadDocument(t.Context(), factsSpecName, specdoc.KindSpec)
+	if err != nil {
+		t.Fatalf("loadDocument: %v", err)
+	}
+	var got []documentRailEntry
+	for _, e := range snap.Facts.Rail {
+		if e.ID != "evidence" && e.ID != "readiness" {
+			got = append(got, e)
+		}
+	}
+	want := []documentRailEntry{
+		railEntry("identity", "Identity", -1), railEntry("problem", "Problem", -1), railEntry("outcome", "Outcome", -1),
+		railEntry("decisions", "Decisions", 2), railEntry("acceptance-criteria", "Acceptance criteria", -1),
+		railEntry("constraints", "Constraints", 1), railEntry("acceptance-criteria-1", "Acceptance criteria", -1),
+		railEntry("open-questions", "Open questions", 2), railEntry("plan", "Plan", 1),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rail =\n%s\nwant (evidence and readiness aside)\n%s", railString(snap.Facts.Rail), railString(want))
 	}
 }
 
