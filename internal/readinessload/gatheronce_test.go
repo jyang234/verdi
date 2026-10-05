@@ -119,3 +119,38 @@ func TestLoad_NeverWritesTheIndex(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_ReadsThroughOneSession (ledger SI-352, lane P1 (c)): a load's
+// object reads go through its read session's one batch process — no
+// per-path `git show` or `git ls-tree <rev> -- <path>` — and no ref
+// resolution runs twice in one load, the accepted ref's included.
+func TestLoad_ReadsThroughOneSession(t *testing.T) {
+	for _, class := range []string{"feature", "story"} {
+		t.Run(class, func(t *testing.T) {
+			repo, ref := readinessRepo(t, class)
+			log := &argvLog{}
+			if _, err := Load(gitx.WithObserver(context.Background(), log), repo.Dir, ref, Options{}); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			seen := map[string]bool{}
+			batches := 0
+			for _, args := range log.argv {
+				key := strings.Join(args, " ")
+				switch {
+				case args[0] == "cat-file":
+					batches++
+				case args[0] == "show", args[0] == "ls-tree" && args[1] != "-r":
+					t.Errorf("the load ran `git %s` outside its read session", key)
+				case args[0] == "symbolic-ref" || args[0] == "show-ref" || args[0] == "rev-parse" && args[1] == "--verify":
+					if seen[key] {
+						t.Errorf("the load resolved `git %s` more than once", key)
+					}
+					seen[key] = true
+				}
+			}
+			if batches != 1 {
+				t.Fatalf("the load started %d batch processes, want one: %v", batches, log.argv)
+			}
+		})
+	}
+}

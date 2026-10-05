@@ -11,6 +11,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinesspilot"
@@ -191,6 +192,14 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: opening store: %w", err)
 	}
+
+	// Every git read below — this load's facts, its journey, its
+	// implementers' lifecycle — shares one read session (ledger SI-352,
+	// lane P1 (c)): object reads go through one batch process and each ref
+	// resolution, the accepted ref's included, runs once per load. The
+	// session ends with this load; nothing it read outlives it (co-2).
+	ctx, release := gitx.WithReadSession(ctx, root)
+	defer release()
 
 	projector := journey.NewProjector()
 	gatherFacts := l.gatherFacts

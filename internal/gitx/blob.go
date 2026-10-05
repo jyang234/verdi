@@ -32,8 +32,16 @@ var blobRecordPattern = regexp.MustCompile(`^(?:100644|100755) blob ([0-9a-f]{40
 // with a trailing slash that expands into several records is refused as
 // ambiguous, and a symlink or gitlink is refused by mode even though a
 // symlink's git object type is itself "blob". path is repo-relative
-// (forward slashes).
+// (forward slashes). Inside a read session for dir (WithReadSession) the
+// plain-file and absent-entry cases are answered from the parent tree read
+// through the session's batch process — the same entry ls-tree lists —
+// and every other case still runs `git ls-tree` itself.
 func BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool, err error) {
+	if s := sessionFor(ctx, dir); s != nil {
+		if oid, found, ok := s.blobAt(ctx, ref, path); ok {
+			return oid, found, nil
+		}
+	}
 	out, runErr := run(ctx, dir, "ls-tree", ref, "--", path)
 	if runErr != nil {
 		return "", false, fmt.Errorf("gitx: BlobAt(%s:%s): %w", ref, path, runErr)

@@ -118,6 +118,7 @@ func Classification() []Classified {
 		mut("internal/gitx.UpdateRef"), // create-only ref write
 		ro("internal/gitx.ValidateFullOID"),
 		ro("internal/gitx.WithObserver"),
+		ro("internal/gitx.WithReadSession"), // scopes one request's reads; writes nothing
 		mut("internal/gitx.WorktreeAdd"),
 		mut("internal/gitx.WorktreeAddDetached"),
 		ro("internal/gitx.WorktreeChangedPaths"),
