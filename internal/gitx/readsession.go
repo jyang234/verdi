@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // fullOIDPattern matches a full lowercase object id, SHA-1 or SHA-256.
@@ -29,6 +30,7 @@ type readSession struct {
 	dir string
 
 	closeOnce sync.Once
+	released  atomic.Bool
 
 	batchMu sync.Mutex
 	batch   *catFileBatch
@@ -92,18 +94,22 @@ func WithReadSession(ctx context.Context, dir string) (context.Context, func()) 
 	return context.WithValue(ctx, readSessionKey{}, s), s.release
 }
 
-// sessionFor returns ctx's read session when it reads dir, else nil.
+// sessionFor returns ctx's read session when it reads dir and has not
+// been released, else nil.
 func sessionFor(ctx context.Context, dir string) *readSession {
 	s, ok := ctx.Value(readSessionKey{}).(*readSession)
-	if !ok || s == nil || s.dir != filepath.Clean(dir) {
+	if !ok || s == nil || s.released.Load() || s.dir != filepath.Clean(dir) {
 		return nil
 	}
 	return s
 }
 
-// release ends the batch process, once; reads after it take the exec path.
+// release ends the session, once: its batch process stops, and every read
+// after it — through any context that still carries it — takes the exec
+// path, so nothing the session read is answered from after its request.
 func (s *readSession) release() {
 	s.closeOnce.Do(func() {
+		s.released.Store(true)
 		s.batchMu.Lock()
 		defer s.batchMu.Unlock()
 		if s.batch != nil {
@@ -341,9 +347,12 @@ func (b *catFileBatch) read(name string) (batchObject, bool, error) {
 	return batchObject{oid: fields[0], typ: fields[1], data: data[:size]}, true, nil
 }
 
-// stop closes the process's input, so it exits, and reaps it.
+// stop ends the process and reaps it. Closing its input is enough for a
+// clean exit, but after a protocol error the process may still be writing
+// content nobody will read, so it is killed rather than waited on.
 func (b *catFileBatch) stop() {
 	_ = b.stdin.Close()
+	_ = b.cmd.Process.Kill()
 	_ = b.cmd.Wait()
 }
 

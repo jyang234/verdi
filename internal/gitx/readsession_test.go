@@ -298,3 +298,65 @@ func TestParseTree_Negative(t *testing.T) {
 		})
 	}
 }
+
+// TestReadSession_ReleaseEndsEveryShortcut: after release, a context that
+// still carries the session gets no answer from it — a ref read it had
+// memoized runs again, a reachability it had walked takes the per-commit
+// path — so nothing the session read is answered from after its request.
+func TestReadSession_ReleaseEndsEveryShortcut(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	if _, err := RevParse(ctx, repo.Dir, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := ReachableFromHEAD(ctx, repo.Dir, repo.Heads[0], "HEAD"); err != nil || r != Reachable {
+		t.Fatalf("ReachableFromHEAD = (%v, %v), want reachable", r, err)
+	}
+	release()
+	obs := newCountingObserver()
+	after := WithObserver(ctx, obs)
+	if _, err := RevParse(after, repo.Dir, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := ReachableFromHEAD(after, repo.Dir, repo.Heads[0], "HEAD"); err != nil || r != Reachable {
+		t.Fatalf("ReachableFromHEAD after release = (%v, %v), want reachable", r, err)
+	}
+	if obs.count("rev-parse") != 2 || obs.count("merge-base") != 1 || obs.count("rev-list") != 0 {
+		t.Fatalf("reads after release launched %v, want their own rev-parses and merge-base", obs.argv)
+	}
+}
+
+// TestReadSession_FallsBackWhenTheBatchDies: a batch process that dies
+// mid-session costs only the batching — every read after it is answered,
+// exactly, by its own process.
+func TestReadSession_FallsBackWhenTheBatchDies(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	defer release()
+	if _, err := Show(ctx, repo.Dir, "HEAD", "plain.txt"); err != nil {
+		t.Fatal(err)
+	}
+	s := sessionFor(ctx, repo.Dir)
+	if s == nil || s.batch == nil {
+		t.Fatal("the first read started no batch process")
+	}
+	if err := s.batch.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	obs := newCountingObserver()
+	for _, p := range []string{"crlf.txt", "binary.bin", "dir/nested/deep.md"} {
+		want, wantErr := Show(context.Background(), repo.Dir, "HEAD", p)
+		got, gotErr := Show(WithObserver(ctx, obs), repo.Dir, "HEAD", p)
+		if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+			t.Fatalf("Show(%q) after the batch died = (%q, %v), want (%q, %v)", p, got, gotErr, want, wantErr)
+		}
+		wantOID, wantFound, wantErr := BlobAt(context.Background(), repo.Dir, "HEAD", p)
+		gotOID, gotFound, gotErr := BlobAt(WithObserver(ctx, obs), repo.Dir, "HEAD", p)
+		if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+			t.Fatalf("BlobAt(%q) after the batch died = (%q, %v, %v), want (%q, %v, %v)", p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+		}
+	}
+	if obs.count("cat-file") != 0 || obs.count("show") != 3 {
+		t.Fatalf("reads after the batch died launched %v, want their own shows and no new batch", obs.argv)
+	}
+}
