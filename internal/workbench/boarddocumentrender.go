@@ -17,8 +17,9 @@ import (
 // the shared body, every piece server-rendered from the page's facts so
 // it reads before any script runs (ac-4): the temporal stamp — the state
 // words and the commit in the authored or accepted token, with a slot the
-// browser fills with the refreshed time (dc-2) — the identity card, and
-// the contents rail beside the body. The body is the shared renderer's,
+// browser fills with the refreshed time (dc-2) — and the identity card,
+// together one named region landmark, and the contents rail beside the
+// body. The body is the shared renderer's,
 // byte for byte (ac-3): the stamp and the card sit above it, the rail
 // beside it, and nothing is placed between its own h1 and its sections
 // (SI-340 (3)). The id chips are never rendered here: the chip anchors
@@ -44,6 +45,7 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 </header>
 <div class="document-layout">
 <div class="document-grid">
+<section class="document-lead" aria-label="Stamp and identity" data-testid="document-lead">
 <p id="document-stamp" class="document-stamp document-stamp--{{.Facts.Stamp.State}}" data-testid="document-stamp" data-state="{{.Facts.Stamp.State}}" data-commit="{{.Facts.Stamp.Commit}}"><span class="document-stamp-dot" aria-hidden="true"></span><span class="document-stamp-words" data-testid="document-stamp-words">{{.Facts.Stamp.Words}}</span><span class="document-stamp-sep" aria-hidden="true">·</span><span class="document-stamp-at">commit <code data-testid="document-stamp-commit" title="{{.Facts.Stamp.Commit}}">{{.CommitShort}}</code></span><span id="document-refreshed" class="document-stamp-refreshed" data-testid="document-refreshed"></span></p>
 <dl id="document-identity" class="document-identity" data-testid="document-identity">
 <dt>ref</dt><dd data-testid="document-identity-ref"><code>{{.Facts.Identity.Ref}}</code></dd>
@@ -52,6 +54,7 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 <dt>owners</dt><dd data-testid="document-identity-owners"{{if .Facts.Identity.Owners}}>{{range $i, $o := .Facts.Identity.Owners}}{{if $i}}, {{end}}{{$o}}{{end}}{{else}} data-state="none">none declared{{end}}</dd>
 <dt>files</dt><dd data-testid="document-identity-files">{{range .Facts.Identity.Files}}<code>{{.}}</code>{{end}}</dd>
 </dl>
+</section>
 <nav class="document-rail" aria-label="Contents" data-testid="document-contents">
 <span class="document-contents-label" aria-hidden="true">contents</span>
 <ol id="document-contents-list" class="document-contents-list">{{range .Facts.Rail}}<li data-testid="document-contents-{{.ID}}"{{if .Count}} data-count="{{.Count}}"{{end}}><a href="#{{.ID}}"><span class="document-contents-text">{{.Text}}</span>{{if .Count}}<span class="document-contents-count" data-testid="document-contents-{{.ID}}-count">{{.Count}}</span>{{end}}</a></li>{{end}}</ol>

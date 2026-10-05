@@ -102,6 +102,12 @@ func TestDocumentPage_RendersTheChrome(t *testing.T) {
 			if f.Stamp.State != tc.state || len(f.Stamp.Commit) != 40 {
 				t.Fatalf("the fixture's stamp is %+v, want %s at a full commit", f.Stamp, tc.state)
 			}
+			// The stamp and the identity card sit inside one named region
+			// landmark, before the rail and the body.
+			lead := elementByTestID(t, page, "document-lead")
+			if !strings.HasPrefix(lead, `<section class="document-lead" aria-label="Stamp and identity"`) || !strings.Contains(lead, stamp) || !strings.Contains(lead, `id="document-identity"`) || strings.Contains(lead, `id="document-region"`) {
+				t.Errorf("the lead landmark must hold the stamp and the card and nothing else: %s", lead)
+			}
 
 			// The identity card (SI-340 (4)): ref, class, branch, owners,
 			// and the files behind the spec, each in its own cell.

@@ -4331,13 +4331,12 @@ body:not(.board-page) > footer.site-foot,
 .document-grid {
   display: grid;
   grid-template-columns: minmax(0, 70ch) 240px;
-  grid-template-areas: "stamp rail" "identity rail" "body rail";
+  grid-template-areas: "lead rail" "body rail";
   column-gap: 72px;
   justify-content: center;
   padding: 0 0 2.5rem;
 }
-.document-grid > .document-stamp { grid-area: stamp; }
-.document-grid > .document-identity { grid-area: identity; }
+.document-grid > .document-lead { grid-area: lead; min-width: 0; }
 .document-grid > .document-region { grid-area: body; }
 .document-grid > .document-rail {
   grid-area: rail;
@@ -4359,7 +4358,6 @@ body:not(.board-page) > footer.site-foot,
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-self: start;
   gap: 0.3rem 0.6rem;
   max-width: 100%;
   margin: 0 0 1rem;
@@ -4509,7 +4507,7 @@ body:not(.board-page) > footer.site-foot,
 @container document (max-width: 940px) {
   .document-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "stamp" "identity" "rail" "body";
+    grid-template-areas: "lead" "rail" "body";
   }
   .document-grid > .document-rail { position: static; max-height: none; overflow: visible; margin-bottom: 1.6rem; }
   .document-contents-list { flex-direction: row; flex-wrap: wrap; gap: 0.2rem 1rem; }

@@ -7,10 +7,10 @@
 //   - the refreshed time (dc-2): computed here, never by the server, from
 //     the page's own load and from every completed check the document
 //     script reports — the verdi:document-refresh event specdocument.js
-//     dispatches on each poll or Refresh with its HTTP status, 200 and
-//     304 alike being completed checks. It sits outside the live region;
-//     data-refreshed-at holds the last check's time, so a test can see
-//     it move.
+//     dispatches on each poll or Refresh with its HTTP status: a 304 is
+//     a completed check at once, a 200 once the snapshot it carries has
+//     been read. It sits outside the live region; data-refreshed-at
+//     holds the last check's time, so a test can see it move.
 //   - the id chips (dc-1): one link per eligible anchor the page's facts
 //     list, to <board href>#obj-<id>, in the object kind's colour word,
 //     drawn right at the body's own anchor. They are drawn only here, so
@@ -282,21 +282,27 @@
   }
   region.addEventListener("verdi:document-refresh", function (e) {
     var d = e.detail || {};
-    if (d.status === 200) {
-      recordFocus();
-      if (d.snapshot && typeof d.snapshot.then === "function") {
-        d.snapshot.then(
-          function (snap) {
-            if (snap && snap.revision && snap.facts) {
-              pending[snap.revision] = snap.facts;
-              applyPending();
-            }
-          },
-          function () {}
-        );
-      }
+    if (d.status === 304) {
+      checked();
+      return;
     }
-    if (d.status === 200 || d.status === 304) checked();
+    if (d.status !== 200) return;
+    recordFocus();
+    if (!d.snapshot || typeof d.snapshot.then !== "function") return;
+    // A 200 is a completed check once its body has been read (SI-340
+    // (5), (12)): a 200 whose body is not JSON, which the document script
+    // reports as a failed refresh, moves nothing here. A 200 without the
+    // seam's payload is not counted either, since it cannot be read.
+    d.snapshot.then(
+      function (snap) {
+        checked();
+        if (snap && snap.revision && snap.facts) {
+          pending[snap.revision] = snap.facts;
+          applyPending();
+        }
+      },
+      function () {}
+    );
   });
   new MutationObserver(function () {
     if (!applyPending()) {

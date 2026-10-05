@@ -280,9 +280,11 @@ test.describe("document-page", () => {
     criteria.count = (criteria.count as number) + 1;
     const dropped = probe.facts.chips[0].id;
     probe.facts.chips = probe.facts.chips.slice(1);
-    await page.route(`**${proposed}/snapshot*`, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", headers: { etag: `"${probe.revision}"` }, body: JSON.stringify(probe) }),
-    );
+    let probed = 0;
+    await page.route(`**${proposed}/snapshot*`, (route) => {
+      probed++;
+      return route.fulfill({ status: 200, contentType: "application/json", headers: { etag: `"${probe.revision}"` }, body: JSON.stringify(probe) });
+    });
     try {
       await expect.poll(() => region.getAttribute("data-revision"), { timeout: 10_000 }).toBe(probe.revision);
       await expect(page.getByTestId("document-stamp")).toHaveAttribute("data-commit", "f".repeat(40));
@@ -291,6 +293,27 @@ test.describe("document-page", () => {
       await expect(page.getByTestId("document-contents-acceptance-criteria-count")).toHaveText(String(criteria.count));
       await expect(region.locator(".document-chip")).toHaveCount(probe.facts.chips.length);
       await expect(page.getByTestId(`document-chip-${dropped}`)).toHaveCount(0);
+
+      // A 200 is a completed check too (SI-340 (5)): with every poll
+      // answered 200 here and no 304 in between, the refreshed time moves
+      // from one 200 to the next.
+      const atFirst200 = (await refreshed.getAttribute("data-refreshed-at")) as string;
+      const seen = probed;
+      await expect.poll(() => probed, { timeout: 8_000 }).toBeGreaterThan(seen);
+      await expect.poll(() => refreshed.getAttribute("data-refreshed-at"), { timeout: 4_000 }).not.toBe(atFirst200);
+      expect(Date.parse((await refreshed.getAttribute("data-refreshed-at")) as string)).toBeGreaterThan(Date.parse(atFirst200));
+
+      // A 200 whose body is not JSON is a failed refresh, not a completed
+      // check: the status line says so and the refreshed time stays.
+      await page.unroute(`**${proposed}/snapshot*`);
+      await page.route(`**${proposed}/snapshot*`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "<html>not json</html>" }));
+      const beforeBad = (await refreshed.getAttribute("data-refreshed-at")) as string;
+      await page.waitForTimeout(1_100);
+      await page.getByTestId("document-refresh").click();
+      await expect(page.getByRole("status")).toHaveText(/^Refresh failed/);
+      await page.waitForTimeout(300);
+      expect(await refreshed.getAttribute("data-refreshed-at"), "a non-JSON 200 is not a completed check").toBe(beforeBad);
+      await expect(page.getByTestId("document-stamp")).toHaveAttribute("data-commit", "f".repeat(40));
     } finally {
       await page.unroute(`**${proposed}/snapshot*`);
     }
@@ -299,14 +322,65 @@ test.describe("document-page", () => {
     await expect(page.getByTestId("document-identity-owners")).toHaveText(real.facts.identity.owners.join(", "));
     await expectChips(page, design, real.facts, "after the real snapshot returns");
 
+    // A stale 200 — a poll delayed past a newer Refresh — is dropped by
+    // the document script's sequence guard and never drives the chrome:
+    // the facts are applied only for the revision the body carries, so
+    // the chrome never shows another revision than the body (SI-340
+    // (8); the F5b review's stale-drop probe).
+    const stale: Snapshot = JSON.parse(JSON.stringify(real));
+    stale.revision = "probe-stale";
+    stale.facts.stamp.commit = "1".repeat(40);
+    stale.facts.identity.owners = ["stale-team"];
+    const fresh: Snapshot = JSON.parse(JSON.stringify(real));
+    fresh.revision = "probe-fresh";
+    fresh.facts.stamp.commit = "2".repeat(40);
+    fresh.facts.identity.owners = ["fresh-team"];
+    let raced = 0;
+    await page.route(`**${proposed}/snapshot*`, async (route) => {
+      raced++;
+      const inm = route.request().headers()["if-none-match"];
+      if (raced === 1) {
+        await new Promise((r) => setTimeout(r, 2_500));
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stale) });
+      }
+      if (inm === `"${fresh.revision}"`) return route.fulfill({ status: 304 });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh) });
+    });
+    try {
+      await expect.poll(() => raced, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+      await page.getByTestId("document-refresh").click();
+      await expect.poll(() => region.getAttribute("data-revision"), { timeout: 10_000 }).toBe(fresh.revision);
+      await page.waitForTimeout(4_000); // the stale response lands and is dropped
+      await expect(region).toHaveAttribute("data-revision", fresh.revision);
+      await expect(page.getByTestId("document-stamp"), "the chrome shows the body's revision, never the dropped one").toHaveAttribute("data-commit", "2".repeat(40));
+      await expect(page.getByTestId("document-identity-owners")).toHaveText("fresh-team");
+    } finally {
+      await page.unroute(`**${proposed}/snapshot*`);
+    }
+    await expect.poll(() => region.getAttribute("data-revision"), { timeout: 10_000 }).not.toBe(fresh.revision);
+    await expect(page.getByTestId("document-stamp")).toHaveAttribute("data-commit", real.facts.stamp.commit);
+    await expect(page.getByTestId("document-identity-owners")).toHaveText(real.facts.identity.owners.join(", "));
+
     // The accepted reading, in the accepted token.
     const accepted = docPath(SHOWCASE.READONLY_SPEC);
     await page.goto(accepted);
     const acceptedFacts = (await snapshotOf(page, accepted)).facts;
     await expectChrome(page, accepted, acceptedFacts, "accepted");
     await expect(page.getByTestId("document-region")).not.toContainText("Proposed, not accepted");
-    await expect(page.getByTestId("document-refreshed")).toHaveText(/^refreshed \d+ s ago$/);
     await expectChips(page, boardPath(SHOWCASE.READONLY_SPEC), acceptedFacts, "accepted");
+    // Its refreshed time moves after Refresh too (ac-1: "for a proposed
+    // and an accepted spec").
+    const acceptedRefreshed = page.getByTestId("document-refreshed");
+    await expect(acceptedRefreshed).toHaveText(/^refreshed \d+ s ago$/);
+    const acceptedLoaded = (await acceptedRefreshed.getAttribute("data-refreshed-at")) as string;
+    expect(acceptedLoaded).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    await page.waitForTimeout(1_100);
+    await page.getByTestId("document-refresh").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status")).toHaveText("Up to date");
+    await expect.poll(() => acceptedRefreshed.getAttribute("data-refreshed-at")).not.toBe(acceptedLoaded);
+    expect(Date.parse((await acceptedRefreshed.getAttribute("data-refreshed-at")) as string)).toBeGreaterThan(Date.parse(acceptedLoaded));
+    await expect(acceptedRefreshed).toHaveText(/^refreshed \d+ s ago$/);
   });
 
   test("The Document page at 320 px, 200 % zoom, and without JavaScript", async ({ page, browser }) => {
