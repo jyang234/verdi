@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/topbar.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -78,6 +78,15 @@ func boardSpecASDJSHandler() http.HandlerFunc {
 // asset (TestBoardDocumentAssetBudget).
 func specDocumentJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/specdocument.js")
+}
+
+// documentPageJSHandler serves the Document page's chrome script
+// (spec/document-page-v2): the refreshed time, the id chips, and the
+// chrome's refresh on a poll — a new asset for the new behaviour
+// (spec/workbench-redesign co-1), dependency-free, and structurally
+// capped at 64 KiB uncompressed (TestDocumentPageAssetBudget).
+func documentPageJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/documentpage.js")
 }
 
 // boardDiagramJSHandler serves the diagram editor's one JS file

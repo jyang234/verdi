@@ -14,7 +14,12 @@
 //     scroll position;
 //   - Copy Markdown writes the hidden <pre>'s text — the same bytes the
 //     snapshot's markdown field and the ?format=md download carry — and
-//     announces the outcome through the one role="status" line.
+//     announces the outcome through the one role="status" line;
+//   - one seam (spec/document-page-v2; ledger SI-340 (12)): every
+//     completed check — a poll or Refresh, 200 or 304 — dispatches a
+//     verdi:document-refresh event on the region with its status, which
+//     the page's chrome script (documentpage.js) counts the refreshed
+//     time from; the chrome itself lives in that asset, never here.
 //
 // GET only; no route this script touches ever writes (co-2).
 (function () {
@@ -68,6 +73,10 @@
     var headers = { "If-None-Match": '"' + revision + '"' };
     return fetch(snapshotHref, { headers: headers, credentials: "same-origin" })
       .then(function (res) {
+        // The one seam the chrome script listens on (SI-340 (12)): every
+        // completed check, 200 or 304 alike, with its status and, on a
+        // 200, the snapshot this refresh will apply.
+        region.dispatchEvent(new CustomEvent("verdi:document-refresh", { bubbles: true, detail: { status: res.status, snapshot: res.status === 200 ? res.clone().json() : null } }));
         if (res.status === 304) {
           if (force) say("Up to date");
           return null;
