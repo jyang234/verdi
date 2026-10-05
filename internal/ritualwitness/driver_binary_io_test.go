@@ -197,7 +197,7 @@ func TestCIEnv_PinsEveryCIVariableTheBinaryReads(t *testing.T) {
 	pinned := ciEnvKeys()
 	got := slices.Sorted(slices.Values(pinned))
 	if want := slices.Sorted(slices.Values(pinnedCIVariables)); !slices.Equal(got, want) {
-		t.Fatalf("the Binary driver pins %v, want exactly %v", got, want)
+		t.Errorf("the Binary driver pins %v, want exactly %v", got, want)
 	}
 	if len(slices.Compact(slices.Clone(got))) != len(got) {
 		t.Fatalf("the Binary driver pins a variable twice: %v", pinned)
