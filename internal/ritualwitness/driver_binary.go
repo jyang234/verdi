@@ -32,7 +32,7 @@ type Binary struct {
 	// Env is extra environment, appended to the test process's own, which
 	// carries the fixture's git configuration isolation, and to
 	// GOTRACEBACK=single, which Env may override. It may not set a
-	// variable the CI field pins (ciEnvKeys).
+	// variable the CI field pins (ciEnvKey).
 	Env []string
 	// CI is the continuous-integration environment the binary runs under.
 	// Every run sets CI, GITHUB_ACTIONS, and GITHUB_BASE_REF to exactly
@@ -60,21 +60,18 @@ type CIEnv struct {
 	GitHubBaseRef string
 }
 
-// ciEnvKeys are the variables a Binary run takes from its CI field.
-var ciEnvKeys = []string{"CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF"}
-
-// pairs returns c as KEY=value pairs, in ciEnvKeys' order.
+// pairs returns c as KEY=value pairs, one per variable it pins.
 func (c CIEnv) pairs() []string {
 	return []string{"CI=" + c.CI, "GITHUB_ACTIONS=" + c.GitHubActions, "GITHUB_BASE_REF=" + c.GitHubBaseRef}
 }
 
-// ciEnvKey returns the CI variable kv (a KEY=value pair) sets, or "".
+// ciEnvKey returns the variable kv (a KEY=value pair) sets when it is one
+// a Binary run takes from its CI field (CIEnv.pairs), or "".
 func ciEnvKey(kv string) string {
 	key, _, _ := strings.Cut(kv, "=")
-	for _, k := range ciEnvKeys {
-		if key == k {
-			return k
-		}
+	switch key {
+	case "CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF":
+		return key
 	}
 	return ""
 }

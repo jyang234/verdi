@@ -668,7 +668,7 @@ func repoGitState(t *testing.T, root string) string {
 		{"for-each-ref", "--format=%(refname) %(objectname)"},
 		{"worktree", "list", "--porcelain"},
 	} {
-		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", root}, args...)...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
