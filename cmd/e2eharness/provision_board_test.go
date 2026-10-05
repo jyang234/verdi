@@ -347,6 +347,10 @@ func TestTestIDText(t *testing.T) {
 // and others by unresolved concerns (the readiness mark's input, SI-338
 // (2), SI-345 (1) — the store's own state, no mark code involved).
 func TestCanvasWallFixture_CarriesEveryCardAndReceipt(t *testing.T) {
+	// The harness serves with the CI environment cleared (main.go's
+	// neutralizeCIEnv); so does this proof, or a CI runner's own
+	// default-branch and PR-boundary variables would speak for the store.
+	neutralizeCIEnvForTest(t)
 	ctx := t.Context()
 	shared, err := provisionSharedStore(ctx, absModuleRoot(t), t.TempDir(), nil)
 	if err != nil {
