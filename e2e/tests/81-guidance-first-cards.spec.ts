@@ -232,7 +232,21 @@ test("/readiness leads with guidance and keeps Fact, Concern, Timing, Blocking i
     const shape = await cardShape(row);
     expect(shape.stage, id).toBe(0);
     expect(shape.summaries, id).toBe(1);
-    expect(shape.primary, id).toBeGreaterThan(shape.stage);
+    // The primary line is the copy block's second child — its third
+    // exactly when the plain human-review label sits between the step
+    // label and it; nothing else ever precedes it (readiness-page-v2
+    // ac-2: the base pin `primary === 1`, adapted to the human-review
+    // label).
+    const lead = await row.locator(".readiness-copy").evaluate((copy) => {
+      const kids = Array.from(copy.children);
+      const primary = kids.findIndex((k) => k.matches("p.readiness-summary"));
+      return kids.slice(0, Math.max(primary, 0)).map((k) => k.className);
+    });
+    const humanReview = await row.locator(".readiness-human-review").count();
+    expect(lead, id).toEqual(
+      humanReview ? ["readiness-stage", "readiness-human-review"] : ["readiness-stage"],
+    );
+    expect(shape.primary, id).toBe(1 + humanReview);
     expect(shape.chip, id).toBeGreaterThan(shape.primary);
     const primary = row.locator(".readiness-copy > p.readiness-summary");
     if (state === "proven") {

@@ -941,35 +941,59 @@ test("420px: the stepper hides nothing, anchors reveal disclosed rows, long valu
   expect(widths.doc).toBeLessThanOrEqual(420);
   expect(widths.clipped).toEqual([]);
 
-  const railBottom = () =>
-    page.evaluate(
-      () =>
-        document.querySelector(".readiness-rail")!.getBoundingClientRect()
-          .bottom,
-    );
+  // Below 720 px the stepper is in flow, not pinned (SI-346 (7)): it
+  // stacks as rows that hide nothing and scrolls away with the page, so
+  // an anchor's target lands at the top of the viewport, never under a
+  // sticky bar.
+  const stepper = await page.evaluate(() => {
+    const rail = document.querySelector(".readiness-rail")!;
+    const stations = Array.from(rail.querySelectorAll(".readiness-station"));
+    return {
+      position: getComputedStyle(rail).position,
+      stations: stations.length,
+      visibleLines: stations.filter(
+        (st) =>
+          st.querySelector(".readiness-station-line")!.getBoundingClientRect().height > 0,
+      ).length,
+    };
+  });
+  expect(stepper.position).not.toBe("sticky");
+  expect(stepper.stations).toBe(4);
+  expect(stepper.visibleLines).toBe(4);
 
-  // A rail anchor whose target sits INSIDE the collapsed remainder must
-  // reveal it (native details auto-expansion) and land below the rail.
+  // The target's top in the viewport after an anchor activation: at or
+  // just below the viewport's top (the lists' 1rem scroll margin), inside
+  // the viewport, with nothing fixed above it.
+  const landed = async (id: string) =>
+    page.evaluate((targetId) => {
+      const r = document.getElementById(targetId)!.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        Math.min(r.left + 8, window.innerWidth - 1),
+        Math.max(r.top + 1, 0),
+      );
+      return {
+        top: r.top,
+        inside: r.top >= -1 && r.top < window.innerHeight,
+        unobscured: !!hit && document.getElementById(targetId)!.contains(hit),
+      };
+    }, id);
+
+  // A stepper anchor whose target sits INSIDE the collapsed remainder must
+  // reveal it (native details auto-expansion) and land in view.
   await page.locator('a[href="#area-check-context"]').click();
   await expect(page.locator("details.readiness-more")).toHaveAttribute(
     "open",
     "",
   );
-  let top = await page.evaluate(
-    () =>
-      document.getElementById("area-check-context")!.getBoundingClientRect()
-        .top,
-  );
-  expect(top).toBeGreaterThanOrEqual((await railBottom()) - 1);
+  let at = await landed("area-check-context");
+  expect(at.inside, `target top ${at.top}`).toBe(true);
+  expect(at.unobscured).toBe(true);
 
   // Keyboard-activated anchor to a visible target likewise.
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator('a[href="#area-request-review"]').focus();
   await page.keyboard.press("Enter");
-  top = await page.evaluate(
-    () =>
-      document.getElementById("area-request-review")!.getBoundingClientRect()
-        .top,
-  );
-  expect(top).toBeGreaterThanOrEqual((await railBottom()) - 1);
+  at = await landed("area-request-review");
+  expect(at.inside, `target top ${at.top}`).toBe(true);
+  expect(at.unobscured).toBe(true);
 });

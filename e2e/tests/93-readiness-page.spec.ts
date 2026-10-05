@@ -174,6 +174,24 @@ async function idsOf(scope: Locator): Promise<string[]> {
   return scope.evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id") ?? ""));
 }
 
+// leadOf: what a row's copy block renders before its one primary line —
+// the class names of the children ahead of it — plus whether the chip and
+// the disclosure follow it. Guidance-first means the lead-in is exactly
+// the step label, and the human-review label exactly when the row is
+// human review (F4P-1).
+async function leadOf(r: Locator): Promise<{ before: string[]; primaries: number; chipAfter: boolean; techAfter: boolean }> {
+  return r.locator(".readiness-copy").evaluate((copy) => {
+    const kids = Array.from(copy.children);
+    const primary = kids.findIndex((k) => k.matches("p.readiness-summary"));
+    return {
+      before: kids.slice(0, Math.max(primary, 0)).map((k) => k.className),
+      primaries: kids.filter((k) => k.matches("p.readiness-summary")).length,
+      chipAfter: kids.findIndex((k) => k.matches(".readiness-state")) > primary,
+      techAfter: kids.findIndex((k) => k.matches("details.readiness-tech")) > primary,
+    };
+  });
+}
+
 // isBefore: a precedes b in DOM order.
 async function isBefore(a: Locator, b: Locator): Promise<boolean> {
   const bh = await b.elementHandle();
@@ -373,14 +391,13 @@ test.describe("readiness-page", () => {
       if (STEP2.guidance[id]) {
         await expect(primary, id).toHaveText(STEP2.guidance[id]);
       }
-      const shape = await r.locator(".readiness-copy").evaluate((copy) => {
-        const kids = Array.from(copy.children);
-        const idx = (sel: string) => kids.findIndex((k) => k.matches(sel));
-        return { stage: idx("p.readiness-stage"), primary: idx("p.readiness-summary.readiness-guidance"), chip: idx(".readiness-state"), tech: idx("details.readiness-tech") };
-      });
-      expect(shape.stage, `${id}: step label first`).toBe(0);
-      expect(shape.primary, `${id}: guidance before the chip`).toBeLessThan(shape.chip);
-      expect(shape.chip, `${id}: chip before the disclosure`).toBeLessThan(shape.tech);
+      // Exactly the step label precedes the guidance (no row here is
+      // human review); one primary line; chip and disclosure follow.
+      const lead = await leadOf(r);
+      expect(lead.before, `${id}: only the step label before the guidance`).toEqual(["readiness-stage"]);
+      expect(lead.primaries, `${id}: one primary line`).toBe(1);
+      expect(lead.chipAfter, `${id}: chip after the guidance`).toBe(true);
+      expect(lead.techAfter, `${id}: disclosure after the guidance`).toBe(true);
       const tech = r.locator("details.readiness-tech");
       await expect(tech.locator("dl.readiness-tech-facts"), id).toBeHidden();
       await tech.locator("summary").click();
@@ -406,7 +423,22 @@ test.describe("readiness-page", () => {
     // link to its one row, which the link reveals and reaches.
     const knownLinks = page.locator("#readiness-known .readiness-known-link");
     expect(await knownLinks.evaluateAll((els) => els.map((el) => el.getAttribute("data-known-concern")))).toEqual(STEP2.known);
-    await expect(page.locator("#readiness-known [data-concern-id]")).toHaveCount(0);
+    // An entry is exactly its step label, its fact and its state chip —
+    // nothing of the row itself (F4P-2).
+    const knownSection = page.locator("#readiness-known");
+    for (const sel of ["[data-concern-id]", "details", ".readiness-guidance", ".readiness-dest", ".readiness-tech", ".readiness-summary"]) {
+      await expect(knownSection.locator(sel), `known problems hold no ${sel}`).toHaveCount(0);
+    }
+    for (const id of STEP2.known) {
+      const entry = knownSection.locator(`.readiness-known-link[data-known-concern="${id}"]`);
+      expect(await entry.evaluate((el) => Array.from(el.children).map((k) => k.className)), id).toEqual([
+        "readiness-stage", "readiness-known-text", "readiness-state readiness-state--violated-with-witness",
+      ]);
+      const area = (await row(page, id).getAttribute("data-area-id"))!;
+      await expect(entry.locator(".readiness-stage"), id).toHaveText(AREA_LABEL[area]);
+      await expect(entry.locator(".readiness-known-text"), id).not.toHaveText("");
+      await expect(entry.locator(".readiness-state"), id).toHaveText(PLAIN["violated-with-witness"]);
+    }
     await laterSummary.click();
     await expect(later).not.toHaveAttribute("open", "");
     await expect(knownLinks.first()).toHaveAttribute("href", `#concern-${STEP2.known[0]}`);
@@ -461,11 +493,18 @@ test.describe("readiness-page", () => {
         await expect(formal, id).toContainText("governance");
       }
       await expect(r.locator(".readiness-copy > p.readiness-summary.readiness-guidance"), id).toHaveText(SOLO.text[id]);
+      // The human-review label sits between the step label and the
+      // guidance, and nothing else does (F4P-1).
+      const lead = await leadOf(r);
+      expect(lead.before, `${id}: step label, then the human-review label, then the guidance`).toEqual(["readiness-stage", "readiness-human-review"]);
+      expect(lead.primaries, `${id}: one primary line`).toBe(1);
+      expect(lead.chipAfter && lead.techAfter, `${id}: chip and disclosure after the guidance`).toBe(true);
     }
     const judgmental = row(page, SOLO.judgmental);
     await expect(judgmental).toBeVisible();
     await expect(judgmental.locator(".readiness-human-review")).toHaveCount(0);
     await expect(judgmental).not.toHaveClass(/readiness-concern--human-review/);
+    expect((await leadOf(judgmental)).before, "judgmental row: only the step label before its guidance").toEqual(["readiness-stage"]);
     // An unresolved non-blocking row of an earlier, complete step waits on
     // nothing: it stays visible and reads "now" (a reading beyond SI-339
     // (3), disclosed in the lane's report).

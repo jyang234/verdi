@@ -589,32 +589,41 @@ func TestReadinessRender_KnownProblemsLinkLaterViolatedRows(t *testing.T) {
 	if !strings.Contains(known, `<h2 class="readiness-heading readiness-heading--violated">Known problems in later steps<span class="readiness-count"> · 2</span></h2>`) {
 		t.Fatalf("known-problems heading does not count the later violated rows:\n%s", known)
 	}
-	if strings.Contains(known, `data-concern-id="`) {
-		t.Fatalf("known-problems list renders concern rows of its own:\n%s", known)
+	// An entry is a link to the row and nothing of the row itself: no
+	// concern row, no disclosure, no guidance, no destination (review
+	// finding F4P-2).
+	for _, forbidden := range []string{`data-concern-id="`, `<details`, `readiness-guidance`, `readiness-dest`, `readiness-board-link`, `readiness-tech`} {
+		if strings.Contains(known, forbidden) {
+			t.Fatalf("known-problems section carries %q:\n%s", forbidden, known)
+		}
 	}
 	prev := -1
-	for _, id := range []string{"success/blocker/obligation-quality/coverage", "review/blocker/gov-signoff"} {
-		link := sectionOf(t, known, `data-known-concern="`+id+`"`, `</a>`)
-		idx := strings.Index(known, `data-known-concern="`+id+`"`)
+	for _, want := range []struct{ id, label, summary string }{
+		{"success/blocker/obligation-quality/coverage", "Define success", readinessConcernCoverage().Summary},
+		{"review/blocker/gov-signoff", "Get approval", readinessConcernSignoff().Summary},
+	} {
+		idx := strings.Index(known, `data-known-concern="`+want.id+`"`)
+		if idx < 0 {
+			t.Fatalf("known-problems list is missing %q:\n%s", want.id, known)
+		}
 		if idx < prev {
-			t.Fatalf("known problem %q is out of the attention order", id)
+			t.Fatalf("known problem %q is out of the attention order", want.id)
 		}
 		prev = idx
-		if !strings.Contains(sectionOf(t, known, `<a class="readiness-known-link" href="#concern-`+id+`"`, `>`), `data-known-concern="`+id+`"`) {
-			t.Fatalf("known problem %q does not link to its row:\n%s", id, known)
+		// The entry's exact content: its step label, its fact, its chip.
+		entry := `<li><a class="readiness-known-link" href="#concern-` + want.id + `" data-known-concern="` + want.id + `">` +
+			`<span class="readiness-stage">` + want.label + `</span>` +
+			`<span class="readiness-known-text">` + stdhtml.EscapeString(want.summary) + `</span>` +
+			`<span class="readiness-state readiness-state--violated-with-witness">Violated</span></a></li>`
+		if !strings.Contains(known, entry) {
+			t.Fatalf("known problem %q is not exactly its label, fact and chip:\nwant %s\nin   %s", want.id, entry, known)
 		}
-		if !strings.Contains(link, `>Violated<`) {
-			t.Fatalf("known problem %q is not labeled violated:\n%s", id, link)
-		}
-		if got := strings.Count(html, `id="concern-`+id+`"`); got != 1 {
-			t.Fatalf("concern %q has %d row anchors, want exactly 1", id, got)
+		if got := strings.Count(html, `id="concern-`+want.id+`"`); got != 1 {
+			t.Fatalf("concern %q has %d row anchors, want exactly 1", want.id, got)
 		}
 	}
 	if got := strings.Count(known, `data-known-concern="`); got != 2 {
 		t.Fatalf("known-problems list has %d entries, want 2", got)
-	}
-	if strings.Contains(known, "readiness-board-link") {
-		t.Fatal("a known-problems link wears the destination link's class")
 	}
 
 	// A current step with no later violated row says so plainly.
@@ -745,36 +754,55 @@ func TestReadinessRender_TechnicalDetailsComplete(t *testing.T) {
 	}
 }
 
+// readinessLeadIn matches everything a row's copy block renders before
+// its one primary line: the step label (with its now/later mark when it
+// has one) and then, optionally, the plain human-review label — nothing
+// else, in that order. Group 1 is the human-review label when present.
+var readinessLeadIn = regexp.MustCompile(`^<div class="readiness-copy"><p class="readiness-stage">[^<]*(?:<span class="readiness-when readiness-when--(?:now|later)">[^<]*</span>)?</p>(<p class="readiness-human-review" data-testid="readiness-human-review">.*?</p>)?$`)
+
 // TestReadinessRender_GuidanceIsPrimaryCopy is ac-2 and SI-339 (2): an
 // unresolved concern's primary line is its guidance, its fact filed in the
 // disclosure; a proven concern, which carries no guidance, leads with its
-// fact.
+// fact. The primary line is the copy block's first line after the step
+// label — and after the human-review label exactly when HumanReview()
+// holds (review finding F4P-1): no fact line, chip, or anything else
+// comes before it, and there is exactly one primary line.
 func TestReadinessRender_GuidanceIsPrimaryCopy(t *testing.T) {
-	snap := readinessFixture()
+	snap := readinessWithRoleFixture()
 	html := renderReadinessFixture(t, snap)
 	for _, concern := range snap.AllConcerns {
 		row := concernRow(t, html, concern.ID)
+		primary := `<p class="readiness-summary">` + stdhtml.EscapeString(concern.Summary) + `</p>`
 		if concern.State == readinesspilot.StateProven {
-			if !strings.Contains(row, `<p class="readiness-summary">`+stdhtml.EscapeString(concern.Summary)+`</p>`) {
-				t.Fatalf("proven concern %q does not lead with its fact:\n%s", concern.ID, row)
-			}
 			if strings.Contains(row, "readiness-guidance") {
 				t.Fatalf("proven concern %q renders a guidance line:\n%s", concern.ID, row)
 			}
-			continue
+		} else {
+			primary = `<p class="readiness-summary readiness-guidance">` + stdhtml.EscapeString(concern.Guidance) + `</p>`
+			if !strings.Contains(row, `<dt>Fact</dt><dd class="readiness-fact">`+stdhtml.EscapeString(concern.Summary)+`</dd>`) {
+				t.Fatalf("concern %q does not file its fact in the disclosure:\n%s", concern.ID, row)
+			}
 		}
-		primary := `<p class="readiness-summary readiness-guidance">` + stdhtml.EscapeString(concern.Guidance) + `</p>`
-		if !strings.Contains(row, primary) {
-			t.Fatalf("concern %q does not lead with its guidance:\n%s", concern.ID, row)
+		at := strings.Index(row, primary)
+		if at < 0 {
+			t.Fatalf("concern %q does not render its primary line %q:\n%s", concern.ID, primary, row)
 		}
-		if strings.Contains(row, `<p class="readiness-summary">`) {
-			t.Fatalf("concern %q renders its summary as a primary line too:\n%s", concern.ID, row)
+		if got := strings.Count(row, `<p class="readiness-summary`); got != 1 {
+			t.Fatalf("concern %q renders %d primary lines, want exactly 1:\n%s", concern.ID, got, row)
 		}
-		if !strings.Contains(row, `<dt>Fact</dt><dd class="readiness-fact">`+stdhtml.EscapeString(concern.Summary)+`</dd>`) {
-			t.Fatalf("concern %q does not file its fact in the disclosure:\n%s", concern.ID, row)
+		copyAt := strings.Index(row, `<div class="readiness-copy">`)
+		if copyAt < 0 || copyAt > at {
+			t.Fatalf("concern %q's primary line is outside its copy block:\n%s", concern.ID, row)
 		}
-		if strings.Index(row, primary) > strings.Index(row, `<details class="readiness-tech">`) {
-			t.Fatalf("concern %q files its guidance after the disclosure:\n%s", concern.ID, row)
+		lead := readinessLeadIn.FindStringSubmatch(row[copyAt:at])
+		if lead == nil {
+			t.Fatalf("concern %q renders something other than the step label (and the human-review label) before its primary line:\n%s", concern.ID, row[copyAt:at])
+		}
+		if (lead[1] != "") != concern.HumanReview() {
+			t.Fatalf("concern %q (human review %v) leads with human-review label %q:\n%s", concern.ID, concern.HumanReview(), lead[1], row)
+		}
+		if strings.Index(row, `<span class="readiness-state`) < at || strings.Index(row, `<details class="readiness-tech">`) < at {
+			t.Fatalf("concern %q's chip or disclosure precedes its primary line:\n%s", concern.ID, row)
 		}
 	}
 }
