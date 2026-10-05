@@ -107,17 +107,17 @@ func TestBinary_StdinAndExtraFiles(t *testing.T) {
 	})
 }
 
-// inheritedFD3 reports whether this process's file descriptor 3 is open
+// inheritedFD reports whether this process's file descriptor fd is open
 // without close-on-exec, so a process it starts inherits it. Go opens every
 // descriptor of its own close-on-exec, so such a descriptor came from the
 // process that started this one (or was handed on deliberately).
-func inheritedFD3() (bool, error) {
-	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, 3, syscall.F_GETFD, 0)
+func inheritedFD(fd uintptr) (bool, error) {
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFD, 0)
 	switch {
 	case errno == syscall.EBADF:
 		return false, nil
 	case errno != 0:
-		return false, fmt.Errorf("reading file descriptor 3's flags: %w", errno)
+		return false, fmt.Errorf("reading file descriptor %d's flags: %w", fd, errno)
 	}
 	return flags&syscall.FD_CLOEXEC == 0, nil
 }
@@ -129,7 +129,7 @@ func inheritedFD3() (bool, error) {
 // runs with unexpected descriptors open (R3ab review R3-B7).
 func skipOnInheritedFD3(t *testing.T) {
 	t.Helper()
-	inherited, err := inheritedFD3()
+	inherited, err := inheritedFD(3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,56 +138,81 @@ func skipOnInheritedFD3(t *testing.T) {
 	}
 }
 
-// TestInheritedFD3: a process handed a descriptor as fd 3 (ExtraFiles,
-// which clears close-on-exec in the child) reads it as inherited, and one
-// handed none does not, so skipOnInheritedFD3 skips exactly when the child
-// would inherit fd 3.
-func TestInheritedFD3(t *testing.T) {
-	ctx := context.Background()
-	fx := Build(t, ctx, SeedClean)
-	exe := selfBinary(t)
-	t.Run("a descriptor handed on as fd 3 is inherited", func(t *testing.T) {
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
+// TestInheritedFD: a descriptor Go opened (close-on-exec) is not
+// inherited, the same descriptor with close-on-exec cleared is, and a
+// descriptor that is not open is not, so skipOnInheritedFD3 skips exactly
+// when a started binary would inherit fd 3.
+func TestInheritedFD(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close(); _ = w.Close() }()
+	setCloseOnExec := func(fd uintptr, on bool) {
+		t.Helper()
+		var flags uintptr
+		if on {
+			flags = syscall.FD_CLOEXEC
 		}
-		defer func() { _ = r.Close(); _ = w.Close() }()
-		if exit, _, err := (Binary{Path: exe, Env: []string{helperEnv + "=fd3-inherited"}, ExtraFiles: []*os.File{w}}).Run(boundedContext(t, ctx), fx.Dir); exit != 0 || err != nil {
-			t.Fatalf("Run = (%d, %v), want the helper's exit 0 reading fd 3 as inherited", exit, err)
+		if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFD, flags); errno != 0 {
+			t.Fatalf("setting fd %d's close-on-exec to %v: %v", fd, on, errno)
 		}
-	})
-	t.Run("no fd 3 is not inherited", func(t *testing.T) {
-		skipOnInheritedFD3(t)
-		if exit, _, err := (Binary{Path: exe, Env: []string{helperEnv + "=fd3-inherited"}}).Run(boundedContext(t, ctx), fx.Dir); exit != 4 || err == nil {
-			t.Fatalf("Run = (%d, %v), want the helper's exit 4 reading no inherited fd 3", exit, err)
-		}
-	})
+	}
+	for _, tt := range []struct {
+		name  string
+		fd    func() uintptr
+		clear bool
+		want  bool
+	}{
+		{"a descriptor Go opened is close-on-exec", w.Fd, false, false},
+		{"a descriptor without close-on-exec is inherited", w.Fd, true, true},
+		{"a descriptor that is not open is not inherited", func() uintptr { return 1 << 20 }, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fd := tt.fd()
+			if tt.clear {
+				setCloseOnExec(fd, false)
+				defer setCloseOnExec(fd, true)
+			}
+			got, err := inheritedFD(fd)
+			if err != nil || got != tt.want {
+				t.Fatalf("inheritedFD(%d) = (%v, %v), want %v", fd, got, err, tt.want)
+			}
+		})
+	}
 }
 
 // TestBinary_StdinThatNeverEndsIsBounded: a Stdin reader that never reaches
 // EOF (here an io.Pipe nobody closes) cannot hold Run past its bounds
-// (R3ab review R3-B1). A binary that exits at once returns -1 by the time
-// its context ends, naming the standard input that never ended, and one
-// that outlives its context is killed and returns -1 naming the context.
+// (R3ab review R3-B1). A binary that exits at once returns -1, naming the
+// standard input that never ended, when its context ends (the reviewer's
+// P1) or binaryWaitDelay after its exit, whichever comes first; one that
+// outlives its context is killed and returns -1 naming the context (P3).
 // Each case releases the reader only after Run returns, or after the bound
 // has passed, so a hang fails the test instead of the package.
 func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
 	exe := selfBinary(t)
-	const runFor = 2 * time.Second
-	bound := runFor + binaryWaitDelay + 10*time.Second
+	const slack = 10 * time.Second
 	for _, tt := range []struct {
-		name, spec string
-		wantErr    []string
+		name, spec   string
+		runFor       time.Duration
+		bound        time.Duration
+		wantDeadline bool
+		wantErr      []string
 	}{
-		{"a binary that exits at once", "0", []string{"exited 0", "standard input never reached EOF"}},
-		{"a binary that outlives its context", "linger", []string{"context", "killed"}},
+		{"a binary that exits at once, before its context ends", "0", 3 * time.Second, 3*time.Second + binaryWaitDelay + slack, true,
+			[]string{"exited 0", "standard input never reached EOF before the context ended"}},
+		{"a binary that exits at once, well within its context", "0", helperBound, binaryWaitDelay + slack, false,
+			[]string{"exited 0", "standard input never reached EOF within " + binaryWaitDelay.String()}},
+		{"a binary that outlives its context", "linger", 2 * time.Second, 2*time.Second + binaryWaitDelay + slack, true,
+			[]string{"did not exit before its context ended", "killed"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r, w := io.Pipe()
 			defer func() { _ = w.Close() }()
-			runCtx, cancel := context.WithTimeout(ctx, runFor)
+			runCtx, cancel := context.WithTimeout(ctx, tt.runFor)
 			defer cancel()
 			type result struct {
 				exit int
@@ -202,19 +227,22 @@ func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 			var got result
 			select {
 			case got = <-done:
-			case <-time.After(bound):
+			case <-time.After(tt.bound):
 				_ = w.Close()
 				select {
 				case got = <-done:
 				case <-time.After(helperBound):
 				}
-				t.Fatalf("Run was still blocked %s after it began, past its bound; released, it returned (%d, %v)", bound, got.exit, got.err)
+				t.Fatalf("Run was still blocked %s after it began, past its bound; released, it returned (%d, %v)", tt.bound, got.exit, got.err)
 			}
-			if elapsed := time.Since(start); elapsed > bound {
-				t.Fatalf("Run returned after %s, past its bound %s", elapsed, bound)
+			if elapsed := time.Since(start); elapsed > tt.bound {
+				t.Fatalf("Run returned after %s, past its bound %s", elapsed, tt.bound)
 			}
 			if got.exit != -1 || got.err == nil {
 				t.Fatalf("Run = (%d, %v), want -1, no verb's exit", got.exit, got.err)
+			}
+			if errors.Is(got.err, context.DeadlineExceeded) != tt.wantDeadline {
+				t.Errorf("err = %q wraps the context's deadline: %v, want %v", got.err, !tt.wantDeadline, tt.wantDeadline)
 			}
 			for _, want := range tt.wantErr {
 				if !strings.Contains(got.err.Error(), want) {
