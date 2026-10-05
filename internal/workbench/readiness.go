@@ -31,9 +31,11 @@ var errReadinessNoSpec = errors.New(
 
 // readinessRoute is GET /readiness's dependency set: root, the serving
 // checkout, for every page's top bar facts (renderPage); mdl, the store's
-// resolved operating model the shared layout's other pages receive, for
-// the page's plain-vocabulary labels (G4; nil renders bare ids, as on
-// every other page); the per-request loader; and the default spec.
+// resolved operating model the shared layout's other pages receive (G4);
+// the per-request loader; and the default spec. mdl is carried for the
+// readiness page's plain-vocabulary labels, which lane F4-presentation
+// renders; nothing reads it yet, so today's page renders the same bytes
+// whatever model it holds.
 type readinessRoute struct {
 	root        string
 	mdl         *model.Model
