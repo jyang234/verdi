@@ -367,10 +367,11 @@ func TestCanvasWallFixture_CarriesEveryCardAndReceipt(t *testing.T) {
 	}
 	h := workbench.NewHandlerWith(root, workbench.Deps{})
 
-	if len(canvasWalls) != 2 || canvasWalls[0].name == canvasWalls[1].name {
-		t.Fatalf("canvasWalls = %+v, want two distinct instances (one per spec file, BL-98)", canvasWalls)
+	walls := canvasWalls()
+	if len(walls) != 2 || walls[0].name == walls[1].name || walls[0].stickyID == walls[1].stickyID {
+		t.Fatalf("canvasWalls = %+v, want two distinct instances (one per spec file, BL-98)", walls)
 	}
-	for _, w := range canvasWalls {
+	for _, w := range walls {
 		t.Run(w.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/board/spec/"+w.name, nil))
@@ -455,7 +456,7 @@ func TestCanvasWallFixture_CarriesEveryCardAndReceipt(t *testing.T) {
 // name or commit is refused before any file is shaped.
 func TestCanvasWallFiles(t *testing.T) {
 	const commit = "0123456789abcdef0123456789abcdef01234567"
-	for _, w := range canvasWalls {
+	for _, w := range canvasWalls() {
 		t.Run(w.name, func(t *testing.T) {
 			files, err := canvasWallFiles(w.name, commit)
 			if err != nil {
@@ -517,7 +518,7 @@ func TestCanvasWallFiles(t *testing.T) {
 func TestWriteCanvasWallScratch(t *testing.T) {
 	const commit = "0123456789abcdef0123456789abcdef01234567"
 	root := t.TempDir()
-	w := canvasWalls[0]
+	w := canvasWalls()[0]
 	if err := writeCanvasWallScratch(root, commit, w); err != nil {
 		t.Fatalf("writeCanvasWallScratch: %v", err)
 	}

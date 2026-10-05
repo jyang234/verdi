@@ -80,7 +80,7 @@ func TestWorkbenchAssets_EveryAssetWithinItsCeiling(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	for name := range grandfatheredAssetCeilings {
+	for name := range grandfatheredAssetCeilings() {
 		if !seen[name] {
 			t.Errorf("grandfathered asset %s is not under assets/: drop its entry rather than keep a dead exception", name)
 		}
@@ -157,11 +157,13 @@ const boardSpecJSCeiling = 122974
 // ceiling and exceed it, each to its own recorded ceiling, keyed by path
 // under assets/: boardspec.js to the no-growth ratchet, and specimport.js
 // to the 96 KiB structural ceiling its own story set
-// (TestSpecImport_HomeAndPageDiscoverable). Closed: a new asset is never added
-// here — it meets assetCeiling.
-var grandfatheredAssetCeilings = map[string]int{
-	"boardspec.js":  boardSpecJSCeiling,
-	"specimport.js": 96 * 1024,
+// (TestSpecImport_HomeAndPageDiscoverable). Closed: a new asset is never
+// added here — it meets assetCeiling.
+func grandfatheredAssetCeilings() map[string]int {
+	return map[string]int{
+		"boardspec.js":  boardSpecJSCeiling,
+		"specimport.js": 96 * 1024,
+	}
 }
 
 // assetBudgetError reports whether an asset of size bytes at name (its
@@ -169,7 +171,7 @@ var grandfatheredAssetCeilings = map[string]int{
 // grandfathered ceiling or else assetCeiling.
 func assetBudgetError(name string, size int) error {
 	ceiling := assetCeiling
-	if c, ok := grandfatheredAssetCeilings[name]; ok {
+	if c, ok := grandfatheredAssetCeilings()[name]; ok {
 		ceiling = c
 	}
 	if size == 0 {

@@ -234,15 +234,12 @@ type viewportBadgeLine struct {
 	at, token, line string
 }
 
-var (
-	viewportTokens = []string{"innerHeight", "innerWidth", "outerHeight", "outerWidth", "visualViewport", "screen.height", "screen.width"}
-	badgeTokens    = []string{"badge", "stamp", "smell", "drawer", "derivation"}
-)
-
 // viewportBadgeLines is spec/case-file-flags ac-3's client witness over
 // every asset handed to it: each line reading a viewport dimension that
 // also touches badge/stamp/drawer vocabulary, once per matched token.
 func viewportBadgeLines(assets []workbenchAsset) []viewportBadgeLine {
+	viewportTokens := []string{"innerHeight", "innerWidth", "outerHeight", "outerWidth", "visualViewport", "screen.height", "screen.width"}
+	badgeTokens := []string{"badge", "stamp", "smell", "drawer", "derivation"}
 	var out []viewportBadgeLine
 	for _, a := range assets {
 		for i, line := range strings.Split(string(a.data), "\n") {

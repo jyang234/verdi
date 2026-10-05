@@ -602,9 +602,11 @@ type canvasWall struct {
 
 // canvasWalls is every wall-canvas fixture instance, in provisioning
 // order.
-var canvasWalls = []canvasWall{
-	{name: canvasWallSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000001"},
-	{name: canvasKeysSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000002"},
+func canvasWalls() []canvasWall {
+	return []canvasWall{
+		{name: canvasWallSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000001"},
+		{name: canvasKeysSpecName, stickyID: "a-01J8Z0K3CANVASSTCKY0000002"},
+	}
 }
 
 // fullSHARe is one full lowercase 40-hex commit sha.
@@ -1112,7 +1114,7 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	// address from the serving checkout — the checkout the readiness
 	// loader derives from, so the snapshot's branch and head are the
 	// wall's own (SI-338).
-	for _, w := range canvasWalls {
+	for _, w := range canvasWalls() {
 		wallFiles, err := canvasWallFiles(w.name, mainSHA)
 		if err != nil {
 			return "", err
@@ -1194,7 +1196,7 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	}
 	// The wall-canvas fixtures' untracked half (their static record and
 	// their sticky), keyed to the same main sha.
-	for _, w := range canvasWalls {
+	for _, w := range canvasWalls() {
 		if err := writeCanvasWallScratch(storeRoot, mainSHA, w); err != nil {
 			return "", err
 		}
