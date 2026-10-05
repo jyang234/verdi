@@ -135,6 +135,24 @@ func TestHarness_CheckedOutBindsToTheActingCheckout(t *testing.T) {
 				}, Fail
 			},
 		},
+		{
+			// R3C-A4: the fail-closed binding, where a fall-back to the
+			// root's branch would read the move as within.
+			name: "an acting checkout that is no registered worktree reads a move of the fixture root's branch as outside", states: both(), decl: actingDecl(),
+			setup: func(_ *testing.T, _ context.Context, fx *Fixture) {
+				fx.Acting = filepath.Join(fx.Dir, OwnedDir)
+			},
+			driver: commitIn(atRoot),
+			want: func(t *testing.T, fx *Fixture, res Result) ([]Verdict, RunOutcome) {
+				return []Verdict{
+					v("refs_move", Outside, "refs/heads/main moved"),
+					v("index", Within, "index entry owned/acting.txt added"),
+					v("working_tree", Within, "owned/acting.txt created"+fileWrite),
+					v("index_carry", Within, "declares scoped; observed scoped"),
+					v("stage_paths", Within, "commit "+onlyCommit(t, res)+" recorded owned/acting.txt"),
+				}, Fail
+			},
+		},
 	}
 	for _, c := range cases {
 		for _, state := range c.states {
