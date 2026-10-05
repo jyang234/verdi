@@ -66,7 +66,8 @@ type Binary struct {
 // CIEnv is the CI environment a Binary run sees: one field per CI-context
 // variable the verdi binary's code reads, its env tag naming the variable.
 // TestCIEnv_PinsEveryCIVariableTheBinaryReads fails when that code names a
-// CI-context variable no field pins.
+// CI-context variable no field pins in a string literal; its doc lists the
+// reads the scan cannot see (ledger SI-344 (2)).
 type CIEnv struct {
 	// The generic markers and refs: internal/lint's ReadCIEnv,
 	// internal/specstate's default branch.

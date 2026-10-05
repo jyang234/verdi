@@ -374,11 +374,23 @@ var ciVariableName = regexp.MustCompile(`^(CI|(CI|GITHUB|GITLAB)_[A-Z0-9_]+)$`)
 
 // TestCIEnv_PinsEveryCIVariableTheBinaryReads: the driver pins exactly
 // pinnedCIVariables, and every CI-context variable the built binary's code
-// names (any string literal naming one, in a non-test Go file under
-// cmd/verdi or internal: an os.Getenv argument, a constant a getenv seam
-// reads) is among them, so a new CI-context read the driver does not pin
-// fails here instead of leaking CI's environment into a local run's
-// meaning.
+// names literally is among them, so a new literal CI-context read the
+// driver does not pin fails here instead of leaking CI's environment into
+// a local run's meaning (ledger SI-344 (2), as narrowed after R3ab review
+// R3-B3).
+//
+// What the scan proves: every Go string literal, in a non-test Go file
+// under cmd/verdi or internal, whose whole value is CI or a CI_, GITHUB_,
+// or GITLAB_ name (an os.Getenv or os.LookupEnv argument, a constant a
+// getenv seam reads) names a pinned variable; and the scan finds the
+// reads it exists for, so a scan that sees nothing fails.
+//
+// What it does not prove: a name computed at run time (GITHUB_ joined to
+// a suffix); a variable outside those prefixes (RUNNER_*, ACTIONS_*); a
+// read whose meaning hangs on os.LookupEnv's set-versus-unset, which a
+// pinned empty value answers "set"; and a read made by a subprocess the
+// binary starts. None of these exists at this revision; each is disclosed,
+// not witnessed.
 func TestCIEnv_PinsEveryCIVariableTheBinaryReads(t *testing.T) {
 	// Every CI-context variable the Binary driver pins, listed here so a
 	// change to the set is a reviewed change to this test.
