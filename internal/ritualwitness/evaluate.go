@@ -57,6 +57,16 @@ func classify(admitted, attributed bool) Status {
 // and refuses a snapshot pair from different repositories. Evaluate reads
 // the filesystem only to canonicalize the log's paths.
 func Evaluate(decl ws.Declaration, exit int, before, after Snapshot, log CommandLog) ([]Verdict, error) {
+	return EvaluateIn(decl, "", exit, before, after, log)
+}
+
+// EvaluateIn is Evaluate for a ritual acting in the checkout at acting,
+// which binds @checked-out (ledger SI-348 (4)): "" or the repository's
+// root is the main worktree, as Evaluate binds it; any other path names a
+// linked worktree, whose branch before the run @checked-out then is. A
+// path that is no worktree registered before the run binds no branch, so
+// every @checked-out effect is outside: the binding fails closed.
+func EvaluateIn(decl ws.Declaration, acting string, exit int, before, after Snapshot, log CommandLog) ([]Verdict, error) {
 	if err := decl.Validate(); err != nil {
 		return nil, fmt.Errorf("ritualwitness: Evaluate: %w", err)
 	}
@@ -64,6 +74,11 @@ func Evaluate(decl ws.Declaration, exit int, before, after Snapshot, log Command
 		return nil, errors.New("ritualwitness: Evaluate: the before and after snapshots are of different repositories")
 	}
 	e := newEvaluation(decl, exit, before, after, log)
+	if acting != "" {
+		if p := canonicalPath("", acting); p != after.Root {
+			e.acting = p
+		}
+	}
 	var out []Verdict
 	for _, section := range []func() []Verdict{
 		e.commandLog,
@@ -100,6 +115,9 @@ type evaluation struct {
 	linkedA  map[string]Worktree
 	addedWT  map[string]bool // linked worktrees the ritual added (SI-329 (5′))
 	switched bool            // the main worktree's HEAD switched (SI-325 (4))
+	// acting is the canonical path of the linked worktree the ritual acts
+	// in, or "" for the main worktree (EvaluateIn; SI-348 (4)).
+	acting string
 }
 
 func newEvaluation(decl ws.Declaration, exit int, b, a Snapshot, log CommandLog) *evaluation {
@@ -225,19 +243,44 @@ func (e *evaluation) hadForeign() bool {
 	return false
 }
 
-// checkedOutBefore is the main worktree's branch before the ritual, as a
-// full refname, or "" when HEAD was detached.
+// checkedOutBefore is @checked-out's binding: the branch checked out,
+// before the ritual, in the checkout the ritual acts on (the write-scope
+// grammar; ledger SI-348 (4)), as a full refname. That is the main
+// worktree's branch unless the ritual acts in a linked worktree (acting),
+// whose branch it then is. It is "" when that checkout's HEAD was
+// detached, or when the acting checkout is no worktree registered before
+// the run, so no ref matches @checked-out (fail closed).
 func (e *evaluation) checkedOutBefore() string {
+	if e.acting == "" {
+		return e.mainBranchBefore()
+	}
+	w, ok := e.linkedB[e.acting]
+	if !ok || w.Head.Detached {
+		return ""
+	}
+	return w.Head.Ref
+}
+
+// mainBranchBefore is the main worktree's branch before the ritual, as a
+// full refname, or "" when HEAD was detached.
+func (e *evaluation) mainBranchBefore() string {
 	if e.b.Head.Detached {
 		return ""
 	}
 	return e.b.Head.Ref
 }
 
-// checkedOutMoved reports a move of @checked-out: HEAD stayed attached to
-// the branch it started on, and that branch moved.
+// checkedOutMoved reports a move of @checked-out in the main worktree: the
+// ritual acts there, HEAD stayed attached to the branch it started on, and
+// that branch moved. It feeds the main worktree's own readings, the tree
+// difference such a move makes in its index and the hand-back exception;
+// a ritual acting in a linked worktree has its changes there judged as
+// that worktree's (preExistingWorktree), so this is false for it.
 func (e *evaluation) checkedOutMoved() bool {
-	ref := e.checkedOutBefore()
+	if e.acting != "" {
+		return false
+	}
+	ref := e.mainBranchBefore()
 	return ref != "" && !e.switched && e.b.Refs[ref].Object != e.a.Refs[ref].Object
 }
 

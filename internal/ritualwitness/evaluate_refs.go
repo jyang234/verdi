@@ -185,7 +185,7 @@ func (e *evaluation) pushedBranches() map[string]bool {
 // "" when its HEAD was detached or it did not exist.
 func (e *evaluation) headBefore(wt string) string {
 	if wt == e.a.Root {
-		return e.checkedOutBefore()
+		return e.mainBranchBefore()
 	}
 	if w, ok := e.linkedB[wt]; ok && !w.Head.Detached {
 		return w.Head.Ref

@@ -171,7 +171,7 @@ func (e *evaluation) handbackTips(aw Worktree, present bool) map[string]bool {
 	if !e.checkedOutMoved() || e.commitLoggedInFixture() {
 		return tips
 	}
-	tip := e.a.Refs[e.checkedOutBefore()].Object
+	tip := e.a.Refs[e.mainBranchBefore()].Object
 	if present && e.reachable(tip, aw.Head.Commit) {
 		tips[tip] = true
 	}
