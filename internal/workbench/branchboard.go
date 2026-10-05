@@ -19,6 +19,10 @@
 //   - branch checked out at the serving root -> the serving checkout's own
 //     board instance: that checkout IS the branch's working tree, so the
 //     one instance (and its write serialization) serves both addresses;
+//   - branch checked out in any other worktree (an unmanaged linked one, or
+//     another serve's managed one) -> refused with 409 before any
+//     mutation, naming that worktree (ledger SI-347): it is another
+//     checkout's working tree, served by neither instance;
 //   - remote-tracking ref only   -> a sealed read-only render of that
 //     ref's committed content, remoteness disclosed, no worktree cut, no
 //     local branch minted (dc-4);
@@ -34,6 +38,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -121,6 +126,9 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 			b.renderBranchGone(w, r, branch, rt)
 			return
 		}
+		if b.refusedElsewhere(w, r, branch, rt) {
+			return
+		}
 		if b.refusedSwitch(w, r, branch, rt) {
 			return
 		}
@@ -176,6 +184,81 @@ func (b *branchBoards) refusedSwitch(w http.ResponseWriter, r *http.Request, bra
 	// before any worktree is cut.
 	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(fixedBranchSwitchRefusal, branch))
 	return true
+}
+
+// refusedElsewhere answers every /b/ request for a branch checked out in a
+// worktree other than the serving checkout and the branch's own managed
+// worktree, and reports whether it answered (ledger SI-347; backlog
+// BL-150). Only the serving checkout's own branch is served by the serving
+// instance, and only the managed worktree's own branch by its per-branch
+// instance; any other holder — an unmanaged linked worktree, or a managed
+// worktree another serve cut under its own root — is another checkout's
+// working tree, which this server neither serves nor mutates. So the
+// request is refused with 409 before any mutation, naming that worktree,
+// through the same per-branch notice a failed cut answers with. A failed
+// read refuses too, before any mutation, naming the failure.
+func (b *branchBoards) refusedElsewhere(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	holder, err := b.heldElsewhere(r.Context(), branch)
+	if err != nil {
+		b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not resolve where branch %s is checked out before serving its board: %v", branch, err))
+		return true
+	}
+	if holder == "" {
+		return false
+	}
+	b.renderBranchNotice(w, r, rt, http.StatusConflict, fmt.Sprintf(heldElsewhereRefusal, branch, holder))
+	return true
+}
+
+// heldElsewhereRefusal is the refusal of a /b/ request for a branch checked
+// out in another worktree, formatted with the branch and that worktree's
+// path as git reports it.
+const heldElsewhereRefusal = "branch %s is checked out in another worktree, %s: this server serves a branch only from its own checkout or from the branch's managed worktree under its own data zone, so it refuses rather than read or change another checkout's files; open the branch's board from a serve rooted in that worktree, or check the branch out somewhere else first"
+
+// heldElsewhere returns the path, as git reports it, of the worktree that
+// has branch checked out when that worktree is neither the serving
+// checkout nor branch's own managed worktree under the serving root, and
+// "" otherwise: when the serving checkout holds branch (the same test
+// gitx.WorktreeAdd makes before reporting it checked out here), when its
+// managed worktree does, and when no worktree does. Two read-only git
+// calls; nothing is written.
+func (b *branchBoards) heldElsewhere(ctx context.Context, branch string) (string, error) {
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		return "", err
+	}
+	if current == branch {
+		return "", nil
+	}
+	entries, err := gitx.WorktreeList(ctx, b.root)
+	if err != nil {
+		return "", err
+	}
+	managed := resolvedWorktreePath(wtmanager.WorktreePath(b.root, branch))
+	for _, e := range entries {
+		if e.Branch != branch {
+			continue
+		}
+		if resolvedWorktreePath(e.Path) == managed {
+			return "", nil
+		}
+		return e.Path, nil
+	}
+	return "", nil
+}
+
+// resolvedWorktreePath is path absolute, cleaned, and with its symbolic
+// links resolved where it exists, so a worktree path git reports compares
+// equal to the same path spelled through a symbolic link (a macOS
+// temporary directory resolves under /private).
+func resolvedWorktreePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
 }
 
 // fixedBranchSwitchRefusal is the one refusal of a branch switch on a
@@ -383,12 +466,19 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 // real local branch failed, and the failure is named to the human instead
 // of buried in a log behind a dead link.
 func (b *branchBoards) renderCutFailure(w http.ResponseWriter, r *http.Request, branch string, err error, rt boardSpecRoute) {
-	msg := fmt.Sprintf("could not prepare the working tree for branch %s: %v", branch, err)
+	b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not prepare the working tree for branch %s: %v", branch, err))
+}
+
+// renderBranchNotice is the per-branch notice a /b/ route answers with when
+// the dispatch refuses it or fails before reaching a board instance: a
+// JSON route gets the JSON error shape, a page the disclosed error page,
+// both at status and naming msg.
+func (b *branchBoards) renderBranchNotice(w http.ResponseWriter, r *http.Request, rt boardSpecRoute, status int, msg string) {
 	if rt.json {
-		writeJSONError(w, http.StatusInternalServerError, msg)
+		writeJSONError(w, status, msg)
 		return
 	}
-	renderError(r.Context(), w, b.root, http.StatusInternalServerError, errors.New(msg))
+	renderError(r.Context(), w, b.root, status, errors.New(msg))
 }
 
 // renderBranchGone is dc-4's no-ref shape: the disclosed notice page —
