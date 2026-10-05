@@ -281,8 +281,14 @@ test.describe("document-page", () => {
     const dropped = probe.facts.chips[0].id;
     probe.facts.chips = probe.facts.chips.slice(1);
     let probed = 0;
+    // One route for the whole block: swapping routes would leave a gap a
+    // poll could slip through to the real server, moving the refreshed
+    // time by chance; the non-JSON body below is served by this same
+    // handler once the flag is set.
+    let badBody = false;
     await page.route(`**${proposed}/snapshot*`, (route) => {
       probed++;
+      if (badBody) return route.fulfill({ status: 200, contentType: "application/json", body: "<html>not json</html>" });
       return route.fulfill({ status: 200, contentType: "application/json", headers: { etag: `"${probe.revision}"` }, body: JSON.stringify(probe) });
     });
     try {
@@ -305,8 +311,8 @@ test.describe("document-page", () => {
 
       // A 200 whose body is not JSON is a failed refresh, not a completed
       // check: the status line says so and the refreshed time stays.
-      await page.unroute(`**${proposed}/snapshot*`);
-      await page.route(`**${proposed}/snapshot*`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "<html>not json</html>" }));
+      badBody = true;
+      await page.waitForTimeout(300); // a probe 200 answered just before the flag settles first
       const beforeBad = (await refreshed.getAttribute("data-refreshed-at")) as string;
       await page.waitForTimeout(1_100);
       await page.getByTestId("document-refresh").click();
