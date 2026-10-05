@@ -38,6 +38,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -129,7 +130,7 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 		if b.refusedElsewhere(w, r, branch, rt) {
 			return
 		}
-		if b.refusedSwitch(w, r, branch, rt) {
+		if b.refusedSwitch(w, r, branch, rt) || b.refusedFirstUseCommit(w, r, branch, rt) {
 			return
 		}
 		s, err := b.server(r.Context(), branch)
@@ -185,6 +186,51 @@ func (b *branchBoards) refusedSwitch(w http.ResponseWriter, r *http.Request, bra
 	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(fixedBranchSwitchRefusal, branch))
 	return true
 }
+
+// refusedFirstUseCommit answers Commit and push (POST api/git-commit)
+// beneath /b/ for a local branch that is not the serving checkout's own and
+// whose managed worktree is not cut yet, before dispatch ensures it, and
+// reports whether it answered (ledger SI-348 (3)). A freshly cut managed
+// worktree is exactly the branch's own tree, so the commit could only fail
+// with nothing to commit: ensuring the worktree first would leave a cut
+// behind that refusal, a mutation a refusal never leaves (SI-325 (3)). The
+// refusal is the instance's own nothing-to-commit answer, 400, given
+// before the cut. A branch whose managed worktree exists reaches its own
+// instance as before; the serving checkout's branch reaches the serving
+// instance; a branch with no local ref keeps its remote-only or no-ref
+// answer. A failed read refuses too, before any mutation, naming the
+// failure.
+func (b *branchBoards) refusedFirstUseCommit(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	if rt.suffix != routeBoardAPI || r.Method != http.MethodPost || r.PathValue("action") != "git-commit" {
+		return false
+	}
+	if _, err := os.Stat(wtmanager.WorktreePath(b.root, branch)); err == nil {
+		return false
+	}
+	ctx := r.Context()
+	local, err := gitx.HasLocalBranch(ctx, b.root, branch)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve branch %s before a commit: %v", branch, err))
+		return true
+	}
+	if !local {
+		return false
+	}
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before a commit: %v", err))
+		return true
+	}
+	if current == branch {
+		return false
+	}
+	writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(firstUseCommitRefusal, branch))
+	return true
+}
+
+// firstUseCommitRefusal is the refusal of Commit and push on a /b/ board
+// whose managed worktree is not cut yet, formatted with its branch.
+const firstUseCommitRefusal = "nothing to commit: branch %s has no working tree of its own here yet, so it carries no uncommitted change; open its board, make a change, then commit"
 
 // refusedElsewhere answers every /b/ request for a branch checked out in a
 // worktree other than the serving checkout and the branch's own managed
