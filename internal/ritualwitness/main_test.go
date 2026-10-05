@@ -10,12 +10,21 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // helperEnv switches this test binary into a stand-in for a built verb
 // (helperVerb), so the Binary driver's tests exec a real subprocess with
 // no network and no second build.
 const helperEnv = "RITUALWITNESS_HELPER_VERB"
+
+// helperPIDFileEnv names the file helper spec "orphan" records its
+// grandchild's pid in, so the test can end the grandchild.
+const helperPIDFileEnv = "RITUALWITNESS_HELPER_PIDFILE"
+
+// lingerFor bounds helper spec "linger": the grandchild holding an
+// orphaned pipe outlives the driver's WaitDelay, and then exits.
+const lingerFor = 30 * time.Second
 
 // TestMain isolates the whole test binary from ambient git configuration
 // (IsolateGitConfig), so tests using Build may run in parallel. Run with
@@ -48,10 +57,34 @@ func TestMain(m *testing.M) {
 // "gotraceback" prints its GOTRACEBACK and exits 1; spec "stdin" prints
 // what it read from standard input and exits 1; spec "fd3" writes a line
 // to file descriptor 3 and exits 0, or exits 3 when it cannot; spec
-// "cienv" prints CI, GITHUB_ACTIONS, and GITHUB_BASE_REF, each with
-// whether it is set at all, and exits 1.
+// "cienv" prints every variable the Binary driver pins (ciEnvKeys), each
+// with whether it is set at all, and exits 1; spec "orphan" starts a
+// grandchild (spec "linger") that inherits its stdout and stderr, writes
+// the grandchild's pid to the file helperPIDFileEnv names, and exits 0
+// without waiting; spec "linger" sleeps for lingerFor, then exits 0.
 func helperVerb(spec string) int {
 	switch spec {
+	case "orphan":
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper: locating itself:", err)
+			return 3
+		}
+		cmd := exec.CommandContext(context.Background(), exe)
+		cmd.Env = append(os.Environ(), helperEnv+"=linger")
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, "helper: starting the grandchild:", err)
+			return 3
+		}
+		if err := os.WriteFile(os.Getenv(helperPIDFileEnv), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "helper: recording the grandchild:", err)
+			return 3
+		}
+		return 0
+	case "linger":
+		time.Sleep(lingerFor)
+		return 0
 	case "stdin":
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -67,7 +100,7 @@ func helperVerb(spec string) int {
 		}
 		return 0
 	case "cienv":
-		for _, k := range []string{"CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF"} {
+		for _, k := range ciEnvKeys() {
 			v, ok := os.LookupEnv(k)
 			fmt.Fprintf(os.Stderr, "%s=%q set=%v\n", k, v, ok)
 		}

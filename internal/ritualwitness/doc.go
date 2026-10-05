@@ -29,9 +29,11 @@
 // never exit 2 alone (ledger SI-334 (3), (4); re-review RR-B1). MCP maps a
 // tool result whose isError is false to 0, one whose isError is true or a
 // JSON-RPC error to 2, and a transport failure or a response that is
-// neither to -1 (ledger SI-341 (5)). Binary sets CI, GITHUB_ACTIONS, and
-// GITHUB_BASE_REF on every run from its CI field, never from the test
-// process, so a verb that reads them behaves the same locally and in CI.
+// neither to -1 (ledger SI-341 (5)). Binary sets every CI-context
+// variable the verdi binary reads (CIEnv) on every run from its CI field,
+// never from the test process, so a verb that reads one behaves the same
+// locally and in CI, and bounds a binary whose output a process it started
+// holds open (binaryWaitDelay).
 //
 // # Sensed
 //
