@@ -146,6 +146,17 @@ func designImportRepo(t *testing.T) string {
 // have). The fixture stays on main throughout.
 func designImportPolicyRepo(t *testing.T, mode string) string {
 	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: designImportPolicyFiles(t, mode), Message: "adopt design import policy"}})
+	resolved, err := filepath.EvalSymlinks(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.ToSlash(resolved)
+}
+
+// designImportPolicyFiles is designImportPolicyRepo's store, as files.
+func designImportPolicyFiles(t *testing.T, mode string) map[string]string {
+	t.Helper()
 	files := map[string]string{
 		".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 		".verdi/.gitignore": "data/\n",
@@ -174,12 +185,7 @@ func designImportPolicyRepo(t *testing.T, mode string) string {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "adopt design import policy"}})
-	resolved, err := filepath.EvalSymlinks(repo.Dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.ToSlash(resolved)
+	return files
 }
 
 // runDesignImportBinary runs `verdi design import <args...>` against dir,
