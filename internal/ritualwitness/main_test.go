@@ -18,9 +18,14 @@ import (
 // no network and no second build.
 const helperEnv = "RITUALWITNESS_HELPER_VERB"
 
-// helperPIDFileEnv names the file helper spec "orphan" records its
-// grandchild's pid in, so the test can end the grandchild.
+// helperPIDFileEnv names the file helper specs "orphan" and
+// "orphan-stdin" record their grandchild's pid in, so the test can end the
+// grandchild.
 const helperPIDFileEnv = "RITUALWITNESS_HELPER_PIDFILE"
+
+// helperEOFFileEnv names the file helper spec "drain" writes once its
+// standard input ends.
+const helperEOFFileEnv = "RITUALWITNESS_HELPER_EOFFILE"
 
 // lingerFor bounds helper spec "linger": the grandchild holding an
 // orphaned pipe outlives the driver's WaitDelay, and then exits.
@@ -61,29 +66,40 @@ func TestMain(m *testing.M) {
 // with whether it is set at all, and exits 1; spec "orphan" starts a
 // grandchild (spec "linger") that inherits its stdout and stderr, writes
 // the grandchild's pid to the file helperPIDFileEnv names, and exits 0
-// without waiting; spec "linger" sleeps for lingerFor, then exits 0.
+// without waiting; spec "linger" sleeps for lingerFor, then exits 0; spec
+// "orphan-stdin" does as "orphan" with a grandchild (spec "drain") that
+// inherits its standard input instead; spec "drain" reads its standard
+// input to its end, writes "eof" to the file helperEOFFileEnv names, and
+// exits 0, or exits 3 if the input has not ended within lingerFor.
 func helperVerb(spec string) int {
 	switch spec {
 	case "orphan":
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "helper: locating itself:", err)
-			return 3
-		}
-		cmd := exec.CommandContext(context.Background(), exe)
-		cmd.Env = append(os.Environ(), helperEnv+"=linger")
-		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		if err := cmd.Start(); err != nil {
-			fmt.Fprintln(os.Stderr, "helper: starting the grandchild:", err)
-			return 3
-		}
-		if err := os.WriteFile(os.Getenv(helperPIDFileEnv), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
-			fmt.Fprintln(os.Stderr, "helper: recording the grandchild:", err)
-			return 3
-		}
-		return 0
+		return startGrandchild("linger", nil, os.Stdout, os.Stderr)
+	case "orphan-stdin":
+		return startGrandchild("drain", os.Stdin, nil, nil)
 	case "linger":
 		time.Sleep(lingerFor)
+		return 0
+	case "drain":
+		drained := make(chan error, 1)
+		go func() {
+			_, err := io.Copy(io.Discard, os.Stdin)
+			drained <- err
+		}()
+		select {
+		case err := <-drained:
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "helper: draining stdin:", err)
+				return 3
+			}
+		case <-time.After(lingerFor):
+			fmt.Fprintln(os.Stderr, "helper: stdin did not end within", lingerFor)
+			return 3
+		}
+		if err := os.WriteFile(os.Getenv(helperEOFFileEnv), []byte("eof"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "helper: recording the end of stdin:", err)
+			return 3
+		}
 		return 0
 	case "stdin":
 		data, err := io.ReadAll(os.Stdin)
@@ -135,6 +151,29 @@ func helperVerb(spec string) int {
 	fmt.Println("helper stdout")
 	fmt.Fprintln(os.Stderr, "helper stderr")
 	return exit
+}
+
+// startGrandchild starts this test binary as helper spec with the given
+// standard streams, writes its pid to the file helperPIDFileEnv names, and
+// returns 0 without waiting for it, or 3 when it cannot.
+func startGrandchild(spec string, stdin io.Reader, stdout, stderr io.Writer) int {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper: locating itself:", err)
+		return 3
+	}
+	cmd := exec.CommandContext(context.Background(), exe)
+	cmd.Env = append(os.Environ(), helperEnv+"="+spec)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "helper: starting the grandchild:", err)
+		return 3
+	}
+	if err := os.WriteFile(os.Getenv(helperPIDFileEnv), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "helper: recording the grandchild:", err)
+		return 3
+	}
+	return 0
 }
 
 // overflowStack recurses until the goroutine's stack exceeds its limit.

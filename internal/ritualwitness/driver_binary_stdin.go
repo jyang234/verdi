@@ -27,8 +27,29 @@ type stdinFeed struct {
 	// EOF, so the binary reads its input's end, and abandon closes it to
 	// stop feeding.
 	closeParent func() error
-	// copied carries the copy's result once it ends.
+	// copied carries the copy's result once it ends. It is buffered, so a
+	// copy Run abandoned can still send its result, which nobody reads,
+	// and end once the reader's Read returns.
 	copied chan error
+}
+
+// errStdinClosed is what the copy's destination (pipeWriter) reports for
+// a write to the pipe that failed with EPIPE: the binary no longer reads
+// its standard input, because it closed it or exited.
+var errStdinClosed = errors.New("ritualwitness: the binary no longer reads its standard input")
+
+// pipeWriter is the copy's destination, the pipe's write end. It reports
+// that end's own EPIPE as errStdinClosed, so the copy tells the binary's
+// closed input apart from a source reader's error, even one wrapping
+// EPIPE.
+type pipeWriter struct{ f *os.File }
+
+func (w pipeWriter) Write(p []byte) (int, error) {
+	n, err := w.f.Write(p)
+	if errors.Is(err, syscall.EPIPE) {
+		return n, errStdinClosed
+	}
+	return n, err
 }
 
 // stdinFor returns the binary's standard input for src, and the feed that
@@ -61,11 +82,13 @@ func (f *stdinFeed) start(src io.Reader) {
 	}
 	_ = f.child.Close()
 	go func() {
-		_, err := io.Copy(f.parent, src)
-		if errors.Is(err, syscall.EPIPE) {
-			// The binary closed its standard input, or exited, before
-			// reading the rest: its choice, not a fault, as os/exec reads
-			// it too.
+		_, err := io.Copy(pipeWriter{f.parent}, src)
+		if errors.Is(err, errStdinClosed) {
+			// A write to the pipe failed with EPIPE: the binary closed
+			// its standard input, or exited, before reading the rest. That
+			// is its choice, not a fault, as os/exec reads a stdin write's
+			// EPIPE too. Only that write's EPIPE counts: a source reader's
+			// own error, even one wrapping EPIPE, is a failure to feed.
 			err = nil
 		}
 		if cerr := f.closeParent(); err == nil {

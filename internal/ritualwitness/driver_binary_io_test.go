@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +65,14 @@ func TestBinary_StdinAndExtraFiles(t *testing.T) {
 			_ = w.CloseWithError(errors.New("the request source failed"))
 			return r
 		}, -1, "feeding its standard input: the request source failed"},
+		// Only the pipe write's own EPIPE is the binary's choice; a source
+		// reader's error that wraps EPIPE is a failure to feed (R3ab
+		// re-review RRR3-4).
+		{"a reader whose own error wraps EPIPE is no verb's exit", "0", func(*testing.T) io.Reader {
+			r, w := io.Pipe()
+			_ = w.CloseWithError(&os.PathError{Op: "read", Path: "upstream", Err: syscall.EPIPE})
+			return r
+		}, -1, "feeding its standard input: read upstream: broken pipe"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			exit, log, err := Binary{Path: exe, Env: []string{helperEnv + "=" + tt.spec}, Stdin: tt.stdin(t)}.Run(boundedContext(t, ctx), fx.Dir)
@@ -182,14 +191,23 @@ func TestInheritedFD(t *testing.T) {
 	}
 }
 
+// raceExitNow, in a helper's Env, turns off the race runtime's one-second
+// sleep before a clean exit (GORACE atexit_sleep_ms), so a test bounded
+// tighter than binaryWaitDelay keeps its margin under -race and on a
+// loaded CI runner (R3ab re-review RRR3-1). A build without -race ignores
+// it.
+const raceExitNow = "GORACE=atexit_sleep_ms=0"
+
 // TestBinary_StdinThatNeverEndsIsBounded: a Stdin reader that never reaches
 // EOF (here an io.Pipe nobody closes) cannot hold Run past its bounds
 // (R3ab review R3-B1). A binary that exits at once returns -1, naming the
 // standard input that never ended, when its context ends (the reviewer's
 // P1) or binaryWaitDelay after its exit, whichever comes first; one that
-// outlives its context is killed and returns -1 naming the context (P3).
-// Each case releases the reader only after Run returns, or after the bound
-// has passed, so a hang fails the test instead of the package.
+// outlives its context is killed and returns -1 naming the context (P3);
+// and one that refuses with exit 2 returns its own exit and words at once,
+// without waiting for the copy (R3ab re-review RRR3-2). Each case releases
+// the reader only after Run returns, or after the bound has passed, so a
+// hang fails the test instead of the package.
 func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
@@ -199,15 +217,23 @@ func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 		name, spec   string
 		runFor       time.Duration
 		bound        time.Duration
+		wantExit     int
 		wantDeadline bool
 		wantErr      []string
+		notErr       []string
 	}{
-		{"a binary that exits at once, before its context ends", "0", 3 * time.Second, 3*time.Second + binaryWaitDelay + slack, true,
-			[]string{"exited 0", "standard input never reached EOF before the context ended"}},
-		{"a binary that exits at once, well within its context", "0", helperBound, binaryWaitDelay + slack, false,
-			[]string{"exited 0", "standard input never reached EOF within " + binaryWaitDelay.String()}},
-		{"a binary that outlives its context", "linger", 2 * time.Second, 2*time.Second + binaryWaitDelay + slack, true,
-			[]string{"did not exit before its context ended", "killed"}},
+		// The context (4.5 s) ends before binaryWaitDelay can pass after
+		// the exit, however fast the binary exits.
+		{"a binary that exits at once, before its context ends", "0", 4500 * time.Millisecond, 4500*time.Millisecond + binaryWaitDelay + slack, -1, true,
+			[]string{"exited 0", "standard input never reached EOF before the context ended"}, nil},
+		{"a binary that exits at once, well within its context", "0", helperBound, binaryWaitDelay + slack, -1, false,
+			[]string{"exited 0", "standard input never reached EOF within " + binaryWaitDelay.String()}, nil},
+		{"a binary that outlives its context", "linger", 2 * time.Second, 2*time.Second + binaryWaitDelay + slack, -1, true,
+			[]string{"did not exit before its context ended", "killed"}, nil},
+		// Bounded below binaryWaitDelay: a Run that waited for the copy
+		// after a refusal would return only once that delay had passed.
+		{"a binary that refuses while its input is open", "2", helperBound, binaryWaitDelay - 500*time.Millisecond, 2, false,
+			[]string{"exited 2", "helper stderr"}, []string{"standard input"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r, w := io.Pipe()
@@ -221,7 +247,7 @@ func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 			done := make(chan result, 1)
 			start := time.Now()
 			go func() {
-				exit, _, err := Binary{Path: exe, Env: []string{helperEnv + "=" + tt.spec}, Stdin: r}.Run(runCtx, fx.Dir)
+				exit, _, err := Binary{Path: exe, Env: []string{helperEnv + "=" + tt.spec, raceExitNow}, Stdin: r}.Run(runCtx, fx.Dir)
 				done <- result{exit, err}
 			}()
 			var got result
@@ -238,8 +264,8 @@ func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 			if elapsed := time.Since(start); elapsed > tt.bound {
 				t.Fatalf("Run returned after %s, past its bound %s", elapsed, tt.bound)
 			}
-			if got.exit != -1 || got.err == nil {
-				t.Fatalf("Run = (%d, %v), want -1, no verb's exit", got.exit, got.err)
+			if got.exit != tt.wantExit || got.err == nil {
+				t.Fatalf("Run = (%d, %v), want %d", got.exit, got.err, tt.wantExit)
 			}
 			if errors.Is(got.err, context.DeadlineExceeded) != tt.wantDeadline {
 				t.Errorf("err = %q wraps the context's deadline: %v, want %v", got.err, !tt.wantDeadline, tt.wantDeadline)
@@ -249,11 +275,88 @@ func TestBinary_StdinThatNeverEndsIsBounded(t *testing.T) {
 					t.Errorf("err = %q, want it to name %q", got.err, want)
 				}
 			}
-			if strings.Contains(got.err.Error(), "left its output open") {
-				t.Errorf("err = %q names output left open, which is not the cause", got.err)
+			for _, wrong := range append([]string{"left its output open"}, tt.notErr...) {
+				if strings.Contains(got.err.Error(), wrong) {
+					t.Errorf("err = %q names %q, which is not the cause", got.err, wrong)
+				}
 			}
 		})
 	}
+}
+
+// stdinCopies counts this process's running stdin copies: goroutines
+// stdinFeed.start began.
+func stdinCopies() int {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return strings.Count(string(buf[:n]), "ritualwitness.(*stdinFeed).start.func1(")
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+// eventually polls cond until it holds, failing t naming what after
+// helperBound.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(helperBound)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not happen within %s", what, helperBound)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestBinary_AbandonedStdinCopyEnds: when Run abandons the copy of a
+// Stdin that never reached EOF, it closes the pipe, so a process still
+// holding the binary's standard input (here a grandchild the binary left
+// running) reads its end; and the abandoned copy, still blocked in the
+// caller's reader when Run returns, ends once that reader returns (R3ab
+// re-review RRR3-3; ledger SI-344 (3)).
+func TestBinary_AbandonedStdinCopyEnds(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	dir := t.TempDir()
+	pidFile, eofFile := filepath.Join(dir, "grandchild.pid"), filepath.Join(dir, "eof")
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		if pid, err := strconv.Atoi(string(data)); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				_ = p.Kill()
+				_, _ = p.Wait()
+			}
+		}
+	})
+	eventually(t, "every earlier stdin copy ending", func() bool { return stdinCopies() == 0 })
+
+	r, w := io.Pipe()
+	defer func() { _ = w.Close() }()
+	runCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	env := []string{helperEnv + "=orphan-stdin", helperPIDFileEnv + "=" + pidFile, helperEOFFileEnv + "=" + eofFile, raceExitNow}
+	exit, _, err := Binary{Path: selfBinary(t), Env: env, Stdin: r}.Run(runCtx, fx.Dir)
+	if exit != -1 || err == nil || !strings.Contains(err.Error(), "standard input never reached EOF") {
+		t.Fatalf("Run = (%d, %v), want -1 naming the standard input that never reached EOF", exit, err)
+	}
+	if _, err := os.Stat(pidFile); err != nil {
+		t.Fatalf("the helper recorded no grandchild, so the case proves nothing: %v", err)
+	}
+	eventually(t, "the grandchild reading the end of the abandoned standard input", func() bool {
+		_, err := os.Stat(eofFile)
+		return err == nil
+	})
+	if n := stdinCopies(); n != 1 {
+		t.Fatalf("%d stdin copies run after Run returned, want the abandoned one, still blocked in the reader", n)
+	}
+
+	_ = w.Close()
+	eventually(t, "the abandoned copy ending once the reader returned", func() bool { return stdinCopies() == 0 })
 }
 
 // allCIEnv returns a CIEnv whose every field is value(key), key being the
@@ -501,7 +604,7 @@ func TestBinary_WaitDelayBoundsAnOrphanedPipe(t *testing.T) {
 		}
 	})
 	start := time.Now()
-	exit, _, err := Binary{Path: selfBinary(t), Env: []string{helperEnv + "=orphan", helperPIDFileEnv + "=" + pidFile}}.Run(boundedContext(t, ctx), fx.Dir)
+	exit, _, err := Binary{Path: selfBinary(t), Env: []string{helperEnv + "=orphan", helperPIDFileEnv + "=" + pidFile, raceExitNow}}.Run(boundedContext(t, ctx), fx.Dir)
 	elapsed := time.Since(start)
 	if bound := binaryWaitDelay + 10*time.Second; elapsed > bound {
 		t.Fatalf("Run returned after %s, past %s: the orphaned pipe held Wait", elapsed, bound)
