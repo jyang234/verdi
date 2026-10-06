@@ -716,32 +716,79 @@ type canvasWallServe struct {
 }
 
 // startCanvasWallServe starts the SHIPPED binary over a fresh shared-shape
-// store through readinessPilotFixture's sequence: provisionSharedStore,
-// buildBinary, then `verdi serve` under sharedServeEnv, the exact posture
-// the e2e harness gives its own serve. The serve stops and its scratch
-// directory, the managed worktrees inside it included, is removed when
-// the test ends.
+// store built from this module (startCanvasWallServeAt), failing the test
+// if the start fails.
 func startCanvasWallServe(t *testing.T) canvasWallServe {
 	t.Helper()
-	f := newReadinessPilotFixture(absModuleRoot(t), "http://127.0.0.1:9/openmrs")
-	var scratch string
-	t.Cleanup(func() {
-		f.stop()
-		if scratch != "" {
-			if err := os.RemoveAll(scratch); err != nil {
-				t.Errorf("removing the serve's scratch %s: %v", scratch, err)
-			}
-		}
-	})
-	url, err := f.ensureStarted(t.Context())
+	serve, err := startCanvasWallServeAt(t, absModuleRoot(t))
 	if err != nil {
 		t.Fatalf("starting verdi serve over a shared-shape store: %v", err)
+	}
+	return serve
+}
+
+// startCanvasWallServeAt starts the SHIPPED binary over a fresh
+// shared-shape store through readinessPilotFixture's sequence:
+// provisionSharedStore, buildBinary, then `verdi serve` under
+// sharedServeEnv, the exact posture the e2e harness gives its own serve.
+// moduleRoot locates the corpus and the tree the binary is built from.
+//
+// The fixture makes its scratch with os.MkdirTemp("", ...) and never
+// removes it, and a failed start never returns its path. So before the
+// start, this makes a directory of its own, registers its removal, and
+// points TMPDIR at it: every scratch the start makes, the store and its
+// managed worktrees included, lands there and is removed on every path,
+// a failed start included. The serve's stop is registered after that
+// removal, so it runs first. The directory sits directly under the
+// ambient temp root, not under a t.TempDir: serve puts its MCP socket
+// under TMPDIR, and a t.TempDir path would push the socket past the
+// 103-byte unix sun_path ceiling (I-29).
+func startCanvasWallServeAt(t *testing.T, moduleRoot string) (canvasWallServe, error) {
+	t.Helper()
+	tmp, err := os.MkdirTemp("", "cw-")
+	if err != nil {
+		t.Fatalf("making the serve's temp root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(tmp); err != nil {
+			t.Errorf("removing the serve's temp root %s: %v", tmp, err)
+		}
+	})
+	t.Setenv("TMPDIR", tmp)
+	f := newReadinessPilotFixture(moduleRoot, "http://127.0.0.1:9/openmrs")
+	t.Cleanup(f.stop)
+	url, err := f.ensureStarted(t.Context())
+	if err != nil {
+		return canvasWallServe{}, err
 	}
 	f.mu.Lock()
 	st := f.serve.store
 	f.mu.Unlock()
-	scratch = filepath.Dir(st.storeRoot)
-	return canvasWallServe{base: strings.TrimSuffix(url, "/"), store: st}
+	return canvasWallServe{base: strings.TrimSuffix(url, "/"), store: st}, nil
+}
+
+// TestStartCanvasWallServeAt_FailedStartLeavesNoScratch is the helper's
+// negative path: a start over a module root with no corpus fails after
+// the fixture has made its scratch, and once the test that started it
+// ends, no scratch is left behind.
+func TestStartCanvasWallServeAt_FailedStartLeavesNoScratch(t *testing.T) {
+	var tmp string
+	t.Run("start", func(t *testing.T) {
+		if _, err := startCanvasWallServeAt(t, t.TempDir()); err == nil {
+			t.Fatal("a start over a module root with no corpus succeeded")
+		}
+		tmp = os.Getenv("TMPDIR")
+		entries, err := os.ReadDir(tmp)
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("the failed start made no scratch under %s (%v): the witness would be vacuous", tmp, err)
+		}
+	})
+	if tmp == "" {
+		t.Fatal("the start subtest recorded no TMPDIR")
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("the failed start left %s behind (stat: %v)", tmp, err)
+	}
 }
 
 // storeFileDigests maps every regular file under root to its sha256, keyed
@@ -914,8 +961,9 @@ func refsOf(t *testing.T, root string) string {
 //     refusal banner, a pin on every object card, Correct stub, and the
 //     sticky's Graduate;
 //   - its first request reuses the worktree provisioning pre-cut, so no
-//     request pays a cut, and every worktree lives inside the harness's
-//     scratch directory, which the harness removes;
+//     request pays a cut, and every worktree lives inside the store's own
+//     scratch directory, so it goes when that scratch goes (main.go's on
+//     exit; this test's through startCanvasWallServeAt);
 //   - one typed write through the existing mutate path lands in that
 //     wall's own worktree only: the serving branch's copy, the other wall
 //     and every other file of the store are byte-identical, and no ref
@@ -935,7 +983,7 @@ func TestCanvasWallWritablePath_DomainLiveAndWritesIsolated(t *testing.T) {
 	worktrees := worktreePaths(t, root)
 	for _, p := range worktrees {
 		if !strings.HasPrefix(p, scratch+string(filepath.Separator)) {
-			t.Errorf("worktree %s lies outside the harness scratch %s, which the harness removes", p, scratch)
+			t.Errorf("worktree %s lies outside the store's scratch %s, so removing the scratch would not remove it", p, scratch)
 		}
 	}
 	for _, w := range canvasWalls() {

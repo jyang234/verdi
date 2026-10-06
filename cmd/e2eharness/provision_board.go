@@ -602,10 +602,37 @@ func writeSlotWallDerived(storeRoot, commit string) error {
 //     keyboard) write through this path. A typed write lands in that
 //     wall's own worktree only (the spec and its design-provenance
 //     record), never in the serving checkout or the other wall's
-//     worktree, and moves no ref. The branch is cut before the later
-//     provisioners add their commits to the serving branch, so its tree
-//     lacks their fixtures (diagrams, family links); the corpus on main
-//     and every fixture above are there.
+//     worktree, and moves no ref.
+//
+// The writable path is not the serving page with writes switched on. The
+// branch is cut inside provisionBoard, before the later provisioners
+// commit to the serving branch, so its tree carries the corpus on main
+// and every fixture in this file but lacks 17 files the serving branch
+// has:
+//
+//   - provisionDiagrams' 5 diagrams, .verdi/diagrams/editor-*.mermaid
+//     (base-topology, derived, derived-corrupt, illustrative-ops,
+//     proposal). Pin search for "diagram" returns 4 rows on the writable
+//     page and 9 on the serving page.
+//   - provisionFamilyBoardLinks' 4 specs: active family-links-dangling-
+//     story and family-links-orphan-story, archived family-links-
+//     archived-child and family-links-archived-parent.
+//   - provisionReadiness' policy fixture: .verdi/policy/constitution.md,
+//     policies/go-toolchain.md, overlays/frontend-go-version.md,
+//     exemptions/legacy-service-go.md, profiles/solo-default.md and
+//     projections/codex.json, with AGENTS.md and context-request.json at
+//     the root. With no policy adopted on the branch, the writable page
+//     shows the "policy not adopted" posture (asd-policy-guide,
+//     asd-policy-guide-report, asd-fact-context/policy,
+//     asd-guidance-context/policy) where the serving page shows
+//     asd-summary-context/policy and asd-summary-context/draft-writes.
+//
+// The readiness marks are also never drawn on the writable path. The
+// readiness snapshot derives from the serving checkout, so its branch is
+// design/refi-decline-flow, not the wall's design/<name>; once the marks
+// land, the writable page shows SI-350 (2)'s "readiness marks are
+// unavailable" notice instead. Marks, like every ac-1 assertion, are read
+// on the serving path.
 //
 // The spec files keep their own copies of these four paths (SI-350 (11)),
 // so the names and values stay stable; TestCanvasWallPaths pins them.
@@ -810,8 +837,10 @@ func writeCanvasWallScratch(storeRoot, commit string, w canvasWall) error {
 // wall would lack its sticky (and so its Graduate) and its static record
 // (provision_showcase_draft.go's precedent). At serve time EnsureWorktree
 // finds the path present and reuses it, so no request pays the cut. The
-// worktrees live under the harness's scratch store, which the harness
-// removes on exit.
+// worktrees live inside the store, so they go wherever the store goes:
+// main.go removes its own scratch, store and worktrees included, on exit.
+// The readiness-pilot fixture's copy of the store (readinesspilotfixture.go)
+// is never removed; that leak predates these worktrees (BL-68).
 //
 // Call it with the serving branch checked out at its final fixture commit
 // for the walls, so each branch carries the walls exactly as committed.
