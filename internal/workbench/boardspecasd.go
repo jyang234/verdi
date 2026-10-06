@@ -31,6 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -776,6 +777,26 @@ type wallRefresh struct {
 	// Both are zero when the refresh did not compose readiness.
 	readiness    *readinesspilot.Snapshot
 	readinessErr error
+	// revision is the refresh's token over every fact it derives (Wave 6
+	// §5.1; review P2R-4): the snapshot's own revision on a plain refresh,
+	// byte for byte, and on a composed one a digest of that revision and
+	// the readiness it composed — the snapshot, or the loader's failure —
+	// so a readiness change moves the token with no snapshot change.
+	revision string
+}
+
+// composedRevision is a composed refresh's token: snapRevision and the
+// readiness facts the refresh composed with it.
+func composedRevision(snapRevision string, readiness *readinesspilot.Snapshot, readinessErr error) (string, error) {
+	failure := ""
+	if readinessErr != nil {
+		failure = readinessErr.Error()
+	}
+	return canonjson.Digest(struct {
+		Snapshot         string
+		Readiness        *readinesspilot.Snapshot
+		ReadinessFailure string
+	}{snapRevision, readiness, failure})
 }
 
 // projectWallRefresh is the wall's one application projection per
@@ -785,9 +806,10 @@ type wallRefresh struct {
 // the wall's own projection, its badges and — when composeReadiness is
 // set and a loader is wired — the spec's readiness all read at the one
 // commit id, enumerate the accepted tree at most once between them, and
-// resolve nothing again. The /snapshot route refreshes without readiness:
-// the wall renders no readiness mark yet. It is the seam the marks lane
-// composes readiness through. Nothing outlives the call (co-2).
+// resolve nothing again; its revision covers all of it. The /snapshot
+// route refreshes without readiness: the wall renders no readiness mark
+// yet. It is the seam the marks lane composes readiness through. Nothing
+// outlives the call (co-2).
 func (s *boardSpecServer) projectWallRefresh(ctx context.Context, name string, composeReadiness bool) (wallRefresh, error) {
 	ctx, release := s.openProjection(ctx)
 	defer release()
@@ -795,13 +817,16 @@ func (s *boardSpecServer) projectWallRefresh(ctx context.Context, name string, c
 	if err != nil {
 		return wallRefresh{}, err
 	}
-	out := wallRefresh{snap: snap}
+	out := wallRefresh{snap: snap, revision: snap.Revision}
 	if composeReadiness && s.readinessLoader != nil {
 		readiness, err := s.readinessLoader.Load(ctx, "spec/"+name)
 		if err != nil {
 			out.readinessErr = err
 		} else {
 			out.readiness = &readiness
+		}
+		if out.revision, err = composedRevision(snap.Revision, out.readiness, out.readinessErr); err != nil {
+			return wallRefresh{}, fmt.Errorf("workbench: the composed refresh's revision: %w", err)
 		}
 	}
 	return out, nil

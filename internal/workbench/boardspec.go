@@ -812,7 +812,7 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		etag := `"` + snap.Revision + `"`
+		etag := `"` + refresh.revision + `"`
 		w.Header().Set("ETag", etag)
 		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
 			w.WriteHeader(http.StatusNotModified)

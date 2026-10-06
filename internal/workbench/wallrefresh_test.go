@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/gitx/readcensus"
 	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -255,5 +256,48 @@ func TestResolvePostureHeads_PinnedAcceptedHead(t *testing.T) {
 	unresolved := resolvePostureHeads(context.Background(), wall.root, &boardGitState{}, &countingPostureReader{})
 	if unresolved.accepted != "" || unresolved.acceptedWhy != defaultBranchUnresolved {
 		t.Fatalf("an unresolved default branch's heads = %+v", unresolved)
+	}
+}
+
+// TestProjectWallRefresh_RevisionCoversReadiness (Wave 6 §5.1; review
+// P2R-4): a composed refresh's revision covers the readiness it composes —
+// changing only the readiness (another snapshot, or a loader failure)
+// changes the composed token — while a plain refresh's token is the
+// snapshot's own revision, byte for byte, whatever the loader would say.
+func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
+	wall := refreshWalls(t)[0]
+	snapA := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Head: "a"}
+	snapB := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Head: "b"}
+	refreshWith := func(loader ReadinessLoader, compose bool) wallRefresh {
+		t.Helper()
+		s := &boardSpecServer{root: wall.root, design: readinessGapCapsBridge(), readinessLoader: loader}
+		refresh, err := s.projectWallRefresh(context.Background(), wall.name, compose)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return refresh
+	}
+	a := refreshWith(fixedSnapshotLoader{snap: snapA}, true)
+	b := refreshWith(fixedSnapshotLoader{snap: snapB}, true)
+	failed := refreshWith(erroringReadinessLoader{err: errBoom}, true)
+	if a.snap.Revision != b.snap.Revision || a.snap.Revision != failed.snap.Revision {
+		t.Fatalf("the snapshot moved with the readiness alone: %s, %s, %s", a.snap.Revision, b.snap.Revision, failed.snap.Revision)
+	}
+	if a.revision == b.revision || a.revision == failed.revision || b.revision == failed.revision {
+		t.Fatalf("a readiness change left the composed token unchanged: %s, %s, %s", a.revision, b.revision, failed.revision)
+	}
+	if a.revision == a.snap.Revision {
+		t.Fatal("the composed token is the snapshot's alone")
+	}
+	if again := refreshWith(fixedSnapshotLoader{snap: snapA}, true); again.revision != a.revision {
+		t.Fatalf("the same readiness derived two composed tokens: %s, %s", a.revision, again.revision)
+	}
+	for _, loader := range []ReadinessLoader{fixedSnapshotLoader{snap: snapA}, fixedSnapshotLoader{snap: snapB}, erroringReadinessLoader{err: errBoom}, nil} {
+		if plain := refreshWith(loader, false); plain.revision != a.snap.Revision {
+			t.Fatalf("a plain refresh's token %s is not the snapshot's revision %s", plain.revision, a.snap.Revision)
+		}
+	}
+	if none := refreshWith(nil, true); none.revision != a.snap.Revision {
+		t.Fatalf("a composed refresh with no loader carries token %s, want the snapshot's %s", none.revision, a.snap.Revision)
 	}
 }
