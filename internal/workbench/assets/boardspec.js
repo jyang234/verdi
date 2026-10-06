@@ -187,8 +187,12 @@
     if (op && !op.hidden) return true;
     var stub = document.getElementById("asd-stub-dialog");
     if (stub && !stub.hidden) return true;
+    // The open edge type picker and an open add slot hold the swap too
+    // (spec/wall-canvas-v2 co-2; SI-350 (13)).
+    var picker = document.getElementById("edge-picker");
+    if (picker && !picker.hidden) return true;
     var c = canvas();
-    return !!(c && c.querySelector(".sticky-draft"));
+    return !!(c && c.querySelector(".sticky-draft, .wall-slot[data-open]"));
   }
 
   function applyFragment(html) {
@@ -2126,11 +2130,11 @@
 
   // -- the supply toolbox (import/pin) ----------------------------------------
   //
-  // The wall's box of pins (owner directive): a quiet tab at the
-  // screen's lower-left; one click opens the tray — a search picker over
-  // the corpus index, server-rendered rows — and choosing a row pins the
-  // artifact to the wall. Escape, the tab, or any outside click closes
-  // it without residue.
+  // The wall's box of pins (owner directive): the toolbar's "Pin an
+  // artifact" button (aria-controls the tray; spec/wall-canvas-v2 ac-3)
+  // opens the tray — a search picker over the corpus index, server-
+  // rendered rows — and choosing a row pins the artifact to the wall.
+  // Escape, the button, or any outside click closes it without residue.
 
   var pinFetchSeq = 0;
 
@@ -2159,9 +2163,13 @@
       });
   }
 
+  function pinTrayButton() {
+    return document.querySelector('[aria-controls="pin-tray"]');
+  }
+
   function openPinTray() {
     var tray = pinTray();
-    var tab = document.getElementById("pin-toolbox-tab");
+    var tab = pinTrayButton();
     if (!tray || !tray.hidden) return;
     tray.hidden = false;
     if (tab) tab.setAttribute("aria-expanded", "true");
@@ -2175,7 +2183,7 @@
 
   function closePinTray() {
     var tray = pinTray();
-    var tab = document.getElementById("pin-toolbox-tab");
+    var tab = pinTrayButton();
     if (!tray || tray.hidden) return;
     tray.hidden = true;
     if (tab) tab.setAttribute("aria-expanded", "false");
@@ -2401,6 +2409,91 @@
       });
   }
 
+  // -- the toolbar's entries (spec/wall-canvas-v2 ac-3; SI-350 (5)) ----------
+  //
+  // The in-chip and in-card affordances (owner UAT round 6, item 3 + the
+  // retype directive) live on the contextual toolbar (walltoolbar.js),
+  // reached through __BOARDV2API__: the same paths and confirmations.
+
+  // removeElement routes a delete per tier: a scratch thread dies at once
+  // (hidden as its delete posts — no stale ghost; a refusal reconciles it
+  // back); a spec-layer edge mirrors creation (gate-bearing types confirm
+  // first); a paper takes the trash drop's own routing.
+  function removeElement(el) {
+    if (!el.classList.contains("yarn-chip")) {
+      var kind = "card";
+      if (el.classList.contains("sticky")) kind = "sticky";
+      else if (el.classList.contains("refcard")) kind = "refcard";
+      else if (el.classList.contains("stubcard")) kind = "stub";
+      trashDrop({ kind: kind, el: el });
+      return;
+    }
+    if (el.getAttribute("data-layer") === "annotation") {
+      el.style.visibility = "hidden";
+      mutate("annotation-delete", { id: el.getAttribute("data-annotation-id") });
+      return;
+    }
+    var stored = chipStoredLink(el, el.getAttribute("data-to"));
+    var type = el.getAttribute("data-edge-type");
+    if (state.gate.indexOf(type) >= 0) {
+      pending = { remove: true, from: el.getAttribute("data-from"), to: el.getAttribute("data-to"), type: type, storedRef: stored.ref, storedNote: stored.note };
+      openConfirm("Remove " + type, state.removals[type] || "", false);
+    } else {
+      mutateOps([removeLinkOp(el.getAttribute("data-from"), type, stored.ref, stored.note)]);
+    }
+  }
+
+  // chipPicker frames the picker over a chip's own pair.
+  function chipPicker(chip, extra) {
+    var fromEl = endpointElement(chip.getAttribute("data-from"));
+    var toEl = endpointElement(chip.getAttribute("data-to"));
+    extra.from = chip.getAttribute("data-from");
+    extra.fromKind = fromEl ? kindOfElement(fromEl) : "unknown";
+    extra.to = chip.getAttribute("data-to");
+    extra.toKind = toEl ? kindOfElement(toEl) : "unknown";
+    openPicker(extra);
+  }
+
+  // retypeChip reopens the context-sensitive picker over the chip's pair,
+  // offering the OTHER legal types (in-place retype, owner directive).
+  function retypeChip(chip) {
+    var stored = chipStoredLink(chip, chip.getAttribute("data-to"));
+    chipPicker(chip, { retype: chip.getAttribute("data-edge-type"), storedRef: stored.ref, storedNote: stored.note });
+  }
+
+  // graduateElement graduates a sticky or a scratch thread. A proto-
+  // sticky's kind is its type, so there is no menu — one confirmation
+  // carrying the FULL impact preview (F-06/F-08), the server-derived slug
+  // validated BEFORE the durable mutation. Any other sticky takes the
+  // object menu at the toolbar's button; a thread, the picker over its pair.
+  function graduateElement(el, anchorEl) {
+    if (el.classList.contains("yarn-chip")) {
+      chipPicker(el, { annotationId: el.getAttribute("data-annotation-id") });
+      return;
+    }
+    var type = el.getAttribute("data-annotation-type");
+    if (type !== "story" && type !== "spike") {
+      openGraduateMenu(anchorEl || el, el.getAttribute("data-id"));
+      return;
+    }
+    var plan = stubGraduationPlan(el);
+    if (plan.error) {
+      pending = null;
+      openConfirm("Not yet a stub", plan.error, false);
+      document.getElementById("edge-confirm-ok").hidden = true;
+      return;
+    }
+    pending = { stubGraduate: plan };
+    openConfirm(
+      "Graduate into stub “" + plan.slug + "”",
+      "One typed operation (add-stub) declares slug " + plan.slug + " in this spec's stubs registry, " +
+        (plan.spike ? "resolving open questions " : "covering acceptance criteria ") + plan.targets.join(", ") +
+        ". Its yarn graduates with it. Instantiating it later cuts branch design/" + plan.slug +
+        " carrying spec/" + plan.slug + " at .verdi/specs/active/" + plan.slug + "/spec.md.",
+      false
+    );
+  }
+
   // -- graduate menus ---------------------------------------------------------
 
   var pendingSticky = null;
@@ -2466,9 +2559,9 @@
       return;
     }
 
-    // The supply toolbox: the tab toggles the tray; a result row pins;
+    // The supply toolbox: its button toggles the tray; a result row pins;
     // any click outside closes the tray without residue.
-    if (t.closest("#pin-toolbox-tab")) {
+    if (t.closest('[aria-controls="pin-tray"]')) {
       var trayEl = pinTray();
       if (trayEl && trayEl.hidden) openPinTray();
       else closePinTray();
@@ -2712,64 +2805,6 @@
         return;
     }
 
-    // Deletion affordances (owner UAT round 6, item 3): scratch records
-    // die immediately (mutable stream only); a spec-layer edge mirrors
-    // creation — gate-bearing types restate their removal consequence
-    // and confirm first, others remove on the spot.
-    var del = t.closest(".delete-btn");
-    if (del) {
-      var what = del.getAttribute("data-delete");
-      if (what === "sticky") {
-        // Immediate acknowledgment (same as the trash drop): the sticky
-        // hides the moment its delete is posted — no stale ghost to
-        // double-delete; a refusal reconciles it back via the refetch.
-        var deadSticky = del.closest(".sticky");
-        deadSticky.style.visibility = "hidden";
-        mutate("annotation-delete", { id: deadSticky.getAttribute("data-id") });
-      } else if (what === "thread") {
-        var deadChip = del.closest(".yarn-chip");
-        deadChip.style.visibility = "hidden";
-        mutate("annotation-delete", { id: deadChip.getAttribute("data-annotation-id") });
-      } else {
-        var edgeChip = del.closest(".yarn-chip");
-        var stored = chipStoredLink(edgeChip, edgeChip.getAttribute("data-to"));
-        var edge = {
-          from: edgeChip.getAttribute("data-from"),
-          to: edgeChip.getAttribute("data-to"),
-          type: edgeChip.getAttribute("data-edge-type"),
-          storedRef: stored.ref,
-          storedNote: stored.note,
-        };
-        if (state.gate.indexOf(edge.type) >= 0) {
-          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type, storedRef: edge.storedRef, storedNote: edge.storedNote };
-          openConfirm("Remove " + edge.type, state.removals[edge.type] || "", false);
-        } else {
-          mutateOps([removeLinkOp(edge.from, edge.type, edge.storedRef, edge.storedNote)]);
-        }
-      }
-      return;
-    }
-
-    // In-place retype (owner directive): the chip's type label reopens
-    // the context-sensitive picker over the same pair.
-    var retypeBtn = t.closest("[data-retype]");
-    if (retypeBtn) {
-      var retypeChip = retypeBtn.closest(".yarn-chip");
-      var retypeStored = chipStoredLink(retypeChip, retypeChip.getAttribute("data-to"));
-      var rFrom = endpointElement(retypeChip.getAttribute("data-from"));
-      var rTo = endpointElement(retypeChip.getAttribute("data-to"));
-      openPicker({
-        from: retypeChip.getAttribute("data-from"),
-        fromKind: rFrom ? kindOfElement(rFrom) : "unknown",
-        to: retypeChip.getAttribute("data-to"),
-        toKind: rTo ? kindOfElement(rTo) : "unknown",
-        retype: retypeChip.getAttribute("data-edge-type"),
-        storedRef: retypeStored.ref,
-        storedNote: retypeStored.note,
-      });
-      return;
-    }
-
     // Instantiate (sealed accepted feature wall): consequence-labeled
     // before it fires — a branch cut is not a hover-and-hope click.
     var inst = t.closest("[data-instantiate]");
@@ -2785,49 +2820,6 @@
           "The serving checkout never moves — nothing on this wall changes until that branch merges.",
         false
       );
-      return;
-    }
-
-    var grad = t.closest(".graduate-btn");
-    if (grad) {
-      if (grad.getAttribute("data-graduate") === "stub") {
-        // The proto-sticky's graduation: the kind is already the
-        // sticky's type, so there is no menu — one confirmation carrying
-        // the FULL impact preview (F-06/F-08): the server-derived slug is
-        // validated against the server's own grammar BEFORE the durable
-        // mutation, and the exact resulting refs/paths/bindings are
-        // spoken first.
-        var protoEl = grad.closest(".sticky");
-        var plan = stubGraduationPlan(protoEl);
-        if (plan.error) {
-          pending = null;
-          openConfirm("Not yet a stub", plan.error, false);
-          document.getElementById("edge-confirm-ok").hidden = true;
-          return;
-        }
-        pending = { stubGraduate: plan };
-        openConfirm(
-          "Graduate into stub “" + plan.slug + "”",
-          "One typed operation (add-stub) declares slug " + plan.slug + " in this spec's stubs registry, " +
-            (plan.spike ? "resolving open questions " : "covering acceptance criteria ") + plan.targets.join(", ") +
-            ". Its yarn graduates with it. Instantiating it later cuts branch design/" + plan.slug +
-            " carrying spec/" + plan.slug + " at .verdi/specs/active/" + plan.slug + "/spec.md.",
-          false
-        );
-      } else if (grad.getAttribute("data-graduate") === "sticky") {
-        openGraduateMenu(grad, grad.closest(".sticky").getAttribute("data-id"));
-      } else {
-        var chip = grad.closest(".yarn-chip");
-        var fromEl = endpointElement(chip.getAttribute("data-from"));
-        var toEl = endpointElement(chip.getAttribute("data-to"));
-        openPicker({
-          from: chip.getAttribute("data-from"),
-          fromKind: fromEl ? kindOfElement(fromEl) : "unknown",
-          to: chip.getAttribute("data-to"),
-          toKind: toEl ? kindOfElement(toEl) : "unknown",
-          annotationId: chip.getAttribute("data-annotation-id"),
-        });
-      }
       return;
     }
 
@@ -2936,7 +2928,7 @@
 
   // The ASD transport's hooks (boardspecasd.js): the region swap, the
   // interaction-hold contract, and the status line — one owner each, no
-  // duplicated machinery.
+  // duplicated machinery. The toolbar's entries (walltoolbar.js) follow.
   window.__BOARDV2API__ = {
     applyFragment: applyFragment,
     interactionLive: interactionLive,
@@ -2944,6 +2936,11 @@
     resumeHeldRefresh: resumeHeldRefresh,
     setStatus: setStatus,
     setDirty: function (dirty) { state.git.dirty = dirty; },
+    addSticky: startStickyEditor,
+    editCard: openCardEditor,
+    remove: removeElement,
+    retype: retypeChip,
+    graduate: graduateElement,
     openNotice: function (title, message) {
       openConfirm(title, message, false);
       var ok = document.getElementById("edge-confirm-ok");

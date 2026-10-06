@@ -454,6 +454,18 @@
     var preview = document.getElementById("asd-op-id-preview");
     if (sel && preview) preview.textContent = "will be declared as " + nextIDFor(sel.value);
   }
+  // declareOp builds the one typed operation that declares a new object
+  // with the server's next id for its kind (the canvas's data-next-id-*),
+  // its anchor heading, and, for an acceptance criterion, the attestation
+  // evidence floor. The add-object dialog and the wall's add-in-place
+  // slots (walltoolbar.js; spec/wall-canvas-v2 ac-5) share it, so no
+  // client ever mints an id of its own.
+  function declareOp(op, text) {
+    var id = nextIDFor(op);
+    var o = { op: op, id: id, text: text, anchor: "#" + id };
+    if (op === "add-ac") o.evidence = ["attestation"];
+    return o;
+  }
   document.addEventListener("change", function (e) {
     if (e.target && e.target.id === "asd-op-kind") updateIDPreview();
   });
@@ -484,11 +496,7 @@
         var anchor = anchorAttr && anchorAttr.getAttribute("data-anchor") ? anchorAttr.getAttribute("data-anchor") : (opState.kind === "set-problem" ? "#problem" : "#outcome");
         ops = [{ op: opState.kind, text: text, anchor: anchor }];
       } else {
-        var sel = document.getElementById("asd-op-kind").value;
-        var id = nextIDFor(sel);
-        var op = { op: sel, id: id, text: text, anchor: "#" + id };
-        if (sel === "add-ac") op.evidence = ["attestation"];
-        ops = [op];
+        ops = [declareOp(document.getElementById("asd-op-kind").value, text)];
       }
       hideDialogs();
       mutate(ops, {});
@@ -629,11 +637,12 @@
     mutate(ops, {});
   }
 
-  // The published transport surface boardspec.js consumes.
+  // The published transport surface boardspec.js and walltoolbar.js consume.
   window.__verdiASD = {
     mutate: mutate,
     refresh: refresh,
     slugPattern: slugPattern,
+    declareOp: declareOp,
     state: function () {
       return { revision: revision, baseDigest: baseDigest, expected: expected };
     },

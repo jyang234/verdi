@@ -518,7 +518,22 @@
 
   // The seam the following lanes read: the toolbar acts on the selection,
   // the keyboard moves it. Set before arrival, so a page that arrives on a
-  // card already has it.
+  // card already has it. keyOf and elementOf translate between a card or
+  // chip element and the selection that names it, in this file's one key
+  // grammar, so no other asset re-derives a key.
+  function keyOf(el) {
+    if (el.classList.contains("yarn-chip")) return { kind: "thread", key: chipKey(el) };
+    return { kind: "card", key: cardKey(el) };
+  }
+  function elementOf(s) {
+    if (!s) return null;
+    if (s.kind === "card") return cardByKey(s.key);
+    var all = chips();
+    for (var i = 0; i < all.length; i++) {
+      if (chipKey(all[i]) === s.key) return all[i];
+    }
+    return null;
+  }
   window.__WALLSELECT__ = {
     selection: function () {
       return selection;
@@ -526,6 +541,11 @@
     select: select,
     clear: function () {
       select(null);
+    },
+    keyOf: keyOf,
+    elementOf: elementOf,
+    selectElement: function (el) {
+      select(keyOf(el));
     },
   };
 
