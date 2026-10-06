@@ -41,10 +41,29 @@ import (
 // it.
 //
 // The scan is syntactic (go/parser, no type checking), so its shapes are
-// named where they are defined: tokenListSites for (a), execSites and
-// gitProgramLiterals for (b), and the update-ref spelling for (c). The
-// falsifier subtests apply mutants to the parsed source, at least one per
-// clause, and require each to draw its clause's finding.
+// named where they are defined: tokenListSites and checkRecoveryDelegates
+// for (a); execSites, launcherPrograms and gitProgramLiterals for (b); and
+// checkGitxUpdateRef's constant evaluation for (c). The falsifier subtests
+// apply mutants to the parsed source, at least one per clause, and require
+// each to draw its clause's finding.
+//
+// Two rules fail closed on legitimate text. The git-literal rule reports
+// any string literal naming the git program, so `filepath.Join(xdg, "git")`
+// naming a configuration directory is a finding; the token rule reports
+// any list spelling two forbidden tokens, so a `case "reset", "clean":`
+// written for another purpose is a second list. The remedy is a named
+// exception in this test (gitNameExceptions or tokenTextExceptions: file,
+// function and reason), never a weaker rule; an exception that excuses
+// nothing is itself a finding.
+//
+// Disclosed, not proven: a token list assembled at run time from one-token
+// fragments (`append([]string{"reset"}, "clean")`) is not seen by (a);
+// git a child program runs itself (the go toolchain under `go test`, make,
+// npx) is outside (b) (SI-359 (4b)); a command's .Path assigned in a file
+// that does not import os/exec is not seen by (b); and an argv in gitx
+// assembled at run time is seen by (c) only for the functions
+// checkBranchCreationArgv runs. A program name taken from another
+// package's constant is treated as data, the fail-closed direction.
 func TestGitRecorderSeamStaticContract(t *testing.T) {
 	src, err := loadSeamSource(verdiRepoRoot)
 	if err != nil {
@@ -58,16 +77,16 @@ func TestGitRecorderSeamStaticContract(t *testing.T) {
 		t.Logf("the verdi binary's closure: %d module packages, %d non-test files", len(src.closure), len(src.files))
 	})
 	t.Run("a: one shared forbidden-token list", func(t *testing.T) {
-		findings, def := checkForbiddenTokenList(src)
+		findings, def := checkForbiddenTokenList(src, tokenTextExceptions())
 		for _, f := range findings {
 			t.Error(f)
 		}
 		if def != nil {
-			t.Logf("the forbidden-token list is defined once, at %s, holding %q; internal/recovery imports %s", def.pos, def.tokens, def.pkg)
+			t.Logf("the forbidden-token list is defined once, at %s, holding %q; internal/recovery imports %s, and its IsForbiddenArgv delegates to it", def.pos, def.tokens, def.pkg)
 		}
 	})
 	t.Run("b: git runs only through internal/gitx", func(t *testing.T) {
-		findings, sites := checkGitExecution(src, dataNamedExecExceptions())
+		findings, sites := checkGitExecution(src, dataNamedExecExceptions(), gitNameExceptions())
 		for _, f := range findings {
 			t.Error(f)
 		}
@@ -88,6 +107,11 @@ func TestGitRecorderSeamStaticContract(t *testing.T) {
 			for _, want := range m.wants {
 				if !strings.Contains(got, want) {
 					t.Errorf("clause %s missed the mutant %q (findings:\n%s\n); want a finding mentioning %q", m.clause, m.name, got, want)
+				}
+			}
+			for _, unwanted := range m.notWants {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("clause %s reported %q under %q (findings:\n%s\n); a named exception excuses it", m.clause, unwanted, m.name, got)
 				}
 			}
 		})
@@ -243,17 +267,58 @@ func forbiddenTokenFloor() []string {
 // least two distinct forbidden tokens.
 type tokenListSite struct {
 	pkg    string
+	path   string
+	fn     string
 	pos    string
 	tokens []string // the distinct forbidden tokens it spells, in source order
+}
+
+// textException names one production function whose string literals spell
+// two forbidden tokens, or the git program's name, for a purpose other
+// than listing the tokens or running git, with its reason. The token and
+// git-literal rules fail closed on such text, and a named exception is the
+// remedy; an exception that excuses nothing is itself a finding.
+type textException struct {
+	path   string // module-relative file
+	fn     string // enclosing function, as funcName renders it; "" for package scope
+	reason string
+}
+
+// tokenTextExceptions returns clause (a)'s named exceptions: none today.
+func tokenTextExceptions() []textException { return nil }
+
+// gitNameExceptions returns clause (b)'s named exceptions to the
+// git-literal rule: none today.
+func gitNameExceptions() []textException { return nil }
+
+// excused reports whether exceptions name (path, fn), counting the use.
+func excused(exceptions []textException, used map[int]bool, path, fn string) bool {
+	for i, e := range exceptions {
+		if e.path == path && e.fn == fn {
+			used[i] = true
+			return true
+		}
+	}
+	return false
+}
+
+// staleExceptions reports each exception that excused nothing.
+func staleExceptions(clause string, exceptions []textException, used map[int]bool) []string {
+	var findings []string
+	for i, e := range exceptions {
+		if !used[i] {
+			findings = append(findings, fmt.Sprintf("%s: named text exception %s in %s excuses nothing; remove it (reason was: %s)", clause, e.fn, e.path, e.reason))
+		}
+	}
+	return findings
 }
 
 // tokenListSites finds every list in the closure that spells two or more
 // distinct forbidden tokens as string literals: a composite literal's
 // elements (a map's keys and values alike), a switch case's expressions, or
 // one const or var declaration's values. These are the shapes a token list
-// is written in; a list assembled at run time from fragments is not seen
-// (a disclosed limit). On the closure today the one shared definition is
-// the only list spelling even two.
+// is written in. On the closure today the one shared definition is the
+// only list spelling even two.
 func tokenListSites(src seamSource) []tokenListSite {
 	floor := map[string]bool{}
 	for _, tok := range forbiddenTokenFloor() {
@@ -261,53 +326,62 @@ func tokenListSites(src seamSource) []tokenListSite {
 	}
 	var sites []tokenListSite
 	for _, sf := range src.files {
-		ast.Inspect(sf.file, func(n ast.Node) bool {
-			var exprs []ast.Expr
-			switch x := n.(type) {
-			case *ast.CompositeLit:
-				for _, e := range x.Elts {
-					if kv, ok := e.(*ast.KeyValueExpr); ok {
-						exprs = append(exprs, kv.Key, kv.Value)
-						continue
+		for _, decl := range sf.file.Decls {
+			fn := funcName(decl)
+			ast.Inspect(decl, func(n ast.Node) bool {
+				var exprs []ast.Expr
+				switch x := n.(type) {
+				case *ast.CompositeLit:
+					for _, e := range x.Elts {
+						if kv, ok := e.(*ast.KeyValueExpr); ok {
+							exprs = append(exprs, kv.Key, kv.Value)
+							continue
+						}
+						exprs = append(exprs, e)
 					}
-					exprs = append(exprs, e)
+				case *ast.CaseClause:
+					exprs = x.List
+				case *ast.GenDecl:
+					for _, spec := range x.Specs {
+						if vs, ok := spec.(*ast.ValueSpec); ok {
+							exprs = append(exprs, vs.Values...)
+						}
+					}
+				default:
+					return true
 				}
-			case *ast.CaseClause:
-				exprs = x.List
-			case *ast.GenDecl:
-				for _, spec := range x.Specs {
-					if vs, ok := spec.(*ast.ValueSpec); ok {
-						exprs = append(exprs, vs.Values...)
+				var tokens []string
+				have := map[string]bool{}
+				for _, e := range exprs {
+					if v, ok := stringLiteral(e); ok && floor[v] && !have[v] {
+						have[v] = true
+						tokens = append(tokens, v)
 					}
 				}
-			default:
+				if len(tokens) >= 2 {
+					sites = append(sites, tokenListSite{pkg: sf.pkg, path: sf.path, fn: fn, pos: src.position(n.Pos()), tokens: tokens})
+				}
 				return true
-			}
-			var tokens []string
-			have := map[string]bool{}
-			for _, e := range exprs {
-				if v, ok := stringLiteral(e); ok && floor[v] && !have[v] {
-					have[v] = true
-					tokens = append(tokens, v)
-				}
-			}
-			if len(tokens) >= 2 {
-				sites = append(sites, tokenListSite{pkg: sf.pkg, pos: src.position(n.Pos()), tokens: tokens})
-			}
-			return true
-		})
+			})
+		}
 	}
 	return sites
 }
 
 // checkForbiddenTokenList proves clause (a): exactly one list, outside
 // internal/recovery (dc-1 moved it out), holding the floor, in a package
-// recovery imports. A list inside recovery is a copy whether or not
-// recovery also imports the shared one. It returns the definition when
-// clause (a) holds.
-func checkForbiddenTokenList(src seamSource) ([]string, *tokenListSite) {
-	sites := tokenListSites(src)
-	var findings []string
+// recovery imports, and recovery's runtime refusal delegating to it. A
+// list inside recovery is a copy whether or not recovery also imports the
+// shared one. It returns the definition when clause (a) holds.
+func checkForbiddenTokenList(src seamSource, exceptions []textException) ([]string, *tokenListSite) {
+	used := map[int]bool{}
+	var sites []tokenListSite
+	for _, s := range tokenListSites(src) {
+		if !excused(exceptions, used, s.path, s.fn) {
+			sites = append(sites, s)
+		}
+	}
+	findings := staleExceptions("a", exceptions, used)
 	var shared []tokenListSite
 	for _, s := range sites {
 		if s.pkg == "internal/recovery" {
@@ -358,11 +432,76 @@ func checkForbiddenTokenList(src seamSource) ([]string, *tokenListSite) {
 		findings = append(findings, "a: internal/recovery has no production file in the closure")
 	case !imported:
 		findings = append(findings, fmt.Sprintf("a: internal/recovery does not import %s, the package defining the forbidden-token list", def.pkg))
+	default:
+		findings = append(findings, checkRecoveryDelegates(src, defImport)...)
 	}
 	if len(findings) > 0 {
 		return findings, nil
 	}
 	return nil, &def
+}
+
+// checkRecoveryDelegates pins recovery's runtime refusal to the shared
+// list (SI-359 (4c)): recovery.IsForbiddenArgv's whole body is `return
+// <shared>.Forbids(<its parameter>)`. Anything else in that body could
+// spell the tokens again in a shape tokenListSites cannot see (one literal
+// split at run time, say), so it is a second definition.
+func checkRecoveryDelegates(src seamSource, defImport string) []string {
+	const want = "Forbids"
+	found := 0
+	var findings []string
+	for _, sf := range src.files {
+		if sf.pkg != "internal/recovery" {
+			continue
+		}
+		local := ""
+		for _, imp := range sf.file.Imports {
+			if p, err := strconv.Unquote(imp.Path.Value); err == nil && p == defImport {
+				local = path.Base(p)
+				if imp.Name != nil {
+					local = imp.Name.Name
+				}
+			}
+		}
+		for _, decl := range sf.file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name.Name != "IsForbiddenArgv" {
+				continue
+			}
+			found++
+			if !delegatesTo(fd, local, want) {
+				findings = append(findings, fmt.Sprintf("a: recovery.IsForbiddenArgv at %s does not delegate to %s.%s: its whole body must be `return %s.%s(<its parameter>)`, so recovery spells no second copy of the list (SI-359 (4c))", src.position(fd.Pos()), path.Base(defImport), want, path.Base(defImport), want))
+			}
+		}
+	}
+	if found != 1 {
+		findings = append(findings, fmt.Sprintf("a: internal/recovery declares IsForbiddenArgv %d times, want once (SI-359 (4c) pins its delegation)", found))
+	}
+	return findings
+}
+
+// delegatesTo reports whether fd's whole body is `return local.fn(p)` with
+// p its only parameter.
+func delegatesTo(fd *ast.FuncDecl, local, fn string) bool {
+	params := fd.Type.Params.List
+	if local == "" || fd.Body == nil || len(fd.Body.List) != 1 || len(params) != 1 || len(params[0].Names) != 1 {
+		return false
+	}
+	ret, ok := fd.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	call, ok := ret.Results[0].(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != fn {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	arg, argOK := call.Args[0].(*ast.Ident)
+	return ok && pkg.Name == local && argOK && arg.Name == params[0].Names[0].Name
 }
 
 // ---- (b) git runs only through internal/gitx ----
@@ -428,10 +567,11 @@ func isGitProgram(v string) bool {
 // where it is named, and no string literal names the git program, which
 // is how a wrapper that runs its argument (publicrelease's commandBytes
 // shape) would be handed git.
-func checkGitExecution(src seamSource, exceptions []dataNamedException) ([]string, []execSite) {
+func checkGitExecution(src seamSource, exceptions []dataNamedException, textExceptions []textException) ([]string, []execSite) {
 	var findings []string
 	var sites []execSite
 	consts := map[string]map[string]ast.Expr{}
+	used := map[int]bool{}
 	for _, sf := range src.files {
 		if sf.pkg == "internal/gitx" {
 			continue
@@ -440,11 +580,12 @@ func checkGitExecution(src seamSource, exceptions []dataNamedException) ([]strin
 		sites = append(sites, fileSites...)
 		findings = append(findings, fileFindings...)
 		for _, lit := range gitProgramLiterals(sf) {
-			if !reported[lit.Pos()] {
-				findings = append(findings, fmt.Sprintf("b: %s names the git program outside internal/gitx", src.position(lit.Pos())))
+			if !reported[lit.lit.Pos()] && !excused(textExceptions, used, sf.path, lit.fn) {
+				findings = append(findings, fmt.Sprintf("b: %s (%s) names the git program outside internal/gitx", src.position(lit.lit.Pos()), lit.fn))
 			}
 		}
 	}
+	findings = append(findings, staleExceptions("b", textExceptions, used)...)
 	for _, s := range sites {
 		if !s.data && isGitProgram(s.program) {
 			findings = append(findings, fmt.Sprintf("b: %s (%s, %s) executes git outside internal/gitx", s.pos, s.fn, s.what))
@@ -479,11 +620,60 @@ func exceptionIndex(exceptions []dataNamedException, s execSite) int {
 	return -1
 }
 
-// execSites finds one file's process starts: os/exec's Command and
-// CommandContext called (program from the first or second argument) or
-// used as a value (program unknown), an exec.Cmd built directly, and
-// os.StartProcess and syscall's Exec, ForkExec and StartProcess. reported
-// holds the positions of program literals it classified, so the
+// launcherPrograms returns the programs that run another program named in
+// their arguments: shells, env-style wrappers and script interpreters
+// (SI-359 (4a)). A constant program naming one of them is a data-named exec
+// site, since what it finally runs (`sh -c "git status"`) is its
+// arguments' business. The list is explicit; the go toolchain, make and npx
+// may run git themselves too, and SI-359 (4b) leaves that outside this
+// contract, disclosed.
+func launcherPrograms() []string {
+	return []string{
+		"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "busybox",
+		"env", "xargs", "nice", "nohup", "timeout", "time", "stdbuf", "setsid", "flock", "ionice",
+		"sudo", "doas", "chroot", "nsenter", "unshare",
+		"perl", "python", "python3", "ruby", "node", "osascript", "pwsh", "powershell", "cmd",
+	}
+}
+
+// isLauncher reports whether a constant program name names a launcher.
+func isLauncher(v string) bool {
+	base := strings.TrimSuffix(path.Base(v), ".exe")
+	for _, l := range launcherPrograms() {
+		if base == l {
+			return true
+		}
+	}
+	return false
+}
+
+// lowLevelStart reports whether pkg.sel starts a process below os/exec:
+// os.StartProcess, and syscall's or golang.org/x/sys/unix's Exec, ForkExec
+// and StartProcess. Each is a data-named site unless its program is git.
+func lowLevelStart(pkgPath, sel string) bool {
+	switch pkgPath {
+	case "os":
+		return sel == "StartProcess"
+	case "syscall", "golang.org/x/sys/unix":
+		return sel == "Exec" || sel == "ForkExec" || sel == "StartProcess"
+	}
+	return false
+}
+
+// execSites finds one file's process starts (SI-359 (4), (4a)):
+//
+//   - os/exec's Command and CommandContext called: the program is the first
+//     or second argument. A constant program naming git executes git; one
+//     naming a launcher, or a program that is not a constant, is data-named.
+//   - os/exec's Command and CommandContext used as a value, new(exec.Cmd),
+//     a zero-value `var c exec.Cmd`, an exec.Cmd literal without a constant
+//     Path, and, in a file importing os/exec, any assignment to a .Path:
+//     data-named.
+//   - os.StartProcess and syscall's and golang.org/x/sys/unix's Exec,
+//     ForkExec and StartProcess: data-named, or executing git when their
+//     program is the constant git.
+//
+// reported holds the positions of program constants it classified, so the
 // git-literal pass does not report them twice. consts caches each
 // package's constants across its files.
 func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Expr) ([]execSite, map[token.Pos]bool, []string) {
@@ -491,7 +681,7 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 	var findings []string
 	for _, imp := range sf.file.Imports {
 		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || (p != "os/exec" && p != "os" && p != "syscall") {
+		if err != nil || (p != "os/exec" && p != "os" && p != "syscall" && p != "golang.org/x/sys/unix") {
 			continue
 		}
 		name := path.Base(p)
@@ -511,19 +701,37 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 	if len(names) == 0 {
 		return nil, reported, findings
 	}
-	program := func(e ast.Expr, decl ast.Decl) (string, bool) {
-		if consts[sf.pkg] == nil {
-			consts[sf.pkg] = packageConsts(src, sf.pkg)
-		}
-		return constString(e, consts[sf.pkg], shadowedNames(decl), 0)
+	importsExec := false
+	for _, p := range names {
+		importsExec = importsExec || p == "os/exec"
 	}
 	var sites []execSite
-	add := func(site execSite, n ast.Node) {
-		site.pos = src.position(n.Pos())
-		sites = append(sites, site)
-	}
 	for _, decl := range sf.file.Decls {
 		fn := funcName(decl)
+		// classify records a site whose program is e: executing git when e
+		// is the constant git, constant-named when launchers are allowed
+		// through (allowConst) and e is another constant that names no
+		// launcher, data-named otherwise.
+		classify := func(n ast.Node, what string, e ast.Expr, allowConst bool) {
+			site := execSite{path: sf.path, fn: fn, pos: src.position(n.Pos()), what: what, data: true}
+			if e != nil {
+				if consts[sf.pkg] == nil {
+					consts[sf.pkg] = packageConsts(src, sf.pkg)
+				}
+				if v, ok := constString(e, consts[sf.pkg], shadowedNames(decl), 0); ok {
+					reported[e.Pos()] = true
+					switch {
+					case isGitProgram(v):
+						site.data, site.program = false, v
+					case isLauncher(v):
+						site.what = what + " through the launcher " + v
+					case allowConst:
+						site.data, site.program = false, v
+					}
+				}
+			}
+			sites = append(sites, site)
+		}
 		calls := map[ast.Node]bool{}
 		ast.Inspect(decl, func(n ast.Node) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
@@ -532,61 +740,56 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 			return true
 		})
 		ast.Inspect(decl, func(n ast.Node) bool {
-			site := execSite{path: sf.path, fn: fn}
 			switch x := n.(type) {
 			case *ast.CallExpr:
 				pkgPath, sel := qualified(names, x.Fun)
-				prog := -1
 				switch {
-				case pkgPath == "os/exec" && sel == "Command":
-					prog = 0
-				case pkgPath == "os/exec" && sel == "CommandContext":
-					prog = 1
-				case pkgPath == "os" && sel == "StartProcess", pkgPath == "syscall" && (sel == "Exec" || sel == "ForkExec" || sel == "StartProcess"):
-					prog = 0
+				case pkgPath == "os/exec" && sel == "Command" && len(x.Args) > 0:
+					classify(x, "os/exec.Command", x.Args[0], true)
+				case pkgPath == "os/exec" && sel == "CommandContext" && len(x.Args) > 1:
+					classify(x, "os/exec.CommandContext", x.Args[1], true)
+				case lowLevelStart(pkgPath, sel) && len(x.Args) > 0:
+					classify(x, pkgPath+"."+sel, x.Args[0], false)
 				}
 				if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "new" && len(x.Args) == 1 {
 					if p, s := qualified(names, x.Args[0]); p == "os/exec" && s == "Cmd" {
-						site.data, site.what = true, "new(os/exec.Cmd)"
-						add(site, x)
+						classify(x, "new(os/exec.Cmd)", nil, false)
 					}
 				}
-				if prog < 0 || len(x.Args) <= prog {
-					return true
-				}
-				site.what = pkgPath + "." + sel
-				arg := x.Args[prog]
-				if v, ok := program(arg, decl); ok {
-					site.program = v
-					reported[arg.Pos()] = true
-				} else {
-					site.data = true
-				}
-				add(site, x)
 			case *ast.SelectorExpr:
-				if calls[x] {
-					return true
+				if pkgPath, sel := qualified(names, x); !calls[x] && pkgPath == "os/exec" && (sel == "Command" || sel == "CommandContext") {
+					classify(x, "os/exec."+sel+" value", nil, false)
 				}
-				if pkgPath, sel := qualified(names, x); pkgPath == "os/exec" && (sel == "Command" || sel == "CommandContext") {
-					site.data, site.what = true, "os/exec."+sel+" value"
-					add(site, x)
+			case *ast.ValueSpec:
+				if _, pointer := x.Type.(*ast.StarExpr); !pointer && len(x.Values) == 0 {
+					if p, s := qualified(names, x.Type); p == "os/exec" && s == "Cmd" {
+						classify(x, "zero-value os/exec.Cmd", nil, false)
+					}
 				}
 			case *ast.CompositeLit:
 				if pkgPath, sel := qualified(names, x.Type); pkgPath == "os/exec" && sel == "Cmd" {
-					site.data, site.what = true, "os/exec.Cmd literal"
+					var program ast.Expr
 					for _, e := range x.Elts {
-						kv, ok := e.(*ast.KeyValueExpr)
-						if !ok {
-							continue
-						}
-						if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Path" {
-							if v, ok := program(kv.Value, decl); ok {
-								site.data, site.program = false, v
-								reported[kv.Value.Pos()] = true
+						if kv, ok := e.(*ast.KeyValueExpr); ok {
+							if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Path" {
+								program = kv.Value
 							}
 						}
 					}
-					add(site, x)
+					classify(x, "os/exec.Cmd literal", program, program != nil)
+				}
+			case *ast.AssignStmt:
+				if !importsExec {
+					return true
+				}
+				for i, l := range x.Lhs {
+					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == "Path" {
+						var value ast.Expr
+						if len(x.Rhs) == len(x.Lhs) {
+							value = x.Rhs[i]
+						}
+						classify(x, "a command's .Path assigned", value, false)
+					}
 				}
 			}
 			return true
@@ -783,42 +986,55 @@ func stringLiteral(e ast.Expr) (string, bool) {
 	return v, true
 }
 
+// gitLiteral is a string literal naming the git program, with the
+// function it sits in.
+type gitLiteral struct {
+	lit *ast.BasicLit
+	fn  string
+}
+
 // gitProgramLiterals returns a file's string literals that name the git
 // program, outside import paths and struct tags (a `json:"git"` tag is
-// not a program name).
-func gitProgramLiterals(sf seamFile) []*ast.BasicLit {
+// not a program name). Text that merely starts with "git " (recovery's
+// advice templates) does not name the program.
+func gitProgramLiterals(sf seamFile) []gitLiteral {
 	skip := map[*ast.BasicLit]bool{}
 	for _, imp := range sf.file.Imports {
 		skip[imp.Path] = true
 	}
-	var out []*ast.BasicLit
-	ast.Inspect(sf.file, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.Field:
-			if x.Tag != nil {
-				skip[x.Tag] = true
+	var out []gitLiteral
+	for _, decl := range sf.file.Decls {
+		fn := funcName(decl)
+		ast.Inspect(decl, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.Field:
+				if x.Tag != nil {
+					skip[x.Tag] = true
+				}
+			case *ast.BasicLit:
+				if skip[x] {
+					return true
+				}
+				if v, ok := stringLiteral(x); ok && isGitProgram(v) {
+					out = append(out, gitLiteral{lit: x, fn: fn})
+				}
 			}
-		case *ast.BasicLit:
-			if skip[x] {
-				return true
-			}
-			if v, ok := stringLiteral(x); ok && isGitProgram(v) {
-				out = append(out, x)
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
 	return out
 }
 
 // ---- (c) no update-ref in branch creation ----
 
 // checkGitxUpdateRef proves clause (c) statically over every gitx
-// function, the design-branch creators among them: no string literal in
-// internal/gitx's production source spells update-ref, so no gitx argv
-// can carry it as written. checkBranchCreationArgv covers an argv built
-// any other way, for the functions that create a branch.
+// function, the design-branch creators among them: no string constant in
+// internal/gitx's production source evaluates to update-ref, whether a
+// literal or a sum of literals and gitx constants (constString), so no gitx
+// argv can carry it as written. checkBranchCreationArgv covers an argv
+// built any other way, for the functions that create a branch.
 func checkGitxUpdateRef(src seamSource) []string {
+	consts := packageConsts(src, "internal/gitx")
 	var findings []string
 	files := 0
 	for _, sf := range src.files {
@@ -827,10 +1043,14 @@ func checkGitxUpdateRef(src seamSource) []string {
 		}
 		files++
 		ast.Inspect(sf.file, func(n ast.Node) bool {
-			if bl, ok := n.(*ast.BasicLit); ok {
-				if v, ok := stringLiteral(bl); ok && v == "update-ref" {
-					findings = append(findings, fmt.Sprintf("c: %s spells update-ref in internal/gitx's production source", src.position(bl.Pos())))
-				}
+			switch n.(type) {
+			case *ast.BasicLit, *ast.BinaryExpr:
+			default:
+				return true
+			}
+			if v, ok := constString(n.(ast.Expr), consts, nil, 0); ok && v == "update-ref" {
+				findings = append(findings, fmt.Sprintf("c: %s spells update-ref in internal/gitx's production source", src.position(n.Pos())))
+				return false
 			}
 			return true
 		})
@@ -911,22 +1131,24 @@ func checkBranchCreationArgv(t *testing.T) {
 // ---- falsifiers ----
 
 // seamMutant is one mutation of the parsed closure that its clause must
-// catch: every string in wants must appear in the clause's findings.
+// catch: every string in wants must appear in the clause's findings, and
+// none in notWants (a named exception's negative control).
 type seamMutant struct {
-	name   string
-	clause string
-	mutate func(*testing.T, seamSource) seamSource
-	check  func(seamSource) []string
-	wants  []string
+	name     string
+	clause   string
+	mutate   func(*testing.T, seamSource) seamSource
+	check    func(seamSource) []string
+	wants    []string
+	notWants []string
 }
 
 func checkClauseA(src seamSource) []string {
-	findings, _ := checkForbiddenTokenList(src)
+	findings, _ := checkForbiddenTokenList(src, tokenTextExceptions())
 	return findings
 }
 
 func checkClauseB(src seamSource) []string {
-	findings, _ := checkGitExecution(src, dataNamedExecExceptions())
+	findings, _ := checkGitExecution(src, dataNamedExecExceptions(), gitNameExceptions())
 	return findings
 }
 
@@ -1035,7 +1257,7 @@ func rawTopLevel(ctx context.Context, start string) ([]byte, error) {
 func status(run func(string, ...string) error) error { return run("git", "status") }
 `)
 			},
-			wants: []string{"internal/store/wrapper.go:2 names the git program outside internal/gitx"},
+			wants: []string{"internal/store/wrapper.go:2 (status) names the git program outside internal/gitx"},
 		},
 		{
 			name: "a third data-named exec site", clause: "b", check: checkClauseB,
@@ -1077,7 +1299,169 @@ func updateRef(ctx context.Context, dir, ref, commit string) error {
 			},
 			wants: []string{"internal/gitx/updateref.go:4 spells update-ref"},
 		},
+		{
+			name: "R5BR-4 c2: update-ref assembled from a sum of gitx constants", clause: "c", check: checkGitxUpdateRef,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/gitx", "createbranch.go", `package gitx
+import "context"
+const refVerb = "update-" + "ref"
+func CreateDesignBranch(ctx context.Context, dir, ref, commit string) error {
+	_, err := runStdin(ctx, dir, nil, nil, refVerb, ref, commit, "0000000000000000000000000000000000000000")
+	return err
+}
+`)
+			},
+			wants: []string{"internal/gitx/createbranch.go:3 spells update-ref"},
+		},
+		{
+			name: "R5BR-1 e1: git run through a shell launcher", clause: "b", check: checkClauseB,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "shgit.go", `package store
+import "os/exec"
+func shGit() error { return exec.Command("sh", "-c", "git status").Run() }
+`)
+			},
+			wants: []string{"internal/store/shgit.go:3 (shGit, os/exec.Command through the launcher sh) runs a program named by data"},
+		},
+		{
+			name: "R5BR-2 e2: a zero-value exec.Cmd given its program", clause: "b", check: checkClauseB,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "zerocmd.go", `package store
+import (
+	"os"
+	"os/exec"
+)
+func runData() error {
+	var c exec.Cmd
+	c.Path = os.Getenv("VERDI_TOOL")
+	return c.Run()
+}
+`)
+			},
+			wants: []string{"internal/store/zerocmd.go:7 (runData, zero-value os/exec.Cmd) runs a program named by data", "internal/store/zerocmd.go:8 (runData, a command's .Path assigned) runs a program named by data"},
+		},
+		{
+			name: "R5BR-2 e3: unix.Exec", clause: "b", check: checkClauseB,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "unixexec.go", `package store
+import (
+	"os"
+	"golang.org/x/sys/unix"
+)
+func execData() error { return unix.Exec(os.Getenv("VERDI_TOOL"), []string{"x"}, os.Environ()) }
+`)
+			},
+			wants: []string{"internal/store/unixexec.go:6 (execData, golang.org/x/sys/unix.Exec) runs a program named by data"},
+		},
+		{
+			name: "R5BR-2 e4: a command's .Path reassigned", clause: "b", check: checkClauseB,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "pathset.go", `package store
+import (
+	"os"
+	"os/exec"
+)
+func runReassigned() error {
+	c := exec.Command("true")
+	c.Path = os.Getenv("VERDI_TOOL")
+	return c.Run()
+}
+`)
+			},
+			wants: []string{"internal/store/pathset.go:8 (runReassigned, a command's .Path assigned) runs a program named by data"},
+		},
+		{
+			name: "R5BR-3 e9: recovery re-spells the list through strings.Fields", clause: "a", check: checkClauseA,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFileEdited(t, src, "internal/recovery/commandlog.go", "return gitforbid.Forbids(argv)", `_ = gitforbid.Tokens
+	for _, arg := range argv {
+		for _, tok := range strings.Fields("reset restore clean stash --force -f update-ref") {
+			if arg == tok {
+				return true
+			}
+		}
 	}
+	return false`)
+			},
+			wants: []string{"recovery.IsForbiddenArgv", "does not delegate to gitforbid.Forbids"},
+		},
+		{
+			name: "R5BR-5: legitimate text naming git fails closed", clause: "b", check: checkClauseB,
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "xdg.go", xdgGitFile)
+			},
+			wants: []string{"internal/store/xdg.go:3 (configDir) names the git program outside internal/gitx"},
+		},
+		{
+			name: "R5BR-5: a named exception excuses legitimate text naming git", clause: "b",
+			check: func(src seamSource) []string {
+				findings, _ := checkGitExecution(src, dataNamedExecExceptions(), []textException{{path: "internal/store/xdg.go", fn: "configDir", reason: "names git's configuration directory, runs nothing"}})
+				return findings
+			},
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "xdg.go", xdgGitFile)
+			},
+			notWants: []string{"internal/store/xdg.go"},
+		},
+		{
+			name: "R5BR-5: a named git-text exception that excuses nothing", clause: "b",
+			check: func(src seamSource) []string {
+				findings, _ := checkGitExecution(src, dataNamedExecExceptions(), []textException{{path: "internal/store/gone.go", fn: "configDir", reason: "stale"}})
+				return findings
+			},
+			mutate: func(t *testing.T, src seamSource) seamSource { return src },
+			wants:  []string{"b: named text exception configDir in internal/store/gone.go excuses nothing"},
+		},
+		{
+			name: "R5BR-5: a named exception excuses a switch on two tokens", clause: "a",
+			check: func(src seamSource) []string {
+				findings, _ := checkForbiddenTokenList(src, []textException{{path: "internal/store/forbidden.go", fn: "forbidden", reason: "a test of the exception"}})
+				return findings
+			},
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				return withSeamFile(t, src, "internal/store", "forbidden.go", `package store
+func forbidden(arg string) bool {
+	switch arg {
+	case "reset", "update-ref":
+		return true
+	}
+	return false
+}
+`)
+			},
+			notWants: []string{"defined 2 times", "internal/store/forbidden.go"},
+		},
+		{
+			name: "R5BR-5: a named token-text exception that excuses nothing", clause: "a",
+			check: func(src seamSource) []string {
+				findings, _ := checkForbiddenTokenList(src, []textException{{path: "internal/store/gone.go", fn: "forbidden", reason: "stale"}})
+				return findings
+			},
+			mutate: func(t *testing.T, src seamSource) seamSource { return src },
+			wants:  []string{"a: named text exception forbidden in internal/store/gone.go excuses nothing"},
+		},
+	}
+}
+
+// xdgGitFile names git's configuration directory, legitimately, as
+// internal/ritualwitness's fixture does outside the closure.
+const xdgGitFile = `package store
+import "path/filepath"
+func configDir(xdg string) string { return filepath.Join(xdg, "git") }
+`
+
+// withSeamFileEdited returns src with the file at rel re-parsed from its
+// source on disk with old replaced by new.
+func withSeamFileEdited(t *testing.T, src seamSource, rel, old, new string) seamSource {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(verdiRepoRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("mutant: %v", err)
+	}
+	if !strings.Contains(string(data), old) {
+		t.Fatalf("mutant: %s no longer holds %q", rel, old)
+	}
+	return withSeamFileReplaced(t, src, rel, strings.Replace(string(data), old, new, 1))
 }
 
 // withSeamFile returns src with one more parsed file in pkg.
