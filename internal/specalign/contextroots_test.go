@@ -26,8 +26,12 @@ import (
 // whatever its build constraints, read from the module's own source with
 // go/parser. Nothing runs `go list`, so go.mod is never touched. A package
 // in the closure holds code the servers may reach, so the closure is a
-// superset of the code their routes and tools reach: the fail-closed
-// direction. A root is any reference to context.Background or
+// superset of the code their routes and tools reach through static calls
+// only: the fail-closed direction for those. Code a package outside the
+// closure hands the servers at run time is not in it, such as a handler or
+// tool an init function in a package that imports the servers registers
+// with them; every current registrant is inside the closure (R5c2 review
+// R5C2R-6). A root is any reference to context.Background or
 // context.TODO, called or not, through whatever name the file imports
 // "context" by (a dot import included), placed by its enclosing function
 // declaration, or by the package-level variable whose initializer holds
@@ -92,7 +96,9 @@ type contextRootAllowance struct {
 	reason       string
 }
 
-// allowedContextRoots is ledger SI-359 (14)'s list, and no other root.
+// allowedContextRoots is ledger SI-359 (14)'s list, and no other root. An
+// allowance names its file and holder, never a whole package, so a root
+// moved to another function of an allowed package is a finding.
 func allowedContextRoots() []contextRootAllowance {
 	return []contextRootAllowance{
 		{"internal/evidence/fold.go", "Fold", 1, "a nil-Context fallback; every Fold caller sets Context"},
@@ -289,7 +295,8 @@ type contextRootMutant struct {
 // contextRootMutants are the guard's falsifiers: the board's commit root
 // restored (SI-359 (7)), a new root in a package the servers reach, under
 // a renamed import and a dot import too, a second root inside an allowed
-// holder, and an allowance that excuses nothing.
+// holder, an allowed root moved to another function of its package (R5c2
+// review R5C2R-3), and an allowance that excuses nothing.
 func contextRootMutants() []contextRootMutant {
 	const boardFile = "internal/workbench/board.go"
 	return []contextRootMutant{
@@ -346,6 +353,19 @@ var rootContext = Background
 					"ctx = context.Background()", "ctx = context.Background()\n\t\t_ = context.TODO()")
 			},
 			wants: []string{"allowed context root Fold in internal/evidence/fold.go", "want 1 root(s), found 2"},
+		},
+		{
+			name: "Fold's root moved to a new function in internal/evidence",
+			mutate: func(t *testing.T, src seamSource) seamSource {
+				moved := withSeamFileEdited(t, src, "internal/evidence/fold.go", "ctx = context.Background()", "ctx = foldFallback()")
+				return withSeamFile(t, moved, "internal/evidence", "fallback.go", `package evidence
+
+import "context"
+
+func foldFallback() context.Context { return context.Background() }
+`)
+			},
+			wants: []string{"context root at internal/evidence/fallback.go:5 (foldFallback)", "allowed context root Fold in internal/evidence/fold.go", "want 1 root(s), found 0"},
 		},
 		{
 			name: "an allowance that excuses nothing",
