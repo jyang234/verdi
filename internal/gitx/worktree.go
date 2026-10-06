@@ -13,14 +13,18 @@ import (
 	"strings"
 )
 
-// ErrBranchCheckedOut is WorktreeAdd's typed refusal when branch is
-// already checked out in dir itself (the serving checkout). It is
-// detected PROACTIVELY — by asking git for dir's current branch before
-// `git worktree add` ever runs — so the refusal never depends on parsing
-// git's version-dependent "already checked out" stderr text (the D6-8
+// ErrBranchCheckedOut is WorktreeAdd's typed refusal when branch is in
+// use by a worktree: checked out in dir itself (the serving checkout), or
+// in use by another worktree, including one mid-rebase or mid-bisect on it
+// (ledger SI-354 (1)). The first is detected PROACTIVELY — by asking git
+// for dir's current branch before `git worktree add` ever runs — so it
+// never depends on git's version-dependent stderr text (the D6-8
 // environment-parity failure class: local git and a CI runner's git word
-// the same fatal differently, and a string match that passes on one
-// silently misclassifies on the other).
+// the same fatal differently). The second is only git's own refusal,
+// matched in both of its wordings ("is already checked out at" before git
+// 2.42, "is already used by worktree at" from 2.42 on). The sentinel
+// therefore does not say which checkout holds branch: a caller that must
+// tell dir from another worktree re-checks CurrentBranch itself.
 var ErrBranchCheckedOut = errors.New("gitx: branch is already checked out in this checkout")
 
 // StatusDirty reports whether dir's working tree has any uncommitted
@@ -112,10 +116,15 @@ func WorktreeAdd(ctx context.Context, dir, path, branch string) error {
 	}
 
 	if _, err := run(ctx, dir, "worktree", "add", path, branch); err != nil {
-		// Defensive fallback only: if git refuses because branch is
-		// checked out in some worktree the proactive check above did not
-		// cover, still surface the typed refusal rather than raw stderr.
-		if strings.Contains(err.Error(), "already checked out") {
+		// Defensive fallback only: if git refuses because branch is in use
+		// by some worktree the proactive check above did not cover — one
+		// that has it checked out, or is mid-rebase or mid-bisect on it,
+		// where porcelain reports that worktree detached — still surface
+		// the typed refusal rather than raw stderr. git words that refusal
+		// "is already checked out at" before 2.42 and "is already used by
+		// worktree at" from 2.42 on (ledger SI-354 (1)); a caller that must
+		// tell this checkout from another asks CurrentBranch itself.
+		if msg := err.Error(); strings.Contains(msg, "already checked out") || strings.Contains(msg, "is already used by worktree at") {
 			return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, ErrBranchCheckedOut)
 		}
 		return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, err)

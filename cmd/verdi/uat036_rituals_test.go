@@ -104,9 +104,9 @@ func uat036Rituals(t *testing.T, bin string) []uat036Ritual {
 //
 // Of the verdicts logged, the test asserts the index carry, which is ac-3's
 // claim, and nothing else: every other effect is ac-2's (lane R3). Design
-// start's `config: outside` verdicts (branch.design/<n>.remote and .merge,
-// written because it cuts at the base's remote-tracking ref name) are a
-// known effect carried to R3 (backlog BL-141).
+// start no longer writes branch.design/<n>.remote and .merge: it cuts at the
+// resolved base's commit, not its remote-tracking ref name (ledger SI-341
+// (6), backlog BL-141), which TestResolvedBaseCuts_WriteNoUpstream pins.
 //
 // Beside the fixture's foreign entry at the repository root, each run also
 // stages storeForeignFile directly inside .verdi/, outside every listed

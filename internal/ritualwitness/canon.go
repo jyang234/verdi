@@ -3,44 +3,19 @@ package ritualwitness
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/pathcanon"
 )
 
-// canonicalPath returns p absolute, cleaned, and with every symlink in its
-// longest existing prefix resolved, so one location has one spelling: on
-// macOS a temporary directory's /var/folders/... and git's
-// /private/var/folders/... compare equal, as do a relative and an
-// absolute spelling. A path that no longer exists (a removed worktree)
-// keeps its missing tail verbatim under its resolved existing ancestor.
-// base resolves a relative p; "" means the process's working directory.
+// canonicalPath is p in its one spelling (pathcanon.Canonical: absolute,
+// cleaned, its longest existing prefix resolved through symbolic links and
+// any missing tail kept beneath it), with a relative p resolved against
+// base; "" means the process's working directory.
 func canonicalPath(base, p string) string {
-	if !filepath.IsAbs(p) {
-		if base == "" {
-			abs, err := filepath.Abs(p)
-			if err != nil {
-				return filepath.Clean(p)
-			}
-			p = abs
-		} else {
-			p = filepath.Join(base, p)
-		}
+	if !filepath.IsAbs(p) && base != "" {
+		p = filepath.Join(base, p)
 	}
-	p = filepath.Clean(p)
-	var tail []string
-	cur := p
-	for {
-		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
-			for i := len(tail) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, tail[i])
-			}
-			return resolved
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return p
-		}
-		tail = append(tail, filepath.Base(cur))
-		cur = parent
-	}
+	return pathcanon.Canonical(p)
 }
 
 // within reports whether path lies at or under dir; both are canonical.

@@ -9,7 +9,7 @@
 // Like internal/fixturegit, this is a Go test helper, not a production
 // package (PLAN.md §4). The pieces: Build and BuildWith (fixture.go) seed
 // a fixture; Capture (sensor.go) takes a Snapshot; Driver and its
-// InProcess, Binary, and Workbench implementations (driver*.go) run a
+// InProcess, Binary, Workbench, and MCP implementations (driver*.go) run a
 // ritual and report its exit and git command log; Evaluate
 // (evaluate*.go) judges a before/after pair and the log against a
 // Declaration; Run and RunOn (harness.go) compose them; Outcome
@@ -26,7 +26,17 @@
 // Go panic trace or a line beginning "fatal error: " to -1; Workbench
 // follows no redirect; and a witness of a refused declaration (index carry
 // refused) asserts the refusal's own reason — the words of Result.Err —
-// never exit 2 alone (ledger SI-334 (3), (4); re-review RR-B1).
+// never exit 2 alone (ledger SI-334 (3), (4); re-review RR-B1). MCP maps a
+// tool result whose isError is false to 0, one whose isError is true or a
+// JSON-RPC error to 2, and a transport failure or a response that is
+// neither to -1 (ledger SI-341 (5)). Binary sets every CI-context
+// variable CIEnv names, each one the verdi binary's code names literally
+// (SI-344 (2) discloses what that scan cannot see), on every run from its
+// CI field, never from the test process, so a verb that reads one behaves
+// the same locally and in CI; a case driving an in-process driver pins the
+// same set in the test process with PinCIEnv. Binary also bounds a binary
+// whose output a process it started holds open, and a Stdin reader that
+// never reaches EOF (binaryWaitDelay).
 //
 // # Sensed
 //
@@ -67,6 +77,17 @@
 // tree difference it makes, and a commit without a pathspec with none. A
 // working-tree file write is not a git mutation (parent dc-6) and is
 // reported within with that reason, needing no attribution.
+//
+// @checked-out is the branch checked out, before the run, in the checkout
+// the ritual acts on (ledger SI-348 (4)): the main worktree's by default,
+// or, when a test names one in Fixture.Acting, a linked worktree's — a /b/
+// route's managed worktree — so a ritual acting there moves its own branch
+// within refs_move, and the root's branch is not @checked-out for it. An
+// acting checkout that is no worktree registered before the run binds no
+// branch (EvaluateIn). The main worktree's own readings of an @checked-out
+// move (its index's tree difference, the hand-back exception) apply only
+// when the ritual acts there; changes inside a linked worktree stay that
+// worktree's.
 //
 // A created commit belongs to a worktree the ritual added (SI-329 (5′))
 // only when it was made after the add — the commit the worktree started at

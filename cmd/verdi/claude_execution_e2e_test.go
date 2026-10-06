@@ -382,10 +382,22 @@ type claudeCompiledFixture struct {
 // reproduces the request byte for byte.
 func buildClaudeCompiledFixture(t *testing.T, grants execworkspace.GrantSet) claudeCompiledFixture {
 	t.Helper()
-	repo := buildClaudeCompileRepo(t, map[string]string{
+	return buildClaudeCompiledFixtureWith(context.Background(), t, grants, nil)
+}
+
+// buildClaudeCompiledFixtureWith is buildClaudeCompiledFixture with extra
+// files committed in the runway beside the compiled spec (the ritual
+// effect witness's tracked operator file, say), compiling under ctx.
+func buildClaudeCompiledFixtureWith(ctx context.Context, t *testing.T, grants execworkspace.GrantSet, extra map[string]string) claudeCompiledFixture {
+	t.Helper()
+	files := map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 		".gitignore": ".verdi/data/\n",
-	})
+	}
+	for path, content := range extra {
+		files[path] = content
+	}
+	repo := buildClaudeCompileRepo(t, files)
 	compileRequest := contextcompile.Request{
 		Schema:  contextcompile.RequestSchema,
 		Adapter: contextcompile.AdapterRef{ID: string(contextevent.AdapterClaude), Version: "1"},
@@ -394,7 +406,7 @@ func buildClaudeCompiledFixture(t *testing.T, grants execworkspace.GrantSet) cla
 		Scope:   policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
 		Spec:    "spec/feature-alpha",
 	}
-	compiled, err := contextcompile.NewCompiler().Compile(context.Background(), repo.Dir, compileRequest)
+	compiled, err := contextcompile.NewCompiler().Compile(ctx, repo.Dir, compileRequest)
 	if err != nil {
 		t.Fatalf("compile claude lifecycle fixture: %v", err)
 	}
@@ -1237,7 +1249,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	// Amendment 003: vatc is ATC-owned, so the harness — not Verdi — hosts it.
 	// Its capability is derived independently from the same canonical request
 	// bytes, which is exactly how the real ATC parent authenticates the caller.
-	claimServer := startFakeClaimMCP(t, fixture.requestBytes)
+	claimServer := startFakeClaimMCP(context.Background(), t, fixture.requestBytes)
 	fake.claimMCPURL = claimServer.url
 
 	fake.expansionRoot = options.expansionRoot
@@ -1325,7 +1337,10 @@ func (f *fakeClaimMCP) observed() ([]string, int, int) {
 	return append([]string(nil), f.accepted...), f.rejected, f.initCount
 }
 
-func startFakeClaimMCP(t *testing.T, requestBytes []byte) *fakeClaimMCP {
+// startFakeClaimMCP serves the vatc claim MCP for requestBytes until the
+// test ends; its shutdown then runs under ctx's values, never its
+// cancellation.
+func startFakeClaimMCP(ctx context.Context, t *testing.T, requestBytes []byte) *fakeClaimMCP {
 	t.Helper()
 	requestDigest, err := sealedexec.CanonicalRequestDigest(requestBytes)
 	if err != nil {
@@ -1390,7 +1405,7 @@ func startFakeClaimMCP(t *testing.T, requestBytes []byte) *fakeClaimMCP {
 	})}
 	go func() { _ = claim.server.Serve(listener) }()
 	t.Cleanup(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		_ = claim.server.Shutdown(shutdownCtx)
 	})
