@@ -179,3 +179,58 @@ func (f *forbiddenTokenTally) lines() []string {
 	}
 	return out
 }
+
+// TestForbiddenTokenViolations is the witness's law on synthetic runs (R5c2
+// review R5C2R-1): a run with no command log is a violation naming its
+// reason; a clean log is none; a forbidden token as a whole element, a
+// "--" token's longer spelling, or a data element spelt exactly as a token
+// is one naming that element (SI-359 (13)); and an element that merely
+// starts with a plain token is none.
+func TestForbiddenTokenViolations(t *testing.T) {
+	logged := func(argvs ...[]string) ritualwitness.CommandLog {
+		l := ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{}}
+		for _, a := range argvs {
+			l.Calls = append(l.Calls, ritualwitness.Call{Dir: "/repo", Args: a})
+		}
+		return l
+	}
+	tests := []struct {
+		name string
+		log  ritualwitness.CommandLog
+		want []string // words of the one violation; nil for none
+	}{
+		{"no command log", ritualwitness.CommandLog{Reason: "the command log's last record is cut short"},
+			[]string{"no command log", "cannot show it free of forbidden tokens", "cut short"}},
+		{"no command log, even with calls", ritualwitness.CommandLog{Calls: []ritualwitness.Call{{Dir: "/repo", Args: []string{"status"}}}},
+			[]string{"no command log"}},
+		{"an empty log", logged(), nil},
+		{"a clean log", logged([]string{"rev-parse", "--verify", "HEAD"}, []string{"branch", "design/x", "abc"}), nil},
+		{"a forbidden subcommand", logged([]string{"status"}, []string{"stash", "push"}),
+			[]string{"logged call 2 `git stash push`", `forbidden element(s) "stash"`}},
+		{"a -- token's longer spelling", logged([]string{"push", "--force-with-lease", "origin", "HEAD"}),
+			[]string{`"--force-with-lease"`}},
+		{"a data element spelt as a token", logged([]string{"commit", "-m", "update-ref"}),
+			[]string{`"update-ref"`}},
+		{"a message that starts with a plain token", logged([]string{"commit", "-m", "reset the counter"}), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := ritualEffectsRun{Driver: "Workbench", Verb: "workbench:/x", State: "clean", Log: tt.log}
+			got := forbiddenTokenViolations(run)
+			if tt.want == nil {
+				if len(got) != 0 {
+					t.Fatalf("violations = %q, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("violations = %q, want exactly one naming %q", got, tt.want)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(got[0], w) {
+					t.Errorf("violation %q, want it to name %q", got[0], w)
+				}
+			}
+		})
+	}
+}
