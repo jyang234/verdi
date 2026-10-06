@@ -529,6 +529,18 @@
     },
     true
   );
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (e.key !== "Escape") return;
+      var confirm = document.getElementById("edge-confirm");
+      if ((picker && !picker.hidden) || (confirm && !confirm.hidden)) {
+        pendingSelect = null; // Escape closes the picker or the confirmation (boardspec.js)
+        pickerPair = null;
+      }
+    },
+    true
+  );
 
   function selectPending() {
     if (!pendingSelect) return;

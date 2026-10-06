@@ -175,8 +175,9 @@ test.describe("board: the supply toolbox pins planning material", () => {
       "readonly",
     );
     await expect(page.getByTestId("pin-toolbox")).toHaveCount(0);
-    // Nor does the toolbar offer the pin action there (ac-3).
-    await expect(page.getByTestId("wall-toolbar")).toBeVisible();
+    // Nor does the toolbar offer the pin action there (ac-3). The host is
+    // the server's in every mode; a wall with no yarn leaves it empty.
+    await expect(page.getByTestId("wall-toolbar")).toBeAttached();
     await expect(page.getByRole("button", { name: "Pin an artifact" })).toHaveCount(0);
 
     await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
@@ -185,7 +186,7 @@ test.describe("board: the supply toolbox pins planning material", () => {
       "review",
     );
     await expect(page.getByTestId("pin-toolbox")).toHaveCount(0);
-    await expect(page.getByTestId("wall-toolbar")).toBeVisible();
+    await expect(page.getByTestId("wall-toolbar")).toBeAttached();
     await expect(page.getByRole("button", { name: "Pin an artifact" })).toHaveCount(0);
   });
 });

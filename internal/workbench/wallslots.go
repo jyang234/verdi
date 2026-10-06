@@ -42,14 +42,21 @@ type addSlot struct {
 	X, Y   float64
 }
 
-// addSlotOps maps each object zone to its typed add operation and the id
-// prefix the server's next id carries — the same pairs boardspec.js's
-// ADD_OPS and boardspecasd.js's nextIDFor hold.
-var addSlotOps = map[boardlayout.ZoneKind]addSlot{
-	boardlayout.ZoneAC:           {Op: "add-ac", Prefix: "ac"},
-	boardlayout.ZoneConstraint:   {Op: "add-constraint", Prefix: "co"},
-	boardlayout.ZoneDecision:     {Op: "add-decision", Prefix: "dc"},
-	boardlayout.ZoneOpenQuestion: {Op: "add-question", Prefix: "oq"},
+// addSlotOp names an object zone's typed add operation and the id prefix
+// the server's next id carries — the same pairs boardspec.js's ADD_OPS
+// and boardspecasd.js's nextIDFor hold; false for every other zone.
+func addSlotOp(kind boardlayout.ZoneKind) (op, prefix string, ok bool) {
+	switch kind {
+	case boardlayout.ZoneAC:
+		return "add-ac", "ac", true
+	case boardlayout.ZoneConstraint:
+		return "add-constraint", "co", true
+	case boardlayout.ZoneDecision:
+		return "add-decision", "dc", true
+	case boardlayout.ZoneOpenQuestion:
+		return "add-question", "oq", true
+	}
+	return "", "", false
 }
 
 // addSlotsFor computes the slots for a projection, in zone order.
@@ -71,7 +78,7 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 	limit := canvasMinHeight(p)
 	var out []addSlot
 	for _, col := range boardlayout.ZoneColumns() {
-		ops, ok := addSlotOps[col.Kind]
+		op, prefix, ok := addSlotOp(col.Kind)
 		if !ok {
 			continue
 		}
@@ -87,7 +94,7 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 		if y+addSlotHeight > limit {
 			continue // it does not fit
 		}
-		out = append(out, addSlot{Kind: string(col.Kind), Op: ops.Op, Prefix: ops.Prefix, X: float64(col.X), Y: y})
+		out = append(out, addSlot{Kind: string(col.Kind), Op: op, Prefix: prefix, X: float64(col.X), Y: y})
 	}
 	return out
 }
