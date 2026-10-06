@@ -142,13 +142,13 @@ func (at attribution) switchesTo(wt, target string) bool {
 // pathspecMatches reports whether repoPath (relative to root, the calling
 // worktree's canonical top level) matches one of the call's pathspecs. git
 // resolves a relative pathspec against the call's own directory. An
-// absolute one names its path from the filesystem root, so it matches by
-// its canonical path (canonicalPath, the shared pathcanon rule) relative
-// to root: in-process callers of AddPaths and CreateCommitPaths spell it
-// /var/… against a /private/var/… root. An absolute pathspec outside root
-// attributes nothing (SI-359 (11)). A pathspec without glob characters
-// matches the path or a directory above it; one with them is matched by
-// git's default glob rules, where "*" also matches "/".
+// absolute one names its path from the filesystem root, and matches by
+// its path relative to root as git reads it (absPathspec): in-process
+// callers of AddPaths and CreateCommitPaths spell it /var/… against a
+// /private/var/… root. An absolute pathspec outside root attributes
+// nothing (SI-359 (11)). A pathspec without glob characters matches the
+// path or a directory above it; one with them is matched by git's default
+// glob rules, where "*" also matches "/".
 func pathspecMatches(root string, c loggedCall, specs []string, repoPath string) bool {
 	prefix, err := filepath.Rel(root, c.Dir)
 	if err != nil || prefix == ".." || strings.HasPrefix(filepath.ToSlash(prefix), "../") {
@@ -157,15 +157,11 @@ func pathspecMatches(root string, c loggedCall, specs []string, repoPath string)
 	for _, spec := range specs {
 		full := path.Clean(path.Join(filepath.ToSlash(prefix), spec))
 		if filepath.IsAbs(spec) {
-			abs := canonicalPath("", spec)
-			if !within(root, abs) {
+			rel, ok := absPathspec(root, spec)
+			if !ok {
 				continue
 			}
-			rel, err := filepath.Rel(root, abs)
-			if err != nil {
-				continue
-			}
-			full = path.Clean(filepath.ToSlash(rel))
+			full = rel
 		}
 		if full == "." || repoPath == full || strings.HasPrefix(repoPath, full+"/") {
 			return true
@@ -175,6 +171,31 @@ func pathspecMatches(root string, c loggedCall, specs []string, repoPath string)
 		}
 	}
 	return false
+}
+
+// absPathspec reads an absolute pathspec as git's abspath_part_inside_repo
+// does (SI-359 (11) as amended; R5c1 review R5C1R-1): after cleaning it
+// lexically, it walks spec's leading parts, shortest first, and the first
+// whose canonical path (canonicalPath: symbolic links and spelling
+// resolved) is root, the worktree's canonical top level, ends the walk.
+// The rest of spec, inside the worktree, is kept verbatim, so a symbolic
+// link there names itself, never its target; resolving it would credit a
+// path git did not touch. It returns that rest, slash-separated, or "."
+// for the top level itself, and false when no leading part is root.
+func absPathspec(root, spec string) (string, bool) {
+	clean := filepath.Clean(spec)
+	parts := strings.Split(clean, string(filepath.Separator))
+	for i := 1; i <= len(parts); i++ {
+		lead := string(filepath.Separator) + filepath.Join(parts[1:i]...)
+		if canonicalPath("", lead) != root {
+			continue
+		}
+		if rest := filepath.Join(parts[i:]...); rest != "" {
+			return filepath.ToSlash(rest), true
+		}
+		return ".", true
+	}
+	return "", false
 }
 
 // globMatches matches name against git's default pathspec glob: "*" and
