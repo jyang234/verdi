@@ -10,6 +10,8 @@ import (
 	"io"
 	"net"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // MCP is the MCP-server Driver (spec/ritual-effect-witness dc-1, ledger
@@ -42,9 +44,20 @@ import (
 // of judging it: the server ending or failing before its connection closes
 // cleanly, the caller's context ending first, or a response that is
 // neither a tool result nor a JSON-RPC error (the response is decoded
-// strictly). The server's tools root their own git calls, so no observer
-// reaches them: Run reports the log unavailable, as Binary and Workbench
-// do, until spec/gitx-recorder-seam threads one.
+// strictly).
+//
+// The server runs in the test process, so its command log is a
+// gitx.Observer (spec/gitx-recorder-seam ac-2; parent dc-5; ledger SI-359
+// (1)): Run attaches one to the context it passes Serve, which reaches
+// every gitx call the server makes on that context or one derived from
+// it, and reads the log once Serve has returned. A run that ends in a
+// verb's exit reports that log with CommandLog.OK true; one that ends in
+// no verb's exit (-1) reports none. A tool that roots a context of its own
+// (context.Background or TODO) would drop the observer; the static
+// context-root guard in internal/specalign fails on any such root the MCP
+// server reaches (SI-359 (7), (14)), and the ritual-effect producer
+// compares each in-process run's log with a process-wide VERDI_GITLOG
+// record for record.
 type MCP struct {
 	// Serve answers the newline-delimited JSON-RPC requests it reads from
 	// r with responses written to w, for the store rooted at root, until r
@@ -61,7 +74,7 @@ const mcpCallID = "1"
 
 // Run implements Driver. The exchange is bounded by ctx: when ctx ends
 // first, both ends of the pipe are closed, so a blocked server read or
-// write returns, and Run returns -1 wrapping ctx's error.
+// write returns, and Run returns -1 wrapping ctx's error, with no log.
 func (d MCP) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if d.Serve == nil {
 		return -1, CommandLog{}, errors.New("ritualwitness: MCP: no server")
@@ -74,10 +87,11 @@ func (d MCP) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 		return -1, CommandLog{}, err
 	}
 
+	rec := &recorder{}
 	client, server := net.Pipe()
 	served := make(chan error, 1)
 	go func() {
-		err := d.Serve(ctx, dir, server, server)
+		err := d.Serve(gitx.WithObserver(ctx, rec), dir, server, server)
 		// The client's read then ends, rather than waiting on a server
 		// that will never answer.
 		_ = server.Close()
@@ -117,7 +131,11 @@ func (d MCP) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 		return -1, CommandLog{}, fmt.Errorf("ritualwitness: MCP: %s: transport: the server failed: %w", d.Tool, serveErr)
 	}
 	exit, err := mcpExit(d.Tool, a.line)
-	return exit, CommandLog{}, err
+	if exit < 0 {
+		return exit, CommandLog{}, err
+	}
+	// Serve has returned, so the server makes no further call.
+	return exit, CommandLog{Calls: rec.snapshot(), OK: true}, err
 }
 
 // mcpToolCall is the one tools/call request line Run sends, without its

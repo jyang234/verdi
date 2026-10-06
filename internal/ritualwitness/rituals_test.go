@@ -156,8 +156,8 @@ func ritualBypassesGitx(ctx context.Context, dir string) (int, error) {
 	})(ctx, dir)
 }
 
-// noLog is a Driver that cannot supply a command log, like a built binary
-// before spec/gitx-recorder-seam.
+// noLog is a Driver that cannot supply a command log, like a Binary run
+// whose VERDI_GITLOG file it cannot read whole.
 type noLog struct{ fn Ritual }
 
 func (d noLog) Run(ctx context.Context, dir string) (int, CommandLog, error) {

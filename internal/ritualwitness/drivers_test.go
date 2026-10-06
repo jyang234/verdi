@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/gitx"
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
 
@@ -236,6 +237,29 @@ func TestBinary_RunOnAttributesThroughTheLog(t *testing.T) {
 // X-Test "yes": it creates refs/heads/<branch> in root with plain git and
 // answers status; any other request is 400.
 func branchingHandler(branch string, status int) func(string) http.Handler {
+	return branchHandler(func(ctx context.Context, root string) error {
+		_, err := plainGit(ctx, root, "branch", branch)
+		return err
+	}, status)
+}
+
+// gitxBranchingHandler is branchingHandler making the branch through gitx
+// (RevParse, then UpdateRef) on the request's context, as a workbench
+// action does, so the driver's observer logs both calls.
+func gitxBranchingHandler(branch string, status int) func(string) http.Handler {
+	return branchHandler(func(ctx context.Context, root string) error {
+		head, err := gitx.RevParse(ctx, root, "HEAD")
+		if err != nil {
+			return err
+		}
+		return gitx.UpdateRef(ctx, root, "refs/heads/"+branch, head)
+	}, status)
+}
+
+// branchHandler serves one route, POST /act with body "go" and header
+// X-Test "yes": it runs act on the request's context in root and answers
+// status; any other request is 400.
+func branchHandler(act func(ctx context.Context, root string) error, status int) func(string) http.Handler {
 	return func(root string) http.Handler {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/act", func(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +268,7 @@ func branchingHandler(branch string, status int) func(string) http.Handler {
 				http.Error(w, "unexpected request", http.StatusBadRequest)
 				return
 			}
-			if _, err := plainGit(r.Context(), root, "branch", branch); err != nil {
+			if err := act(r.Context(), root); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -255,10 +279,28 @@ func branchingHandler(branch string, status int) func(string) http.Handler {
 	}
 }
 
+// checkInProcessLog checks the log an in-process driver (Workbench, MCP)
+// returned: a run that ends in a verb's exit carries the log its observer
+// recorded, with calls calls; one that ends in no verb's exit (-1)
+// carries none (spec/gitx-recorder-seam ac-2; ledger SI-359 (1)).
+func checkInProcessLog(t *testing.T, exit int, log CommandLog, calls int) {
+	t.Helper()
+	if exit < 0 {
+		if log.OK || log.Calls != nil {
+			t.Fatalf("log = %+v, want none for a run with no verb's exit", log)
+		}
+		return
+	}
+	if !log.OK || len(log.Calls) != calls {
+		t.Fatalf("log = %+v, want the observer's log with %d call(s)", log, calls)
+	}
+}
+
 // TestWorkbench_Run drives a handler over a loopback server: a 2xx answer
-// is exit 0, any other is 2 with the status and body in the error, and the
-// log is always unavailable (the workbench's actions root their own
-// contexts).
+// is exit 0, any other is 2 with the status and body in the error, and a
+// run that answered carries the log the observer attached through the
+// server's base context recorded (spec/gitx-recorder-seam ac-2); the
+// handler makes its branch with plain git, so that log holds no call.
 func TestWorkbench_Run(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
@@ -284,9 +326,7 @@ func TestWorkbench_Run(t *testing.T) {
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
-			if log.OK || log.Calls != nil {
-				t.Fatalf("log = %+v, want unavailable", log)
-			}
+			checkInProcessLog(t, exit, log, 0)
 			if (err != nil) != (tt.wantErr != nil) {
 				t.Fatalf("err = %v, want an error naming %q", err, tt.wantErr)
 			}
@@ -304,7 +344,8 @@ func TestWorkbench_Run(t *testing.T) {
 
 // TestWorkbench_RedirectIsNoCleanRun (ledger SI-334 (3)): the driver
 // follows no redirect, so a 303 is exit 2 naming its status, judged by
-// itself and never by its target, which is never requested.
+// itself and never by its target, which is never requested: the log holds
+// no call of the target's.
 func TestWorkbench_RedirectIsNoCleanRun(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
@@ -326,32 +367,73 @@ func TestWorkbench_RedirectIsNoCleanRun(t *testing.T) {
 	if exit != 2 || err == nil || !strings.Contains(err.Error(), "303") {
 		t.Fatalf("Run = exit %d, %v; want exit 2 naming the 303", exit, err)
 	}
-	if log.OK || log.Calls != nil {
-		t.Fatalf("log = %+v, want unavailable", log)
-	}
+	checkInProcessLog(t, exit, log, 0)
 	if out, gerr := plainGit(ctx, fx.Dir, "branch", "--list", "made-by-the-target"); gerr != nil || out != "" {
 		t.Fatalf("the redirect's target was requested (branch listing %q, %v)", out, gerr)
 	}
 }
 
-// TestWorkbench_RunOnReportsTheLogUnavailable mirrors the Binary case.
-func TestWorkbench_RunOnReportsTheLogUnavailable(t *testing.T) {
+// TestWorkbench_RunOnAttributesThroughTheLog: through RunOn, the
+// observer the driver attaches through the server's base context reaches
+// the handler's gitx calls, so the effect a logged gitx call made is
+// attributed and the run passes; an effect the log does not show (a
+// branch made with plain git) stays unattributable with the log present,
+// so that run is unproven, never a pass inferred from silence.
+func TestWorkbench_RunOnAttributesThroughTheLog(t *testing.T) {
+	ctx := context.Background()
+	hdr := http.Header{"X-Test": []string{"yes"}}
+	for _, tt := range []struct {
+		name        string
+		serve       func(string) http.Handler
+		calls       int
+		want        []Verdict
+		wantOutcome RunOutcome
+	}{
+		{"a branch made through gitx is attributed", gitxBranchingHandler("made-by-handler", http.StatusOK), 2, []Verdict{
+			v("refs_create", Within, "refs/heads/made-by-handler created"),
+			v("index_carry", Within, "declares no_commit; observed no_commit"),
+		}, Pass},
+		{"a branch made with plain git is not", branchingHandler("made-by-handler", http.StatusOK), 0, []Verdict{
+			v("refs_create", Unattributable, "refs/heads/made-by-handler created"),
+			v("index_carry", Within, "declares no_commit; observed no_commit"),
+		}, Unproven},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := Build(t, ctx, SeedClean)
+			res := RunOn(t, ctx, fx, Workbench{Serve: tt.serve, Method: http.MethodPost, Path: "/act", Body: []byte("go"), Header: hdr}, branchDecl())
+			checkInProcessLog(t, res.Exit, res.Log, tt.calls)
+			if diff := verdictDiff(res.Verdicts, tt.want); diff != "" {
+				t.Fatal(diff)
+			}
+			if got := Outcome(res.Verdicts); got != tt.wantOutcome {
+				t.Fatalf("Outcome = %s, want %s", got, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+// TestWorkbench_DetachedContextKeepsTheObserver: a handler that detaches
+// its work from the request's cancellation, as the board's commit does
+// (context.WithoutCancel(r.Context()); ledger SI-359 (7)), keeps the
+// observer the driver attached, so its gitx call is logged.
+func TestWorkbench_DetachedContextKeepsTheObserver(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
-	d := Workbench{Serve: branchingHandler("made-by-handler", http.StatusOK), Method: http.MethodPost, Path: "/act", Body: []byte("go"),
-		Header: http.Header{"X-Test": []string{"yes"}}}
-	res := RunOn(t, ctx, fx, d, branchDecl())
-	want := []Verdict{
-		v("command_log", Unattributable, "the driver supplied no git command log"),
-		v("refs_create", Unattributable, "refs/heads/made-by-handler created"),
-		v("index_carry", Within, "declares no_commit; observed no_commit"),
+	serve := func(root string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			detached := context.WithoutCancel(r.Context())
+			if _, err := gitx.RevParse(detached, root, "HEAD"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
 	}
-	if diff := verdictDiff(res.Verdicts, want); diff != "" {
-		t.Fatal(diff)
+	exit, log, err := Workbench{Serve: serve, Method: http.MethodGet, Path: "/"}.Run(ctx, fx.Dir)
+	if exit != 0 || err != nil {
+		t.Fatalf("Run = (%d, %v), want a clean run", exit, err)
 	}
-	if got := Outcome(res.Verdicts); got != Unproven {
-		t.Fatalf("Outcome = %s, want unproven", got)
-	}
+	checkInProcessLog(t, exit, log, 1)
 }
 
 // fatalRecorder is a testing.TB whose Fatalf records its message and ends
