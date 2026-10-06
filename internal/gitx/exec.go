@@ -17,9 +17,13 @@ import (
 // exec site that bypasses run must call observe too — observer_test pins
 // all three, and a structural test in the same file parses this package's
 // non-test sources and fails if the count of exec.Command/exec.CommandContext
-// call sites ever diverges from the count of observe( call sites.
+// call sites ever diverges from the count of observe( call sites. observe's
+// error (a VERDI_GITLOG record that failed, gitlog.go) is returned before
+// git runs.
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	observe(ctx, dir, args)
+	if err := observe(ctx, dir, args); err != nil {
+		return nil, fmt.Errorf("gitx: git %s (dir %s): %w", strings.Join(args, " "), dir, err)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
