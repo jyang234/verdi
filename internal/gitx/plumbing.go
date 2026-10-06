@@ -110,8 +110,8 @@ func CommitTree(ctx context.Context, dir, tree, parent, message string) (string,
 // create-only: it fails if the branch already exists, rather than silently
 // moving it (stub-instantiate: "fail closed if the branch exists"), and
 // configures no upstream for a commit start point. It keeps its name and
-// full-ref signature, but no longer spells the forbidden update-ref
-// (ritual-write-scope-v3 dc-8, ledger SI-359 (5)).
+// full-ref signature, and its argv carries no forbidden token
+// (internal/gitforbid; ritual-write-scope-v3 dc-8, ledger SI-359 (5)).
 //
 // Before running git it refuses what `git branch` cannot create as asked,
 // so the function is create-only for every input (ledger SI-359 (5b)): a
