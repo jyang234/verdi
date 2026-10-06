@@ -205,6 +205,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 <script src="/assets/boardspec.js"></script>
 <script src="/assets/boardspecasd.js"></script>
 <script src="/assets/wallselect.js"></script>
+<script src="/assets/walltoolbar.js"></script>
 </body>
 </html>
 `))
@@ -689,7 +690,23 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 			// every move triggers re-draws it.
 			cls += " sticky--parked"
 		}
-		b.WriteString(`<div class="` + cls + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
+		// The sticky's Graduate and × live on the contextual toolbar
+		// (spec/wall-canvas-v2 ac-3; SI-350 (5)); the card says what the
+		// toolbar may offer for it. Graduation writes the spec document
+		// (add-ac/-stub/…), so it is offered only where the kernel accepts
+		// it; deletion is the scratch tier's and rides authoring.
+		canAttrs := ""
+		if domainLive {
+			if proto {
+				canAttrs += ` data-can-graduate="stub"`
+			} else {
+				canAttrs += ` data-can-graduate="sticky"`
+			}
+		}
+		if authoring {
+			canAttrs += ` data-can-delete="sticky"`
+		}
+		b.WriteString(`<div class="` + cls + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `"` + canAttrs + ` style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
@@ -705,18 +722,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if authoring && obligationYarn {
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to ` + esc(p.words.indefinite("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
 		}
-		if domainLive {
-			// Graduation writes the spec document (add-ac/-stub/…): the
-			// affordance renders only where the kernel accepts it.
-			if proto {
-				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="stub">Graduate</button>`)
-			} else {
-				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
-			}
-		}
-		if authoring {
-			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
-		}
 		// The footer line names the paper and what the wall offers it
 		// (spec/wall-canvas-v2 ac-1; handoff "Sticky").
 		b.WriteString(`<span class="sticky-foot">` + esc(stickyFootText(authoring, domainLive)) + `</span>`)
@@ -726,19 +731,21 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// Yarn chips: one HTML element per edge carrying the contract's data
 	// attributes; boardspec.js lays them on the thread's midpoint and
 	// draws the SVG thread itself (pure decoration, no data attributes).
-	// Authoring affordances (owner UAT round 6, item 3 + the retype
-	// directive): annotation chips graduate or die; a spec-layer chip
-	// drawn from a decision retypes in place (its type label is the
-	// affordance) or is removed — the inverse of drawing it. A
-	// document-level chip (From "spec") gets neither: its edge lives in
-	// the frontmatter links: block the board cannot edit.
+	// A chip is the button that selects its thread (spec/wall-canvas-v2
+	// ac-2; SI-350 (5)), and its authoring affordances (owner UAT round 6,
+	// item 3 + the retype directive) live on the contextual toolbar
+	// (ac-3): the chip says which the toolbar may offer. Annotation chips
+	// graduate or die; a spec-layer chip drawn from a decision retypes in
+	// place or is removed — the inverse of drawing it. A document-level
+	// chip (From "spec") gets neither: its edge lives in the frontmatter
+	// links: block the board cannot edit.
 	for _, e := range p.Edges {
 		editableSpecEdge := domainLive && e.Layer == "spec" && e.From != "spec"
 		chipClass := "yarn-chip yarn-chip--" + esc(e.Layer)
 		if e.From == "spec" {
 			chipClass += " yarn-chip--doc"
 		}
-		b.WriteString(`<div class="` + chipClass + `" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
+		b.WriteString(`<div class="` + chipClass + `" role="button" tabindex="0" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
 		if e.Layer == "spec" && e.From != "spec" {
 			key := asdEdgeKey(e.From, e.Type, e.To)
 			if facts := asd.EdgeFacts[key]; edgeFactSeen[key] < len(facts) {
@@ -750,37 +757,45 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if e.AnnotationID != "" {
 			b.WriteString(` data-annotation-id="` + esc(e.AnnotationID) + `"`)
 		}
+		if editableSpecEdge {
+			b.WriteString(` data-can-retype="true"`)
+		}
+		if authoring && e.Layer == "annotation" {
+			// An attribution thread (either endpoint a live sticky, round
+			// 5.4) never graduates through the type picker: its meaning IS
+			// the endpoint pair (dc-5), and stub-graduate on the sticky is
+			// what consumes it. It still dies. Thread graduation writes a
+			// typed spec link (add-link) — domain surface, offered only
+			// where the kernel accepts it.
+			if domainLive && !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
+				b.WriteString(` data-can-graduate="thread"`)
+			}
+			b.WriteString(` data-can-delete="thread"`)
+		}
+		if editableSpecEdge {
+			b.WriteString(` data-can-delete="edge"`)
+		}
 		b.WriteString(`>`)
 		if e.From == "spec" {
 			// The document is not a card — its thread runs off the top of
 			// the wall — so its chip says whose edge this is.
 			b.WriteString(`<span class="yarn-chip-doc">this spec</span>`)
 		}
-		if editableSpecEdge {
-			b.WriteString(`<button type="button" class="yarn-chip-type" data-retype aria-label="Change ` + esc(e.Type) + ` edge type" title="change this relationship's type">` + esc(e.Type) + `</button>`)
-		} else {
-			b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
-		}
-		if authoring && e.Layer == "annotation" {
-			// An attribution thread (either endpoint a live sticky, round
-			// 5.4) never graduates through the type picker: its meaning IS
-			// the endpoint pair (dc-5), and stub-graduate on the sticky is
-			// what consumes it. It still dies from its own ×.
-			// Thread graduation writes a typed spec link (add-link) —
-			// domain surface, offered only where the kernel accepts it.
-			if domainLive && !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
-				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
-			}
-			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
-		}
-		if editableSpecEdge {
-			b.WriteString(`<button type="button" class="delete-btn" data-delete="edge" aria-label="Remove ` + esc(e.Type) + ` edge" title="remove this relationship from the spec">×</button>`)
-		}
+		b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
 		b.WriteString(`</div>`)
 	}
 
+	// The add-in-place slots (ac-5; SI-350 (15)): one per object column,
+	// where the domain is live — a slot is a typed write.
+	if domainLive {
+		writeAddSlots(&b, p)
+	}
+
 	b.WriteString(`</div>`) // board-canvas
-	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"></div>`)
+	// The status row hosts the contextual toolbar (ac-3): the toolbar asset
+	// fills it from the selection and the mode, and the selection asset
+	// draws the status pill beside it.
+	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div></div>`)
 	b.WriteString(`</div>`) // wall-frame
 
 	// The side rail, top-down by consequence: the commit affordance (the
@@ -1479,9 +1494,11 @@ func renderBoardDialogs(p *BoardProjection) string {
 <button type="button" role="menuitem" data-object-kind="open-question">Open question</button>
 <button type="button" id="graduate-menu-cancel">Cancel</button>
 </div>
-<!-- The supply toolbox (owner directive): the wall's box of pins — one
-     quiet tab at the screen's lower-left, one click to the picker, no
-     residue when it closes. Authoring only, like every write affordance. -->
+<!-- The supply toolbox (owner directive): the wall's box of pins — the
+     picker tray, opened by the contextual toolbar's "Pin an artifact"
+     button (spec/wall-canvas-v2 ac-3; SI-350 (5), (10): the fixed tab
+     retired into the toolbar), no residue when it closes. Authoring only,
+     like every write affordance. -->
 <div class="pin-toolbox" id="pin-toolbox" data-testid="pin-toolbox">
 <div class="pin-tray" id="pin-tray" role="dialog" aria-label="Pin an artifact" hidden>
 <h2>Pin an artifact</h2>
@@ -1489,7 +1506,6 @@ func renderBoardDialogs(p *BoardProjection) string {
 <input id="pin-search" type="search" aria-label="Search artifacts" placeholder="search the corpus&#8230;" autocomplete="off">
 <div id="pin-results" data-testid="pin-results"></div>
 </div>
-<button type="button" id="pin-toolbox-tab" class="pin-toolbox-tab" aria-expanded="false" aria-controls="pin-tray"><span class="pin-head" aria-hidden="true"></span>Pin an artifact</button>
 </div>
 <!-- The trash target (owner directive): fades in near the lower-right
      while a wall element is dragged; dropping removes per tier. A pure

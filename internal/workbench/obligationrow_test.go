@@ -230,10 +230,19 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // "wall-status-row" data-testid="wall-status-row"></div></div>` after its
 // close — the status pill's reserved row, on every wall alike — and every
 // other byte of the story render is as it was (the region diff is those
-// two insertions and nothing else).
+// two insertions and nothing else). Re-pinned a third time by
+// spec/wall-canvas-v2 (lane F2b, SI-350 (5)): every yarn chip is the
+// button that selects its thread (`role="button" tabindex="0"` after its
+// class) and names its toolbar actions as data-can-* attributes instead
+// of carrying inner buttons, every sticky names its own the same way, and
+// the status row hosts the toolbar
+// (`<div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar"
+// aria-label="Wall actions"></div>`) — on every wall alike; these
+// read-only story walls render no add slot (the domain is not live) and
+// every other byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "2ee56527329b757db851e8f19c1cd2a401babd0e5abd546ddd27f43dc34d61c9"
-	slotStoryWallDigestBase = "2bced997d86c5e02cdefa3cea0fc0dd4f49d0d4afc7211aa512c62b2d30a9554"
+	storyWallDigestBase     = "bd05766fb6ac1887c015e8bda7ead811feb1543f09dbc7187bb187a467ce2b66"
+	slotStoryWallDigestBase = "994205aa135785425dc6369a1822a99ea5e2c1f00e952842ff8d4ce68c6a715b"
 )
 
 func renderDigest(body string) string {

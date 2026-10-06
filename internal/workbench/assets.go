@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -119,6 +119,17 @@ func topBarJSHandler() http.HandlerFunc {
 // (TestWallSelectAsset_ServedWithinBudget).
 func wallSelectJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/wallselect.js")
+}
+
+// wallToolbarJSHandler serves the wall's contextual toolbar script
+// (spec/wall-canvas-v2 ac-3, ac-4, ac-5, co-2): the toolbar built on the
+// selection, drag-to-thread's target highlight and picker placement, the
+// add-in-place slots, and the card editor's Enter and Escape — a new
+// asset for the new behaviour (co-1: boardspec.js does not grow),
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (TestWallToolbarAsset_ServedWithinBudget).
+func wallToolbarJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/walltoolbar.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {

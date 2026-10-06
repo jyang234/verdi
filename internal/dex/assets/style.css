@@ -5013,33 +5013,37 @@ body:not(.board-page) > footer.site-foot,
   -webkit-user-select: none;
   user-select: none;
 }
+/* the row hosts the contextual toolbar at its left (wall-canvas-v2 ac-3,
+   lane F2b: the toolbar retired the pin toolbox's fixed tab, so the row
+   no longer keeps a band free for it) and the status pill at its right;
+   the two wrap onto separate lines where the frame is too narrow for
+   both, the pill on the lower one. Where the asset finds the frame too
+   narrow for the pill to read beside the toolbar ("stacked") the pill
+   takes the whole line. Where the viewport is too short for even the
+   floor canvas and a wrapped row to fit together (a short window at
+   200 % zoom), the row leads the canvas instead: the toolbar and the
+   pill stay in view with the canvas's top */
 .wall-status-row {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 6px 12px;
   min-height: 44px;
   padding: 8px 0 0;
 }
-/* the authoring wall's pin toolbox tab is fixed at the viewport's lower
-   left until the toolbar retires it (wall-canvas-v2 ac-3): the row leaves
-   its band free, so the pill never meets it — beside the band (the tab
-   ends about 9rem from the frame's edge), or, where the asset finds the
-   frame too narrow for that to leave the pill room to read and the
-   viewport tall enough for the frame to fit with a taller row, on a line
-   of its own above the band (the tab's top is about 2.9rem up). Where
-   the viewport is too short for even the floor canvas and a wrapped row
-   to fit together (a short window at 200 % zoom), the row leads the
-   canvas instead: the pill stays in view with the canvas's top and keeps
-   the band's margin, since the tab's band still sweeps the frame as the
-   page scrolls */
-.mode-authoring .wall-status-row { padding-left: 10rem; }
-.mode-authoring [data-wall-row="stacked"] .wall-status-row { padding: 8px 0 3.25rem; }
+/* the pill leads (the handoff's bottom-left), the toolbar follows at the
+   right; stacked, the pill takes the first line whole and the toolbar
+   the lines below — so the pill never reaches the viewport's lower
+   right, where the authoring wall's trash target rises during a drag */
+.wall-status-row .wall-status { order: 1; }
+.wall-status-row .wall-toolbar { order: 2; }
+[data-wall-row="stacked"] .wall-status-row .wall-status { flex: 1 1 100%; }
 [data-wall-row="leading"] .wall-status-row {
   order: -1;
   padding: 4px 0 8px;
 }
-.mode-authoring [data-wall-row="leading"] .wall-status-row { padding-left: 10rem; }
 
 /* ---- every paper's shadow is composed from two custom properties: the
    ring the selection sets and the resting or lifted shadow. A hover rule,
@@ -5325,5 +5329,272 @@ body:not(.board-page) > footer.site-foot,
   .boardv2-canvas .refcard,
   .boardv2-canvas .sticky,
   .boardv2-canvas [data-selected] > .yarn-handle { transition: none; }
+}
+
+/* == The contextual toolbar, drag-to-thread, and the add-in-place slots
+   (spec/wall-canvas-v2 ac-3, ac-4, ac-5; ledger SI-350 (5), (8), (9),
+   (10), (13), (15), (16); lane F2b) ===========================================
+   The toolbar sits in the wall frame's row below the canvas, beside the
+   status pill (not floating over the cork as the handoff drew it: the row
+   is where SI-358 (4) put the pill so it covers nothing, and the toolbar
+   follows it there). The handoff's chrome otherwise: --card paper, 1px
+   --rule, radius 8, mono 12 at .03em, buttons padded 8 × 12 with --panel
+   on hover, 1 × 20 dividers, the kind lockup in the kind's ink, Delete in
+   --st-violated. Tokens only (SI-326); the toolbar's pushpin glyph keeps
+   the pin's gradient like every pushpin. */
+.wall-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 6px 20px rgba(20, 26, 18, 0.18);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+/* until the asset fills it the host takes no room */
+.wall-toolbar:empty { display: none; }
+/* where the row leads the canvas (a viewport too short for the floor
+   canvas and a wrapped row together — a short window at 200 % zoom,
+   wallselect.js ROW_FIT_HEIGHT) the toolbar keeps to one line and scrolls
+   across, so the canvas keeps what little height the viewport has; every
+   action stays reachable, by scroll or by Tab */
+[data-wall-row="leading"] .wall-status-row .wall-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.wall-toolbar-btn,
+.wall-toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wall-toolbar-btn:hover,
+.wall-toolbar-link:hover,
+.wall-toolbar-btn[aria-expanded="true"] { background: var(--panel); }
+.wall-toolbar-btn:focus-visible,
+.wall-toolbar-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wall-toolbar-btn kbd { font: inherit; opacity: 0.6; }
+.wall-toolbar-btn--delete { color: var(--st-violated); }
+.wall-toolbar-btn--delete:hover { background: var(--st-violated-tint); }
+.wall-toolbar-divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--rule);
+}
+.wall-toolbar-lockup {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 18rem;
+  padding: 0 12px 0 6px;
+  margin-right: 6px;
+  border-right: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.wall-toolbar-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wall-toolbar-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+.wall-toolbar-lockup[data-object-kind="acceptance-criterion"] .wall-toolbar-kind { color: var(--st-evidenced); }
+.wall-toolbar-lockup[data-object-kind="constraint"] .wall-toolbar-kind { color: var(--st-violated); }
+.wall-toolbar-lockup[data-object-kind="decision"] .wall-toolbar-kind { color: var(--authored); }
+.wall-toolbar-lockup[data-object-kind="open-question"] .wall-toolbar-kind { color: var(--st-waived); }
+.wall-toolbar-lockup[data-object-kind="stub"] .wall-toolbar-kind { color: var(--stub-ink); }
+.wall-toolbar-lockup[data-object-kind="reference"] .wall-toolbar-kind { color: var(--frozen); }
+.wall-toolbar-lockup[data-object-kind="sticky"] .wall-toolbar-kind { color: var(--st-nosignal); }
+/* a thread's lockup: the swatch in its type's ink (dashed where the yarn is) */
+.wall-toolbar-swatch {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid var(--yarn);
+}
+.wall-toolbar-swatch[data-edge-type="implements"] { border-top-color: var(--yarn-implements); }
+.wall-toolbar-swatch[data-edge-type="resolves"] { border-top-color: var(--yarn-resolves); }
+.wall-toolbar-swatch[data-edge-type="depends-on"] { border-top-color: var(--yarn-depends-on); }
+.wall-toolbar-swatch[data-edge-type="exempts"] { border-top-color: var(--yarn-exempts); }
+.wall-toolbar-swatch[data-edge-type="supersedes"] { border-top-color: var(--yarn-supersedes); border-top-style: dashed; }
+.wall-toolbar-swatch[data-edge-type="relates"] { border-top-color: var(--yarn-relates); border-top-style: dashed; }
+.wall-toolbar-lockup[data-edge-type="implements"] .wall-toolbar-kind { color: var(--yarn-implements); }
+.wall-toolbar-lockup[data-edge-type="resolves"] .wall-toolbar-kind { color: var(--yarn-resolves); }
+.wall-toolbar-lockup[data-edge-type="depends-on"] .wall-toolbar-kind { color: var(--yarn-depends-on); }
+.wall-toolbar-lockup[data-edge-type="exempts"] .wall-toolbar-kind { color: var(--yarn-exempts); }
+.wall-toolbar-lockup[data-edge-type="supersedes"] .wall-toolbar-kind { color: var(--yarn-supersedes); }
+.wall-toolbar-lockup[data-edge-type="relates"] .wall-toolbar-kind { color: var(--yarn-relates); }
+.wall-toolbar-pair,
+.wall-toolbar-count,
+.wall-toolbar-hint {
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--muted-solid);
+  white-space: nowrap;
+}
+.wall-toolbar-hint { font-size: 10.5px; }
+.wall-toolbar-pair { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+/* the thread hint's pin and the Pin button's pin: pushpin glyphs */
+.wall-toolbar-pushpin {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%, #dd9482, var(--yarn) 55%, #6f2418 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+/* the yarn key's swatches, five in a row */
+.wall-toolbar-key {
+  display: inline-flex;
+  gap: 2px;
+}
+.wall-toolbar-key i {
+  width: 6px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--yarn-implements);
+}
+.wall-toolbar-key i:nth-child(2) { background: var(--yarn-resolves); }
+.wall-toolbar-key i:nth-child(3) { background: var(--yarn-depends-on); }
+.wall-toolbar-key i:nth-child(4) { background: var(--yarn-exempts); }
+.wall-toolbar-key i:nth-child(5) { background: var(--yarn-supersedes); }
+/* the existing yarn key, revealed by the toolbar's action (SI-350 (9)):
+   the rail's own section, scrolled into view and focused, wears a ring
+   while it has focus */
+.yarn-key[data-revealed] {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* ---- a thread chip is the button that selects its thread (ac-2; SI-350 (5)) ---- */
+.boardv2-canvas .yarn-chip { cursor: pointer; }
+.boardv2-canvas .yarn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- drag-to-thread (ac-4): the paper under the pointer lights while a
+   pin is dragged (the handoff's drag preview) ---- */
+.boardv2-canvas [data-drop-target] {
+  z-index: 7;
+  --wall-ring: 0 0 0 3px var(--yarn);
+}
+/* the type picker opens at the drop point (or at the chip for a retype),
+   clamped inside the viewport by the asset; elsewhere it keeps the shared
+   dialog's centred place */
+#edge-picker[data-at-point] { transform: none; }
+
+/* ---- the pin toolbox lost its fixed tab: the tray the toolbar's button
+   opens sits centred over the viewport's foot, where the toolbar's row
+   usually is ---- */
+.pin-toolbox {
+  left: 50%;
+  bottom: 1.1rem;
+  width: 0;
+}
+.pin-tray {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ---- the add-in-place slots (ac-5; SI-350 (15)): a dashed box at the
+   foot of each object column; open, it grows into the kind line, the
+   serif textarea and the key hint ---- */
+.boardv2-canvas .wall-slot {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 200px;
+  min-height: 44px;
+  border: 1px dashed color-mix(in srgb, var(--muted-solid) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+}
+.boardv2-canvas .wall-slot-open {
+  display: block;
+  width: 100%;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.boardv2-canvas .wall-slot-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:focus-within { border-color: var(--st-evidenced); }
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:hover .wall-slot-open { color: var(--st-evidenced); }
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:focus-within { border-color: var(--st-violated); }
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:hover .wall-slot-open { color: var(--st-violated); }
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:focus-within { border-color: var(--authored); }
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:hover .wall-slot-open { color: var(--authored); }
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:focus-within { border-color: var(--st-waived); }
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:hover .wall-slot-open { color: var(--st-waived); }
+.boardv2-canvas .wall-slot[data-open] {
+  z-index: 9;
+  min-height: 130px;
+  border: 1px solid var(--accent);
+  background: var(--card);
+  box-shadow: var(--shadow-lift);
+}
+.boardv2-canvas .wall-slot[data-open] .wall-slot-open { display: none; }
+.wall-slot-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+.wall-slot-line,
+.wall-slot-hint {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+}
+.wall-slot-line { text-transform: uppercase; letter-spacing: 0.06em; }
+.wall-slot-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 58px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 13.5px;
+  line-height: 1.4;
+  resize: vertical;
 }
 /* verdi:workbench-only:end */
