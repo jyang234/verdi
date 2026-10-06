@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -317,5 +319,55 @@ func TestResolveLocalActors_NotAGitRepository(t *testing.T) {
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("error = %v, want a legible git-related refusal, not a bare filesystem error", err)
+	}
+}
+
+// actorLocalGitReads records the git reads gitx runs on its context.
+type actorLocalGitReads struct {
+	mu   sync.Mutex
+	argv []string
+}
+
+func (r *actorLocalGitReads) Observe(_ string, args []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.argv = append(r.argv, strings.Join(args, " "))
+}
+
+// TestVerifyGitTopLevel is verifyGitTopLevel's table: a store root that
+// is its repository's top level passes, and one below the top level or
+// outside any repository is refused, each by a top-level read made
+// through gitx so the observer sees it (spec/gitx-recorder-seam dc-3).
+func TestVerifyGitTopLevel(t *testing.T) {
+	t.Parallel()
+	top := initGitRepoNoIdentity(t)
+	nested := filepath.Join(top, "nested-store")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		root    string
+		wantErr string
+	}{
+		{name: "the top level itself", root: top},
+		{name: "a store nested below the top level", root: nested, wantErr: "is not itself a Git repository top level"},
+		{name: "a store outside any repository", root: t.TempDir(), wantErr: "is not a Git repository"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reads := &actorLocalGitReads{}
+			err := verifyGitTopLevel(gitx.WithObserver(context.Background(), reads), tc.root)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("verifyGitTopLevel(%s) = %v, want nil", tc.root, err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("verifyGitTopLevel(%s) = %v, want an error mentioning %q", tc.root, err, tc.wantErr)
+			}
+			if len(reads.argv) != 1 || !strings.HasPrefix(reads.argv[0], "rev-parse --show-toplevel") {
+				t.Fatalf("observed git reads %q, want the one top-level read through gitx", reads.argv)
+			}
+		})
 	}
 }

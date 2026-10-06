@@ -41,11 +41,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -141,21 +139,20 @@ func readLocalGitIdentity(ctx context.Context, root string) (identity string, av
 }
 
 // verifyGitTopLevel refuses when root is not itself a Git repository top
-// level: `git -C root rev-parse --show-toplevel` must resolve to exactly
-// root, canonicalized the same way on both sides so a symlinked temp
-// directory (e.g. macOS's /tmp -> /private/tmp) never produces a false
-// mismatch. A store nested inside a larger checkout with no .git of its
-// own would otherwise have that ENCLOSING repository's identity read on
-// its behalf — refused here rather than silently trusted.
+// level: the top level gitx.Locate reads in root (`git rev-parse
+// --show-toplevel`, through gitx so the read is observed like every other,
+// spec/gitx-recorder-seam dc-3) must resolve to exactly root,
+// canonicalized the same way on both sides so a symlinked temp directory
+// (e.g. macOS's /tmp -> /private/tmp) never produces a false mismatch. A
+// store nested inside a larger checkout with no .git of its own would
+// otherwise have that ENCLOSING repository's identity read on its behalf —
+// refused here rather than silently trusted.
 func verifyGitTopLevel(ctx context.Context, root string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--show-toplevel")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cmd/verdi: local-operator identity: store root %q is not a Git repository: %w: %s", root, err, strings.TrimSpace(stderr.String()))
+	location, err := gitx.Locate(ctx, root)
+	if err != nil {
+		return fmt.Errorf("cmd/verdi: local-operator identity: store root %q is not a Git repository: %w", root, err)
 	}
-	toplevel, err := canonicalGitDir(strings.TrimSpace(stdout.String()))
+	toplevel, err := canonicalGitDir(location.TopLevel)
 	if err != nil {
 		return fmt.Errorf("cmd/verdi: local-operator identity: resolving Git top-level path: %w", err)
 	}
