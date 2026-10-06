@@ -5343,6 +5343,7 @@ body:not(.board-page) > footer.site-foot,
    --st-violated. Tokens only (SI-326); the toolbar's pushpin glyph keeps
    the pin's gradient like every pushpin. */
 .wall-toolbar {
+  box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -5405,7 +5406,8 @@ body:not(.board-page) > footer.site-foot,
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  max-width: 18rem;
+  min-width: 0;
+  max-width: 100%;
   padding: 0 12px 0 6px;
   margin-right: 6px;
   border-right: 1px solid var(--rule);
@@ -5458,8 +5460,9 @@ body:not(.board-page) > footer.site-foot,
   color: var(--muted-solid);
   white-space: nowrap;
 }
-.wall-toolbar-hint { font-size: 10.5px; }
-.wall-toolbar-pair { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+/* the hint wraps rather than widen the row (320 px: Wave 6 §5.2) */
+.wall-toolbar-hint { flex: 1 1 8rem; min-width: 0; font-size: 10.5px; white-space: normal; }
+.wall-toolbar-pair { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* the thread hint's pin and the Pin button's pin: pushpin glyphs */
 .wall-toolbar-pushpin {
   flex: none;

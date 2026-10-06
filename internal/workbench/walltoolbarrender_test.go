@@ -255,8 +255,11 @@ func slotProjection(mode boardModeKind, refusal string) *BoardProjection {
 func TestWallToolbar_AddSlotsAtEachObjectColumnsFoot(t *testing.T) {
 	body := renderBoardRegion(slotProjection(modeAuthoring, ""), &boardGitState{}, testASDView())
 	for _, want := range []string{
-		// AC column: ac-2 (top 216) is the lowest card → 216 + 176.
-		`<div class="wall-slot" data-testid="slot-ac" data-slot-kind="acceptance-criterion" data-slot-op="add-ac" data-slot-prefix="ac" style="left:40px;top:392px"><button type="button" class="wall-slot-open" data-testid="slot-open-ac">+ acceptance criterion</button></div>`,
+		// AC column: ac-2 (top 216) is the lowest card → 216 + 176. The
+		// resting label is the kind's short noun: a button named
+		// "acceptance …" would read as a control claiming governance
+		// authority (50-design-workbench pins that no browser control does).
+		`<div class="wall-slot" data-testid="slot-ac" data-slot-kind="acceptance-criterion" data-slot-op="add-ac" data-slot-prefix="ac" style="left:40px;top:392px"><button type="button" class="wall-slot-open" data-testid="slot-open-ac">+ criterion</button></div>`,
 		// Constraint column: co-1 alone → 40 + 176.
 		`<div class="wall-slot" data-testid="slot-co" data-slot-kind="constraint" data-slot-op="add-constraint" data-slot-prefix="co" style="left:268px;top:216px"><button type="button" class="wall-slot-open" data-testid="slot-open-co">+ constraint</button></div>`,
 		// Decision column: the sticky at (520, 300) overlaps the band and
@@ -264,7 +267,7 @@ func TestWallToolbar_AddSlotsAtEachObjectColumnsFoot(t *testing.T) {
 		// 150 + 36.
 		`<div class="wall-slot" data-testid="slot-dc" data-slot-kind="decision" data-slot-op="add-decision" data-slot-prefix="dc" style="left:496px;top:486px"><button type="button" class="wall-slot-open" data-testid="slot-open-dc">+ decision</button></div>`,
 		// Open-question column: empty → the first row.
-		`<div class="wall-slot" data-testid="slot-oq" data-slot-kind="open-question" data-slot-op="add-question" data-slot-prefix="oq" style="left:724px;top:40px"><button type="button" class="wall-slot-open" data-testid="slot-open-oq">+ open question</button></div>`,
+		`<div class="wall-slot" data-testid="slot-oq" data-slot-kind="open-question" data-slot-op="add-question" data-slot-prefix="oq" style="left:724px;top:40px"><button type="button" class="wall-slot-open" data-testid="slot-open-oq">+ question</button></div>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("slot markup missing:\n%s", want)

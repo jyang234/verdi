@@ -39,24 +39,30 @@ type addSlot struct {
 	Kind   string
 	Op     string
 	Prefix string
+	Label  string
 	X, Y   float64
 }
 
-// addSlotOp names an object zone's typed add operation and the id prefix
-// the server's next id carries — the same pairs boardspec.js's ADD_OPS
-// and boardspecasd.js's nextIDFor hold; false for every other zone.
-func addSlotOp(kind boardlayout.ZoneKind) (op, prefix string, ok bool) {
+// addSlotOp names an object zone's typed add operation, the id prefix the
+// server's next id carries — the same pairs boardspec.js's ADD_OPS and
+// boardspecasd.js's nextIDFor hold — and the slot's resting label, the
+// kind's short noun ("+ criterion", not the handoff's "+ acceptance
+// criterion": a button whose name says "acceptance" would read as a
+// control claiming governance authority, which the workbench forbids its
+// browser controls to do; the open slot's own line names the kind in
+// full). False for every other zone.
+func addSlotOp(kind boardlayout.ZoneKind) (op, prefix, label string, ok bool) {
 	switch kind {
 	case boardlayout.ZoneAC:
-		return "add-ac", "ac", true
+		return "add-ac", "ac", "criterion", true
 	case boardlayout.ZoneConstraint:
-		return "add-constraint", "co", true
+		return "add-constraint", "co", "constraint", true
 	case boardlayout.ZoneDecision:
-		return "add-decision", "dc", true
+		return "add-decision", "dc", "decision", true
 	case boardlayout.ZoneOpenQuestion:
-		return "add-question", "oq", true
+		return "add-question", "oq", "question", true
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 // addSlotsFor computes the slots for a projection, in zone order.
@@ -78,7 +84,7 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 	limit := canvasMinHeight(p)
 	var out []addSlot
 	for _, col := range boardlayout.ZoneColumns() {
-		op, prefix, ok := addSlotOp(col.Kind)
+		op, prefix, label, ok := addSlotOp(col.Kind)
 		if !ok {
 			continue
 		}
@@ -94,7 +100,7 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 		if y+addSlotHeight > limit {
 			continue // it does not fit
 		}
-		out = append(out, addSlot{Kind: string(col.Kind), Op: op, Prefix: prefix, X: float64(col.X), Y: y})
+		out = append(out, addSlot{Kind: string(col.Kind), Op: op, Prefix: prefix, Label: label, X: float64(col.X), Y: y})
 	}
 	return out
 }
@@ -104,6 +110,6 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 func writeAddSlots(b *strings.Builder, p *BoardProjection) {
 	for _, s := range addSlotsFor(p) {
 		b.WriteString(`<div class="wall-slot" data-testid="slot-` + s.Prefix + `" data-slot-kind="` + s.Kind + `" data-slot-op="` + s.Op + `" data-slot-prefix="` + s.Prefix + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
-		b.WriteString(`<button type="button" class="wall-slot-open" data-testid="slot-open-` + s.Prefix + `">+ ` + strings.ReplaceAll(s.Kind, "-", " ") + `</button></div>`)
+		b.WriteString(`<button type="button" class="wall-slot-open" data-testid="slot-open-` + s.Prefix + `">+ ` + s.Label + `</button></div>`)
 	}
 }
