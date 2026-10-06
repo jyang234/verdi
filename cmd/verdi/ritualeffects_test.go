@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/jyang234/verdi/internal/ritualwitness"
 	ws "github.com/jyang234/verdi/internal/writescope"
@@ -179,19 +178,30 @@ func (c ritualCase) states() []ritualwitness.SeedState {
 // every (declaration, verb) of the registry to have a case naming that
 // declaration's ritual; every table key to be a registry verb; and every
 // verb's dispatch branches and named paths to have a case (dc-3; SI-341
-// (4), (7); SI-354 (5)). It then pins, for the whole run, ambient git
-// configuration isolation and the CI environment (PinCIEnv: an in-process
-// driver reads the test process's own environment, SI-344 (2)), so the
-// cases can run in parallel without touching the process environment.
+// (4), (7); SI-354 (5)). The table's runs are shared with
+// TestForbiddenTokens_EveryVerbCommandLog (forEachRitualEffectsRun; ledger
+// SI-359 (8)): whichever test runs first runs them, pinning for the whole
+// table ambient git configuration isolation, the CI environment (PinCIEnv:
+// an in-process driver reads the test process's own environment, SI-344
+// (2)), and a process-wide VERDI_GITLOG, so the cases can run in parallel
+// without touching the process environment.
+//
+// Every run carries its git command log (spec/gitx-recorder-seam ac-2):
+// the built binary's from the VERDI_GITLOG file it appends to, and the
+// workbench's and MCP server's from the gitx.Observer the in-process
+// drivers attach through the servers' contexts (ledger SI-359 (1)). Each
+// in-process run's log is compared with the process-wide VERDI_GITLOG
+// record for record, so no context root dropped a call (SI-359 (7)), and
+// any difference fails the run.
 //
 // Each run fails on any outside verdict, except the one SI-348 (2) names
 // for a whole-tree guard's refusal under a scoped declaration; requires
 // the exit and, for a refusal, the refusal's own words, with no git
-// mutation remaining and no commit created; and tolerates an
-// unattributable verdict only while the driver supplies no command log
-// (SI-341 (1)), logging the counts, so the test tightens on its own once
-// spec/gitx-recorder-seam lands the log. Every verdict is logged
-// (ritualRunViolations is the law).
+// mutation remaining and no commit created; and fails on any
+// unattributable verdict when its log was supplied, which is every run
+// (SI-341 (1) as SI-359 (9) reads it: the no-log tolerance has ended).
+// Every verdict is logged (ritualRunViolations is the law), and so are the
+// per-driver counts of runs, logged calls, and verdicts.
 //
 // The whole-tree guards (SI-341 (2), SI-349 (2)) — board switch,
 // constitution propose onto a branch HEAD is elsewhere from, context
@@ -212,15 +222,18 @@ func (c ritualCase) states() []ritualwitness.SeedState {
 // completion (SI-348 (1), SI-349 (3), SI-351 (1), backlog BL-155), whose
 // rows assert a mismatched input binding's refusal in the binding slot's
 // own words, the earliest refusal before any effect common to every
-// platform. Until the command log lands (SI-341 (1)), observation itself
-// is unproven: an effect made and undone within one run is unobserved,
-// and no observed effect is attributed.
+// platform. Disclosed beside the log (spec/gitx-recorder-seam): gitx
+// records a call before it runs, so a failed call can still be credited
+// with an effect made outside gitx (SI-325 (8)); a call that names no
+// paths is credited per worktree (SI-329 (8′)); and git a child program
+// runs itself, or a verdi process the binary starts, is outside the log
+// (SI-359 (4b), (15)).
 //
 // So the producer abstains (SI-354 (3)). It runs and asserts every case,
 // and any failure fails it; then, while the run itself shows a disclosed
-// gap — a run with no command log, or a refusal standing in for a
-// completion the ritual is declared to make — it ends with t.Skip naming
-// each gap, which the go-test producer reads as abstain
+// gap — a refusal standing in for a completion the ritual is declared to
+// make, or a run whose driver failed to supply its command log — it ends
+// with t.Skip naming each gap, which the go-test producer reads as abstain
 // (testproducer.go's verdictForOutcome), never pass.
 func TestRitualEffects_EveryDeclaredRitual(t *testing.T) {
 	if awaiting := ws.AwaitingFixes(); len(awaiting) != 0 {
@@ -232,43 +245,102 @@ func TestRitualEffects_EveryDeclaredRitual(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	ritualwitness.PinCIEnv(t, ritualwitness.CIEnv{})
-
-	decls := map[string]ws.Declaration{}
-	for _, d := range ws.Registry() {
-		decls[d.Ritual] = d
-	}
 	var gaps ritualEffectsGaps
-	// The cases run in parallel inside one sequential subtest, which
-	// returns only once every case has finished.
-	t.Run("cases", func(t *testing.T) {
-		for _, verb := range sortedVerbs(table) {
-			for _, c := range table[verb] {
-				decl := decls[c.ritual]
-				t.Run(c.ritual+" "+c.path+" "+verb.String(), func(t *testing.T) {
-					t.Parallel()
-					for _, state := range c.states() {
-						t.Run(state.String(), func(t *testing.T) {
-							runRitualCase(t, c, decl, state, &gaps)
-						})
-					}
-				})
-			}
+	var counts ritualEffectsCounts
+	forEachRitualEffectsRun(t, bin, table, func(t *testing.T, c ritualCase, decl ws.Declaration, state ritualwitness.SeedState, run ritualEffectsRun) {
+		if c.disclosure != "" {
+			t.Logf("disclosed: %s", c.disclosure)
+		}
+		want := c.want(state)
+		res := run.result()
+		gaps.record(want, res)
+		counts.record(run)
+		logVerdicts(t, res)
+		judgeRitualRun(t, decl, want, res)
+		for _, g := range run.LogGaps {
+			t.Error(g)
 		}
 	})
+	for _, line := range counts.lines() {
+		t.Log(line)
+	}
 	if open := gaps.open(); len(open) > 0 {
 		t.Skipf("ac-2 abstains while the run shows its disclosed gaps (ledger SI-354 (3)); every case ran and was asserted, and none of the gaps is a pass: %s", strings.Join(open, "; "))
 	}
 }
 
+// ritualEffectsCounts tallies the table's runs per driver kind: runs, runs
+// whose log was supplied, logged calls, in-process records compared with
+// the process-wide VERDI_GITLOG, and verdicts by status. Its zero value is
+// ready; the parallel cases record into it concurrently.
+type ritualEffectsCounts struct {
+	mu       sync.Mutex
+	byDriver map[string]*driverCounts
+}
+
+// driverCounts is one driver kind's tally.
+type driverCounts struct {
+	runs, logged, calls, compared int
+	verdicts                      map[ritualwitness.Status]int
+}
+
+// record notes one run.
+func (c *ritualEffectsCounts) record(run ritualEffectsRun) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.byDriver == nil {
+		c.byDriver = map[string]*driverCounts{}
+	}
+	d := c.byDriver[run.Driver]
+	if d == nil {
+		d = &driverCounts{verdicts: map[ritualwitness.Status]int{}}
+		c.byDriver[run.Driver] = d
+	}
+	d.runs++
+	if run.Log.OK {
+		d.logged++
+	}
+	d.calls += len(run.Log.Calls)
+	d.compared += run.Compared
+	for _, v := range run.Verdicts {
+		d.verdicts[v.Status]++
+	}
+}
+
+// lines is the tally, one line per driver kind, sorted, then the total.
+func (c *ritualEffectsCounts) lines() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var kinds []string
+	for k := range c.byDriver {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	var out []string
+	total := driverCounts{verdicts: map[ritualwitness.Status]int{}}
+	line := func(kind string, d *driverCounts) string {
+		return fmt.Sprintf("driver %s: %d run(s), %d with a command log, %d logged call(s), %d in-process record(s) compared with the process-wide VERDI_GITLOG; verdicts: %d within, %d unattributable, %d outside",
+			kind, d.runs, d.logged, d.calls, d.compared, d.verdicts[ritualwitness.Within], d.verdicts[ritualwitness.Unattributable], d.verdicts[ritualwitness.Outside])
+	}
+	for _, k := range kinds {
+		d := c.byDriver[k]
+		out = append(out, line(k, d))
+		total.runs += d.runs
+		total.logged += d.logged
+		total.calls += d.calls
+		total.compared += d.compared
+		for s, n := range d.verdicts {
+			total.verdicts[s] += n
+		}
+	}
+	return append(out, line("(all)", &total))
+}
+
 // The gaps the producer's run can show (ledger SI-354 (3)).
 const (
-	// noCommandLogGap is a run whose driver supplied no command log
-	// (SI-341 (1)).
-	noCommandLogGap = "no command log: an effect made and undone within one run is unobserved, and no observed effect is attributed (ledger SI-341 (1); spec/gitx-recorder-seam)"
+	// noCommandLogGap is a run whose driver failed to supply its command
+	// log (SI-341 (1), SI-354 (3)), or no run at all.
+	noCommandLogGap = "a run without its command log: an effect made and undone within that run is unobserved, and no effect it made is attributed (ledger SI-341 (1), SI-354 (3); spec/gitx-recorder-seam ac-2)"
 	// closeCompletionGap is close's completion (SI-349 (1)).
 	closeCompletionGap = "close's completion: every hermetic close refuses at the closure gate's countersign condition (ledger SI-349 (1); backlog BL-44)"
 	// executionCompletionGap is the execution rituals' completion
@@ -394,36 +466,6 @@ func checkRitualCoverage(decls []ws.Declaration, table map[ws.Verb][]ritualCase)
 	return nil
 }
 
-// ritualCaseTimeout bounds one run, fixture to judgment.
-const ritualCaseTimeout = 120 * time.Second
-
-// runRitualCase builds, seeds, and runs one case in one state, records the
-// run's gaps (SI-354 (3)), and judges the run (judgeRitualRun).
-func runRitualCase(t *testing.T, c ritualCase, decl ws.Declaration, state ritualwitness.SeedState, gaps *ritualEffectsGaps) {
-	ctx, cancel := context.WithTimeout(context.Background(), ritualCaseTimeout)
-	defer cancel()
-	var fx *ritualwitness.Fixture
-	if c.fixture != nil {
-		fx = c.fixture(t, ctx, state)
-	} else {
-		fx = ritualwitness.BuildWith(t, ctx, state, c.base)
-	}
-	if c.pristine {
-		makePristine(t, fx)
-	}
-	if c.seed != nil {
-		c.seed(t, ctx, fx)
-	}
-	if c.disclosure != "" {
-		t.Logf("disclosed: %s", c.disclosure)
-	}
-	want := c.want(state)
-	res := ritualwitness.RunOn(t, ctx, fx, c.driver(t, ctx, fx), decl)
-	gaps.record(want, res)
-	logVerdicts(t, res)
-	judgeRitualRun(t, decl, want, res)
-}
-
 // makePristine removes the operator's work every seeded state carries
 // (the dirty tracked file, the untracked file, and SeedFull's staged
 // foreign entry), leaving a pristine tree for a whole-tree guard's
@@ -451,9 +493,9 @@ func scopedRefusalVerdict() ritualwitness.Verdict {
 	return ritualwitness.Verdict{Field: "index_carry", Status: ritualwitness.Outside, Detail: "declares scoped; observed refused"}
 }
 
-// noCommandLogDisclosure is logged with every run whose driver supplied no
-// command log (SI-341 (1), SI-354 (4)).
-const noCommandLogDisclosure = "this run supplied no command log, so its observation is unproven: an effect made and undone within the run is unobserved, and no observed effect is attributed (ledger SI-341 (1))"
+// noCommandLogDisclosure is logged with every run whose driver failed to
+// supply its command log (SI-341 (1), SI-354 (4)), with the reason.
+const noCommandLogDisclosure = "this run's driver supplied no command log, so its observation is unproven: an effect made and undone within the run is unobserved, and no effect it made is attributed (ledger SI-341 (1))"
 
 // judgeRitualRun logs res's verdict counts, the disclosure a run without a
 // command log carries, and the ritual's answer, and fails t with each of
@@ -461,10 +503,10 @@ const noCommandLogDisclosure = "this run supplied no command log, so its observa
 func judgeRitualRun(t *testing.T, decl ws.Declaration, want ritualRun, res ritualwitness.Result) {
 	t.Helper()
 	counts := verdictCounts(res)
-	t.Logf("verdict counts: %d within, %d unattributable, %d outside; command log supplied: %t",
-		counts[ritualwitness.Within], counts[ritualwitness.Unattributable], counts[ritualwitness.Outside], res.Log.OK)
+	t.Logf("verdict counts: %d within, %d unattributable, %d outside; command log supplied: %t (%d call(s))",
+		counts[ritualwitness.Within], counts[ritualwitness.Unattributable], counts[ritualwitness.Outside], res.Log.OK, len(res.Log.Calls))
 	if !res.Log.OK {
-		t.Logf("disclosed: %s", noCommandLogDisclosure)
+		t.Logf("disclosed: %s: %s", noCommandLogDisclosure, res.Log.Reason)
 	}
 	if res.Err != nil {
 		t.Logf("the ritual answered: %v", res.Err)
@@ -531,7 +573,7 @@ func ritualRunViolations(decl ws.Declaration, want ritualRun, res ritualwitness.
 	}
 
 	if n := verdictCounts(res)[ritualwitness.Unattributable]; n > 0 && res.Log.OK {
-		out = append(out, fmt.Sprintf("%d unattributable verdict(s) with a command log supplied: the tolerance ends once the log exists (SI-341 (1))", n))
+		out = append(out, fmt.Sprintf("%d unattributable verdict(s) with a command log supplied: the no-log tolerance ends once the log exists (SI-341 (1), SI-359 (9))", n))
 	}
 	return out
 }
