@@ -24,6 +24,13 @@ import (
 //
 // VERDI_RECOVERY_GITLOG (`verdi recover`'s own hook, SI-305) is separate
 // and keeps working (SI-359 (2)).
+//
+// Name a file outside every worktree the verb touches. A relative value
+// resolves against the recording process's working directory, and a file
+// inside a worktree changes what the verb sees: git lists it as
+// untracked, a whole-tree guard counts it as the operator's work, and
+// `git add -A` stages it (R5c1 review R5C1R-3). The ritual witness's
+// Binary driver names an absolute temporary file for that reason.
 const GitLogEnv = "VERDI_GITLOG"
 
 // GitLogRecord is one line of the VERDI_GITLOG file: the argv after "git",
@@ -32,6 +39,15 @@ const GitLogEnv = "VERDI_GITLOG"
 // pid, so a reader keeps the records of the process it drove (SI-359 (3)).
 // Each line is the record's canonical JSON (internal/canonjson): keys
 // sorted, no HTML escaping, ending in one newline.
+//
+// Disclosed, not lossless (R5c1 review R5C1R-2): canonjson, like
+// encoding/json, writes each invalid UTF-8 byte of an argument or of the
+// directory as U+FFFD, so a record names such a path in a spelling no file
+// has. A reader that attributes effects by path then matches nothing for
+// it, which fails closed (unattributable, never within). Forbidden-token
+// matching is unaffected: every token is ASCII, an element equal to one is
+// valid UTF-8 and kept byte for byte, and a "--" token's prefix survives
+// the replacement of any later byte.
 type GitLogRecord struct {
 	Args []string `json:"args"`
 	Dir  string   `json:"dir"`
