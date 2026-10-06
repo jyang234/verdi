@@ -12,8 +12,11 @@ import (
 // worktrees they may have run in. Every query is false when the driver
 // supplied no log.
 type attribution struct {
-	ok    bool
-	calls []loggedCall
+	ok bool
+	// reason is why the log is unavailable, when the driver said
+	// (CommandLog.Reason).
+	reason string
+	calls  []loggedCall
 	// fetched reports a logged `fetch` in the repository: not a mutating
 	// primitive (no gitx function fetches), so it admits a remote-tracking
 	// mirror (SI-325 (7)) but attributes nothing.
@@ -30,6 +33,7 @@ type attribution struct {
 func newAttribution(log CommandLog, roots []string) attribution {
 	at := attribution{ok: log.OK, roots: roots, addedAndRemoved: map[string]bool{}}
 	if !log.OK {
+		at.reason = log.Reason
 		return at
 	}
 	prims := mutatingPrimitives()

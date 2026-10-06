@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/gitforbid"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -282,6 +283,11 @@ func TestBinary_AnUnreadableLogFailsClosed(t *testing.T) {
 			if log.OK || log.Calls != nil {
 				t.Fatalf("log = %+v, want unavailable for a broken command log", log)
 			}
+			// A clean exit carries no error, so the log itself keeps why
+			// it is unavailable (R5c1 review R5C1R-5).
+			if !strings.Contains(log.Reason, "command log") {
+				t.Fatalf("log.Reason = %q, want it to name why the command log is unavailable", log.Reason)
+			}
 		})
 	}
 
@@ -291,16 +297,19 @@ func TestBinary_AnUnreadableLogFailsClosed(t *testing.T) {
 		if exit != 2 || err == nil || !strings.Contains(err.Error(), "exited 2") || !strings.Contains(err.Error(), "command log") {
 			t.Fatalf("Run = (%d, %v), want exit 2 naming the verb's exit and the command log", exit, err)
 		}
-		if log.OK || log.Calls != nil {
-			t.Fatalf("log = %+v, want unavailable", log)
+		if log.OK || log.Calls != nil || !strings.Contains(log.Reason, "command log") {
+			t.Fatalf("log = %+v, want unavailable, naming why", log)
 		}
 	})
 
 	t.Run("through RunOn the logged effect is unattributable", func(t *testing.T) {
 		fx := Build(t, ctx, SeedClean)
 		res := RunOn(t, boundedContext(t, ctx), fx, Binary{Path: exe, Env: []string{helperEnv + "=gitlog:remove:0"}}, branchDecl())
+		if res.Log.Reason == "" {
+			t.Fatalf("log = %+v, want the reason it is unavailable", res.Log)
+		}
 		want := []Verdict{
-			v("command_log", Unattributable, "the driver supplied no git command log"),
+			v("command_log", Unattributable, "the driver supplied no git command log: "+res.Log.Reason),
 			v("refs_create", Unattributable, "refs/heads/logged-remove created"),
 			v("index_carry", Within, "declares no_commit; observed no_commit"),
 		}
@@ -311,4 +320,86 @@ func TestBinary_AnUnreadableLogFailsClosed(t *testing.T) {
 			t.Fatalf("Outcome = %s, want unproven", got)
 		}
 	})
+}
+
+// TestBinary_GitLogPathIsAbsolute (R5c1 review R5C1R-5): the run's command
+// log is named by an absolute path even when TMPDIR is relative, so the
+// binary, which runs in the fixture, never resolves it there: the log
+// holds the binary's calls, and the fixture shows no stray file.
+func TestBinary_GitLogPathIsAbsolute(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	exe := selfBinary(t)
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("rel", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", "rel")
+
+	path, err := newGitLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	if !filepath.IsAbs(path) {
+		t.Fatalf("newGitLog() = %q under TMPDIR=rel, want an absolute path", path)
+	}
+
+	before := plainGitStatus(t, ctx, fx.Dir)
+	exit, log, err := Binary{Path: exe, Env: []string{helperEnv + "=gitx:0:logged-relative-tmpdir"}}.Run(boundedContext(t, ctx), fx.Dir)
+	if exit != 0 || err != nil {
+		t.Fatalf("Run = (%d, %v), want a clean run", exit, err)
+	}
+	checkBinaryLog(t, exit, log, 2)
+	if after := plainGitStatus(t, ctx, fx.Dir); after != before {
+		t.Fatalf("the fixture's status changed from %q to %q: the command log landed in it", before, after)
+	}
+}
+
+// plainGitStatus is dir's porcelain status with untracked files listed.
+func plainGitStatus(t *testing.T, ctx context.Context, dir string) string {
+	t.Helper()
+	out, err := plainGit(ctx, dir, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestGitLog_InvalidUTF8FailsClosed pins the disclosure R5c1 review
+// R5C1R-2 asked for: a VERDI_GITLOG record spells each invalid UTF-8 byte
+// as U+FFFD, so a pathspec naming such a path matches nothing (its effect
+// is unattributable, never within), while a forbidden token's whole
+// element, or a "--" token's prefix, still matches.
+func TestGitLog_InvalidUTF8FailsClosed(t *testing.T) {
+	ctx := context.Background()
+	fx := Build(t, ctx, SeedClean)
+	path := filepath.Join(t.TempDir(), "git.jsonl")
+	t.Setenv(gitx.GitLogEnv, path)
+	const bad = "bad\xff.txt"
+	// git refuses both pathspecs (no such file); gitx logs each call first.
+	_ = gitx.AddPaths(ctx, fx.Dir, bad)
+	_ = gitx.AddPaths(ctx, fx.Dir, "--force\xff")
+	calls, err := readGitLog(path, os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("logged %+v, want the two add calls", calls)
+	}
+	if got, want := calls[0].Args, []string{"add", "--", "bad\uFFFD.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("logged argv %q, want %q", got, want)
+	}
+	lc, ok := mutatingCall(calls[0], mutatingPrimitives())
+	if !ok {
+		t.Fatalf("the logged add %+v is no mutating primitive", calls[0])
+	}
+	specs, _ := lc.pathspecs()
+	root := canonicalPath("", fx.Dir)
+	if pathspecMatches(root, lc, specs, bad) {
+		t.Fatalf("the U+FFFD spelling %q matched the real path %q; attribution must fail closed", specs, bad)
+	}
+	if !gitforbid.Forbids(calls[1].Args) {
+		t.Fatalf("logged argv %q: the --force prefix no longer reads forbidden", calls[1].Args)
+	}
 }

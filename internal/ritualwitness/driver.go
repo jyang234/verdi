@@ -24,6 +24,11 @@ type Call struct {
 type CommandLog struct {
 	Calls []Call
 	OK    bool
+	// Reason is why the log is unavailable, when OK is false and the
+	// driver knows: a Binary run whose VERDI_GITLOG file it could not
+	// read whole says so here even on a clean exit, which carries no
+	// error (R5c1 review R5C1R-5).
+	Reason string
 }
 
 // Ritual is a synthetic, in-process ritual: git operations run against dir
