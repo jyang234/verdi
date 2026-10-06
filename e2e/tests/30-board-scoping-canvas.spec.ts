@@ -183,8 +183,9 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     const stickyId = await sticky.getAttribute("data-id");
     await expect(page.getByTestId(`sticky-${stickyId}`)).toBeVisible();
 
-    // Tidy the wall for the next journey (scratch dies without ceremony).
-    await sticky.locator('[data-delete="sticky"]').click();
+    // Tidy the wall for the next journey (scratch dies without ceremony,
+    // through the toolbar's Delete for the selected sticky).
+    await toolbarAction(page, sticky, "Delete");
     await expectAutosaved(page);
     await expect(page.getByTestId(`sticky-${stickyId}`)).toHaveCount(0);
   });
@@ -267,12 +268,9 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
       ).toHaveCount(0);
     }
 
-    // Tidy the wall.
+    // Tidy the wall (the toolbar's Delete for each selected sticky).
     for (const id of [storyId, spikeId]) {
-      await page
-        .getByTestId(`sticky-${id}`)
-        .locator('[data-delete="sticky"]')
-        .click();
+      await toolbarAction(page, page.getByTestId(`sticky-${id}`), "Delete");
       await expectAutosaved(page);
     }
   });
