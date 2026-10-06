@@ -11,9 +11,10 @@ import (
 // obligation: exactly ONE drawer-body renderer in internal/workbench,
 // taking the canonical derivation record (badgeView, its local mirror) as
 // its sole data input; no call from the drawer render path back into
-// lint, decisionsweep, or evidence recomputation; and assets/boardspec.js
-// free of any derivation-data templating — the client only toggles and
-// positions the server-rendered hidden drawer element. The same
+// lint, decisionsweep, or evidence recomputation; and every client asset
+// the server embeds (boardspec.js and every asset added since) free of
+// any derivation-data templating — the client only toggles and positions
+// the server-rendered hidden drawer element. The same
 // deliberately-minimal source-text witness badgesstatic_test.go already
 // established for this package.
 func TestDrawerRenderer_StaticEvidence(t *testing.T) {
@@ -70,11 +71,12 @@ func TestDrawerRenderer_StaticEvidence(t *testing.T) {
 
 	// No client asset templates derivation data — boardspec.js nor any
 	// asset added since (spec/wall-canvas-v2 co-1 ships new behaviour in
-	// new assets): none even READS the serialized record
+	// new assets), walked in the embedded FS the server serves: none even
+	// READS the serialized record
 	// (data-badge-record stays the server's opener contract, consumed by
 	// tests and agents) — the client's whole drawer role is
 	// toggling/positioning the server-rendered hidden sibling.
-	assets, err := workbenchAssets(os.DirFS("assets"))
+	assets, err := workbenchAssets(embeddedAssets)
 	if err != nil {
 		t.Fatal(err)
 	}
