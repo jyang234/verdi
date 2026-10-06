@@ -1,7 +1,6 @@
 package disclosureview
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -11,7 +10,6 @@ import (
 	"hash"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -246,55 +244,36 @@ func (r *inputReader) environment() {
 	r.field("environment", []byte(strings.Join(env, "\x00")))
 }
 
-// gitOutput runs one read-only git command in dir and returns its stdout.
-// gitx has no reader for the whole ref list or the whole configuration,
-// so the key runs these few commands itself.
-func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, uncomputable("git "+strings.Join(args, " "), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String())))
-	}
-	return stdout.Bytes(), nil
-}
-
-// git keys the repository state lint's git reads depend on.
+// git keys the repository state lint's git reads depend on. Every read
+// runs through gitx (spec/gitx-recorder-seam dc-3), whose readers return
+// git's exact stdout, so the key is byte for byte what it was when the key
+// ran these commands itself.
 func (r *inputReader) git(ctx context.Context, root string) error {
 	if v := os.Getenv("GIT_ALTERNATE_OBJECT_DIRECTORIES"); v != "" {
 		return uncomputable("object store", errors.New("GIT_ALTERNATE_OBJECT_DIRECTORIES names a second object store"))
 	}
-	version, err := gitOutput(ctx, root, "version")
+	version, err := gitx.Version(ctx, root)
 	if err != nil {
-		return err
+		return uncomputable("git version", err)
 	}
 	r.field("git version", version)
 
-	revParse, err := gitOutput(ctx, root, "rev-parse", "--path-format=absolute",
-		"--git-dir", "--git-common-dir",
-		"--git-path", "objects", "--git-path", "shallow", "--git-path", "info/grafts",
-		"--is-shallow-repository", "HEAD", "--symbolic-full-name", "HEAD")
+	layout, err := gitx.RepositoryLayout(ctx, root)
 	if err != nil {
-		return err
+		return uncomputable("git rev-parse", err)
 	}
-	lines := strings.Split(strings.TrimRight(string(revParse), "\n"), "\n")
-	if len(lines) != 8 {
-		return uncomputable("git rev-parse", fmt.Errorf("want 8 lines, got %d", len(lines)))
-	}
-	gitDir, commonDir, objectsDir, shallowPath, graftsPath := lines[0], lines[1], lines[2], lines[3], lines[4]
-	r.field("git rev-parse", revParse)
+	gitDir, commonDir, objectsDir, shallowPath, graftsPath := layout.GitDir, layout.CommonDir, layout.ObjectsDir, layout.ShallowFile, layout.GraftsFile
+	r.field("git rev-parse", layout.Output)
 
-	refs, err := gitOutput(ctx, root, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)")
+	refs, err := gitx.RefList(ctx, root)
 	if err != nil {
-		return err
+		return uncomputable("git for-each-ref", err)
 	}
 	r.field("git refs", refs)
 
-	config, err := gitOutput(ctx, root, "config", "--list", "-z")
+	config, err := gitx.ConfigList(ctx, root)
 	if err != nil {
-		return err
+		return uncomputable("git config --list", err)
 	}
 	r.field("git config", config)
 	if err := refsAreStampable(config, gitDir, commonDir); err != nil {
