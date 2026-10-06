@@ -259,10 +259,7 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string, pinned 
 	var listed bool
 	var err error
 	if pinned {
-		paths, conflictPaths, listed, err = p.storeTreePaths(ctx, root, rev)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
+		paths, conflictPaths, listed = p.storeTreePaths(ctx, root, rev)
 	}
 	if !listed {
 		if paths, err = p.git.LsTree(ctx, root, rev, specZonesPrefix); err != nil {
@@ -374,28 +371,40 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string, pinned 
 // session, the same listing every other reader of that commit's tree
 // shares. Only a scan pinned to a request's accepted HEAD lists this way
 // (scanSuccessors' pinned): every other caller's git reads are what they
-// always were, which the disclosures view's cache key relies on. It answers only
-// where that listing is exactly the two plain ones: rev is a full object
-// id (a listing of a ref name would resolve the ref again), root is its
-// repository's top level (the plain listings name paths from root, the
-// whole-tree listing from the top), and no path under either directory
-// holds a byte a plain listing quotes (a control character, a double
-// quote, a backslash, or any non-ASCII byte under core.quotePath).
-// Anything else reports listed false and the scan runs the two plain
-// listings, exactly as before. A whole-tree listing that fails is the
-// scan's error: only the scan pinned to a commit lists this way, and when
-// it fails successors scans again at the ref, whose error is the one a
-// caller sees.
-func (p Projector) storeTreePaths(ctx context.Context, root, rev string) (specs, conflicts []string, listed bool, err error) {
-	if !fullCommitID.MatchString(rev) {
-		return nil, nil, false, nil
+// always were, which the disclosures view's cache key relies on.
+//
+// It answers only where that listing names exactly the paths the two
+// plain listings name, and reports listed false — the scan then runs the
+// two plain listings at the same rev, exactly as an unpinned scan does —
+// in every other case:
+//
+//   - rev is not a full object id (a listing of a ref name would resolve
+//     the ref again);
+//   - root is not its repository's top level (the plain listings name
+//     paths from root, the whole-tree listing from the top);
+//   - the whole-tree listing fails (it reads every tree of the commit, the
+//     plain listings only the two directories);
+//   - a path under either directory holds a byte a plain listing quotes
+//     (plainListingQuotes);
+//   - a path under either directory begins or ends with whitespace:
+//     gitx.LsTree trims its output, so the plain listing drops a trailing
+//     space from its last path (review P2R-1);
+//   - a path names either directory in another letter case, which a
+//     case-insensitive pathspec (GIT_ICASE_PATHSPECS) would match.
+//
+// The corpus a pinned scan builds is therefore always the one an unpinned
+// scan of the same commit builds, so the process-wide corpus cache answers
+// either kind of caller identically, whichever filled it.
+func (p Projector) storeTreePaths(ctx context.Context, root, rev string) (specs, conflicts []string, listed bool) {
+	if gitx.ValidateFullOID(rev) != nil {
+		return nil, nil, false
 	}
 	if prefix, err := p.git.RepoPrefix(ctx, root); err != nil || prefix != "" {
-		return nil, nil, false, nil
+		return nil, nil, false
 	}
 	entries, err := p.git.LsTreeEntries(ctx, root, rev)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, false
 	}
 	specs, conflicts = []string{}, []string{}
 	for _, e := range entries {
@@ -405,19 +414,24 @@ func (p Projector) storeTreePaths(ctx context.Context, root, rev string) (specs,
 			into = &specs
 		case under(e.Path, conflictsDir()):
 			into = &conflicts
+		case underFolded(e.Path, specZonesPrefix), underFolded(e.Path, conflictsDir()):
+			return nil, nil, false
 		default:
 			continue
 		}
-		if plainListingQuotes(e.Path) {
-			return nil, nil, false, nil
+		if plainListingQuotes(e.Path) || e.Path != strings.TrimSpace(e.Path) {
+			return nil, nil, false
 		}
 		*into = append(*into, e.Path)
 	}
-	return specs, conflicts, true, nil
+	return specs, conflicts, true
 }
 
-// fullCommitID matches a full lowercase object id, SHA-1 or SHA-256.
-var fullCommitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+// underFolded reports whether p lies at or beneath dir under Unicode case
+// folding.
+func underFolded(p, dir string) bool {
+	return strings.EqualFold(p, dir) || (len(p) > len(dir) && p[len(dir)] == '/' && strings.EqualFold(p[:len(dir)], dir))
+}
 
 // under reports whether p is dir itself or lies beneath it — what a plain
 // `ls-tree` pathspec of dir matches.
@@ -448,10 +462,12 @@ func plainListingQuotes(p string) bool {
 //
 // Every other case runs the scan at branch.Ref, as this package did
 // before the cache existed, and caches nothing: no cache; a commit that
-// does not resolve; and a pinned scan that fails. The last one matters
-// for errors: a scan error's text names the revision it read, so
-// re-running the scan at the ref returns the error callers have always
-// seen, never one naming the commit id.
+// does not resolve; and a scan at the resolved commit that fails. The last
+// one matters for errors: a scan error's text names the revision it read,
+// so re-running the scan at the ref returns the error callers have always
+// seen, never one naming the commit id. In a request that pinned its
+// accepted HEAD, that re-run is for the error text alone: a scan at the
+// pinned commit that fails is never answered by the ref's corpus.
 func (p Projector) successors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
 	if p.corpora == nil {
 		return p.scanSuccessors(ctx, root, branch.Ref, false)
@@ -468,10 +484,20 @@ func (p Projector) successors(ctx context.Context, root string, branch Branch) (
 	corpus, err := p.corpora.get(ctx, corpusKey{root: root, commit: commit}, func() (*successorCorpus, error) {
 		return p.scanSuccessors(ctx, root, commit, pinned)
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		return corpus, nil
+	case !pinned:
 		return p.scanSuccessors(ctx, root, branch.Ref, false)
 	}
-	return corpus, nil
+	// A pinned scan that failed is never answered by a scan at the ref,
+	// which may name another commit: the projection reads one (ledger
+	// SI-356, SI-357 (2); review P2R-2). The scan at the ref runs only for
+	// its error text, the one callers have always seen, when it fails too.
+	if _, refErr := p.scanSuccessors(ctx, root, branch.Ref, false); refErr != nil {
+		return nil, refErr
+	}
+	return nil, err
 }
 
 // ResolveMany projects every candidate's effective state, building the
@@ -741,16 +767,23 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 	}, nil
 }
 
-// atRef runs read at branch.Rev() and — when that names the pinned
-// commit and the read fails — again at branch.Ref, so a failure is the
-// one the ref read reports, word for word, as it was before the pin. A
-// healthy repository never fails the first read.
+// atRef runs read at branch.Rev(). When that names the pinned commit and
+// the read fails, it fails: a read at the ref, which may name another
+// commit, never answers it (ledger SI-356, SI-357 (2); review P2R-2). The
+// ref is read only for its error text — the one callers saw before the
+// pin — which is returned when that read fails too; when it succeeds, the
+// pinned read's own failure is returned. A healthy repository never fails
+// the first read.
 func atRef[T any](branch Branch, read func(rev string) (T, error)) (T, error) {
 	v, err := read(branch.Rev())
-	if err != nil && branch.Rev() != branch.Ref {
-		return read(branch.Ref)
+	if err == nil || branch.Rev() == branch.Ref {
+		return v, err
 	}
-	return v, err
+	var zero T
+	if _, refErr := read(branch.Ref); refErr != nil {
+		return zero, refErr
+	}
+	return zero, err
 }
 
 // specScanIncompleteDisclosure is the witness that the default-branch spec
