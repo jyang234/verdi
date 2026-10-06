@@ -542,9 +542,9 @@
       } else {
         var anchorEl = fromEl || toEl;
         if (anchorEl) {
-          // One on-board endpoint: the thread hangs from above it and
-          // ties to its top edge. Several document edges on one card fan
-          // out along that edge instead of overlapping.
+          // One on-board endpoint: the thread hangs from a point above
+          // it and ties to its top edge's midpoint; several document
+          // edges on one card start from staggered points above it.
           var tieKey = keyOfElement(anchorEl);
           var tie = offboardTies[tieKey] || 0;
           offboardTies[tieKey] = tie + 1;
@@ -684,10 +684,10 @@
   // case-file placard to three lines, an object card and a stub to their
   // index-card size). When a clamp actually cuts text, that must be
   // visible, not silent: the element gets `.is-clamped` (a fade on its
-  // last line) and a quiet "⋯" mark in its corner, and a click on a
-  // placard opens the read-only expand dialog (a card's click selects it;
-  // its full text is a double click away). The mark appears ONLY when the
-  // text measurably overflows — a short placard stays crisp and inert.
+  // last line) and a quiet "⋯" mark in its corner. On a placard, a click
+  // anywhere opens the read-only expand dialog; on a card the mark is a
+  // button that opens it (SI-358 (1)), since a card's click selects it.
+  // The mark appears ONLY when the text measurably overflows.
   // Measured on the SERVER-RENDERED text (the DOM always holds the full
   // string; the clamp only hides it), so it re-runs after every fragment
   // swap, on load (web fonts change wrapping), and on resize.
@@ -709,9 +709,18 @@
       }
     }
     if (on && !mark) {
-      mark = document.createElement("span");
+      // A placard opens from anywhere on its face (and has its dog-ear);
+      // a card's mark is the control that reads its full text.
+      var placard = parent.classList.contains("placard");
+      mark = document.createElement(placard ? "span" : "button");
       mark.className = "clamp-more";
-      mark.setAttribute("aria-hidden", "true");
+      if (placard) {
+        mark.setAttribute("aria-hidden", "true");
+      } else {
+        mark.type = "button";
+        mark.setAttribute("aria-label", "Read the full text");
+        mark.setAttribute("aria-haspopup", "dialog");
+      }
       parent.appendChild(mark);
     } else if (!on && mark) {
       mark.remove();
@@ -893,27 +902,6 @@
     var headline = placard.querySelector(".placard-text");
     var body = buildExpandDialog(header, false, false);
     body.textContent = headline ? headline.textContent : "";
-  }
-
-  // A single click opens the dialog, but a card is also double-click-to-
-  // edit in authoring: the open is deferred a beat and CANCELLED by the
-  // dblclick handler, so the second click never lands on an expand dialog
-  // and editing wins. A drag (past the slop) is a drag — its click tail is
-  // guarded out below.
-  var EXPAND_DELAY = 250;
-  var expandTimer = null;
-  function scheduleExpand(el) {
-    if (expandTimer) clearTimeout(expandTimer);
-    expandTimer = setTimeout(function () {
-      expandTimer = null;
-      openExpandDialog(el);
-    }, EXPAND_DELAY);
-  }
-  function cancelExpand() {
-    if (expandTimer) {
-      clearTimeout(expandTimer);
-      expandTimer = null;
-    }
   }
 
   // -- derivation drawer: open, position, close — NOTHING else --------------
@@ -1907,7 +1895,6 @@
     }
     var textEl = card.querySelector(".card-text");
     if (!textEl) return;
-    cancelExpand(); // editing a card wins over the click-to-expand it shares
     editing = true;
     var original = textEl.textContent;
     var editor = document.createElement("textarea");
@@ -2517,14 +2504,14 @@
       return;
     }
 
-    // Click-to-expand: a clamped placard headline opens its read-only
-    // dialog. Only truncated text carries `.is-clamped`, so a short one is
-    // inert. A card's clamped text no longer expands on click: a click
-    // SELECTS the card (spec/wall-canvas-v2 ac-2, SI-350 (4) — wallselect.js),
-    // and Enter or a double click edits it.
-    var clampEl = t.closest(".placard .is-clamped[data-expandable]");
-    if (clampEl) {
-      scheduleExpand(clampEl);
+    // A clamped card's ⋯ control reads its full text in the expand dialog
+    // (SI-358 (1)) — an inner control, so it never selects the card
+    // (wallselect.js). A clamped placard is handled above: it opens from
+    // anywhere on its face.
+    var more = t.closest("button.clamp-more");
+    if (more) {
+      var clamped = more.parentNode.querySelector(".is-clamped[data-expandable]");
+      if (clamped) openExpandDialog(clamped);
       return;
     }
 
@@ -2918,7 +2905,6 @@
     }
     if (e.key === "Escape") {
       pending = null;
-      cancelExpand();
       hideAllDialogs();
       closeRefPeek();
       closeExpandDialog();
