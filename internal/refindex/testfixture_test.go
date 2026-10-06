@@ -1,7 +1,6 @@
 package refindex
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -13,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // runGit runs git in dir with the process's inherited environment (identity
@@ -138,14 +137,12 @@ func setDefaultBranchSymref(t *testing.T, dir, branch string) {
 }
 
 // createRemoteDesignRef creates a simulated refs/remotes/origin/design/<name>
-// ref pointing at commit, via gitx.UpdateRef (create-only plumbing that
+// ref pointing at commit, via fixturegit.CreateRef (create-only plumbing that
 // never touches HEAD or the working tree) — CO-2's "directly-created
 // refs/remotes/origin/design/* refs" hermetic alternative to a real fetch.
 func createRemoteDesignRef(t *testing.T, dir, name, commit string) {
 	t.Helper()
-	if err := gitx.UpdateRef(context.Background(), dir, "refs/remotes/origin/design/"+name, commit); err != nil {
-		t.Fatalf("createRemoteDesignRef(%s): %v", name, err)
-	}
+	fixturegit.CreateRef(t, dir, "refs/remotes/origin/design/"+name, commit)
 }
 
 // deleteLocalBranch removes a local branch ref (used to simulate a

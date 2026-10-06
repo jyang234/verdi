@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
@@ -159,13 +160,20 @@ func refCases() []harnessCase {
 		{
 			name: "a remote-tracking ref that does not mirror the remote is outside even under may-push", states: both(),
 			decl: noCommitDecl(func(d *ws.Declaration) { d.HeadSwitch = false; d.MayPush = true }),
-			driver: inProcess(steps(func(ctx context.Context, dir string) error {
-				head, err := gitx.RevParse(ctx, dir, "HEAD")
-				if err != nil {
-					return err
-				}
-				return gitx.UpdateRef(ctx, dir, "refs/remotes/origin/sneaky", head)
-			})),
+			// gitx creates only branches, so the ref is seeded through
+			// fixturegit (ledger SI-359 (5a)). A remote-tracking ref that
+			// mirrors nothing is outside whether or not a logged call names
+			// it, so the verdict does not depend on which seeds it.
+			driver: func(t *testing.T, _ *Fixture) Driver {
+				return InProcess{Fn: steps(func(ctx context.Context, dir string) error {
+					head, err := gitx.RevParse(ctx, dir, "HEAD")
+					if err != nil {
+						return err
+					}
+					fixturegit.CreateRef(t, dir, "refs/remotes/origin/sneaky", head)
+					return nil
+				})}
+			},
 			want: func(*testing.T, *Fixture, Result) ([]Verdict, RunOutcome) {
 				return []Verdict{
 					v("may_push", Outside, "refs/remotes/origin/sneaky created"),

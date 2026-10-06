@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
-	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // The tests in this file prove WHICH ref name the default-branch walk
@@ -35,9 +34,7 @@ func neutralizeCIDefaultBranch(t *testing.T) {
 // at commit — create-only ref plumbing, no remote, no network (co-2).
 func createRemoteTrackingMain(t *testing.T, dir, commit string) {
 	t.Helper()
-	if err := gitx.UpdateRef(context.Background(), dir, "refs/remotes/origin/main", commit); err != nil {
-		t.Fatalf("createRemoteTrackingMain: %v", err)
-	}
+	fixturegit.CreateRef(t, dir, "refs/remotes/origin/main", commit)
 }
 
 func headSHA(t *testing.T, dir string) string {
