@@ -113,11 +113,49 @@ const stickyTypeLabels: Record<StickyType, string> = {
   spike: "Spike",
 };
 
-// Open the supply toolbox (board-polish, owner directive): the "Pin an
-// artifact" tab at the screen's lower-left opens the corpus picker tray
-// in one click. Returns the tray.
+// The wall's contextual toolbar (spec/wall-canvas-v2 ac-3): the host in
+// the wall frame's row below the canvas, filled by walltoolbar.js from the
+// selection and the mode.
+export function wallToolbar(page: Page): Locator {
+  return page.getByTestId("wall-toolbar");
+}
+
+// Clear the wall's selection through the selection asset's seam
+// (wallselect.js window.__WALLSELECT__), so the toolbar offers its
+// nothing-selected actions; a no-op before the asset loads.
+export async function clearWallSelection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __WALLSELECT__?: { clear: () => void } };
+    w.__WALLSELECT__?.clear();
+  });
+}
+
+// Select a card or a thread chip on the wall and press one of the
+// toolbar's actions for it (ac-3: the in-card and in-chip affordances
+// moved to the contextual toolbar, SI-350 (5)). Returns the toolbar's
+// button, after its click.
+export async function toolbarAction(
+  page: Page,
+  el: Locator,
+  name: string | RegExp,
+): Promise<Locator> {
+  await el.scrollIntoViewIfNeeded();
+  await el.click();
+  await expect(el).toHaveAttribute("data-selected", "true");
+  const button = wallToolbar(page).getByRole("button", { name, exact: typeof name === "string" });
+  await expect(button).toBeVisible();
+  await button.click();
+  return button;
+}
+
+// Open the supply toolbox (board-polish, owner directive; now the
+// contextual toolbar's "Pin an artifact" action, spec/wall-canvas-v2
+// ac-3): one click opens the corpus picker tray. Clears the selection
+// first, since the toolbar offers the pin action with nothing selected.
+// Returns the tray.
 export async function openPinToolbox(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Pin an artifact" }).click();
+  await clearWallSelection(page);
+  await wallToolbar(page).getByRole("button", { name: "Pin an artifact" }).click();
   const tray = page.getByRole("dialog", { name: "Pin an artifact" });
   await expect(tray).toBeVisible();
   return tray;
@@ -235,12 +273,17 @@ export function transformRotates(transform: string): boolean {
   return true;
 }
 
+// The sticky action is the contextual toolbar's "Sticky" button with
+// nothing selected (spec/wall-canvas-v2 ac-3; SI-350 (16): it opens the
+// same inline draft the rail's "Add sticky" did), so the selection is
+// cleared first. Exact: "Sticky" must not match the rail's "Add sticky".
 export async function addSticky(
   page: Page,
   text: string,
   type: StickyType = "question",
 ): Promise<Locator> {
-  await page.getByRole("button", { name: "Add sticky" }).click();
+  await clearWallSelection(page);
+  await wallToolbar(page).getByRole("button", { name: "Sticky", exact: true }).click();
   const draft = page.locator(".sticky-draft");
   await expect(draft).toBeVisible();
   await draft.getByRole("button", { name: stickyTypeLabels[type] }).click();

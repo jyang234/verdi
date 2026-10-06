@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndicator } from "./helpers";
+import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, toolbarAction, uncommittedIndicator, wallToolbar } from "./helpers";
 
 // Owner UAT (round 6, item 3 + the mid-pass retype directive): scratch
 // stickies and untyped threads die from the annotation layer; a
@@ -8,6 +8,9 @@ import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndica
 // the gate-bearing confirmation mirrored) and its type is updatable IN
 // PLACE. Every negative path proves cancel changes nothing, reload
 // included. None of these affordances exist outside authoring mode.
+// Since spec/wall-canvas-v2 ac-3 (SI-350 (5)) the affordances are the
+// contextual toolbar's for the selected sticky or thread (toolbarAction),
+// over the same paths and confirmations.
 
 const dc1Chip = (page: Page, type: string): Locator =>
   page.locator(
@@ -33,7 +36,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     // deletion CHANGES nothing — the mutable stream is not the spec.
     const dirtyBefore = await uncommittedIndicator(page).isVisible();
 
-    await sticky.getByRole("button", { name: "Delete sticky" }).click();
+    await toolbarAction(page, sticky, "Delete");
     await expectAutosaved(page);
     await expect(
       page.locator('[data-testid^="sticky-"]').filter({ hasText: text }),
@@ -62,7 +65,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     );
     await expect(thread).toHaveCount(1);
 
-    await thread.getByRole("button", { name: "Delete thread" }).click();
+    await toolbarAction(page, thread, "Delete thread");
     await expectAutosaved(page);
     await expect(thread).toHaveCount(0);
 
@@ -75,7 +78,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
   }) => {
     const chip = dc1Chip(page, "exempts");
     await expect(chip).toHaveCount(1);
-    await chip.getByRole("button", { name: "Change exempts edge type" }).click();
+    await toolbarAction(page, chip, "Retype");
 
     // The picker opens over the same pair, offering the OTHER legal type
     // only — no scratch option on a typed edge.
@@ -100,7 +103,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     page,
   }) => {
     const chip = dc1Chip(page, "exempts");
-    await chip.getByRole("button", { name: "Change exempts edge type" }).click();
+    await toolbarAction(page, chip, "Retype");
     const picker = edgeTypePicker(page);
     await picker.getByRole("menuitem", { name: /^supersedes/ }).click();
     const confirm = page.getByRole("alertdialog", { name: /confirm supersedes/i });
@@ -129,7 +132,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     await expect(chip).toBeVisible();
     const type = await chip.getAttribute("data-edge-type");
 
-    await chip.getByRole("button", { name: `Remove ${type} edge` }).click();
+    await toolbarAction(page, chip, `Remove ${type} edge`);
     const confirm = page.getByRole("alertdialog", {
       name: new RegExp(`remove ${type}`, "i"),
     });
@@ -151,7 +154,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
       .first();
     const type = await chip.getAttribute("data-edge-type");
 
-    await chip.getByRole("button", { name: `Remove ${type} edge` }).click();
+    await toolbarAction(page, chip, `Remove ${type} edge`);
     const confirm = page.getByRole("alertdialog", {
       name: new RegExp(`remove ${type}`, "i"),
     });
@@ -182,5 +185,13 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     await expect(page.locator(".delete-btn")).toHaveCount(0);
     await expect(page.locator("[data-retype]")).toHaveCount(0);
     await expect(page.locator(".graduate-btn")).toHaveCount(0);
+    // Nor does the server stamp any action the toolbar could project, and
+    // the toolbar offers none for a selected thread (ac-3).
+    await expect(page.locator("[data-can-delete], [data-can-retype], [data-can-graduate]")).toHaveCount(0);
+    const chip = page.locator(".yarn-chip").first();
+    await chip.scrollIntoViewIfNeeded();
+    await chip.click();
+    await expect(chip).toHaveAttribute("data-selected", "true");
+    await expect(wallToolbar(page).getByRole("button", { name: /Delete|Remove|Retype|Graduate/ })).toHaveCount(0);
   });
 });

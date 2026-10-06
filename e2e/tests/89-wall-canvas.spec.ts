@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
-import { transformRotates } from "./helpers";
+import { SHOWCASE, boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
+import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
 
 // spec/wall-canvas-v2 ac-1 and ac-2 (lane F2a): every card renders at the
 // design's footprint, unrotated, keeping its receipts' exact texts; the
@@ -29,6 +29,16 @@ import { transformRotates } from "./helpers";
 // passes when run alone (BL-98) and assumes nothing another file wrote.
 // Every assertion reads the DOM and computed styles — never a screenshot
 // (recording stays off).
+//
+// Lane F2b (ac-3, ac-4, ac-5): the contextual toolbar, drag-to-thread and
+// the add-in-place slots write, so their tests run on the wall's writable
+// path (WALL.WRITABLE_PATH, its own design branch, where the domain is
+// live and every pin is drawn; cmd/e2eharness/provision_board.go
+// canvasWallWritablePath). Review and read-only modes are read on the
+// harness's review mirror and sealed wall (SHOWCASE.REVIEW_SPEC,
+// SHOWCASE.READONLY_SPEC). Writes stay inside this file, ordered so a
+// later test here still finds what it needs; every run provisions a fresh
+// store.
 //
 // After the lane's review (SI-358): the emphasis holds under hover and a
 // receded card keeps its text legible and its focus ring visible; the
@@ -58,6 +68,8 @@ const WALL = {
   STICKY_ID: "a-01J8Z0K3CANVASSTCKY0000001",
   STICKY_BODY: "who signs off the retraction copy?",
   OBLIGATION_TITLE: "a Playwright test retracts a stale notice on every channel",
+  // The writable address: the wall under its own design branch (SI-350 (11)).
+  WRITABLE_PATH: "/b/design%2Fdecline-canvas-wall/board/spec/decline-canvas-wall",
 };
 
 const CARD_IDS = ["ac-1", "ac-2", "co-1", "dc-1", "oq-1"];
@@ -219,6 +231,47 @@ async function openWall(page: Page): Promise<void> {
   await expect(page.getByTestId("asd-domain-refusal")).toBeVisible();
   await expect(page.locator("#board-canvas .yarn-handle")).toHaveCount(0);
   await expect(baseThreads(page)).toHaveCount(2);
+}
+
+// openWritableWall opens the wall on its own design branch: authoring with
+// the domain live, so every object card carries its pin.
+async function openWritableWall(page: Page): Promise<void> {
+  await page.goto(WALL.WRITABLE_PATH);
+  await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+  await expect(page.getByTestId("yarn-handle-ac-1")).toBeVisible();
+}
+
+// actionsOf lists the toolbar's actions in order, by the action each
+// control carries (walltoolbar.js data-wall-action): the exact set ac-3
+// speaks of.
+const actionsOf = (page: Page) =>
+  wallToolbar(page)
+    .locator("[data-wall-action]")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("data-wall-action")));
+
+// interactionLive reads boardspec.js's hold contract (co-2).
+const interactionLive = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __BOARDV2API__: { interactionLive: () => boolean } }).__BOARDV2API__.interactionLive());
+
+// dragPin drags a pin to the target's centre and releases there, in the
+// bounded canvas: each endpoint is scrolled into view before the pointer
+// reaches it (the pointer is captured, so the gesture survives the
+// scroll), and the target lights while the pointer is over it (ac-4).
+// Returns the drop point in viewport coordinates.
+async function dragPin(page: Page, fromId: string, target: Locator): Promise<{ x: number; y: number }> {
+  const handle = page.getByTestId(`yarn-handle-${fromId}`);
+  await handle.scrollIntoViewIfNeeded();
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await target.scrollIntoViewIfNeeded();
+  const tb = (await target.boundingBox())!;
+  const drop = { x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 };
+  await page.mouse.move(drop.x, drop.y, { steps: 4 });
+  await expect(target).toHaveAttribute("data-drop-target", "true");
+  await page.mouse.up();
+  await expect(target).not.toHaveAttribute("data-drop-target", /./);
+  return drop;
 }
 
 // assertCardsReceiptsAndLayers is ac-1's one shared assertion routine
@@ -668,10 +721,10 @@ test.describe("wall-canvas", () => {
   });
 
   test("the pill's summary is readable at 320 px in authoring (ac-2; SI-358 (4))", async ({ page }) => {
-    // At 320 px the row is 256 px wide; beside the band the authoring
-    // wall's fixed pin-toolbox tab holds, the pill had 64 px and its
-    // summary 1 px. The pill takes a line of its own above the band
-    // instead, and the summary wraps rather than clips.
+    // At 320 px the row is 256 px wide; beside the toolbar (lane F2b put
+    // it in the row, where the pin toolbox's fixed tab used to hold a
+    // band) the pill has too little room to read, so it takes a line of
+    // its own, and the summary wraps rather than clips.
     await page.setViewportSize({ width: 320, height: 640 });
     await openWall(page);
     const dc1 = page.getByTestId("card-dc-1");
@@ -689,15 +742,11 @@ test.describe("wall-canvas", () => {
     expect(fit.pcw, "the pill clips nothing across").toBeGreaterThanOrEqual(fit.pw);
     expect(fit.pch, "the pill clips nothing down").toBeGreaterThanOrEqual(fit.ph);
     expect(fit.cw, "the summary has room to read").toBeGreaterThanOrEqual(120);
-    // And the pill still covers nothing — the toolbox tab included — with
-    // the frame filling the viewport, where the tab's band meets the row.
+    // And the pill still covers nothing — the toolbar beside it in the row
+    // included — with the frame filling the viewport.
     await frameIntoView(page);
-    const tabEl = page.locator("#pin-toolbox-tab");
-    await expect(tabEl).toBeVisible();
+    await expect(wallToolbar(page)).toBeVisible();
     expect(await overlapsOf(page), "the pill covers nothing at 320 px").toEqual([]);
-    const tab = (await tabEl.boundingBox())!;
-    const box = (await pill(page).boundingBox())!;
-    expect(box.y + box.height, `the pill (bottom ${box.y + box.height}) sits above the toolbox tab (top ${tab.y})`).toBeLessThanOrEqual(tab.y);
   });
 
   test("a slow double click never re-announces the same selection (SI-358 (5); Wave 6 §5.2)", async ({ page }) => {
@@ -769,5 +818,438 @@ test.describe("wall-canvas", () => {
       // The selection itself is untouched by moving focus.
       await expect(dc1).toHaveAttribute("data-selected", "true");
     }
+  });
+
+  // -- lane F2b: ac-3, ac-4, ac-5 ------------------------------------------------
+
+  test("The toolbar offers exactly the legal actions for the selection and mode", async ({ page }) => {
+    await openWritableWall(page);
+    const toolbar = wallToolbar(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
+    const ref = page.getByTestId(refCardTestId(WALL.ADR_REF));
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+
+    // Nothing selected: the sticky, card and pin-artifact actions through
+    // their existing dialogs, and the yarn key — nothing else.
+    await expect.poll(() => actionsOf(page)).toEqual(["sticky", "card", "pin", "yarn-key"]);
+    for (const name of ["Sticky", "Card", "Pin an artifact", "Yarn key"]) {
+      await expect(toolbar.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+    // The sticky action is the existing inline draft (SI-350 (16)); Escape discards it.
+    await toolbar.getByRole("button", { name: "Sticky", exact: true }).click();
+    await expect(page.locator(".sticky-draft")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".sticky-draft")).toHaveCount(0);
+    // The card action is the existing add-object dialog.
+    await toolbar.getByRole("button", { name: "Card", exact: true }).click();
+    await expect(page.locator("#asd-op-dialog")).toBeVisible();
+    await page.locator("#asd-op-cancel").click();
+    await expect(page.locator("#asd-op-dialog")).toBeHidden();
+    // The pin-artifact action is the existing tray; the button controls it.
+    const pin = toolbar.getByRole("button", { name: "Pin an artifact", exact: true });
+    await expect(pin).toHaveAttribute("aria-controls", "pin-tray");
+    await expect(pin).toHaveAttribute("aria-expanded", "false");
+    await pin.click();
+    await expect(page.getByRole("dialog", { name: "Pin an artifact" })).toBeVisible();
+    await expect(pin).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Pin an artifact" })).toBeHidden();
+    await expect(pin).toHaveAttribute("aria-expanded", "false");
+    // The yarn key action opens the existing yarn key (SI-350 (9)): the
+    // rail's section, brought into view and focused.
+    await toolbar.getByRole("button", { name: "Yarn key", exact: true }).click();
+    await expect(page.getByTestId("yarn-key")).toBeFocused();
+    await expect(page.getByTestId("yarn-key")).toBeInViewport();
+
+    // An object card: edit, the thread hint, read in document, the thread
+    // count, and delete — and nothing else.
+    await ac1.scrollIntoViewIfNeeded();
+    await ac1.click();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["edit", "read", "delete", "yarn-key"]);
+    await expect(toolbar.locator(".wall-toolbar-kind")).toHaveText("acceptance criterion");
+    await expect(toolbar.locator(".wall-toolbar-id")).toHaveText("ac-1");
+    await expect(toolbar.locator(".wall-toolbar-hint")).toHaveText("Thread — drag the pin");
+    await expect(toolbar.locator(".wall-toolbar-count")).toHaveText("1 thread");
+    await expect(toolbar.getByRole("link", { name: "Read in document ↗" })).toHaveAttribute("href", `${WALL.WRITABLE_PATH}/document#ac-1`);
+    await expect(toolbar.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
+
+    // A stub: edit (the existing Correct stub dialog), read in document (the
+    // Plan section, where stubs are listed, SI-350 (7)) and the count — no
+    // graduate, delete or retype.
+    await stub.scrollIntoViewIfNeeded();
+    await stub.click();
+    await expect(stub).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["edit", "read", "yarn-key"]);
+    await expect(toolbar.locator(".wall-toolbar-kind")).toHaveText("story stub");
+    await expect(toolbar.locator(".wall-toolbar-id")).toHaveText(WALL.STUB_SLUG);
+    await expect(toolbar.locator(".wall-toolbar-count")).toHaveText("1 thread");
+    await expect(toolbar.getByRole("link", { name: "Read in document ↗" })).toHaveAttribute("href", `${WALL.WRITABLE_PATH}/document#plan`);
+    await expect(toolbar.getByRole("button", { name: /Graduate|Delete|Retype|Remove/ })).toHaveCount(0);
+    await toolbar.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Correct stub" })).toBeVisible();
+    await page.locator("#asd-stub-cancel").click();
+    await expect(page.getByRole("dialog", { name: "Correct stub" })).toBeHidden();
+
+    // A reference card, held by dc-1's exempts edge: delete (through the
+    // existing confirmation) and the count; nothing to edit or read.
+    await ref.scrollIntoViewIfNeeded();
+    await ref.click();
+    await expect(ref).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["delete", "yarn-key"]);
+    await expect(toolbar.locator(".wall-toolbar-kind")).toHaveText("reference");
+    await expect(toolbar.locator(".wall-toolbar-count")).toHaveText("1 thread");
+    await toolbar.getByRole("button", { name: "Delete", exact: true }).click();
+    const takeOff = page.getByRole("alertdialog", { name: `Take ${WALL.ADR_REF} off the wall` });
+    await expect(takeOff).toBeVisible();
+    await takeOff.getByRole("button", { name: "Cancel" }).click();
+    await expect(takeOff).toBeHidden();
+    await expect(ref).toBeVisible();
+    await page.keyboard.press("Escape"); // the peek the click opened
+
+    // A sticky: graduate (the existing menu) and delete; no edit, since no
+    // endpoint updates a sticky's text (SI-352 (2)).
+    await sticky.scrollIntoViewIfNeeded();
+    await sticky.click();
+    await expect(sticky).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["graduate", "delete", "yarn-key"]);
+    await expect(toolbar.locator(".wall-toolbar-kind")).toHaveText("comment sticky");
+    await expect(toolbar.locator(".wall-toolbar-count")).toHaveText("no threads yet");
+    await toolbar.getByRole("button", { name: "Graduate", exact: true }).click();
+    await expect(page.locator("#graduate-menu")).toBeVisible();
+    await page.locator("#graduate-menu-cancel").click();
+    await expect(page.locator("#graduate-menu")).toBeHidden();
+
+    // A spec-layer edge: retype (the existing picker) and remove; no graduate.
+    const exemptsChip = page.locator('.yarn-chip[data-edge-type="exempts"]');
+    await exemptsChip.scrollIntoViewIfNeeded();
+    await exemptsChip.click();
+    await expect(exemptsChip).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["retype", "delete", "yarn-key"]);
+    await expect(toolbar.locator(".wall-toolbar-kind")).toHaveText("exempts");
+    await expect(toolbar.locator(".wall-toolbar-pair")).toHaveText(`dc-1 → ${WALL.ADR_REF}`);
+    await expect(toolbar.getByRole("button", { name: "Remove exempts edge", exact: true })).toBeVisible();
+    await toolbar.getByRole("button", { name: "Retype", exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "Edge type" });
+    await expect(picker).toBeVisible();
+    await expect(picker.getByRole("menuitem")).toHaveText(["supersedes"]);
+    await page.keyboard.press("Escape");
+    await expect(picker).toBeHidden();
+
+    // A scoping thread (the stub's coverage yarn): nothing but the key.
+    const coversChip = page.locator('.yarn-chip[data-edge-type="covers"]');
+    await coversChip.scrollIntoViewIfNeeded();
+    await coversChip.click();
+    await expect(coversChip).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["yarn-key"]);
+
+    // A relates thread between two cards: graduate to a typed edge and
+    // delete. Written through the existing scratch path, deleted through
+    // the toolbar's own path, so the wall is as it was.
+    const related = await page.request.post(WALL.WRITABLE_PATH + "/api/relates", { data: { from: "co-1", to: "oq-1" } });
+    expect(related.status(), await related.text()).toBe(200);
+    await page.reload();
+    const relatesChip = page.locator('.yarn-chip[data-edge-type="relates"][data-from="co-1"][data-to="oq-1"]');
+    await expect(relatesChip).toHaveCount(1);
+    await relatesChip.scrollIntoViewIfNeeded();
+    await relatesChip.click();
+    await expect(relatesChip).toHaveAttribute("data-selected", "true");
+    await expect.poll(() => actionsOf(page)).toEqual(["graduate", "delete", "yarn-key"]);
+    await expect(toolbar.getByRole("button", { name: "Graduate to a typed edge", exact: true })).toBeVisible();
+    await toolbar.getByRole("button", { name: "Delete thread", exact: true }).click();
+    await expectAutosaved(page);
+    await expect(relatesChip).toHaveCount(0);
+
+    // Review and read-only modes: only the yarn key and the read actions,
+    // with nothing, a card, and a thread selected. The yarn key is the
+    // wall's own: the server renders it only where the wall has yarn
+    // (writeYarnKey), so the review mirror, which has no thread, has no
+    // key to open and its toolbar offers nothing; the sealed wall has both.
+    for (const [spec, mode] of [
+      [SHOWCASE.REVIEW_SPEC, "review"],
+      [SHOWCASE.READONLY_SPEC, "readonly"],
+    ] as const) {
+      await page.goto(boardPath(spec));
+      await expect(canvas(page)).toHaveAttribute("data-board-mode", mode);
+      const chips = page.locator("#board-canvas .yarn-chip");
+      if (mode === "readonly") await expect(chips.first()).toBeVisible();
+      const key = (await page.getByTestId("yarn-key").count()) > 0 ? ["yarn-key"] : [];
+      expect(key.length > 0, `${mode}: the yarn key is rendered exactly where the wall has yarn`).toBe((await chips.count()) > 0);
+      await expect.poll(() => actionsOf(page), `${mode}: nothing selected`).toEqual(key);
+      await expect(toolbar.locator(".wall-toolbar-hint")).toHaveCount(0);
+      const card = page.locator("#board-canvas .objcard").first();
+      await card.scrollIntoViewIfNeeded();
+      await card.click();
+      await expect(card).toHaveAttribute("data-selected", "true");
+      await expect.poll(() => actionsOf(page), `${mode}: a card selected`).toEqual(["read", ...key]);
+      await expect(toolbar.locator(".wall-toolbar-count")).toBeVisible();
+      if ((await chips.count()) > 0) {
+        await chips.first().scrollIntoViewIfNeeded();
+        await chips.first().click();
+        await expect(chips.first()).toHaveAttribute("data-selected", "true");
+        await expect.poll(() => actionsOf(page), `${mode}: a thread selected`).toEqual(key);
+      }
+      await expect(toolbar.getByRole("button", { name: /Sticky|Card|Pin an artifact|Edit|Graduate|Delete|Remove|Retype/ })).toHaveCount(0);
+    }
+  });
+
+  test("Drag-to-thread offers only the legal edge types", async ({ page }) => {
+    await openWritableWall(page);
+    const picker = page.getByRole("dialog", { name: "Edge type" });
+    // The server's own tables, embedded for the picker (boardspecrender.go
+    // legalPairTable; edgetypes.go), pinned at both ends: a decision
+    // reaches an ADR by supersedes or exempts; no typed edge joins two
+    // acceptance criteria.
+    const table = await page.evaluate(() => {
+      const s = (window as unknown as { __BOARDV2__: { legal: Record<string, string[]>; consequences: Record<string, string>; gate: string[] } }).__BOARDV2__;
+      return { legal: s.legal, consequences: s.consequences, gate: s.gate };
+    });
+    expect(table.legal["decision|adr"]).toEqual(["supersedes", "exempts"]);
+    expect(table.legal["acceptance-criterion|acceptance-criterion"]).toBeUndefined();
+    expect(table.gate).toContain("supersedes");
+
+    // Every source and target kind pair the fixture offers (the four
+    // object kinds, and the ADR as a target): the picker lists exactly the
+    // legal types with their consequence labels, plus the scratch thread,
+    // at the drop point; open, it holds the projection (co-2, SI-350 (13));
+    // Escape closes it with nothing written.
+    const sources: Array<[string, string]> = [
+      ["ac-1", "acceptance-criterion"],
+      ["co-1", "constraint"],
+      ["dc-1", "decision"],
+      ["oq-1", "open-question"],
+    ];
+    const targets: Array<[string, string, Locator]> = [
+      ["ac-2", "acceptance-criterion", page.getByTestId("card-ac-2")],
+      ["co-1", "constraint", page.getByTestId("card-co-1")],
+      ["dc-1", "decision", page.getByTestId("card-dc-1")],
+      ["oq-1", "open-question", page.getByTestId("card-oq-1")],
+      [WALL.ADR_REF, "adr", page.getByTestId(refCardTestId(WALL.ADR_REF))],
+    ];
+    const vp = page.viewportSize()!;
+    let pairs = 0;
+    for (const [from, fromKind] of sources) {
+      for (const [to, toKind, target] of targets) {
+        if (to === from) continue;
+        pairs++;
+        const drop = await dragPin(page, from, target);
+        await expect(picker, `${from} → ${to}`).toBeVisible();
+        await expect(picker.locator("#edge-picker-pair")).toHaveText(`${from} → ${to}`);
+        const legal = table.legal[`${fromKind}|${toKind}`] ?? [];
+        await expect(picker.getByRole("menuitem"), `${from} → ${to}`).toHaveText([...legal, "relates (scratch)"]);
+        for (const t of legal) {
+          expect(table.consequences[t], `consequence of ${t}`).not.toBe("");
+          await expect(picker.getByTestId(`consequence-${t}`)).toHaveText(table.consequences[t]);
+        }
+        if (legal.length === 0) await expect(picker.getByTestId("picker-no-typed-edge")).toBeVisible();
+        const box = (await picker.boundingBox())!;
+        expect(Math.abs(box.x - Math.max(8, Math.min(drop.x, vp.width - box.width - 8))), `${from} → ${to}: picker x`).toBeLessThanOrEqual(1);
+        expect(Math.abs(box.y - Math.max(8, Math.min(drop.y, vp.height - box.height - 8))), `${from} → ${to}: picker y`).toBeLessThanOrEqual(1);
+        expect(await interactionLive(page), `${from} → ${to}: the open picker holds the projection`).toBe(true);
+        await page.keyboard.press("Escape");
+        await expect(picker).toBeHidden();
+        expect(await interactionLive(page), `${from} → ${to}: the closed picker releases it`).toBe(false);
+      }
+    }
+    expect(pairs).toBe(17);
+    await expect(page.getByTestId("autosave-status")).toHaveText("");
+    await expect(baseThreads(page)).toHaveCount(2);
+
+    // A gate-bearing type asks for confirmation; choosing writes the edge
+    // through the existing typed-edge path and selects the new thread.
+    await dragPin(page, "dc-1", page.getByTestId(refCardTestId(WALL.ADR_REF)));
+    await picker.getByRole("menuitem", { name: /^supersedes/ }).click();
+    const confirm = page.getByRole("alertdialog", { name: /confirm supersedes/i });
+    await expect(confirm).toBeVisible();
+    await expect(confirm.locator("#edge-confirm-consequence")).toHaveText(table.consequences.supersedes);
+    await confirm.getByRole("button", { name: "Confirm" }).click();
+    await expectAutosaved(page);
+    const supersedes = page.locator(`.yarn-chip[data-layer="spec"][data-edge-type="supersedes"][data-from="dc-1"][data-to="${WALL.ADR_REF}"]`);
+    await expect(supersedes).toHaveCount(1);
+    await expect(supersedes).toHaveAttribute("data-selected", "true");
+    await expect(canvas(page)).toHaveAttribute("data-selection", "thread");
+    await expect(pill(page).locator(".wall-status-id")).toHaveText("supersedes");
+    await expect(pill(page).locator(".wall-status-summary")).toHaveText(`dc-1 → ${WALL.ADR_REF}`);
+    await page.reload();
+    await expect(supersedes).toHaveCount(1);
+
+    // A stub card's pin anchors its coverage yarn and starts no thread
+    // (dc-3): dragging from it drags the paper, lights no target, opens no
+    // picker, and writes no thread. The paper is released where it was,
+    // and the server's drop resolution puts it back within a pixel.
+    const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
+    const ac2 = page.getByTestId("card-ac-2");
+    await stub.scrollIntoViewIfNeeded();
+    const pin = (await stub.locator(".stub-pushpin").boundingBox())!;
+    const start = { x: pin.x + pin.width / 2, y: pin.y + pin.height / 2 };
+    const stubLeft = await stub.evaluate((el) => parseFloat((el as HTMLElement).style.left));
+    const chipsBefore = await page.locator("#board-canvas .yarn-chip").count();
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    const tb = (await ac2.boundingBox())!;
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 6 });
+    await expect(ac2).not.toHaveAttribute("data-drop-target", /./);
+    await expect(picker).toBeHidden();
+    await page.mouse.move(start.x, start.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(picker).toBeHidden();
+    await expectAutosaved(page);
+    await expect(page.locator("#board-canvas .yarn-chip")).toHaveCount(chipsBefore);
+    await expect(baseThreads(page)).toHaveCount(chipsBefore);
+    expect(Math.abs((await stub.evaluate((el) => parseFloat((el as HTMLElement).style.left))) - stubLeft)).toBeLessThanOrEqual(1);
+
+    // A sticky's attribution yarn and graduation drop keep their existing
+    // paths and writes (dc-3): a story sticky's pin dropped on an AC claims
+    // coverage through its own confirmation, never the picker, and writes
+    // the scratch thread; graduating it writes the stub that claims the AC.
+    const made = await page.request.post(WALL.WRITABLE_PATH + "/api/sticky", { data: { text: "retraction audit trail", type: "story" } });
+    expect(made.status(), await made.text()).toBe(200);
+    await page.reload();
+    const proto = page.locator('[data-testid^="sticky-"][data-annotation-type="story"]').filter({ hasText: "retraction audit trail" });
+    await expect(proto).toHaveCount(1);
+    const protoId = (await proto.getAttribute("data-id"))!;
+    await dragPin(page, protoId, ac2);
+    await expect(picker).toBeHidden();
+    const claim = page.getByRole("alertdialog", { name: "Claim coverage of ac-2" });
+    await expect(claim).toBeVisible();
+    await claim.getByRole("button", { name: "Confirm" }).click();
+    await expectAutosaved(page);
+    await expect(page.locator(`.yarn-chip[data-layer="annotation"][data-edge-type="relates"][data-from="${protoId}"][data-to="ac-2"]`)).toHaveCount(1);
+    await toolbarAction(page, proto, "Graduate");
+    const graduate = page.locator("#edge-confirm");
+    await expect(graduate).toBeVisible();
+    await expect(graduate).toContainText("declares slug retraction-audit-trail");
+    await page.locator("#edge-confirm-ok").click();
+    await expectAutosaved(page);
+    await expect(page.getByTestId(stubCardTestId("retraction-audit-trail"))).toHaveAttribute("data-acs", "ac-2");
+    await expect(proto).toHaveCount(0);
+  });
+
+  test("Declaring in place and editing a card", async ({ page }) => {
+    await openWritableWall(page);
+    // Every typed write goes over one route; what each slot posts is read
+    // here, so the id is proven the server's and the operation exactly one.
+    const posted: Array<{ request: { operations: Array<Record<string, unknown>> } }> = [];
+    await page.route("**/api/mutate_draft", async (route) => {
+      posted.push(route.request().postDataJSON());
+      await route.continue();
+    });
+    const kinds: Record<string, [string, string]> = {
+      ac: ["acceptance criterion", "add-ac"],
+      co: ["constraint", "add-constraint"],
+      dc: ["decision", "add-decision"],
+      oq: ["open question", "add-question"],
+    };
+    for (const prefix of ["ac", "co", "dc", "oq"]) {
+      const [words, op] = kinds[prefix];
+      const slot = page.getByTestId(`slot-${prefix}`);
+      await slot.scrollIntoViewIfNeeded();
+      // The slot sits at the column's foot: one row gap below the lowest
+      // paper whose footprint overlaps the band (SI-350 (15)).
+      const at = await slot.evaluate((el) => ({ left: (el as HTMLElement).offsetLeft, top: (el as HTMLElement).offsetTop }));
+      const lowest = await page.evaluate((x) => {
+        let bottom = 0;
+        for (const p of Array.from(document.querySelectorAll<HTMLElement>("#board-canvas .objcard, #board-canvas .refcard, #board-canvas .stubcard, #board-canvas .sticky"))) {
+          if (p.offsetLeft < x + 200 && x < p.offsetLeft + 200) bottom = Math.max(bottom, p.offsetTop + p.offsetHeight);
+        }
+        return bottom;
+      }, at.left);
+      expect(at.top, `${prefix}: the slot sits below the column's lowest paper`).toBe(lowest + 36);
+      const nextId = (await canvas(page).getAttribute(`data-next-id-${prefix}`))!;
+      await page.getByTestId(`slot-open-${prefix}`).click();
+      await expect(slot).toHaveAttribute("data-open", "true");
+      await expect(page.getByTestId(`slot-line-${prefix}`)).toHaveText(`${words} · will be declared as ${nextId}`);
+      expect(await interactionLive(page), `${prefix}: an open slot holds the projection (co-2)`).toBe(true);
+      const before = posted.length;
+      const text = `declared from the ${words} slot`;
+      await page.getByTestId(`slot-text-${prefix}`).fill(text);
+      await page.keyboard.press("Enter");
+      await expectAutosaved(page);
+      expect(posted.length, `${prefix}: one request`).toBe(before + 1);
+      expect(posted[before].request.operations, `${prefix}: one typed operation, with the server's next id`).toEqual([
+        expect.objectContaining({ op, id: nextId, text, anchor: `#${nextId}` }),
+      ]);
+      await expect(page.getByTestId(`card-${nextId}`)).toContainText(text);
+      await expect(slot).not.toHaveAttribute("data-open", /./);
+      expect(await canvas(page).getAttribute(`data-next-id-${prefix}`)).not.toBe(nextId);
+      // The new card took the slot's row; the slot moved one row down.
+      expect(await slot.evaluate((el) => (el as HTMLElement).offsetTop)).toBe(at.top + 176);
+    }
+
+    // Escape cancels with nothing written.
+    const acSlot = page.getByTestId("slot-ac");
+    await acSlot.scrollIntoViewIfNeeded();
+    await page.getByTestId("slot-open-ac").click();
+    await expect(acSlot).toHaveAttribute("data-open", "true");
+    await page.getByTestId("slot-text-ac").fill("never declared");
+    const beforeEscape = posted.length;
+    await page.keyboard.press("Escape");
+    await expect(acSlot).not.toHaveAttribute("data-open", /./);
+    expect(await interactionLive(page)).toBe(false);
+    await expect(page.getByTestId("slot-open-ac")).toBeFocused();
+    await page.reload();
+    expect(posted.length).toBe(beforeEscape);
+    await expect(page.locator("#board-canvas .objcard").filter({ hasText: "never declared" })).toHaveCount(0);
+
+    // The existing add-object dialog stays for keyboard-only use.
+    await page.locator("#asd-add-object").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#asd-op-dialog")).toBeVisible();
+    await expect(page.getByTestId("asd-op-text")).toBeFocused();
+    const preview = (await page.getByTestId("asd-op-id-preview").textContent())!;
+    const dialogId = preview.replace("will be declared as ", "").trim();
+    expect(dialogId).toMatch(/^(ac|co|dc|oq)-\d+$/);
+    await page.keyboard.type("declared from the keyboard dialog");
+    for (let i = 0; i < 6; i++) {
+      if ((await page.evaluate(() => document.activeElement?.id)) === "asd-op-ok") break;
+      await page.keyboard.press("Tab");
+    }
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("asd-op-ok");
+    const beforeDialog = posted.length;
+    await page.keyboard.press("Enter");
+    await expectAutosaved(page);
+    expect(posted.length).toBe(beforeDialog + 1);
+    expect(posted[beforeDialog].request.operations).toEqual([expect.objectContaining({ id: dialogId, text: "declared from the keyboard dialog" })]);
+    await expect(page.getByTestId(`card-${dialogId}`)).toContainText("declared from the keyboard dialog");
+
+    // Enter edits the selected card in place, Enter applying — with the
+    // focus off the card, so it is the selection Enter acts on.
+    const ac1 = page.getByTestId("card-ac-1");
+    await ac1.scrollIntoViewIfNeeded();
+    await ac1.click();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Enter");
+    const editor = page.getByRole("textbox", { name: "Card text" });
+    await expect(editor).toBeVisible();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    expect(await interactionLive(page), "an open card edit holds the projection (co-2)").toBe(true);
+    const original = await editor.inputValue();
+    const edited = original + " — edited in place";
+    const beforeEdit = posted.length;
+    await editor.fill(edited);
+    await page.keyboard.press("Enter");
+    await expectAutosaved(page);
+    await expect(editor).toHaveCount(0);
+    expect(posted.length).toBe(beforeEdit + 1);
+    expect(posted[beforeEdit].request.operations).toEqual([expect.objectContaining({ op: "edit-ac", id: "ac-1", text: edited })]);
+    await expect(ac1.locator(".card-text")).toHaveText(edited);
+
+    // A double click edits too and keeps the selection; Escape cancels
+    // with nothing written.
+    await ac1.dblclick();
+    await expect(editor).toBeVisible();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await editor.fill("discarded by Escape");
+    const beforeCancel = posted.length;
+    await page.keyboard.press("Escape");
+    await expect(editor).toHaveCount(0);
+    expect(posted.length).toBe(beforeCancel);
+    await expect(ac1.locator(".card-text")).toHaveText(edited);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.reload();
+    await expect(page.getByTestId("card-ac-1").locator(".card-text")).toHaveText(edited);
   });
 });

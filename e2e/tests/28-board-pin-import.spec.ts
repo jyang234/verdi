@@ -27,9 +27,14 @@ test.describe("board: the supply toolbox pins planning material", () => {
   test("the toolbox rests quiet; one click opens the picker; it closes without residue", async ({
     page,
   }) => {
-    // At rest: the tab is present and the tray is closed — zero clutter.
+    // At rest: the toolbox's one control — the contextual toolbar's "Pin
+    // an artifact" button, which retired the fixed tab (spec/wall-canvas-v2
+    // ac-3; SI-350 (5), (10)) — is present and the tray is closed — zero
+    // clutter.
     const tab = page.getByRole("button", { name: "Pin an artifact" });
     await expect(tab).toBeVisible();
+    await expect(page.getByTestId("wall-toolbar").getByRole("button", { name: "Pin an artifact" })).toBeVisible();
+    await expect(page.locator("#pin-toolbox-tab")).toHaveCount(0);
     await expect(tab).toHaveAttribute("aria-expanded", "false");
     const tray = page.getByRole("dialog", { name: "Pin an artifact" });
     await expect(tray).toBeHidden();
@@ -170,6 +175,9 @@ test.describe("board: the supply toolbox pins planning material", () => {
       "readonly",
     );
     await expect(page.getByTestId("pin-toolbox")).toHaveCount(0);
+    // Nor does the toolbar offer the pin action there (ac-3).
+    await expect(page.getByTestId("wall-toolbar")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pin an artifact" })).toHaveCount(0);
 
     await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
@@ -177,5 +185,7 @@ test.describe("board: the supply toolbox pins planning material", () => {
       "review",
     );
     await expect(page.getByTestId("pin-toolbox")).toHaveCount(0);
+    await expect(page.getByTestId("wall-toolbar")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pin an artifact" })).toHaveCount(0);
   });
 });
