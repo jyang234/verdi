@@ -555,7 +555,9 @@ func canvasWallDomainProblems(body string, w canvasWall, wantLive bool) []string
 		check("object-card yarn-handle-"+id, strings.Contains(body, `data-testid="yarn-handle-`+id+`"`))
 	}
 	check("Correct stub on "+canvasWallStubSlug, strings.Contains(body, `data-testid="correct-stub-`+canvasWallStubSlug+`"`))
-	check("sticky Graduate on "+w.stickyID, strings.Contains(stickyCard(body, w.stickyID), `data-graduate="sticky"`))
+	// The sticky's Graduate is the contextual toolbar's (spec/wall-canvas-v2
+	// ac-3; SI-350 (5)): the card says it offers one as data-can-graduate.
+	check("sticky Graduate on "+w.stickyID, strings.Contains(stickyCard(body, w.stickyID), `data-can-graduate="sticky"`))
 	return out
 }
 
@@ -570,7 +572,7 @@ func TestCanvasWallDomainProblems(t *testing.T) {
 		live.WriteString(`<button data-testid="yarn-handle-` + id + `"></button>`)
 	}
 	live.WriteString(`<button data-testid="correct-stub-` + canvasWallStubSlug + `">Correct stub</button>`)
-	live.WriteString(`<div data-testid="sticky-` + w.stickyID + `"><button data-graduate="sticky">Graduate</button></div>`)
+	live.WriteString(`<div data-testid="sticky-` + w.stickyID + `" data-can-graduate="sticky"></div>`)
 	refused := `<section data-board-mode="authoring"><div data-testid="asd-domain-refusal"></div><div data-testid="sticky-` + w.stickyID + `"></div>`
 	for _, tc := range []struct {
 		name      string
@@ -583,7 +585,7 @@ func TestCanvasWallDomainProblems(t *testing.T) {
 		{"live as refused", live.String(), false, 8},
 		{"refused as live", refused, true, 8},
 		{"live without dc-1's pin", strings.Replace(live.String(), `yarn-handle-dc-1`, `yarn-handle-xx`, 1), true, 1},
-		{"a Graduate outside the sticky", strings.Replace(live.String(), `<button data-graduate="sticky">Graduate</button></div>`, `</div><button data-graduate="sticky">Graduate</button>`, 1), true, 1},
+		{"a Graduate outside the sticky", strings.Replace(live.String(), `" data-can-graduate="sticky"></div>`, `"></div><div data-can-graduate="sticky"></div>`, 1), true, 1},
 		{"a review-mode wall", strings.Replace(refused, "authoring", "review", 1), false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
