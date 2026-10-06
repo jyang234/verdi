@@ -3,6 +3,8 @@ package recovery
 import (
 	"reflect"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/gitforbid"
 )
 
 func TestCommandLog_ForbiddenTokens(t *testing.T) {
@@ -47,7 +49,7 @@ func TestCommandLog_MessageTextNeverScanned(t *testing.T) {
 }
 
 // TestIsForbiddenArgv table-tests the exported seam fix round 1 (M4)
-// added, over each rule ForbiddenTokens names: exact match, the
+// added, over each rule of the shared list (gitforbid): exact match, the
 // "--"-prefix rule, R-RR3-17's short "-f" flag, and a clean argv.
 func TestIsForbiddenArgv(t *testing.T) {
 	cases := []struct {
@@ -73,6 +75,31 @@ func TestIsForbiddenArgv(t *testing.T) {
 				t.Fatalf("IsForbiddenArgv(%v) = %v, want %v", tc.argv, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestIsForbiddenArgv_EveryTokenOfTheSharedList proves recovery refuses
+// every token of the one shared list (spec/gitx-recorder-seam dc-1), each
+// as a whole argv element in a recorded command, and that its CommandLog
+// reports exactly those commands, in order.
+func TestIsForbiddenArgv_EveryTokenOfTheSharedList(t *testing.T) {
+	tokens := gitforbid.Tokens()
+	if len(tokens) == 0 {
+		t.Fatal("gitforbid.Tokens() is empty: this test would pass vacuously")
+	}
+	var l CommandLog
+	var want [][]string
+	for _, tok := range tokens {
+		argv := []string{"x", tok}
+		if !IsForbiddenArgv(argv) {
+			t.Errorf("IsForbiddenArgv(%q) = false, want true for shared token %q", argv, tok)
+		}
+		l.Observe("/r", []string{"rev-parse", "HEAD"})
+		l.Observe("/r", argv)
+		want = append(want, argv)
+	}
+	if got := l.Forbidden(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Forbidden() = %q, want %q", got, want)
 	}
 }
 

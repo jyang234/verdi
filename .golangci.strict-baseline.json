@@ -522,7 +522,6 @@
 {"count":1,"linter":"gochecknoglobals","message":"deleteMergedBranch is a global variable","package":"internal/reclaim","source":"\tdeleteMergedBranch = gitx.DeleteMergedBranch"},
 {"count":1,"linter":"gochecknoglobals","message":"keptReasonNames is a global variable","package":"internal/reclaim","source":"var keptReasonNames [numKeptReasons]string = [...]string{"},
 {"count":1,"linter":"gochecknoglobals","message":"worktreeRemove is a global variable","package":"internal/reclaim","source":"\tworktreeRemove     = gitx.WorktreeRemove"},
-{"count":1,"linter":"gochecknoglobals","message":"ForbiddenTokens is a global variable","package":"internal/recovery","source":"var ForbiddenTokens = []string{\"reset\", \"restore\", \"clean\", \"stash\", \"--force\", \"-f\", \"update-ref\"}"},
 {"count":1,"linter":"gochecknoglobals","message":"applyExecutorAllowList is a global variable","package":"internal/recovery","source":"var applyExecutorAllowList = map[string]map[string]bool{"},
 {"count":1,"linter":"gochecknoglobals","message":"applyJourneyHook is a global variable","package":"internal/recovery","source":"var applyJourneyHook func()"},
 {"count":1,"linter":"gochecknoglobals","message":"applyReproveHook is a global variable","package":"internal/recovery","source":"var applyReproveHook func()"},
