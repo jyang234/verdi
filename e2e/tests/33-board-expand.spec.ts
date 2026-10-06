@@ -318,6 +318,26 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await expect(card).toHaveAttribute("data-selected", "true");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+    // The ⋯ button carries a stable key, so a region swap restores focus
+    // to it (Wave 6 §5.1, retain focus). The swap is forced by a scratch
+    // write the wall accepts: a comment sticky, removed again afterwards.
+    await more.focus();
+    await expect(more).toBeFocused();
+    const probeText = "focus probe across a swap [33]";
+    const made = await page.request.post(boardPath(SHOWCASE.DESIGN_SPEC) + "/api/sticky", {
+      data: { text: probeText, type: "comment" },
+    });
+    expect(made.status(), await made.text()).toBe(200);
+    const probe = page.locator('[data-testid^="sticky-"]').filter({ hasText: probeText });
+    await expect(probe).toHaveCount(1, { timeout: 8_000 });
+    await expect(card.locator("button.clamp-more")).toBeFocused();
+    await expect(card.locator("button.clamp-more")).toHaveAttribute("data-testid", `clamp-more-${SHOWCASE.AC_IDS[0]}`);
+    const probeID = (await probe.getAttribute("data-id"))!;
+    const gone = await page.request.post(boardPath(SHOWCASE.DESIGN_SPEC) + "/api/annotation-delete", {
+      data: { ids: [probeID] },
+    });
+    expect(gone.status(), await gone.text()).toBe(200);
+    await expect(probe).toHaveCount(0, { timeout: 8_000 });
     // A double click on the selected card edits it and keeps it selected
     // (ac-5; SI-358 (5)); the editor reads the whole text back.
     await card.dblclick();

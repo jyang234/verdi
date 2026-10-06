@@ -4980,12 +4980,38 @@ body:not(.board-page) > footer.site-foot,
    whose children are all absolutely positioned, shrank to its own border;
    it takes the column's full width (the legacy v1 board keeps its own) ---- */
 @media (max-width: 60rem) {
-  .board-layout > .boardv2-canvas { align-self: stretch; }
+  .board-layout > .wall-frame { align-self: stretch; }
 }
 
-/* ---- the canvas is a column whose only in-flow child is the status
-   pill at its foot (the papers, labels and yarn are all positioned) ---- */
-.boardv2-canvas { display: flex; flex-direction: column; }
+/* ---- the wall frame: the canvas, then the status pill's reserved row
+   below it in normal flow (SI-358 (4)). Before the asset measures, the
+   canvas keeps its content-sized height; measured, it is bounded to what
+   the viewport leaves below the frame's top and above the row, scrolling
+   inside, so the row is in view whenever any of the canvas is and the
+   pill covers nothing at any width or zoom ---- */
+.board-layout > .wall-frame {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wall-frame > .boardv2-canvas { flex: none; }
+.wall-frame--measured > .boardv2-canvas {
+  min-height: 0 !important;
+  height: var(--wall-canvas-height);
+}
+.wall-status-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 44px;
+  padding: 8px 0 0;
+}
+/* the authoring wall's pin toolbox tab is fixed at the viewport's lower
+   left until the toolbar retires it (wall-canvas-v2 ac-3): the row leaves
+   its band free, so the pill never meets it */
+.mode-authoring .wall-status-row { padding-left: 12rem; }
 
 /* ---- every paper's shadow is composed from two custom properties: the
    ring the selection sets and the resting or lifted shadow. A hover rule,
@@ -5220,24 +5246,17 @@ body:not(.board-page) > footer.site-foot,
 .yarn-overlay .yarn-knot { opacity: 1; }
 
 /* ---- the status pill (ac-2; SI-350 (14); SI-358 (4)) ---- */
-/* the pill is drawn inside the canvas while something is selected: its
-   one in-flow child, at the foot of the column, so it covers no paper,
-   label or control at any width or zoom; sticky to the scrollport's left
-   and bottom, so it stays in view while the wall scrolls. Its words are
-   announced by the live region below, rendered once in the page outside
-   the swapped region; the pill itself is hidden from assistive technology
-   so nothing is said twice */
-.boardv2-canvas .wall-status {
-  position: sticky;
-  left: 16px;
-  bottom: 16px;
-  z-index: 10;
-  align-self: flex-start;
-  margin: auto 16px 16px;
+/* the pill is drawn in the frame's reserved row while something is
+   selected, outside the canvas's scroll area, so it covers no paper,
+   label or control. Its words are announced by the live region below,
+   rendered once in the page outside the swapped region; the pill itself
+   is hidden from assistive technology so nothing is said twice */
+.wall-status-row .wall-status {
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - 32px);
+  max-width: 100%;
+  overflow: hidden;
   padding: 6px 12px;
   border-radius: 999px;
   background: var(--ink);

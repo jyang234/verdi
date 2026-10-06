@@ -32,10 +32,12 @@ import { transformRotates } from "./helpers";
 //
 // After the lane's review (SI-358): the emphasis holds under hover and a
 // receded card keeps its text legible and its focus ring visible; the
-// status pill is drawn inside the canvas and covers nothing at 1440 px,
-// 320 px and 200 % zoom; the pill's words reach a live region outside the
-// swapped region; and the wall passes the accessibility scan with a
-// selection active, in light and dark.
+// status pill is drawn in the wall frame's reserved row below the canvas,
+// in view whenever the canvas is, and covers nothing at 1440 px, 320 px
+// and 200 % zoom — beside a tall sticky and under a paper mid-drag; the
+// pill's words reach a live region outside the swapped region, never
+// re-announced across a slow double click; and the wall passes the
+// accessibility scan with a selection active, in light and dark.
 
 const WALL = {
   SPEC: "decline-canvas-wall",
@@ -79,7 +81,7 @@ async function expectFootprint(el: Locator, what: string, w: number, h: number |
 }
 
 const canvas = (page: Page) => page.getByTestId("board");
-// The visual pill, inside the canvas while something is selected, and the
+// The visual pill, in the frame's row while something is selected, and the
 // live region outside the swapped region that speaks its words.
 const pill = (page: Page) => page.getByTestId("wall-status");
 const live = (page: Page) => page.getByTestId("wall-status-live");
@@ -122,14 +124,34 @@ function contrastIn(fg: string, bg: string): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-// overlapsOf lists the headings, texts and controls whose boxes intersect
-// the pill's (SI-358 (4)): the pill must cover none of them.
+// overlapsOf lists the headings, texts and controls whose VISIBLE boxes
+// intersect the pill's (SI-358 (4)): the pill must cover none of them. An
+// element's visible box is its own, clipped by every ancestor that clips
+// its overflow (the canvas scrolls: a paper past its foot is not on
+// screen), so what is counted is what a reader could see.
 async function overlapsOf(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const pillEl = document.querySelector('[data-testid="wall-status"]');
     if (!pillEl) return ["no pill"];
     const r = pillEl.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return ["pill has no box"];
+    const visibleBox = (el: Element) => {
+      let b = { left: 0, top: 0, right: 0, bottom: 0 };
+      const own = el.getBoundingClientRect();
+      b = { left: own.left, top: own.top, right: own.right, bottom: own.bottom };
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p);
+        if (o.overflow === "visible" && o.overflowX === "visible" && o.overflowY === "visible") continue;
+        const c = p.getBoundingClientRect();
+        b = {
+          left: Math.max(b.left, c.left),
+          top: Math.max(b.top, c.top),
+          right: Math.min(b.right, c.right),
+          bottom: Math.min(b.bottom, c.bottom),
+        };
+      }
+      return b;
+    };
     const sel =
       "h1, h2, h3, h4, p, span, a, button, input, textarea, select, summary, li, td, th, label, " +
       ".objcard, .stubcard, .refcard, .sticky, .yarn-chip, .zone-label, .board-notice, .placard";
@@ -138,8 +160,15 @@ async function overlapsOf(page: Page): Promise<string[]> {
       if (pillEl.contains(el) || el.contains(pillEl)) continue;
       const cs = getComputedStyle(el);
       if (cs.display === "none" || cs.visibility === "hidden") continue;
-      const b = el.getBoundingClientRect();
-      if (b.width === 0 || b.height === 0) continue;
+      // An element drawn at opacity 0 by itself or an ancestor (the idle
+      // trash target) is not on screen either.
+      let transparent = false;
+      for (let p: Element | null = el; p && !transparent; p = p.parentElement) {
+        if (Number(getComputedStyle(p).opacity) === 0) transparent = true;
+      }
+      if (transparent) continue;
+      const b = visibleBox(el);
+      if (b.right - b.left <= 0 || b.bottom - b.top <= 0) continue;
       const ix = Math.min(r.right, b.right) - Math.max(r.left, b.left);
       const iy = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top);
       if (ix > 0 && iy > 0) {
@@ -426,11 +455,43 @@ test.describe("wall-canvas", () => {
   });
 
   test("the status pill covers no content or control at 1440 px, 320 px and 200 % zoom (SI-358 (4))", async ({ page }) => {
+    // A tall comment sticky at the canvas's bottom-left: taller than the
+    // server's working estimate, so the canvas's content outgrows its
+    // min-height — the persistent case the review found under the old,
+    // in-canvas pill.
+    await page.goto(boardPath(WALL.SPEC));
+    await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+    const tallText = Array.from({ length: 26 }, (_, i) => `line ${i + 1} of a tall note that keeps growing`).join(" — ");
+    const made = await page.request.post(boardPath(WALL.SPEC) + "/api/sticky", { data: { text: tallText, type: "comment" } });
+    expect(made.status(), await made.text()).toBe(200);
+    // The write is the server's; a fresh page renders it without waiting
+    // on the poll.
+    await page.reload();
+    const tall = page.locator('[data-testid^="sticky-"]').filter({ hasText: "line 26 of a tall note" });
+    await expect(tall).toHaveCount(1);
+    const tallID = (await tall.getAttribute("data-id"))!;
+    const parked = await page.request.post(boardPath(WALL.SPEC) + "/api/sticky-position", { data: { id: tallID, x: 40, y: 392 } });
+    expect(parked.status(), await parked.text()).toBe(200);
+
+    const select = (key: string) =>
+      page.evaluate((k) => {
+        (window as unknown as { __WALLSELECT__: { select: (s: unknown) => void } }).__WALLSELECT__.select({ kind: "card", key: k });
+      }, key);
+    const inViewport = async (label: string) => {
+      const vp = await page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }));
+      const box = (await pill(page).boundingBox())!;
+      expect(box, `${label}: the pill has a box`).not.toBeNull();
+      expect(box.width, `${label}: the pill is drawn`).toBeGreaterThan(40);
+      expect(box.y, `${label}: the pill's top is in the viewport`).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height, `${label}: the pill's bottom is in the viewport (${box.y + box.height} of ${vp.h})`).toBeLessThanOrEqual(vp.h + 0.5);
+    };
+
     for (const shape of [
       { width: 1440, height: 900, zoom: "" },
       { width: 320, height: 800, zoom: "" },
       { width: 720, height: 450, zoom: "200%" },
     ]) {
+      const label = `${shape.width}×${shape.height}${shape.zoom ? " at " + shape.zoom : ""}`;
       await page.setViewportSize({ width: shape.width, height: shape.height });
       await page.goto(boardPath(WALL.SPEC));
       await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
@@ -438,23 +499,73 @@ test.describe("wall-canvas", () => {
         await page.evaluate((z) => {
           (document.body.style as unknown as { zoom: string }).zoom = z;
         }, shape.zoom);
+        await page.evaluate(() => window.dispatchEvent(new Event("resize")));
       }
-      // Select through the asset's own seam: at 320 px the card may sit
-      // behind the stacked rail, and the placement, not the click, is
-      // under test here.
-      await page.evaluate(() => {
-        (window as unknown as { __WALLSELECT__: { select: (s: unknown) => void } }).__WALLSELECT__.select({ kind: "card", key: "dc-1" });
-      });
+      const tallSticky = page.getByTestId(`sticky-${tallID}`);
+      await expect(tallSticky).toHaveCSS("top", "392px");
+      // The pill lives in the frame's reserved row, outside the canvas's
+      // scroll area, so the tall sticky cannot meet it.
+      await select("dc-1");
       await expect(page.getByTestId("card-dc-1")).toHaveAttribute("data-selected", "true");
       await expect(pill(page)).toBeAttached();
-      const label = `${shape.width}×${shape.height}${shape.zoom ? " at " + shape.zoom : ""}`;
-      // The pill is the canvas's own in-flow child, at its foot.
-      expect(await pill(page).evaluate((el) => el.parentElement?.id)).toBe("board-canvas");
-      const box = (await pill(page).boundingBox())!;
-      expect(box, `${label}: the pill has a box`).not.toBeNull();
-      expect(box.width, `${label}: the pill is drawn`).toBeGreaterThan(40);
-      expect(await overlapsOf(page), `${label}: the pill covers nothing`).toEqual([]);
+      expect(await pill(page).evaluate((el) => el.parentElement?.getAttribute("data-testid"))).toBe("wall-status-row");
+      expect(await overlapsOf(page), `${label}: the pill covers nothing beside a tall sticky`).toEqual([]);
+      // Selecting a card near the top, with that card in view, leaves the
+      // pill in the viewport: the canvas is bounded to the room the
+      // viewport has below the frame's top, so its row is in view whenever
+      // any of the canvas is.
+      const ac1 = page.getByTestId("card-ac-1");
+      await ac1.scrollIntoViewIfNeeded();
+      await select("ac-1");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+      await inViewport(`${label}, ac-1 selected`);
+      expect(await overlapsOf(page), `${label}: the pill covers nothing with ac-1 selected`).toEqual([]);
+      // A paper mid-drag over the canvas's foot, where the pill used to
+      // sit, cannot meet it either: the pill is not in the scroll area.
+      const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+      await sticky.scrollIntoViewIfNeeded();
+      const grip = (await sticky.locator(".sticky-body").boundingBox())!;
+      const foot = (await canvas(page).boundingBox())!;
+      await page.mouse.move(grip.x + grip.width / 2, grip.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(foot.x + 80, foot.y + foot.height - 20, { steps: 8 });
+      await expect(sticky).toHaveClass(/dragging/);
+      expect(await overlapsOf(page), `${label}: the pill covers nothing under a paper mid-drag`).toEqual([]);
+      await inViewport(`${label}, mid-drag`);
+      await page.mouse.up();
+      await expect(page.getByTestId("autosave-status")).toHaveText("saved", { timeout: 8_000 });
     }
+  });
+
+  test("a slow double click never re-announces the same selection (SI-358 (5); Wave 6 §5.2)", async ({ page }) => {
+    await openWall(page);
+    const dc1 = page.getByTestId("card-dc-1");
+    await dc1.click();
+    await expect(dc1).toHaveAttribute("data-selected", "true");
+    const words = `dc-1 exempts → ${WALL.ADR_REF}`;
+    await expect(live(page)).toHaveText(words);
+    // Record every rewrite of the live region from here on.
+    await page.evaluate(() => {
+      const el = document.getElementById("wall-status-live")!;
+      const w = window as unknown as { __liveLog: string[] };
+      w.__liveLog = [];
+      new MutationObserver(() => w.__liveLog.push(el.textContent || "")).observe(el, { childList: true, characterData: true, subtree: true });
+    });
+    await page.waitForTimeout(700);
+    // Two clicks on the selected card, further apart than the repeated-
+    // click window but inside the OS double-click interval: the first
+    // clears (after its window), the second re-selects. The pill may blink;
+    // the live region keeps its words, unspoken a second time.
+    await dc1.click();
+    await page.waitForTimeout(400);
+    await dc1.click();
+    await expect(dc1).toHaveAttribute("data-selected", "true");
+    await page.waitForTimeout(900);
+    await expect(live(page)).toHaveText(words);
+    expect(await page.evaluate(() => (window as unknown as { __liveLog: string[] }).__liveLog)).toEqual([]);
+    // A real clear, left alone, is spoken once the hold passes.
+    await canvas(page).click({ position: { x: 300, y: 520 } });
+    await expect(live(page)).toBeEmpty();
   });
 
   test("a selection keeps every text legible and every focus ring visible, in light and dark (SI-358 (2), (3))", async ({ page }) => {

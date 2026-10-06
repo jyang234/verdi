@@ -223,10 +223,17 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // moved, which R-RR2-7 forbids. Re-pinned once by spec/chrome-and-tokens-v2
 // (lane F1b): the posture row left renderBoardRegion for the top bar's
 // posture group — the region's one change since BASE, on every wall alike
-// — and every other byte of the story render is as it was.
+// — and every other byte of the story render is as it was. Re-pinned a
+// second time by spec/wall-canvas-v2 (lane F2a, SI-358 (4)): the canvas is
+// wrapped in the wall frame, `<div class="wall-frame" data-testid=
+// "wall-frame">` before `<div id="board-canvas"` and `<div class=
+// "wall-status-row" data-testid="wall-status-row"></div></div>` after its
+// close — the status pill's reserved row, on every wall alike — and every
+// other byte of the story render is as it was (the region diff is those
+// two insertions and nothing else).
 const (
-	storyWallDigestBase     = "049270cb26925ef88ba9aeb8755edaf3056945079e569ac74f47fb0c7f2768c8"
-	slotStoryWallDigestBase = "56914144e7f1ef6cb15dc3a827fc62ee90b1f5e7b5ee22ea5741738257b5e0e4"
+	storyWallDigestBase     = "2ee56527329b757db851e8f19c1cd2a401babd0e5abd546ddd27f43dc34d61c9"
+	slotStoryWallDigestBase = "2bced997d86c5e02cdefa3cea0fc0dd4f49d0d4afc7211aa512c62b2d30a9554"
 )
 
 func renderDigest(body string) string {

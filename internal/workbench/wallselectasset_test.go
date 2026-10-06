@@ -29,8 +29,8 @@ func TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset(t *testing.T) {
 	if main == "" {
 		t.Fatal("no board region in the page")
 	}
-	if strings.Contains(main, "wall-status") {
-		t.Error("the status pill host sits inside the swapped region")
+	if strings.Contains(main, "wall-status-live") {
+		t.Error("the live region sits inside the swapped region")
 	}
 	if strings.Index(body, pill) < strings.Index(body, `</main>`) {
 		t.Error("the status pill host precedes the region's end")
@@ -48,10 +48,20 @@ func TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset(t *testing.T) {
 		}
 		last = at
 	}
-	// The region render alone never carries the host: it belongs to the page.
+	// The region render alone never carries the live region: it belongs to
+	// the page. It does carry the wall frame — the canvas, then the pill's
+	// reserved row below it in normal flow (SI-358 (4)) — empty until the
+	// asset names a selection in it.
 	proj := &BoardProjection{Spec: "s", Mode: modeAuthoring, Cards: []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}}}
-	if region := renderBoardRegion(proj, &boardGitState{}, testASDView()); strings.Contains(region, "wall-status") {
-		t.Error("renderBoardRegion writes the status pill host")
+	region := renderBoardRegion(proj, &boardGitState{}, testASDView())
+	if strings.Contains(region, "wall-status-live") {
+		t.Error("renderBoardRegion writes the live region")
+	}
+	if !strings.Contains(region, `<div class="board-layout"><div class="wall-frame" data-testid="wall-frame"><div id="board-canvas" `) {
+		t.Error("the canvas is not the wall frame's first child")
+	}
+	if !strings.Contains(region, `</div><div class="wall-status-row" data-testid="wall-status-row"></div></div><aside class="board-side">`) {
+		t.Error("the status row does not follow the canvas inside the frame, before the rail")
 	}
 }
 

@@ -404,6 +404,12 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	}
 
 	b.WriteString(`<div class="board-layout">`)
+	// The wall frame holds the canvas and, below it in normal flow, the
+	// status pill's reserved row (spec/wall-canvas-v2 ac-2; SI-358 (4)):
+	// the pill sits outside the canvas's scroll area, so it covers no
+	// paper, label or control by construction. The row is empty until the
+	// selection asset names a selection in it.
+	b.WriteString(`<div class="wall-frame" data-testid="wall-frame">`)
 	// The canvas is sized to its content plus a working margin — a pure
 	// function of the projection's positions (deterministic), so a sparse
 	// board is a shallow board, not a fixed void.
@@ -774,6 +780,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	}
 
 	b.WriteString(`</div>`) // board-canvas
+	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"></div>`)
+	b.WriteString(`</div>`) // wall-frame
 
 	// The side rail, top-down by consequence: the commit affordance (the
 	// page's one write to the record), then the scratch tools, then the

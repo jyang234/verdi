@@ -21,12 +21,15 @@
 // nothing selected this file leaves no element of its own in the region,
 // so the region's markup is exactly the server's.
 //
-// The pill is drawn inside the canvas, as its one in-flow child at the
-// foot of the column (SI-358 (4): it covers nothing), and is hidden from
+// The pill is drawn in the wall frame's reserved row, below the canvas
+// in normal flow (SI-358 (4): it covers nothing), and is hidden from
 // assistive technology; its words go to the live region rendered once
 // outside the swapped region (boardspecrender.go), rewritten only when
-// they change, so an unchanged selection is never re-announced
-// (Wave 6 §5.2).
+// they change — a clear is held long enough for a slow double click to
+// bring the same words back unspoken — so an unchanged selection is
+// never re-announced (Wave 6 §5.2). The frame bounds the canvas to what
+// the viewport leaves below the frame's top and above the row, so the
+// row is in view whenever any of the canvas is.
 //
 // Marks (read by the stylesheet, by F5c's Document chips, and by the
 // lanes that follow): data-selected="true" on the selected card or chip,
@@ -56,13 +59,46 @@
   var CONTROLS = "a, button, textarea, input, select, label, .review-sticky, .sticky-draft, .card-editor, .badge-drawer";
   var CARDS = ".objcard, .stubcard, .refcard, .sticky";
 
+  // The live region's clear waits this long: a slow double click (two
+  // clicks apart by more than CLEAR_DELAY but inside the OS interval)
+  // clears and re-selects, and the same words must not be spoken again.
+  var LIVE_HOLD = 600;
+  var ROW_HEIGHT = 44; // the reserved row's height, in CSS px
+  var CANVAS_FLOOR = 128; // the least the bounded canvas shrinks to, in CSS px
+
   var selection = null; // { kind: "card" | "thread", key: string } | null
   var spoken = ""; // the live region's current words, so unchanged words are never rewritten
+  var liveClear = null; // the held clear of the live region
   var down = null; // the last press's point, for the drag-tail guard
   var pendingClear = null; // the deferred clear of a repeated click
 
   function canvas() {
     return document.getElementById("board-canvas");
+  }
+  function frame() {
+    return region.querySelector(".wall-frame");
+  }
+
+  // measure bounds the canvas to the viewport (SI-358 (4)): its height is
+  // the least of its content-sized min-height (the server's inline style)
+  // and what the viewport leaves below the frame's top and above the row,
+  // never under CANVAS_FLOOR. The frame's document-relative top does not
+  // move with the scroll, so the bound holds at every scroll position; a
+  // zoomed body scales the frame's box, so lengths are read in its scale.
+  function measure() {
+    var f = frame();
+    var c = canvas();
+    if (!f || !c) return;
+    var content = parseFloat(c.style.minHeight);
+    if (!(content > 0)) return;
+    var box = f.getBoundingClientRect();
+    var scale = f.offsetWidth ? box.width / f.offsetWidth : 1;
+    if (!(scale > 0)) scale = 1;
+    var top = box.top + (window.scrollY || 0);
+    var room = (document.documentElement.clientHeight - top) / scale - ROW_HEIGHT;
+    var height = Math.max(CANVAS_FLOOR, Math.min(content, room));
+    f.style.setProperty("--wall-canvas-height", Math.round(height) + "px");
+    f.classList.add("wall-frame--measured");
   }
   function esc(s) {
     return window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
@@ -226,10 +262,12 @@
     return { id: id, summary: summary };
   }
 
-  // drawPill keeps the visual pill in the canvas while there is a
-  // selection to name, and removes it otherwise.
-  function drawPill(c, w) {
-    var el = c.querySelector(".wall-status");
+  // drawPill keeps the visual pill in the frame's reserved row while there
+  // is a selection to name, and removes it otherwise.
+  function drawPill(w) {
+    var row = region.querySelector(".wall-status-row");
+    if (!row) return;
+    var el = row.querySelector(".wall-status");
     if (!w.id) {
       if (el) el.remove();
       return;
@@ -245,19 +283,35 @@
       sumEl.className = "wall-status-summary";
       el.appendChild(idEl);
       el.appendChild(sumEl);
-      c.appendChild(el);
+      row.appendChild(el);
     }
     if (el.children[0].textContent !== w.id) el.children[0].textContent = w.id;
     if (el.children[1].textContent !== w.summary) el.children[1].textContent = w.summary;
   }
 
   // speak gives the live region the pill's words, only when they change.
+  // A clear is held for LIVE_HOLD: if the same words come back inside it
+  // (a slow double click), nothing is rewritten; different words cancel
+  // the hold and are spoken at once.
   function speak(w) {
     if (!live) return;
     var text = w.id ? w.id + " " + w.summary : "";
-    if (text === spoken) return;
-    spoken = text;
-    live.textContent = text;
+    if (text) {
+      if (liveClear) {
+        clearTimeout(liveClear);
+        liveClear = null;
+      }
+      if (text === spoken) return;
+      spoken = text;
+      live.textContent = text;
+      return;
+    }
+    if (!spoken || liveClear) return;
+    liveClear = setTimeout(function () {
+      liveClear = null;
+      spoken = "";
+      live.textContent = "";
+    }, LIVE_HOLD);
   }
 
   // -- applying the selection to the DOM --------------------------------------
@@ -327,8 +381,9 @@
     else c.removeAttribute("data-selection");
     drawOverlay(c, hot);
     var w = words(selEl, hot);
-    drawPill(c, w);
+    drawPill(w);
     speak(w);
+    measure();
     // The overlay's and the pill's own rebuilds are the mutations this
     // file makes that the observer would see; drop them so apply never
     // re-triggers itself.
@@ -461,5 +516,8 @@
     card.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
   window.addEventListener("hashchange", arrive);
+  window.addEventListener("resize", measure);
+  window.addEventListener("load", measure);
+  measure();
   arrive();
 })();

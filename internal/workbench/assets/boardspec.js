@@ -477,7 +477,7 @@
   }
 
   // pinAnchor: a stub card's pin, centred on its top edge — the anchor of
-  // its projected coverage yarn (dc-3: an anchor, never a handle).
+  // its projected coverage yarn (dc-3: an anchor, not a handle).
   function pinAnchor(el) {
     var r = rectOf(el);
     return { x: r.x + r.w / 2, y: r.y };
@@ -531,7 +531,7 @@
         a = anchorOf(fromEl, centerOf(toEl));
         b = anchorOf(toEl, centerOf(fromEl));
         // The control point sits off the chord, perpendicular, by
-        // min(70, 0.18·length) — the handoff's curve.
+        // min(70, 0.18·length).
         var dx = b.x - a.x;
         var dy = b.y - a.y;
         var len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -684,8 +684,8 @@
   // case-file placard to three lines, an object card and a stub to their
   // index-card size). When a clamp actually cuts text, that must be
   // visible, not silent: the element gets `.is-clamped` (a fade on its
-  // last line) and a quiet "⋯" mark in its corner. On a placard, a click
-  // anywhere opens the read-only expand dialog; on a card the mark is a
+  // last line) and a quiet "⋯" mark in its corner. A placard opens the
+  // read-only expand dialog from anywhere on its face; a card's mark is a
   // button that opens it (SI-358 (1)), since a card's click selects it.
   // The mark appears ONLY when the text measurably overflows.
   // Measured on the SERVER-RENDERED text (the DOM always holds the full
@@ -709,8 +709,8 @@
       }
     }
     if (on && !mark) {
-      // A placard opens from anywhere on its face (and has its dog-ear);
-      // a card's mark is the control that reads its full text.
+      // A card's mark is the control that reads its full text, keyed so a
+      // swap restores focus to it; a placard opens from its face.
       var placard = parent.classList.contains("placard");
       mark = document.createElement(placard ? "span" : "button");
       mark.className = "clamp-more";
@@ -720,6 +720,7 @@
         mark.type = "button";
         mark.setAttribute("aria-label", "Read the full text");
         mark.setAttribute("aria-haspopup", "dialog");
+        mark.setAttribute("data-testid", "clamp-more-" + (parent.getAttribute("data-id") || parent.getAttribute("data-stub")));
       }
       parent.appendChild(mark);
     } else if (!on && mark) {
@@ -2504,10 +2505,8 @@
       return;
     }
 
-    // A clamped card's ⋯ control reads its full text in the expand dialog
-    // (SI-358 (1)) — an inner control, so it never selects the card
-    // (wallselect.js). A clamped placard is handled above: it opens from
-    // anywhere on its face.
+    // A clamped card's ⋯ control reads its full text (SI-358 (1)); it is
+    // an inner control, so wallselect.js never selects on it.
     var more = t.closest("button.clamp-more");
     if (more) {
       var clamped = more.parentNode.querySelector(".is-clamped[data-expandable]");
