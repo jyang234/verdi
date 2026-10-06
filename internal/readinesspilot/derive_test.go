@@ -291,7 +291,7 @@ func TestDeriveCarriesDeclaredObjectIDsInShapeProvenance(t *testing.T) {
 	t.Parallel()
 
 	in := baseInput(t)
-	in.Shape.DeclaredObjectIDs = []string{"decision-2", "constraint-1"}
+	in.Shape.DeclaredObjectIDs = []string{"decision-2", "constraint-1", "ac-1"}
 	concern := mustConcern(t, mustDerive(t, in), "shape/provenance")
 	for _, id := range in.Shape.DeclaredObjectIDs {
 		if !contains(concern.Witnesses, id) {
@@ -660,7 +660,7 @@ func TestDeriveInputOrderDeterminism(t *testing.T) {
 	t.Parallel()
 
 	first := baseInput(t)
-	first.Shape.DeclaredObjectIDs = []string{"decision-b", "constraint-a"}
+	first.Shape.DeclaredObjectIDs = []string{"decision-b", "constraint-a", "ac-1"}
 	first.Shape.OpenQuestionIDs = []string{"oq-b", "oq-a"}
 	first.Provenance.ChainWitnesses = []string{"z-chain", "a-chain"}
 	first.Provenance.MutationWitnesses = []string{"z-mutation", "a-mutation"}
@@ -668,7 +668,7 @@ func TestDeriveInputOrderDeterminism(t *testing.T) {
 	first.Board.Witnesses = []string{"z-board", "a-board"}
 
 	second := baseInput(t)
-	second.Shape.DeclaredObjectIDs = []string{"constraint-a", "decision-b"}
+	second.Shape.DeclaredObjectIDs = []string{"ac-1", "constraint-a", "decision-b"}
 	second.Shape.OpenQuestionIDs = []string{"oq-a", "oq-b"}
 	second.Provenance.ChainWitnesses = []string{"a-chain", "z-chain"}
 	second.Provenance.MutationWitnesses = []string{"a-mutation", "z-mutation"}
@@ -966,6 +966,10 @@ func baseInput(t *testing.T) Input {
 			DeclaredObjectIDs: []string{"ac-1"},
 			OpenQuestionIDs:   []string{},
 			ClaimedQuestions:  []ClaimedQuestion{},
+		},
+		Success: SuccessFacts{
+			CriterionIDs:      []string{"ac-1"},
+			UncoveredCriteria: []string{},
 		},
 		Provenance: ProvenanceFacts{
 			ChainState:        StateProven,

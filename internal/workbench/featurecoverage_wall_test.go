@@ -284,25 +284,14 @@ func isLenStubsOf(e ast.Expr, vars map[string]bool) bool {
 	return ok && vars[v.Name]
 }
 
-// featureCoverageStubDecls builds featurecoverage.StubDecl inputs from a
-// decoded feature's own stubs, exactly as buildProjection's extraction
-// does — the shared conversion both TestBuildProjection_
-// ACCoverageMatchesFeatureCoverage and projection.go itself perform.
-func featureCoverageStubDecls(fm *artifact.SpecFrontmatter) []featurecoverage.StubDecl {
-	var stubs []featurecoverage.StubDecl
-	for _, st := range fm.Stubs {
-		stubs = append(stubs, featurecoverage.StubDecl{Slug: st.Slug, AcceptanceCriteria: st.AcceptanceCriteria})
-	}
-	return stubs
-}
-
 // TestBuildProjection_ACCoverageMatchesFeatureCoverage is the differential
 // half of ac-1--behavioral: buildProjection's ACCoverage must equal
 // featurecoverage.Compute's own stub-half count for the SAME frontmatter,
 // on both the plain fixture and the duplicate-entry fixture — the case
 // that distinguishes "delegates to the shared function" from a
 // re-implementation that merely produces the same TOTAL on the simple
-// case.
+// case. The stub input is featurecoverage.StubDecls, the shared
+// stub-to-declaration step buildProjection itself calls.
 func TestBuildProjection_ACCoverageMatchesFeatureCoverage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -321,7 +310,7 @@ func TestBuildProjection_ACCoverageMatchesFeatureCoverage(t *testing.T) {
 			for i, ac := range tt.fm.AcceptanceCriteria {
 				ids[i] = ac.ID
 			}
-			cov := featurecoverage.Compute(ids, featureCoverageStubDecls(tt.fm), nil)
+			cov := featurecoverage.Compute(ids, featurecoverage.StubDecls(tt.fm.Stubs), nil)
 			for _, id := range ids {
 				want := len(cov[id].Stubs)
 				if got := p.ACCoverage[id]; got != want {

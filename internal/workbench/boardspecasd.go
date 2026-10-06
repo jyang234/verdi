@@ -31,6 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -219,7 +220,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 	} else {
 		add(asdConcern{ID: "shape/problem", Area: asdAreaShape, State: asdStateViolated, Blocking: true,
 			Summary:   "No problem statement is declared.",
-			Guidance:  "State the problem (typed operation set-problem) — the case file opens with it.",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceProblem, readinesspilot.GuidanceFacts{}),
 			Witnesses: []string{"spec.md frontmatter declares no problem attribute"},
 			Dest:      "#asd-forms"})
 	}
@@ -229,7 +230,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 	} else {
 		add(asdConcern{ID: "shape/outcome", Area: asdAreaShape, State: asdStateViolated, Blocking: true,
 			Summary:   "No outcome statement is declared.",
-			Guidance:  "State the intended outcome (typed operation set-outcome).",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceOutcome, readinesspilot.GuidanceFacts{}),
 			Witnesses: []string{"spec.md frontmatter declares no outcome attribute"},
 			Dest:      "#asd-forms"})
 	}
@@ -238,37 +239,40 @@ func deriveASDShell(in asdShellInput) asdShell {
 			// A spike stub's `resolves` claims this question (PLAN.md §7
 			// I-128 option (a); spec/uat-round-1 ac-10): non-blocking, and
 			// acceptance does not need a wall edit — the spike answers it
-			// after acceptance.
+			// after acceptance (readinesspilot.Guidance, shared with the
+			// readiness derivation, SI-338 (1)).
 			//
 			// Two or more stubs may claim one question (the wall's own
 			// multi-claim observation, boardspecrender.go's oq-claims
-			// chip), so the head noun and its verb agree with the count.
-			// The renameable class word itself stays the attributive
-			// SINGULAR both sibling surfaces speak — readinesspilot's
-			// "<word> stubs" and the stub cards' "<word> stub" — so the
-			// display plural (model.DisplayClassPlural) belongs to the
-			// chip, where that word is the head noun, and never here.
-			stubNoun, answerVerb := "stub", "answers"
+			// chip), so the head noun agrees with the count. The renameable
+			// class word itself stays the attributive SINGULAR both sibling
+			// surfaces speak — readinesspilot's "<word> stubs" and the stub
+			// cards' "<word> stub" — so the display plural
+			// (model.DisplayClassPlural) belongs to the chip, where that
+			// word is the head noun, and never here.
+			stubNoun := "stub"
 			if len(oq.ClaimedBySlugs) > 1 {
-				stubNoun, answerVerb = "stubs", "answer"
+				stubNoun = "stubs"
 			}
 			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
-				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
-				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " " + stubNoun + " " + answerVerb + " it after acceptance.",
+				Summary: "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
+				Guidance: readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{
+					Object: oq.ID, SpikeWord: in.SpikeWord, ClaimingStubs: len(oq.ClaimedBySlugs),
+				}),
 				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
 				Dest:      "#obj-" + oq.ID})
 			continue
 		}
 		add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: true,
 			Summary:   "Open question " + oq.ID + " is unresolved: " + oq.Text,
-			Guidance:  "Resolve it on the wall: edit or remove " + oq.ID + ", or graduate a decision that answers it.",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: oq.ID}),
 			Witnesses: []string{"declared open question " + oq.ID},
 			Dest:      "#obj-" + oq.ID})
 	}
 	if in.OpenStickyCount > 0 {
 		add(asdConcern{ID: "shape/board", Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
 			Summary:   fmt.Sprintf("%d open scratch record(s) sit on the wall.", in.OpenStickyCount),
-			Guidance:  "Graduate each sticky into the spec, or delete it — scratch never enters the record by itself.",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceScratch, readinesspilot.GuidanceFacts{}),
 			Witnesses: []string{fmt.Sprintf("%d open annotation record(s) on this board", in.OpenStickyCount)}})
 	}
 
@@ -276,7 +280,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 	if len(in.ACs) == 0 {
 		add(asdConcern{ID: "success/criteria", Area: asdAreaSuccess, State: asdStateViolated, Blocking: true,
 			Summary:   "No acceptance criteria are declared.",
-			Guidance:  "Declare what must be true when this lands (typed operation add-ac).",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceCriteria, readinesspilot.GuidanceFacts{}),
 			Witnesses: []string{"spec.md frontmatter declares no acceptance_criteria"},
 			Dest:      "#asd-forms"})
 	} else {
@@ -294,9 +298,8 @@ func deriveASDShell(in asdShellInput) asdShell {
 	}
 	for _, acID := range in.UncoveredACs {
 		add(asdConcern{ID: "success/coverage/" + acID, Area: asdAreaSuccess, State: asdStateUnproven, Blocking: false,
-			Summary: "No stub covers acceptance criterion " + acID + " yet.",
-			// vocab:identity — "story sticky" names the annotation TYPE id (02 §Record schemas' proto-sticky enum), not display class prose
-			Guidance:  "Plan the delivery: graduate a story sticky into a stub claiming " + acID + ".",
+			Summary:   "No stub covers acceptance criterion " + acID + " yet.",
+			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceCoverage, readinesspilot.GuidanceFacts{Object: acID}),
 			Witnesses: []string{"declared stub coverage count for " + acID + " is 0"},
 			Dest:      "#obj-" + acID})
 	}

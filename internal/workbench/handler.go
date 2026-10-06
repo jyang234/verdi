@@ -129,9 +129,10 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// The Wave 3.5 readiness pilot cockpit: a GET-only render, derived
 	// fresh per request through Deps.ReadinessLoader for ?spec=<name> or
 	// Deps.ReadinessDefaultSpec (nil loader, or neither name, discloses an
-	// honest 503). Method checks live in the handler, matching the
-	// method-prefix note above.
-	mux.HandleFunc("/readiness", readinessHandler(root, deps.ReadinessLoader, deps.ReadinessDefaultSpec))
+	// honest 503), with the resolved Deps.Model every other page receives.
+	// Method checks live in the handler, matching the method-prefix note
+	// above.
+	mux.HandleFunc("/readiness", newReadinessRoute(root, deps).handler())
 
 	// The mechanical spec importer's browser adapter (spec-import-contract
 	// "Browser routes"; specimport.go): the import page, the two strict
@@ -202,6 +203,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
 	mux.HandleFunc("/assets/boardspecasd.js", boardSpecASDJSHandler())
 	mux.HandleFunc("/assets/specdocument.js", specDocumentJSHandler())
+	mux.HandleFunc("/assets/documentpage.js", documentPageJSHandler())
 	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
 	mux.HandleFunc("/assets/readiness.js", readinessJSHandler())
 	mux.HandleFunc("/assets/topbar.js", topBarJSHandler())

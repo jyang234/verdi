@@ -590,6 +590,9 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 	// Compute's own per-stub dedup keeps the count per STUB, not per
 	// entry — a stub repeating an id in its own list still counts once,
 	// so "covered by N stubs" never overstates the declaring stubs.
+	// Its stub input is featurecoverage.StubDecls — the one shared
+	// stub-to-declaration step (every non-spike stub, in declared order),
+	// which the readiness loader's coverage family reads too (SI-338 (4)).
 	// OQClaims (the open-question multi-claim smell) is not part of that
 	// shared contract — spike stubs resolve open questions, never
 	// acceptance criteria — so it stays computed here exactly as before.
@@ -601,7 +604,6 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 	for _, q := range fm.OpenQuestions {
 		p.OQClaims[q.ID] = 0
 	}
-	stubDecls := make([]featurecoverage.StubDecl, 0, len(fm.Stubs))
 	for _, st := range fm.Stubs {
 		p.StubViews = append(p.StubViews, StubView{
 			Slug: st.Slug, Spike: st.Spike, Resolves: st.Resolves, AcceptanceCriteria: st.AcceptanceCriteria,
@@ -618,11 +620,9 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 				counted[oqID] = true
 				p.OQClaims[oqID]++
 			}
-			continue
 		}
-		stubDecls = append(stubDecls, featurecoverage.StubDecl{Slug: st.Slug, AcceptanceCriteria: st.AcceptanceCriteria})
 	}
-	coverage := featurecoverage.Compute(acIDs, stubDecls, nil)
+	coverage := featurecoverage.Compute(acIDs, featurecoverage.StubDecls(fm.Stubs), nil)
 	p.ACCoverage = make(map[string]int, len(acIDs))
 	for _, id := range acIDs {
 		p.ACCoverage[id] = len(coverage[id].Stubs)
