@@ -83,11 +83,17 @@ func (e *evaluation) commitLoggedInFixture() bool {
 // commitPathAttributed is SI-329 (8′) for a path a created commit
 // recorded: a logged commit in the fixture whose pathspec matches it, or
 // one that names no paths (commit without "--", commit-tree), whose
-// attribution stays per worktree — the disclosed residual.
+// attribution stays per worktree — the disclosed residual. A commit-tree
+// logged in a worktree the ritual added counts too, even when that
+// worktree's HEAD does not own the commit it created (ledger SI-359 (12),
+// refining SI-325 (8)): commit-tree moves no HEAD, so the commit lands
+// wherever a later call puts it, a new design/<slug> branch for the
+// board's /b/ commit. A commit logged there stays excluded, since
+// ownership (ownerWorktree) attributes the commit it makes.
 func (e *evaluation) commitPathAttributed(f string) bool {
 	for _, c := range e.at.in("", primCommit, primCommitTree) {
 		wt := e.at.worktreeOf(c.Dir)
-		if e.addedWT[wt] {
+		if e.addedWT[wt] && c.Kind != primCommitTree {
 			continue
 		}
 		specs, named := c.pathspecs()
