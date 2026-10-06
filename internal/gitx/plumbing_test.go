@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -200,5 +202,123 @@ func TestUpdateRef_Negative_RefAlreadyExists(t *testing.T) {
 	}
 	if got != repo.Head {
 		t.Fatalf("refs/heads/design/dup = %q after a refused UpdateRef, want unchanged %q", got, repo.Head)
+	}
+}
+
+// repoState is everything a refused or failed UpdateRef must leave as it
+// was: every ref with its value, what HEAD names, the local config (a
+// branch's upstream lives there) and the working tree's status.
+func repoState(t *testing.T, dir string) string {
+	t.Helper()
+	ctx := context.Background()
+	var b strings.Builder
+	for _, args := range [][]string{
+		{"for-each-ref", "--format=%(refname) %(objectname)"},
+		{"symbolic-ref", "HEAD"},
+		{"config", "--local", "--list"},
+		{"status", "--porcelain", "--untracked-files=all"},
+	} {
+		out, err := run(ctx, dir, args...)
+		if err != nil {
+			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+		}
+		b.WriteString(strings.Join(args, " ") + ":\n" + string(out))
+	}
+	return b.String()
+}
+
+// TestUpdateRef_RunsCreateOnlyGitBranch pins UpdateRef's whole git
+// command log: one `git branch <name> <commit>`, never update-ref
+// (ritual-write-scope-v3 dc-8, ledger SI-359 (5)), and the branch it
+// creates at a commit has no upstream configured.
+func TestUpdateRef_RunsCreateOnlyGitBranch(t *testing.T) {
+	repo := buildRepo(t)
+	obs := &recordingObserver{}
+	ctx := WithObserver(context.Background(), obs)
+
+	if err := UpdateRef(ctx, repo.Dir, "refs/heads/design/argv", repo.Heads[0]); err != nil {
+		t.Fatalf("UpdateRef: %v", err)
+	}
+	want := [][]string{{repo.Dir, "branch", "design/argv", repo.Heads[0]}}
+	if !reflect.DeepEqual(obs.calls, want) {
+		t.Fatalf("observed %q, want %q", obs.calls, want)
+	}
+	got, err := RevParse(context.Background(), repo.Dir, "refs/heads/design/argv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != repo.Heads[0] {
+		t.Fatalf("refs/heads/design/argv = %s, want %s", got, repo.Heads[0])
+	}
+	cfg, err := run(context.Background(), repo.Dir, "config", "--local", "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), "branch.design/argv.") {
+		t.Fatalf("UpdateRef configured the new branch:\n%s", cfg)
+	}
+}
+
+// TestUpdateRef_Negative_ExistingBranchChangesNothing proves the create is
+// create-only: onto an existing branch it fails, and the branch, every
+// other ref, HEAD, the config and the working tree are exactly as before.
+func TestUpdateRef_Negative_ExistingBranchChangesNothing(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+	if err := UpdateRef(ctx, repo.Dir, "refs/heads/design/dup", repo.Heads[0]); err != nil {
+		t.Fatalf("first UpdateRef: %v", err)
+	}
+	before := repoState(t, repo.Dir)
+	if err := UpdateRef(ctx, repo.Dir, "refs/heads/design/dup", repo.Head); err == nil {
+		t.Fatal("UpdateRef onto an existing branch succeeded, want error")
+	}
+	if after := repoState(t, repo.Dir); after != before {
+		t.Fatalf("a refused UpdateRef changed the repository:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestUpdateRef_Negative_RefusedBeforeGit is ledger SI-359 (5b): UpdateRef
+// refuses a ref git branch cannot create (outside refs/heads/, or with an
+// empty short name) and anything git would parse as an option (a short
+// name or a commit starting with "-"), before any git runs, so the
+// function is create-only for every input. Given refs/remotes/origin/x,
+// git branch would silently create refs/heads/refs/remotes/origin/x; given
+// refs/heads/-f, or the commit "-f", it would force-move a branch.
+func TestUpdateRef_Negative_RefusedBeforeGit(t *testing.T) {
+	repo := buildRepo(t)
+	tests := []struct {
+		name, ref, commit string
+	}{
+		{"a remote-tracking ref", "refs/remotes/origin/x", repo.Head},
+		{"a tag", "refs/tags/v1", repo.Head},
+		{"a short name", "design/x", repo.Head},
+		{"HEAD", "HEAD", repo.Head},
+		{"refs/heads without a slash", "refs/heads", repo.Head},
+		{"an empty short name", "refs/heads/", repo.Head},
+		{"an empty ref", "", repo.Head},
+		{"a short name that is a flag", "refs/heads/-f", repo.Head},
+		{"a short name that is a long flag", "refs/heads/--force", repo.Head},
+		{"a short name starting with a dash", "refs/heads/-design/x", repo.Head},
+		{"a commit that is a flag", "refs/heads/design/x", "-f"},
+		{"an empty commit", "refs/heads/design/x", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := repoState(t, repo.Dir)
+			obs := &recordingObserver{}
+			err := UpdateRef(WithObserver(context.Background(), obs), repo.Dir, tt.ref, tt.commit)
+			if err == nil {
+				t.Fatalf("UpdateRef(%q, %q) succeeded, want a refusal", tt.ref, tt.commit)
+			}
+			if !strings.Contains(err.Error(), "UpdateRef") {
+				t.Errorf("error %q does not name UpdateRef", err)
+			}
+			if len(obs.calls) != 0 {
+				t.Fatalf("UpdateRef(%q, %q) ran git before refusing: %q", tt.ref, tt.commit, obs.calls)
+			}
+			if after := repoState(t, repo.Dir); after != before {
+				t.Fatalf("a refused UpdateRef changed the repository:\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
 	}
 }

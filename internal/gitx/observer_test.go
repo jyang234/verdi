@@ -50,8 +50,9 @@ func TestObserver_AbsentIsNoop(t *testing.T) {
 // (plumbing.go), the one behind WriteBlob/BuildTreeWithFile/CommitTree/
 // UpdateRef — R-RR3-2 amended after Task 1 review: the brief's original
 // premise ("ConfigValue is the one exec site that bypasses run") was
-// false, and runStdin is the only producer of the "update-ref" token
-// dc-4/ac-9's command-log check must see.
+// false. UpdateRef's argv is pinned here too: it creates the branch with
+// `git branch <name> <commit>`, never update-ref (ritual-write-scope-v3
+// dc-8, ledger SI-359 (5)).
 func TestObserver_SeesPlumbing(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "a\n"}, Message: "a"}})
 	obs := &recordingObserver{}
@@ -68,7 +69,7 @@ func TestObserver_SeesPlumbing(t *testing.T) {
 
 	want := [][]string{
 		{repo.Dir, "hash-object", "-w", "--stdin"},
-		{repo.Dir, "update-ref", ref, repo.Head, zeroOID},
+		{repo.Dir, "branch", "plumbing-observed", repo.Head},
 	}
 	if !reflect.DeepEqual(obs.calls, want) {
 		t.Fatalf("observed %v, want %v", obs.calls, want)

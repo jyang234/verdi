@@ -91,8 +91,7 @@ func TestMutatingCall(t *testing.T) {
 		{"branch -d", []string{"branch", "-d", "close/x"}, true, primBranchDelete, "", "refs/heads/close/x", "", ""},
 		{"merge --ff-only", []string{"merge", "--ff-only", oidC}, true, primFastForward, "", "", "", oidC},
 		{"push", []string{"push", "--set-upstream", "origin", "HEAD"}, true, primPush, "", "", "", ""},
-		{"update-ref with a full refname", []string{"update-ref", "refs/heads/design/x", oidA, strings.Repeat("0", 40)}, true, primUpdateRef, "refs/heads/design/x", "", "", ""},
-		{"update-ref with a short name names no ref", []string{"update-ref", "design/x", oidA, strings.Repeat("0", 40)}, true, primUpdateRef, "", "", "", ""},
+		{"branch at a commit", []string{"branch", "design/x", oidA}, true, primUpdateRef, "refs/heads/design/x", "", "", ""},
 		{"worktree add", []string{"worktree", "add", "/w", "side"}, true, primWorktreeAdd, "", "", "", ""},
 		{"worktree add --detach", []string{"worktree", "add", "--detach", "/w", oidA}, true, primWorktreeAdd, "", "", "", ""},
 		{"worktree remove behind -c", []string{"-c", "status.showUntrackedFiles=all", "worktree", "remove", "/w"}, true, primWorktreeRemove, "", "", "", ""},
@@ -112,6 +111,13 @@ func TestMutatingCall(t *testing.T) {
 		{"show-ref", []string{"show-ref", "--verify", "--quiet", "refs/heads/x"}, false, 0, "", "", "", ""},
 		{"a checkout of paths is not gitx's argv", []string{"checkout", "--", "a"}, false, 0, "", "", "", ""},
 		{"a branch listing", []string{"branch"}, false, 0, "", "", "", ""},
+		// gitx.UpdateRef's argv is exactly `branch <name> <commit>`: no
+		// gitx function issues update-ref, and a branch call with a flag
+		// in either place is not its argv.
+		{"update-ref is no gitx primitive's argv", []string{"update-ref", "refs/heads/design/x", oidA, strings.Repeat("0", 40)}, false, 0, "", "", "", ""},
+		{"a branch call with a flag before the name", []string{"branch", "-f", "design/x"}, false, 0, "", "", "", ""},
+		{"a branch call with a flag as the start point", []string{"branch", "design/x", "-f"}, false, 0, "", "", "", ""},
+		{"a branch call with no start point", []string{"branch", "design/x"}, false, 0, "", "", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

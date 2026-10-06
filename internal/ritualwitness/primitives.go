@@ -37,7 +37,8 @@ const (
 	// primPush is `push`: the remote's refs, their remote-tracking
 	// mirrors, and the pushed branch's upstream configuration.
 	primPush
-	// primUpdateRef is `update-ref <ref> <new> <old>`: it creates <ref>.
+	// primUpdateRef is gitx.UpdateRef's `branch <name> <commit>`: it
+	// creates refs/heads/<name> (ritual-write-scope-v3 dc-8).
 	primUpdateRef
 	// primWorktreeAdd is `worktree add`: a linked worktree at its path.
 	primWorktreeAdd
@@ -89,7 +90,9 @@ func mutatingPrimitives() []primitive {
 		{"internal/gitx.DeleteMergedBranch", primBranchDelete, branchDelete},
 		{"internal/gitx.FastForwardOnly", primFastForward, func(a []string) bool { return len(a) == 3 && a[0] == "merge" && a[1] == "--ff-only" }},
 		{"internal/gitx.Push", primPush, exactArgv("push", "--set-upstream", "origin", "HEAD")},
-		{"internal/gitx.UpdateRef", primUpdateRef, func(a []string) bool { return len(a) == 4 && a[0] == "update-ref" }},
+		{"internal/gitx.UpdateRef", primUpdateRef, func(a []string) bool {
+			return len(a) == 3 && a[0] == "branch" && !strings.HasPrefix(a[1], "-") && !strings.HasPrefix(a[2], "-")
+		}},
 		{"internal/gitx.WorktreeAdd", primWorktreeAdd, func(a []string) bool {
 			return len(a) == 4 && a[0] == "worktree" && a[1] == "add" && !strings.HasPrefix(a[2], "-")
 		}},
@@ -186,9 +189,7 @@ func (c loggedCall) createdRef() string {
 	case primCheckoutNew:
 		return "refs/heads/" + c.Args[2]
 	case primUpdateRef:
-		if strings.HasPrefix(c.Args[1], "refs/") {
-			return c.Args[1]
-		}
+		return "refs/heads/" + c.Args[1]
 	}
 	return ""
 }
