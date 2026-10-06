@@ -43,8 +43,8 @@ import (
 // The scan is syntactic (go/parser, no type checking), so its shapes are
 // named where they are defined: tokenListSites for (a), execSites and
 // gitProgramLiterals for (b), and the update-ref spelling for (c). The
-// falsifier subtests apply one mutant per clause to the parsed source and
-// require a finding.
+// falsifier subtests apply mutants to the parsed source, at least one per
+// clause, and require each to draw its clause's finding.
 func TestGitRecorderSeamStaticContract(t *testing.T) {
 	src, err := loadSeamSource(verdiRepoRoot)
 	if err != nil {
@@ -518,6 +518,10 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 		return constString(e, consts[sf.pkg], shadowedNames(decl), 0)
 	}
 	var sites []execSite
+	add := func(site execSite, n ast.Node) {
+		site.pos = src.position(n.Pos())
+		sites = append(sites, site)
+	}
 	for _, decl := range sf.file.Decls {
 		fn := funcName(decl)
 		calls := map[ast.Node]bool{}
@@ -528,10 +532,7 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 			return true
 		})
 		ast.Inspect(decl, func(n ast.Node) bool {
-			if n == nil {
-				return true
-			}
-			site := execSite{path: sf.path, fn: fn, pos: src.position(n.Pos())}
+			site := execSite{path: sf.path, fn: fn}
 			switch x := n.(type) {
 			case *ast.CallExpr:
 				pkgPath, sel := qualified(names, x.Fun)
@@ -547,7 +548,7 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 				if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "new" && len(x.Args) == 1 {
 					if p, s := qualified(names, x.Args[0]); p == "os/exec" && s == "Cmd" {
 						site.data, site.what = true, "new(os/exec.Cmd)"
-						sites = append(sites, site)
+						add(site, x)
 					}
 				}
 				if prog < 0 || len(x.Args) <= prog {
@@ -561,14 +562,14 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 				} else {
 					site.data = true
 				}
-				sites = append(sites, site)
+				add(site, x)
 			case *ast.SelectorExpr:
 				if calls[x] {
 					return true
 				}
 				if pkgPath, sel := qualified(names, x); pkgPath == "os/exec" && (sel == "Command" || sel == "CommandContext") {
 					site.data, site.what = true, "os/exec."+sel+" value"
-					sites = append(sites, site)
+					add(site, x)
 				}
 			case *ast.CompositeLit:
 				if pkgPath, sel := qualified(names, x.Type); pkgPath == "os/exec" && sel == "Cmd" {
@@ -585,7 +586,7 @@ func execSites(src seamSource, sf seamFile, consts map[string]map[string]ast.Exp
 							}
 						}
 					}
-					sites = append(sites, site)
+					add(site, x)
 				}
 			}
 			return true
