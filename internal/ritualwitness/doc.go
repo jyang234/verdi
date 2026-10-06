@@ -128,7 +128,8 @@
 // with any path in its worktree. spec/gitx-recorder-seam changes no
 // call's argv, so this residual stays disclosed too (SI-359 (9)), and
 // SI-359 (12) extends it to a commit-tree logged in a worktree the ritual
-// added, which may attribute the commit it creates.
+// added, which may attribute the commit it creates and only that one,
+// matched by the call's parent argument.
 //
 // SI-325 (9), not sensed: ignored files; the reflog (but for a linked
 // worktree's first entry, read only to find the commit it was added at);

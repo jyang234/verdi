@@ -272,6 +272,15 @@ func (c loggedCall) worktreePath() string {
 	return ""
 }
 
+// commitTreeParent is the parent a commit-tree call names (its -p
+// argument), or "" for any other call.
+func (c loggedCall) commitTreeParent() string {
+	if c.Kind == primCommitTree {
+		return c.Args[3]
+	}
+	return ""
+}
+
 // fastForwardTarget is the commit a fast-forward call names, or "".
 func (c loggedCall) fastForwardTarget() string {
 	if c.Kind == primFastForward {
