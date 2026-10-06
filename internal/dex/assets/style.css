@@ -5000,6 +5000,14 @@ body:not(.board-page) > footer.site-foot,
   min-height: 0 !important;
   height: var(--wall-canvas-height);
 }
+/* a chip's label is never selectable text: a press on a chip that buries
+   a pin (boardspec.js's provisional yarn gesture) must not start a text
+   selection, whose autoscroll would move the now vertically scrolling
+   canvas under the hand */
+.boardv2-canvas .yarn-chip {
+  -webkit-user-select: none;
+  user-select: none;
+}
 .wall-status-row {
   flex: none;
   display: flex;
