@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -76,6 +79,62 @@ func TestIdentityDetachedAndInvalidRoots(t *testing.T) {
 	dirtyRoot := root + string(filepath.Separator) + ".." + string(filepath.Separator) + filepath.Base(root)
 	if _, err := ResolveCanonicalIdentity(context.Background(), root, "spec/sample", fakeIdentityReader{root: dirtyRoot, branch: "design/sample", head: strings.Repeat("a", 40)}); err == nil || !strings.Contains(err.Error(), "clean") {
 		t.Fatalf("unclean checkout error = %v", err)
+	}
+}
+
+// rootReads records the git reads gitx runs on its context.
+type rootReads struct {
+	mu   sync.Mutex
+	argv []string
+}
+
+func (r *rootReads) Observe(_ string, args []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.argv = append(r.argv, strings.Join(args, " "))
+}
+
+// TestGitIdentityReader_CheckoutRoot proves the real reader's top-level
+// lookup: the repository's top level from the top level itself or from
+// any directory below it, read through gitx so the observer sees it
+// (spec/gitx-recorder-seam dc-3), and an error, never a guessed root,
+// outside a repository.
+func TestGitIdentityReader_CheckoutRoot(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"store/deep/a.txt": "a\n"}, Message: "seed"}})
+	top, err := filepath.EvalSymlinks(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		start   string
+		wantErr bool
+	}{
+		{name: "the top level", start: repo.Dir},
+		{name: "a directory below the top level", start: filepath.Join(repo.Dir, "store", "deep")},
+		{name: "outside any repository", start: t.TempDir(), wantErr: true},
+		{name: "a directory that does not exist", start: filepath.Join(t.TempDir(), "missing"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := &rootReads{}
+			got, err := GitIdentityReader{}.CheckoutRoot(gitx.WithObserver(context.Background(), reads), tc.start)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "draftmutation: resolving Git checkout root") {
+					t.Fatalf("CheckoutRoot(%s) = %q, %v; want the checkout-root error", tc.start, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CheckoutRoot: %v", err)
+			}
+			if got != top {
+				t.Fatalf("CheckoutRoot = %q, want the top level %q", got, top)
+			}
+			if len(reads.argv) != 1 || !strings.HasPrefix(reads.argv[0], "rev-parse --show-toplevel") {
+				t.Fatalf("observed git reads %q, want the one top-level read through gitx", reads.argv)
+			}
+		})
 	}
 }
 

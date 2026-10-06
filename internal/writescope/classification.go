@@ -70,6 +70,7 @@ func Classification() []Classified {
 		ro("internal/gitx.CommitIdentityAvailable"),
 		mut("internal/gitx.CommitTree"), // commit object only
 		ro("internal/gitx.CommonDir"),
+		ro("internal/gitx.ConfigList"),
 		ro("internal/gitx.ConfigValue"),
 		mut("internal/gitx.CreateCommit"), // records the whole index
 		mut("internal/gitx.CreateCommitPaths"),
@@ -103,9 +104,11 @@ func Classification() []Classified {
 		ro("internal/gitx.PickaxeCommit"),
 		mut("internal/gitx.Push"), // remote ref plus branch.<b>.* upstream config
 		ro("internal/gitx.ReachableFromHEAD"),
+		ro("internal/gitx.RefList"),
 		ro("internal/gitx.RemoteDesignBranches"),
 		ro("internal/gitx.RemoteURL"),
 		ro("internal/gitx.RepoPrefix"),
+		ro("internal/gitx.RepositoryLayout"),
 		ro("internal/gitx.ResetShallowCache"), // clears an in-process cache only
 		ro("internal/gitx.ResolveExactRef"),
 		ro("internal/gitx.RevParse"),
@@ -117,6 +120,7 @@ func Classification() []Classified {
 		ro("internal/gitx.UntrackedPaths"),
 		mut("internal/gitx.UpdateRef"), // create-only ref write
 		ro("internal/gitx.ValidateFullOID"),
+		ro("internal/gitx.Version"),
 		ro("internal/gitx.WithObserver"),
 		mut("internal/gitx.WorktreeAdd"),
 		mut("internal/gitx.WorktreeAddDetached"),

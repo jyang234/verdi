@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -24,13 +23,15 @@ type IdentityReader interface {
 
 type GitIdentityReader struct{}
 
+// CheckoutRoot reads start's repository top level through gitx.Locate,
+// so the read is observed like every other git read (spec/gitx-recorder-seam
+// dc-3).
 func (GitIdentityReader) CheckoutRoot(ctx context.Context, start string) (string, error) {
-	command := exec.CommandContext(ctx, "git", "-C", start, "rev-parse", "--show-toplevel")
-	output, err := command.CombinedOutput()
+	location, err := gitx.Locate(ctx, start)
 	if err != nil {
-		return "", fmt.Errorf("draftmutation: resolving Git checkout root: %w (%s)", err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("draftmutation: resolving Git checkout root: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	return location.TopLevel, nil
 }
 
 func (GitIdentityReader) CurrentBranch(ctx context.Context, root string) (string, error) {
