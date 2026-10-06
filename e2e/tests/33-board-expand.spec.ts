@@ -285,6 +285,13 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     const cardText = card.locator(".card-text");
     await expect(cardText).toHaveClass(/is-clamped/);
     await expect(card.locator(".clamp-more")).toHaveCount(1);
+    // The double clicks above left the card selected (SI-358 (5)); clear it
+    // through the asset's seam so the single click below is a selection,
+    // not the repeated click that clears.
+    await page.evaluate(() => {
+      (window as unknown as { __WALLSELECT__: { clear: () => void } }).__WALLSELECT__.clear();
+    });
+    await expect(card).not.toHaveAttribute("data-selected", /./);
     await cardText.click();
     await expect(card).toHaveAttribute("data-selected", "true");
     await expect(
@@ -294,12 +301,31 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await page.waitForTimeout(400);
     await expect(page.getByTestId("expand-dialog")).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Card text" })).toHaveCount(0);
-    // The full text is in the DOM (the clamp only hides it), and the
-    // editor still reads it back whole.
+    // The full text is in the DOM (the clamp only hides it). The ⋯ mark is
+    // a button that reads it in the expand dialog (SI-358 (1)) — an inner
+    // control, so it neither selects nor clears: the card stays selected.
     await expect(cardText).toHaveText(longText);
+    const more = card.locator("button.clamp-more");
+    await expect(more).toHaveAttribute("aria-haspopup", "dialog");
+    await more.click();
+    const dialog = page.getByTestId("expand-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("expand-text")).toHaveText(longText);
+    await expect(dialog.locator(".expand-kind")).toContainText(SHOWCASE.AC_IDS[0]);
+    // Past the repeated-click window: the ⋯ click neither selected nor
+    // cleared, so the card is still selected.
+    await page.waitForTimeout(400);
+    await expect(card).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    // A double click on the selected card edits it and keeps it selected
+    // (ac-5; SI-358 (5)); the editor reads the whole text back.
     await card.dblclick();
     const editor3 = page.getByRole("textbox", { name: "Card text" });
     await expect(editor3).toHaveValue(longText);
+    await expect(card).toHaveAttribute("data-selected", "true");
+    await page.waitForTimeout(400);
+    await expect(card).toHaveAttribute("data-selected", "true");
     await editor3.blur();
   });
 

@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
 import { transformRotates } from "./helpers";
 
@@ -28,6 +29,13 @@ import { transformRotates } from "./helpers";
 // passes when run alone (BL-98) and assumes nothing another file wrote.
 // Every assertion reads the DOM and computed styles — never a screenshot
 // (recording stays off).
+//
+// After the lane's review (SI-358): the emphasis holds under hover and a
+// receded card keeps its text legible and its focus ring visible; the
+// status pill is drawn inside the canvas and covers nothing at 1440 px,
+// 320 px and 200 % zoom; the pill's words reach a live region outside the
+// swapped region; and the wall passes the accessibility scan with a
+// selection active, in light and dark.
 
 const WALL = {
   SPEC: "decline-canvas-wall",
@@ -71,9 +79,76 @@ async function expectFootprint(el: Locator, what: string, w: number, h: number |
 }
 
 const canvas = (page: Page) => page.getByTestId("board");
+// The visual pill, inside the canvas while something is selected, and the
+// live region outside the swapped region that speaks its words.
 const pill = (page: Page) => page.getByTestId("wall-status");
+const live = (page: Page) => page.getByTestId("wall-status-live");
 const overlayThreads = (page: Page) => page.locator("#board-canvas svg.yarn-overlay path.yarn-thread");
 const baseThreads = (page: Page) => page.locator("#board-canvas svg.yarn-svg path.yarn-thread");
+
+// Computed-style readers: the ring is the first shadow in the list, a
+// spread with no blur ("0px 0px 0px 3px"); the recede is a grayscale
+// filter with the shadow gone.
+const shadowOf = (el: Locator) => el.evaluate((node) => getComputedStyle(node).boxShadow);
+const filterOf = (el: Locator) => el.evaluate((node) => getComputedStyle(node).filter);
+const opacityOf = (el: Locator) => el.evaluate((node) => Number(getComputedStyle(node).opacity));
+const RING_3 = /(^|, )rgba?\([^)]*\) 0px 0px 0px 3px/;
+const RING_2 = /(^|, )rgba?\([^)]*\) 0px 0px 0px 2px/;
+
+async function expectReceded(el: Locator, what: string): Promise<void> {
+  await expect.poll(() => filterOf(el), `${what} recedes`).toBe("grayscale(1)");
+  await expect.poll(() => shadowOf(el), `${what} drops its shadow`).toBe("none");
+  await expect.poll(() => opacityOf(el), `${what} keeps its ink`).toBe(1);
+}
+
+async function expectEmphasized(el: Locator, what: string, ring: RegExp): Promise<void> {
+  await expect.poll(() => filterOf(el), `${what} is not receded`).toBe("none");
+  await expect.poll(() => shadowOf(el), `${what} wears its ring`).toMatch(ring);
+}
+
+// contrastIn computes the WCAG contrast ratio of two computed colours.
+function contrastIn(fg: string, bg: string): number {
+  const parse = (c: string) => {
+    const m = c.match(/rgba?\(([^)]+)\)/);
+    expect(m, `not an rgb colour: ${c}`).not.toBeNull();
+    return m![1].split(",").slice(0, 3).map((v) => Number(v.trim()) / 255);
+  };
+  const lum = (rgb: number[]) => {
+    const [r, g, b] = rgb.map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const a = lum(parse(fg));
+  const b = lum(parse(bg));
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+// overlapsOf lists the headings, texts and controls whose boxes intersect
+// the pill's (SI-358 (4)): the pill must cover none of them.
+async function overlapsOf(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const pillEl = document.querySelector('[data-testid="wall-status"]');
+    if (!pillEl) return ["no pill"];
+    const r = pillEl.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return ["pill has no box"];
+    const sel =
+      "h1, h2, h3, h4, p, span, a, button, input, textarea, select, summary, li, td, th, label, " +
+      ".objcard, .stubcard, .refcard, .sticky, .yarn-chip, .zone-label, .board-notice, .placard";
+    const hits: string[] = [];
+    for (const el of Array.from(document.querySelectorAll(sel))) {
+      if (pillEl.contains(el) || el.contains(pillEl)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      const b = el.getBoundingClientRect();
+      if (b.width === 0 || b.height === 0) continue;
+      const ix = Math.min(r.right, b.right) - Math.max(r.left, b.left);
+      const iy = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top);
+      if (ix > 0 && iy > 0) {
+        hits.push(el.tagName.toLowerCase() + (el.className && typeof el.className === "string" ? "." + el.className.split(" ").join(".") : ""));
+      }
+    }
+    return hits;
+  });
+}
 
 async function openWall(page: Page): Promise<void> {
   await page.goto(boardPath(WALL.SPEC));
@@ -198,9 +273,17 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
 test.describe("wall-canvas", () => {
   // Held (SI-355): the claim includes the readiness mark, which waits on
   // the owner's decision (SI-352). Skipped counts as falsified, so ac-1
-  // stays unproven, never a pass.
+  // stays unproven, never a pass; the reason rides the run's report as an
+  // annotation (SI-358 (7)).
   test.fixme(
     "Cards at the new footprint with their receipts, and yarn in two layers",
+    {
+      annotation: {
+        type: "fixme",
+        description:
+          "held: the claim's readiness mark waits on the owner's decision (SI-352); the same routine runs unheld under the SI-355 title below",
+      },
+    },
     async ({ page }) => {
       await assertCardsReceiptsAndLayers(page);
     },
@@ -215,27 +298,53 @@ test.describe("wall-canvas", () => {
     const dc1 = page.getByTestId("card-dc-1");
     const co1 = page.getByTestId("card-co-1");
     const ref = page.getByTestId(refCardTestId(WALL.ADR_REF));
+    const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
     const exemptsChip = page.locator('.yarn-chip[data-edge-type="exempts"]');
     const coversChip = page.locator('.yarn-chip[data-edge-type="covers"]');
-    const opacityOf = (el: Locator) => el.evaluate((node) => Number(getComputedStyle(node).opacity));
+    const base = page.locator("#board-canvas svg.yarn-svg");
 
     // Clicking a card selects it: the card and every card threaded to it
-    // are emphasized, everything else recedes.
+    // are emphasized — the selected card's 3 px ink ring, the linked
+    // card's 2 px ring in the thread's colour — and everything else
+    // recedes: every other kind of paper, the other chips, and the base
+    // yarn layer.
     await dc1.click();
     await expect(dc1).toHaveAttribute("data-selected", "true");
     await expect(ref).toHaveAttribute("data-linked", "exempts");
     await expect(canvas(page)).toHaveAttribute("data-selection", "card");
     await expect(exemptsChip).toHaveAttribute("data-hot", "true");
     await expect(coversChip).not.toHaveAttribute("data-hot", /./);
-    await expect.poll(() => opacityOf(dc1)).toBe(1);
-    await expect.poll(() => opacityOf(ref)).toBe(1);
-    await expect.poll(() => opacityOf(co1)).toBeCloseTo(0.32, 2);
-    await expect.poll(() => opacityOf(coversChip)).toBeCloseTo(0.25, 2);
-    await expect.poll(() => opacityOf(exemptsChip)).toBe(1);
-    // The status pill names the card and its threads.
-    await expect(pill(page)).toHaveAttribute("role", "status");
+    await expectEmphasized(dc1, "the selected card", RING_3);
+    await expectEmphasized(ref, "the linked reference card", RING_2);
+    await expectEmphasized(exemptsChip, "the selection's chip", /./);
+    for (const [el, what] of [
+      [co1, "co-1"],
+      [page.getByTestId("card-ac-1"), "ac-1"],
+      [page.getByTestId("card-ac-2"), "ac-2"],
+      [page.getByTestId("card-oq-1"), "oq-1"],
+      [stub, "the stub card"],
+      [sticky, "the sticky"],
+      [coversChip, "the other thread's chip"],
+    ] as [Locator, string][]) {
+      await expectReceded(el, what);
+    }
+    await expect.poll(() => opacityOf(base), "the base yarn layer recedes").toBeCloseTo(0.25, 2);
+    // The emphasis holds while the pointer is on a card (SI-358 (5)): the
+    // rings are drawn under the hover lift, not replaced by it.
+    await dc1.hover();
+    await expect.poll(() => shadowOf(dc1), "the selected ring under the pointer").toMatch(RING_3);
+    await ref.hover();
+    await expect.poll(() => shadowOf(ref), "the linked ring under the pointer").toMatch(RING_2);
+    await page.mouse.move(300, 520);
+    await expect.poll(() => shadowOf(dc1), "the selected ring with the pointer off").toMatch(RING_3);
+    await expect.poll(() => shadowOf(ref), "the linked ring with the pointer off").toMatch(RING_2);
+    // The status pill names the card and its threads; its words reach the
+    // live region, a polite status region outside the swapped region.
     await expect(pill(page).locator(".wall-status-id")).toHaveText("dc-1");
     await expect(pill(page).locator(".wall-status-summary")).toHaveText(`exempts → ${WALL.ADR_REF}`);
+    await expect(live(page)).toHaveAttribute("role", "status");
+    await expect(live(page)).toHaveText(`dc-1 exempts → ${WALL.ADR_REF}`);
 
     // A card with no threads says so — and this wall offers no pin to
     // drag, so the pill does not mention one (SI-350 (14) as amended).
@@ -245,22 +354,26 @@ test.describe("wall-canvas", () => {
     await expect(page.locator("#board-canvas [data-linked]")).toHaveCount(0);
     await expect(pill(page).locator(".wall-status-id")).toHaveText("co-1");
     await expect(pill(page).locator(".wall-status-summary")).toHaveText("no threads yet");
+    await expect(live(page)).toHaveText("co-1 no threads yet");
 
-    // Clicking the wall clears the selection.
+    // Clicking the wall clears the selection: the pill leaves the canvas,
+    // the live region empties, and nothing recedes.
     await canvas(page).click({ position: { x: 300, y: 520 } });
     await expect(page.locator("#board-canvas [data-selected]")).toHaveCount(0);
     await expect(canvas(page)).not.toHaveAttribute("data-selection", /./);
-    await expect(pill(page)).toBeEmpty();
-    await expect.poll(() => opacityOf(co1)).toBe(1);
+    await expect(pill(page)).toHaveCount(0);
+    await expect(live(page)).toBeEmpty();
+    await expect.poll(() => filterOf(co1)).toBe("none");
+    await expect.poll(() => shadowOf(co1)).not.toBe("none");
 
     // Clicking the same card clears it too (a beat apart: two quick clicks
-    // are a double click, which edits).
+    // are a double click, which edits and keeps the card selected).
     await dc1.click();
     await expect(dc1).toHaveAttribute("data-selected", "true");
     await page.waitForTimeout(600);
     await dc1.click();
     await expect(dc1).not.toHaveAttribute("data-selected", /./);
-    await expect(pill(page)).toBeEmpty();
+    await expect(pill(page)).toHaveCount(0);
 
     // Clicking a thread's chip selects the thread: both ends light up, the
     // pill names the type and the pair, the overlay carries that one thread.
@@ -309,5 +422,78 @@ test.describe("wall-canvas", () => {
     await expect(overlayThreads(page)).toHaveCount(1);
     await expect(pill(page).locator(".wall-status-id")).toHaveText("dc-1");
     await expect(pill(page).locator(".wall-status-summary")).toHaveText(`exempts → ${WALL.ADR_REF}`);
+    await expect(live(page)).toHaveText(`dc-1 exempts → ${WALL.ADR_REF}`);
+  });
+
+  test("the status pill covers no content or control at 1440 px, 320 px and 200 % zoom (SI-358 (4))", async ({ page }) => {
+    for (const shape of [
+      { width: 1440, height: 900, zoom: "" },
+      { width: 320, height: 800, zoom: "" },
+      { width: 720, height: 450, zoom: "200%" },
+    ]) {
+      await page.setViewportSize({ width: shape.width, height: shape.height });
+      await page.goto(boardPath(WALL.SPEC));
+      await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+      if (shape.zoom) {
+        await page.evaluate((z) => {
+          (document.body.style as unknown as { zoom: string }).zoom = z;
+        }, shape.zoom);
+      }
+      // Select through the asset's own seam: at 320 px the card may sit
+      // behind the stacked rail, and the placement, not the click, is
+      // under test here.
+      await page.evaluate(() => {
+        (window as unknown as { __WALLSELECT__: { select: (s: unknown) => void } }).__WALLSELECT__.select({ kind: "card", key: "dc-1" });
+      });
+      await expect(page.getByTestId("card-dc-1")).toHaveAttribute("data-selected", "true");
+      await expect(pill(page)).toBeAttached();
+      const label = `${shape.width}×${shape.height}${shape.zoom ? " at " + shape.zoom : ""}`;
+      // The pill is the canvas's own in-flow child, at its foot.
+      expect(await pill(page).evaluate((el) => el.parentElement?.id)).toBe("board-canvas");
+      const box = (await pill(page).boundingBox())!;
+      expect(box, `${label}: the pill has a box`).not.toBeNull();
+      expect(box.width, `${label}: the pill is drawn`).toBeGreaterThan(40);
+      expect(await overlapsOf(page), `${label}: the pill covers nothing`).toEqual([]);
+    }
+  });
+
+  test("a selection keeps every text legible and every focus ring visible, in light and dark (SI-358 (2), (3))", async ({ page }) => {
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await openWall(page);
+      const dc1 = page.getByTestId("card-dc-1");
+      const oq1 = page.getByTestId("card-oq-1");
+      await dc1.click();
+      await expect(dc1).toHaveAttribute("data-selected", "true");
+      await expectReceded(oq1, `${scheme}: oq-1`);
+
+      // The automated scan covers text contrast on the receded papers and
+      // chips: a recede that faded them would fail it.
+      const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      const violations = results.violations.map((v) => ({
+        id: v.id,
+        impact: v.impact,
+        nodes: v.nodes.length,
+        targets: v.nodes.slice(0, 3).map((n) => n.target.join(" ")),
+      }));
+      expect(violations, `${scheme}: ${JSON.stringify(violations, null, 2)}`).toEqual([]);
+
+      // Tab from the selected card lands on the next card, receded: focus
+      // lifts the recede and the ring reads at 3:1 or better against the
+      // wall (WCAG 1.4.11; Wave 6 §5.2 "visible focus").
+      await page.keyboard.press("Tab");
+      await expect(oq1).toBeFocused();
+      await expect.poll(() => filterOf(oq1), `${scheme}: a focused card is not receded`).toBe("none");
+      const ring = await oq1.evaluate((node) => {
+        const c = getComputedStyle(node);
+        return { style: c.outlineStyle, width: parseFloat(c.outlineWidth), color: c.outlineColor };
+      });
+      expect(ring.style, `${scheme}: focus ring style`).not.toBe("none");
+      expect(ring.width, `${scheme}: focus ring width`).toBeGreaterThanOrEqual(2);
+      const wall = await canvas(page).evaluate((node) => getComputedStyle(node).backgroundColor);
+      expect(contrastIn(ring.color, wall), `${scheme}: focus ring ${ring.color} on the wall ${wall}`).toBeGreaterThanOrEqual(3);
+      // The selection itself is untouched by moving focus.
+      await expect(dc1).toHaveAttribute("data-selected", "true");
+    }
   });
 });

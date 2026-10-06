@@ -11,15 +11,17 @@ import (
 // ac-2, co-1, co-2; lane F2a; ledger SI-350 (14)).
 
 // TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset: the status
-// pill's host is a polite status region rendered once in the page, after
-// the swapped region (co-2: a region swap must never re-create the live
-// region, which would re-announce an unchanged selection), and the page
-// loads the selection asset after the board scripts it builds on.
+// pill's live region is a polite status region rendered once in the page,
+// after the swapped region (co-2: a region swap must never re-create the
+// live region, which would re-announce an unchanged selection; the visual
+// pill itself is the asset's, drawn inside the canvas while something is
+// selected, SI-358 (4)), and the page loads the selection asset after the
+// board scripts it builds on.
 func TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	const pill = `<div id="wall-status" class="wall-status" data-testid="wall-status" role="status" aria-live="polite"></div>`
+	const pill = `<div id="wall-status-live" class="wall-status-live" data-testid="wall-status-live" role="status" aria-live="polite"></div>`
 	if strings.Count(body, pill) != 1 {
 		t.Fatalf("page carries %d status pill hosts, want exactly 1:\n%s", strings.Count(body, pill), pill)
 	}

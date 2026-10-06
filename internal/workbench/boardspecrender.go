@@ -196,7 +196,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellF
 <main id="boardv2-region">
 {{.Region}}
 </main>
-<div id="wall-status" class="wall-status" data-testid="wall-status" role="status" aria-live="polite"></div>
+<div id="wall-status-live" class="wall-status-live" data-testid="wall-status-live" role="status" aria-live="polite"></div>
 {{buildFooter}}
 {{.Dialogs}}
 <script>

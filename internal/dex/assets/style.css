@@ -4967,15 +4967,46 @@ body:not(.board-page) > footer.site-foot,
    draws at 80 % ink (the stub's slug and meta line, the sticky's footer)
    are at full ink here: the reduced-opacity label failed WCAG AA on the
    note and kraft papers before (the .sticky-type precedent), and the size
-   and tracking already set them apart. */
+   and tracking already set them apart. After the lane's review (SI-358):
+   the recede desaturates and flattens a card instead of fading it, so its
+   text keeps AA contrast; a focused card never recedes; the rings hold
+   under hover; a clamped card's ⋯ mark is a button that reads its full
+   text; and the status pill sits inside the canvas, in flow at its foot,
+   where it covers nothing. */
 
 /* ---- the canvas in the stacked layout (Wave 6 §5.2: usable at 320 px
    and at 200 % zoom) — below 60rem the shared rules stack the layout into
-   a column but leave its align-items at flex-start, so the canvas, whose
-   children are all absolutely positioned, shrank to its own border; it
-   takes the column's full width ---- */
+   a column but leave its align-items at flex-start, so the v2 canvas,
+   whose children are all absolutely positioned, shrank to its own border;
+   it takes the column's full width (the legacy v1 board keeps its own) ---- */
 @media (max-width: 60rem) {
-  .board-layout > .board-canvas { align-self: stretch; }
+  .board-layout > .boardv2-canvas { align-self: stretch; }
+}
+
+/* ---- the canvas is a column whose only in-flow child is the status
+   pill at its foot (the papers, labels and yarn are all positioned) ---- */
+.boardv2-canvas { display: flex; flex-direction: column; }
+
+/* ---- every paper's shadow is composed from two custom properties: the
+   ring the selection sets and the resting or lifted shadow. A hover rule,
+   whatever its specificity, changes only the shadow, so the selected and
+   linked rings hold while the pointer is on the card (SI-358 (5)) ---- */
+.boardv2-canvas .objcard,
+.boardv2-canvas .stubcard,
+.boardv2-canvas .refcard,
+.boardv2-canvas .sticky {
+  --wall-ring: 0 0 0 0 transparent;
+  --wall-shadow: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
+  box-shadow: var(--wall-ring), var(--wall-shadow);
+  transition: opacity 0.18s, box-shadow 0.18s, transform 0.18s, filter 0.18s;
+}
+.boardv2-canvas .sticky { --wall-shadow: 0 3px 7px rgba(0, 0, 0, 0.18); }
+.mode-authoring .boardv2-canvas .objcard:hover,
+.mode-authoring .boardv2-canvas .stubcard:hover,
+.mode-authoring .boardv2-canvas .refcard:hover,
+.mode-authoring .boardv2-canvas .sticky:hover {
+  --wall-shadow: var(--shadow-lift);
+  box-shadow: var(--wall-ring), var(--wall-shadow);
 }
 
 /* ---- object cards: the handoff's footprint and header lockup ---- */
@@ -4984,14 +5015,11 @@ body:not(.board-page) > footer.site-foot,
   height: 140px;
   padding: 11px 14px 12px;
   border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
   font-size: 14px;
   line-height: 1.4;
-  transition: opacity 0.18s, box-shadow 0.18s, transform 0.18s;
 }
 /* a superseded object's card keeps growing for its §6 lines (SI-278) */
 .boardv2-canvas .objcard:has(.objsupersede-lines) { height: auto; min-height: 140px; }
-.mode-authoring .boardv2-canvas .objcard:hover { box-shadow: var(--shadow-lift); }
 .boardv2-canvas .objcard .card-kind,
 .boardv2-canvas .refcard .card-kind,
 .boardv2-canvas .stubcard .card-kind {
@@ -5005,10 +5033,24 @@ body:not(.board-page) > footer.site-foot,
 /* the open question drops its ? watermark */
 .boardv2-canvas .objcard--open-question::after { content: none; }
 /* a card's clamped text no longer expands on click (a click selects it;
-   a double click edits), so it keeps the card's own cursor */
+   a double click edits), so it keeps the card's own cursor; its ⋯ mark is
+   the button that reads the full text (SI-358 (1)), in every mode, so it
+   takes the pointer the shared mark refused and dresses as the quiet
+   control it is */
 .boardv2-canvas .objcard .is-clamped,
 .boardv2-canvas .stubcard .is-clamped,
 .boardv2-canvas .sticky .is-clamped { cursor: inherit; }
+.boardv2-canvas button.clamp-more {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.boardv2-canvas button.clamp-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+/* the sticky's footer line leaves the mark its corner */
+.boardv2-canvas .sticky .sticky-foot { padding-right: 18px; }
 
 /* ---- stub cards: the footprint, the slug inside, the pin, the meta line ---- */
 .boardv2-canvas .stubcard {
@@ -5018,12 +5060,9 @@ body:not(.board-page) > footer.site-foot,
   gap: 0;
   border-radius: 6px;
   color: var(--stub-ink);
-  box-shadow: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
   font-size: 14px;
   line-height: 1.4;
-  transition: opacity 0.18s, box-shadow 0.18s, transform 0.18s;
 }
-.mode-authoring .boardv2-canvas .stubcard:hover { box-shadow: var(--shadow-lift); }
 /* the slug: no longer a protruding tab — the card's first line, in the
    machine's mono, inside the paper */
 .boardv2-canvas .stub-tab {
@@ -5082,7 +5121,6 @@ body:not(.board-page) > footer.site-foot,
   border-radius: 6px;
   font-size: 13px;
   cursor: zoom-in;
-  transition: opacity 0.18s, box-shadow 0.18s;
 }
 .boardv2-canvas .refcard.refcard--object { height: auto; min-height: 72px; }
 .boardv2-canvas .refcard .card-ref { margin-top: 5px; font-size: 12.5px; }
@@ -5095,7 +5133,6 @@ body:not(.board-page) > footer.site-foot,
   gap: 5px;
   font-size: 14px;
   line-height: 1.4;
-  transition: opacity 0.18s, box-shadow 0.18s;
 }
 .boardv2-canvas .sticky-foot {
   font-family: var(--mono);
@@ -5114,34 +5151,46 @@ body:not(.board-page) > footer.site-foot,
 /* ---- the selection: emphasis and recede (ac-2) ---- */
 /* while anything is selected, every paper and chip the selection does
    not reach recedes, and so does the base yarn layer: the selection's
-   threads are drawn again above (the overlay below) */
-.boardv2-canvas[data-selection] .objcard:not([data-selected]):not([data-linked]),
-.boardv2-canvas[data-selection] .stubcard:not([data-selected]):not([data-linked]),
-.boardv2-canvas[data-selection] .refcard:not([data-selected]):not([data-linked]),
-.boardv2-canvas[data-selection] .sticky:not([data-selected]):not([data-linked]) { opacity: 0.32; }
-.boardv2-canvas[data-selection] .yarn-chip:not([data-hot]) { opacity: 0.25; }
+   threads are drawn again above (the overlay below). A receded paper is
+   desaturated and flattened, never faded (SI-358 (2)): a grayscale filter
+   keeps every text's luminance, so AA contrast holds in light and dark,
+   while the colour and the shadow leave it. A focused paper never
+   recedes (SI-358 (3)): its focus ring stays at full strength. */
+.boardv2-canvas[data-selection] .objcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .stubcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .refcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .sticky:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within) {
+  filter: grayscale(1);
+  box-shadow: none;
+}
+.boardv2-canvas[data-selection] .yarn-chip:not([data-hot]):not(:focus-within) {
+  filter: grayscale(1);
+  box-shadow: none;
+}
 .boardv2-canvas[data-selection] .yarn-svg { opacity: 0.25; }
 /* the cards a thread reaches: a ring in the thread's colour */
 .boardv2-canvas [data-linked] {
   z-index: 7;
-  box-shadow: 0 0 0 2px var(--yarn), 0 6px 14px rgba(20, 26, 18, 0.22);
+  --wall-ring: 0 0 0 2px var(--yarn);
+  --wall-shadow: 0 6px 14px rgba(20, 26, 18, 0.22);
 }
-.boardv2-canvas [data-linked="implements"] { box-shadow: 0 0 0 2px var(--yarn-implements), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="resolves"] { box-shadow: 0 0 0 2px var(--yarn-resolves), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="depends-on"] { box-shadow: 0 0 0 2px var(--yarn-depends-on), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="exempts"] { box-shadow: 0 0 0 2px var(--yarn-exempts), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="supersedes"] { box-shadow: 0 0 0 2px var(--yarn-supersedes), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="relates"] { box-shadow: 0 0 0 2px var(--yarn-relates), 0 6px 14px rgba(20, 26, 18, 0.22); }
+.boardv2-canvas [data-linked="implements"] { --wall-ring: 0 0 0 2px var(--yarn-implements); }
+.boardv2-canvas [data-linked="resolves"] { --wall-ring: 0 0 0 2px var(--yarn-resolves); }
+.boardv2-canvas [data-linked="depends-on"] { --wall-ring: 0 0 0 2px var(--yarn-depends-on); }
+.boardv2-canvas [data-linked="exempts"] { --wall-ring: 0 0 0 2px var(--yarn-exempts); }
+.boardv2-canvas [data-linked="supersedes"] { --wall-ring: 0 0 0 2px var(--yarn-supersedes); }
+.boardv2-canvas [data-linked="relates"] { --wall-ring: 0 0 0 2px var(--yarn-relates); }
 /* the scoping threads wear the inks their receipts wear */
-.boardv2-canvas [data-linked="covers"][data-linked-layer="scoping"] { box-shadow: 0 0 0 2px var(--st-evidenced), 0 6px 14px rgba(20, 26, 18, 0.22); }
-.boardv2-canvas [data-linked="resolves"][data-linked-layer="scoping"] { box-shadow: 0 0 0 2px var(--st-waived), 0 6px 14px rgba(20, 26, 18, 0.22); }
+.boardv2-canvas [data-linked="covers"][data-linked-layer="scoping"] { --wall-ring: 0 0 0 2px var(--st-evidenced); }
+.boardv2-canvas [data-linked="resolves"][data-linked-layer="scoping"] { --wall-ring: 0 0 0 2px var(--st-waived); }
 /* the selected card: the ink ring, lifted; its pin swells with a halo */
 .boardv2-canvas .objcard[data-selected],
 .boardv2-canvas .stubcard[data-selected],
 .boardv2-canvas .refcard[data-selected],
 .boardv2-canvas .sticky[data-selected] {
   z-index: 7;
-  box-shadow: 0 0 0 3px var(--ink), 0 10px 22px rgba(20, 26, 18, 0.28);
+  --wall-ring: 0 0 0 3px var(--ink);
+  --wall-shadow: 0 10px 22px rgba(20, 26, 18, 0.28);
 }
 .boardv2-canvas [data-selected] > .yarn-handle {
   transform: scale(1.3);
@@ -5170,20 +5219,25 @@ body:not(.board-page) > footer.site-foot,
 .yarn-overlay .yarn-thread { stroke-width: 3; opacity: 1; }
 .yarn-overlay .yarn-knot { opacity: 1; }
 
-/* ---- the status pill (ac-2; SI-350 (14)) ---- */
-/* a polite status region rendered once in the page, outside the swapped
-   region; it floats at the wall's lower left, above where the toolbar
-   lands, and fades out when it has nothing to say (it stays in the
-   accessibility tree, so its next words are announced) */
-.wall-status {
-  position: fixed;
-  left: calc(2rem + 16px);
-  bottom: 74px;
+/* ---- the status pill (ac-2; SI-350 (14); SI-358 (4)) ---- */
+/* the pill is drawn inside the canvas while something is selected: its
+   one in-flow child, at the foot of the column, so it covers no paper,
+   label or control at any width or zoom; sticky to the scrollport's left
+   and bottom, so it stays in view while the wall scrolls. Its words are
+   announced by the live region below, rendered once in the page outside
+   the swapped region; the pill itself is hidden from assistive technology
+   so nothing is said twice */
+.boardv2-canvas .wall-status {
+  position: sticky;
+  left: 16px;
+  bottom: 16px;
   z-index: 10;
+  align-self: flex-start;
+  margin: auto 16px 16px;
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: min(520px, calc(100% - 4rem - 16px));
+  max-width: calc(100% - 32px);
   padding: 6px 12px;
   border-radius: 999px;
   background: var(--ink);
@@ -5194,9 +5248,18 @@ body:not(.board-page) > footer.site-foot,
   letter-spacing: 0.03em;
   box-shadow: 0 4px 12px rgba(20, 26, 18, 0.25);
   pointer-events: none;
-  transition: opacity 0.18s;
 }
-.wall-status:empty { opacity: 0; }
+.wall-status-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .wall-status-id { flex: none; font-weight: 700; }
 .wall-status-summary {
   min-width: 0;
@@ -5211,7 +5274,6 @@ body:not(.board-page) > footer.site-foot,
   .boardv2-canvas .stubcard,
   .boardv2-canvas .refcard,
   .boardv2-canvas .sticky,
-  .boardv2-canvas [data-selected] > .yarn-handle,
-  .wall-status { transition: none; }
+  .boardv2-canvas [data-selected] > .yarn-handle { transition: none; }
 }
 /* verdi:workbench-only:end */
