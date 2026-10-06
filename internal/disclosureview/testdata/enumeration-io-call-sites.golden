@@ -2,6 +2,10 @@ github.com/jyang234/verdi/internal/artifact ulid.go crypto/rand.Reader value 1
 github.com/jyang234/verdi/internal/artifact ulid.go time.Now call 1
 github.com/jyang234/verdi/internal/gitx configvalue.go os/exec.CommandContext call 1
 github.com/jyang234/verdi/internal/gitx exec.go os/exec.CommandContext call 1
+github.com/jyang234/verdi/internal/gitx gitlog.go os.Getenv call 1
+github.com/jyang234/verdi/internal/gitx gitlog.go os.Getpid call 1
+github.com/jyang234/verdi/internal/gitx gitlog.go os.OpenFile call 1
+github.com/jyang234/verdi/internal/gitx gitlog.go path/filepath.Abs call 1
 github.com/jyang234/verdi/internal/gitx hashobject.go os.Stat call 1
 github.com/jyang234/verdi/internal/gitx plumbing.go os.CreateTemp call 1
 github.com/jyang234/verdi/internal/gitx plumbing.go os.Environ call 1

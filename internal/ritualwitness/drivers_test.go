@@ -53,9 +53,11 @@ func boundedContext(t *testing.T, parent context.Context) context.Context {
 }
 
 // TestBinary_Run drives a real subprocess: the exit code is the
-// process's, the directory is the fixture, Env reaches it, and the log is
-// always unavailable (dc-1; spec/gitx-recorder-seam lands the binary's
-// log).
+// process's, the directory is the fixture, and Env reaches it. A run that
+// ends in an exit code carries the binary's command log, read from its
+// VERDI_GITLOG (spec/gitx-recorder-seam ac-2): the helper verb makes its
+// branch with plain git, so the log holds no call. A run that ends in no
+// verb's exit carries none.
 func TestBinary_Run(t *testing.T) {
 	ctx := context.Background()
 	fx := Build(t, ctx, SeedClean)
@@ -84,9 +86,7 @@ func TestBinary_Run(t *testing.T) {
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
-			if log.OK || log.Calls != nil {
-				t.Fatalf("log = %+v, want unavailable: a built binary supplies no command log", log)
-			}
+			checkBinaryLog(t, exit, log, 0)
 			if (err != nil) != (tt.wantErr != nil) {
 				t.Fatalf("err = %v, want an error naming %q", err, tt.wantErr)
 			}
@@ -161,9 +161,7 @@ func TestBinary_CrashIsNoVerbsExit(t *testing.T) {
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
-			if log.OK || log.Calls != nil {
-				t.Fatalf("log = %+v, want unavailable", log)
-			}
+			checkBinaryLog(t, exit, log, 0)
 			for _, w := range tt.wantErr {
 				if err == nil || !strings.Contains(err.Error(), w) {
 					t.Errorf("err = %v, want it to name %q", err, w)
@@ -196,23 +194,41 @@ func TestGoCrash(t *testing.T) {
 	}
 }
 
-// TestBinary_RunOnReportsTheLogUnavailable: through RunOn, an effect only
-// the log could attribute stays unattributable, so the run is unproven,
-// never a pass inferred from an absent log.
-func TestBinary_RunOnReportsTheLogUnavailable(t *testing.T) {
+// TestBinary_RunOnAttributesThroughTheLog: through RunOn, the binary's
+// command log attributes the effect a logged gitx call made, so the run
+// passes; an effect the log does not show (a branch made with plain git)
+// stays unattributable with the log present, so that run is unproven,
+// never a pass inferred from silence.
+func TestBinary_RunOnAttributesThroughTheLog(t *testing.T) {
 	ctx := context.Background()
-	fx := Build(t, ctx, SeedClean)
-	res := RunOn(t, boundedContext(t, ctx), fx, Binary{Path: selfBinary(t), Env: []string{helperEnv + "=0:made-by-binary"}}, branchDecl())
-	want := []Verdict{
-		v("command_log", Unattributable, "the driver supplied no git command log"),
-		v("refs_create", Unattributable, "refs/heads/made-by-binary created"),
-		v("index_carry", Within, "declares no_commit; observed no_commit"),
-	}
-	if diff := verdictDiff(res.Verdicts, want); diff != "" {
-		t.Fatal(diff)
-	}
-	if got := Outcome(res.Verdicts); got != Unproven {
-		t.Fatalf("Outcome = %s, want unproven", got)
+	for _, tt := range []struct {
+		name        string
+		spec        string
+		want        []Verdict
+		wantOutcome RunOutcome
+	}{
+		{"a branch made through gitx is attributed", "gitx:0:made-by-binary", []Verdict{
+			v("refs_create", Within, "refs/heads/made-by-binary created"),
+			v("index_carry", Within, "declares no_commit; observed no_commit"),
+		}, Pass},
+		{"a branch made with plain git is not", "0:made-by-plain-git", []Verdict{
+			v("refs_create", Unattributable, "refs/heads/made-by-plain-git created"),
+			v("index_carry", Within, "declares no_commit; observed no_commit"),
+		}, Unproven},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := Build(t, ctx, SeedClean)
+			res := RunOn(t, boundedContext(t, ctx), fx, Binary{Path: selfBinary(t), Env: []string{helperEnv + "=" + tt.spec}}, branchDecl())
+			if !res.Log.OK {
+				t.Fatalf("log = %+v, want the binary's log", res.Log)
+			}
+			if diff := verdictDiff(res.Verdicts, tt.want); diff != "" {
+				t.Fatal(diff)
+			}
+			if got := Outcome(res.Verdicts); got != tt.wantOutcome {
+				t.Fatalf("Outcome = %s, want %s", got, tt.wantOutcome)
+			}
+		})
 	}
 }
 

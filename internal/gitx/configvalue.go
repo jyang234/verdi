@@ -51,6 +51,8 @@ var ErrConfigUnset = errors.New("gitx: git config key is unset")
 //   - broken configuration: any other git failure (a corrupt config
 //     file, an unreadable repository, a missing git binary). Reported as
 //     a plain operational error carrying git's own stderr.
+//   - a failed VERDI_GITLOG record (gitlog.go): git never runs, and the
+//     failure is a plain operational error, never ErrConfigUnset.
 //
 // The read is scoped with `--local`, so the global and system scopes
 // deliberately never participate. The design calls this "the store's Git
@@ -72,7 +74,9 @@ var ErrConfigUnset = errors.New("gitx: git config key is unset")
 // the same way — the fail-closed direction, and never an identity
 // ConfigValue invented.
 func ConfigValue(ctx context.Context, dir, key string) (string, error) {
-	observe(ctx, dir, []string{"config", "--local", "--get-all", key})
+	if err := observe(ctx, dir, []string{"config", "--local", "--get-all", key}); err != nil {
+		return "", fmt.Errorf("gitx: ConfigValue(%q): %w", key, err)
+	}
 	cmd := exec.CommandContext(ctx, "git", "config", "--local", "--get-all", key)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer

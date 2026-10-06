@@ -23,12 +23,20 @@ func WithObserver(ctx context.Context, obs Observer) context.Context {
 	return context.WithValue(ctx, observerKey{}, obs)
 }
 
-// observe notifies the context's observer, if any. Called at the top of
-// all three of gitx's exec sites: run, ConfigValue, and runStdin
-// (plumbing.go) — R-RR3-2 amended after Task 1 review corrected the
-// original premise that ConfigValue was the only exec site bypassing run.
-func observe(ctx context.Context, dir string, args []string) {
+// observe is gitx's single observe point, called at the top of all three
+// of gitx's exec sites: run, ConfigValue, and runStdin (plumbing.go) —
+// R-RR3-2 amended after Task 1 review corrected the original premise that
+// ConfigValue was the only exec site bypassing run. It first appends the
+// call's record to the VERDI_GITLOG file when that variable is set
+// (gitlog.go), then notifies the context's observer, if any. A non-nil
+// error means the record failed: the exec site returns it without running
+// git, and no observer has been told of a call that never ran.
+func observe(ctx context.Context, dir string, args []string) error {
+	if err := appendGitLog(dir, args); err != nil {
+		return err
+	}
 	if obs, ok := ctx.Value(observerKey{}).(Observer); ok && obs != nil {
 		obs.Observe(dir, args)
 	}
+	return nil
 }

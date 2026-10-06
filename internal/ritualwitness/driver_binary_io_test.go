@@ -79,9 +79,7 @@ func TestBinary_StdinAndExtraFiles(t *testing.T) {
 			if exit != tt.wantExit || (err == nil) != (tt.wantErr == "") || (err != nil && !strings.Contains(err.Error(), tt.wantErr)) {
 				t.Fatalf("Run = (%d, %v), want exit %d naming %q", exit, err, tt.wantExit, tt.wantErr)
 			}
-			if log.OK || log.Calls != nil {
-				t.Fatalf("log = %+v, want unavailable", log)
-			}
+			checkBinaryLog(t, exit, log, 0)
 		})
 	}
 
