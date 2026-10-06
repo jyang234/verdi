@@ -337,26 +337,40 @@ func (r *actorLocalGitReads) Observe(_ string, args []string) {
 // TestVerifyGitTopLevel is verifyGitTopLevel's table: a store root that
 // is its repository's top level passes, and one below the top level or
 // outside any repository is refused, each by a top-level read made
-// through gitx so the observer sees it (spec/gitx-recorder-seam dc-3).
+// through gitx so the observer sees it (spec/gitx-recorder-seam dc-3). It
+// is not parallel, because one row sets the environment.
 func TestVerifyGitTopLevel(t *testing.T) {
-	t.Parallel()
 	top := initGitRepoNoIdentity(t)
 	nested := filepath.Join(top, "nested-store")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	spaced := filepath.Join(t.TempDir(), "store ")
+	if err := os.MkdirAll(spaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", spaced, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
 	cases := []struct {
 		name    string
 		root    string
+		env     map[string]string
 		wantErr string
 	}{
 		{name: "the top level itself", root: top},
+		// The pre-gitx read trimmed git's output, so a top level whose name
+		// ends in a space was refused as unresolvable.
+		{name: "a top level whose name ends in a space", root: spaced},
+		{name: "git writing trace output on stderr", root: top, env: map[string]string{"GIT_TRACE": "1"}},
 		{name: "a store nested below the top level", root: nested, wantErr: "is not itself a Git repository top level"},
 		{name: "a store outside any repository", root: t.TempDir(), wantErr: "is not a Git repository"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
 			reads := &actorLocalGitReads{}
 			err := verifyGitTopLevel(gitx.WithObserver(context.Background(), reads), tc.root)
 			switch {
