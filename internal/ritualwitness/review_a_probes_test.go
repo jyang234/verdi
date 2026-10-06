@@ -357,7 +357,7 @@ func TestZZ_P9b_FailedCommitAttributesOutOfGitxMove(t *testing.T) {
 	// gitx. The probe now asserts that within result, so closing the
 	// residual turns it red.
 	if !zzHas(res.Verdicts, "refs_move", Within, "refs/heads/main") {
-		t.Errorf("PINNED DISCLOSURE changed: ledger SI-325 (8)'s residual (a failed logged `git commit` credited with a branch move made outside gitx) no longer reads within; if spec/gitx-recorder-seam ac-1 closed it, update doc.go's residual paragraph and this probe")
+		t.Errorf("PINNED DISCLOSURE changed: ledger SI-325 (8)'s residual (a failed logged `git commit` credited with a branch move made outside gitx) no longer reads within; spec/gitx-recorder-seam ac-1 narrows it without closing it (SI-359 (9)), so whatever change closed it must update doc.go's residual paragraph and this probe")
 	}
 }
 

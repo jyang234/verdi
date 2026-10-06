@@ -807,9 +807,10 @@ func logCases() []harnessCase {
 		{
 			name: "disclosed residual (SI-325 (8)): a failed commit is credited with a move made outside gitx (A P9b)", states: both(),
 			decl: checkedOutDecl(),
-			note: "PINNED DISCLOSURE: this case pins ledger SI-325 (8)'s residual (gitx's observer fires before exec, so a failed " +
-				"`git commit` is credited with a branch move made outside gitx). If spec/gitx-recorder-seam ac-1 (no git execution " +
-				"outside gitx) closed it, update the residual paragraph in doc.go, then this case.\n",
+			note: "PINNED DISCLOSURE: this case pins ledger SI-325 (8)'s residual (gitx records a call before exec, so a failed " +
+				"`git commit` is credited with a branch move made outside gitx). spec/gitx-recorder-seam ac-1 narrows it but does " +
+				"not close it (SI-359 (9)); if a change ever does (a log that tells a failed call from one that succeeded), update " +
+				"the residual paragraph in doc.go, then this case.\n",
 			driver: inProcess(func(ctx context.Context, dir string) (int, error) {
 				_, _ = gitx.CreateCommitPaths(ctx, dir, "nothing to commit: fails", "owned/keep.txt") // logged before exec; fails
 				return steps(writeFile("owned/q.txt", "q\n"), plain("add", "owned/q.txt"), func(ctx context.Context, dir string) error {

@@ -109,19 +109,26 @@
 //
 // # Disclosed
 //
-// SI-325 (8)'s residual: gitx's observer fires before a command runs, so
-// a failed mutating call can still be credited with an effect made outside
-// gitx — a failed `git commit` logged in a worktree, followed by a move of
-// that worktree's branch to a commit whose parent is the old tip, made
-// with plain git, reads as within. TestHarness_SensorsAndVerdicts pins it
-// (the "disclosed residual" case), so closing it — spec/gitx-recorder-seam
-// ac-1, no git execution outside gitx — turns that case red and forces
-// this disclosure to change.
+// SI-325 (8)'s residual: gitx records a call before it runs (its observer
+// and VERDI_GITLOG alike), so a failed mutating call can still be credited
+// with an effect made outside gitx — a failed `git commit` logged in a
+// worktree, followed by a move of that worktree's branch to a commit whose
+// parent is the old tip, made with plain git, reads as within.
+// TestHarness_SensorsAndVerdicts pins it (the "disclosed residual" case).
+// spec/gitx-recorder-seam ac-1 narrows where such an effect can come from
+// in a real verb, since the verdi binary runs no git outside gitx (ledger
+// SI-359 (4)); but git that a child program runs itself is outside that
+// contract (SI-359 (4b)), and the log still cannot tell a call that failed
+// from one that succeeded, so the residual stays disclosed, not closed
+// (SI-359 (9)).
 //
 // SI-329 (8′)'s residual, beside it: where a call names no paths — `add
 // -A`, a commit without a pathspec, commit-tree — attribution of index
 // entries and commit paths stays per worktree, so such a call is credited
-// with any path in its worktree. spec/gitx-recorder-seam ac-1 closes it.
+// with any path in its worktree. spec/gitx-recorder-seam changes no
+// call's argv, so this residual stays disclosed too (SI-359 (9)), and
+// SI-359 (12) extends it to a commit-tree logged in a worktree the ritual
+// added, which may attribute the commit it creates.
 //
 // SI-325 (9), not sensed: ignored files; the reflog (but for a linked
 // worktree's first entry, read only to find the commit it was added at);
