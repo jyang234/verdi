@@ -349,7 +349,7 @@ func TestVerifyGitTopLevel(t *testing.T) {
 	if err := os.MkdirAll(spaced, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "-C", spaced, "init", "--quiet").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "git", "-C", spaced, "init", "--quiet").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	cases := []struct {
