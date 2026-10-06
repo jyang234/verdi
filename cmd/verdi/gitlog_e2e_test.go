@@ -46,7 +46,7 @@ func runForGitLog(t *testing.T, bin string, extra ...string) gitLogE2ERun {
 			env = append(env, kv)
 		}
 	}
-	cmd := exec.Command(bin, "recover", "--json", "spec/checkout")
+	cmd := exec.CommandContext(t.Context(), bin, "recover", "--json", "spec/checkout")
 	cmd.Dir = repo.Dir
 	cmd.Env = append(append(env, "TMPDIR="+tmp), extra...)
 	var stdout, stderr bytes.Buffer
