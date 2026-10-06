@@ -114,11 +114,15 @@ func CommitTree(ctx context.Context, dir, tree, parent, message string) (string,
 // (internal/gitforbid; ritual-write-scope-v3 dc-8, ledger SI-359 (5)).
 //
 // Before running git it refuses what `git branch` cannot create as asked,
-// so the function is create-only for every input (ledger SI-359 (5b)): a
-// ref outside refs/heads/, for which git would silently create
-// refs/heads/<that ref>; an empty short name; and a short name or a commit
-// starting with "-", which git would parse as an option (refs/heads/-f, or
-// the commit "-f", would force-move an existing branch).
+// so the function is create-only for every input (ledger SI-359 (5b),
+// (5c)): a ref outside refs/heads/, for which git would silently create
+// refs/heads/<that ref>; an empty short name; a short name starting with
+// "-", which git would parse as an option (refs/heads/-f would force-move
+// an existing branch); a short name containing "@{", which git expands to
+// another branch (@{-1}, @{u}) and creates; and a start point that is not
+// a full object id (ValidateFullOID), since an option ("-f") force-moves a
+// branch and a symbolic start point under branch.autoSetupMerge=always
+// writes upstream configuration.
 func UpdateRef(ctx context.Context, dir, ref, commit string) error {
 	name, ok := strings.CutPrefix(ref, "refs/heads/")
 	switch {
@@ -126,8 +130,11 @@ func UpdateRef(ctx context.Context, dir, ref, commit string) error {
 		return fmt.Errorf("gitx: UpdateRef(%s): refusing a ref that is not a branch under refs/heads/", ref)
 	case strings.HasPrefix(name, "-"):
 		return fmt.Errorf("gitx: UpdateRef(%s): refusing a branch name git would read as an option", ref)
-	case commit == "" || strings.HasPrefix(commit, "-"):
-		return fmt.Errorf("gitx: UpdateRef(%s): refusing start point %q, which is empty or git would read as an option", ref, commit)
+	case strings.Contains(name, "@{"):
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing a branch name git would expand to another branch", ref)
+	}
+	if err := ValidateFullOID(commit); err != nil {
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing start point %q: %w", ref, commit, err)
 	}
 	if _, err := runStdin(ctx, dir, nil, nil, "branch", name, commit); err != nil {
 		return fmt.Errorf("gitx: UpdateRef(%s): branch may already exist: %w", ref, err)

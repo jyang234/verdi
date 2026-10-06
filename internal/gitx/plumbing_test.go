@@ -259,6 +259,32 @@ func TestUpdateRef_RunsCreateOnlyGitBranch(t *testing.T) {
 	}
 }
 
+// TestUpdateRef_AutoSetupMergeAlwaysWritesNoUpstream proves why the start
+// point must be a full object id (ledger SI-359 (5c)): even under
+// branch.autoSetupMerge=always, a branch created at a commit id gets no
+// upstream configuration.
+func TestUpdateRef_AutoSetupMergeAlwaysWritesNoUpstream(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+	if _, err := run(ctx, repo.Dir, "config", "branch.autoSetupMerge", "always"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := run(ctx, repo.Dir, "config", "--local", "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateRef(ctx, repo.Dir, "refs/heads/design/always", repo.Heads[0]); err != nil {
+		t.Fatalf("UpdateRef: %v", err)
+	}
+	after, err := run(ctx, repo.Dir, "config", "--local", "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("UpdateRef changed the local config:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
 // TestUpdateRef_Negative_ExistingBranchChangesNothing proves the create is
 // create-only: onto an existing branch it fails, and the branch, every
 // other ref, HEAD, the config and the working tree are exactly as before.
@@ -283,9 +309,27 @@ func TestUpdateRef_Negative_ExistingBranchChangesNothing(t *testing.T) {
 // name or a commit starting with "-"), before any git runs, so the
 // function is create-only for every input. Given refs/remotes/origin/x,
 // git branch would silently create refs/heads/refs/remotes/origin/x; given
-// refs/heads/-f, or the commit "-f", it would force-move a branch.
+// refs/heads/-f, or the commit "-f", it would force-move a branch. It
+// also refuses a name containing "@{", which git expands to another branch
+// and creates (R5AR-1), and a start point that is not a full object id,
+// which under branch.autoSetupMerge=always writes upstream configuration
+// (R5AR-2); both are ledger SI-359 (5c). The repository is set up so that
+// every refused input would otherwise do something: @{-1} names the
+// deleted branch ghost, @{u} names main's upstream up, and v1 is a tag.
 func TestUpdateRef_Negative_RefusedBeforeGit(t *testing.T) {
 	repo := buildRepo(t)
+	for _, args := range [][]string{
+		{"checkout", "-q", "-b", "ghost"},
+		{"checkout", "-q", "main"},
+		{"branch", "-q", "-D", "ghost"},
+		{"config", "branch.main.remote", "."},
+		{"config", "branch.main.merge", "refs/heads/up"},
+		{"tag", "v1", repo.Heads[0]},
+	} {
+		if _, err := run(context.Background(), repo.Dir, args...); err != nil {
+			t.Fatalf("setup: git %s: %v", strings.Join(args, " "), err)
+		}
+	}
 	tests := []struct {
 		name, ref, commit string
 	}{
@@ -301,6 +345,14 @@ func TestUpdateRef_Negative_RefusedBeforeGit(t *testing.T) {
 		{"a short name starting with a dash", "refs/heads/-design/x", repo.Head},
 		{"a commit that is a flag", "refs/heads/design/x", "-f"},
 		{"an empty commit", "refs/heads/design/x", ""},
+		{"the previous-branch name", "refs/heads/@{-1}", repo.Head},
+		{"the upstream name", "refs/heads/@{u}", repo.Head},
+		{"a name containing @{", "refs/heads/x@{y", repo.Head},
+		{"a start point that is HEAD", "refs/heads/design/x", "HEAD"},
+		{"a start point that is a branch", "refs/heads/design/x", "main"},
+		{"a start point that is an abbreviated object id", "refs/heads/design/x", repo.Head[:7]},
+		{"a start point that is a tag", "refs/heads/design/x", "v1"},
+		{"a start point that is an uppercase object id", "refs/heads/design/x", strings.ToUpper(repo.Head)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
