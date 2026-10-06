@@ -369,12 +369,12 @@ func TestZZ_P10_FullRefnameArgvIsUnattributable(t *testing.T) {
 		if err != nil {
 			return 2, err
 		}
-		return 0, gitx.UpdateRef(ctx, dir, "refs/heads/design/x", head) // the real stub-instantiate primitive today
+		return 0, gitx.UpdateRef(ctx, dir, "refs/heads/design/x", head) // the real stub-instantiate primitive, `git branch <name> <commit>` since dc-8
 	}}, decl, SeedClean)
 	t.Logf("log=%v", res.Log.Calls)
 	t.Logf("verdicts:\n%s", formatVerdicts(res.Verdicts))
 	if zzHas(res.Verdicts, "refs_create", Unattributable, "design/x") {
-		t.Logf("NOTE (fails toward unattributable): gitx.UpdateRef's full refname argv does not attribute its own ref create")
+		t.Logf("NOTE (fails toward unattributable): gitx.UpdateRef's `branch <name> <commit>` argv does not attribute its own ref create")
 	}
 }
 
