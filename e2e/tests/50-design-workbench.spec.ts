@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, dragToTrash, uncommittedIndicator } from "./helpers";
+import { addSticky, dragToTrash, toolbarAction, uncommittedIndicator } from "./helpers";
 
 // Wave 6 Task 2 — the ASD synchronized workbench (design §§3-6, SI-163/
 // SI-165/SI-167/SI-168; ASD AC-2/AC-4..AC-8, CO-9 §Browser behavior).
@@ -766,7 +766,9 @@ test.describe("typed forms", () => {
     await page.goto(DESIGN());
     // A story proto-sticky whose title cannot typeset to a kebab slug.
     const sticky = await addSticky(page, "Bad Slug! With? Punct.", "story");
-    await sticky.getByRole("button", { name: "Graduate" }).click();
+    // Graduate is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)); the refusal is the same.
+    await toolbarAction(page, sticky, "Graduate");
     // The refusal comes BEFORE any durable mutation, naming the rejected
     // bytes and the grammar (F-06's exact gap).
     const dialog = page.locator("#edge-confirm");
@@ -775,7 +777,7 @@ test.describe("typed forms", () => {
     await expect(dialog).toContainText("kebab-case slug");
     await page.getByRole("button", { name: "Cancel" }).click();
     // Clean up the sticky (scratch dies without ceremony).
-    await sticky.getByRole("button", { name: "Delete sticky" }).click();
+    await toolbarAction(page, sticky, "Delete");
   });
 
   test("in-place stub correction rides the same typed transaction (F-06)", async ({ page }) => {
@@ -1000,7 +1002,7 @@ test.describe("typed forms", () => {
     await expect(sticky).toHaveCount(1, { timeout: 10_000 });
     // Cleanup: the sticky dies by its own affordance; the stub through
     // the typed surface.
-    await sticky.first().getByRole("button", { name: "Delete sticky" }).click();
+    await toolbarAction(page, sticky.first(), "Delete");
     await expectClean(
       await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
         { op: "remove-stub", slug },

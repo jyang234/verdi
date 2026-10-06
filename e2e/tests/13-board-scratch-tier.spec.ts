@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
-import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndicator } from "./helpers";
+import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, toolbarAction, uncommittedIndicator } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6, exit
 // criterion 2: "an authoring-mode open-question sticky → graduation
@@ -62,7 +62,9 @@ test.describe("V1-P6: scratch tier", () => {
     // mutable-zone — creating it left the spec's working tree clean.
     await expect(uncommittedIndicator(page)).toBeHidden();
 
-    await sticky.getByRole("button", { name: "Graduate" }).click();
+    // Graduate is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)); the menu is the same.
+    await toolbarAction(page, sticky, "Graduate");
     await page.getByRole("menuitem", { name: "Open question" }).click();
     // Wave 6 Task 2: the graduation impact preview confirms the exact
     // resulting object id before the one typed transaction (F-08).
@@ -142,7 +144,7 @@ test.describe("V1-P6: scratch tier", () => {
 
     // Graduate it: the same context-sensitive picker, now over the
     // existing thread's (source, target) pair.
-    await scratchThread.getByRole("button", { name: "Graduate" }).click();
+    await toolbarAction(page, scratchThread, "Graduate to a typed edge");
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: /^exempts/ }).click();
 
