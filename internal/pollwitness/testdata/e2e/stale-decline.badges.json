@@ -1,0 +1,145 @@
+{
+  "ByObject": {
+    "ac-1": [
+      {
+        "source": "fold:empty-slot",
+        "label": "empty slot",
+        "target": "ac-1",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "3a869c9452d430664f4d5169320a538c54df597a"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "static: no current record"
+        ]
+      }
+    ],
+    "ac-2": [
+      {
+        "source": "fold:empty-slot",
+        "label": "2 empty slots",
+        "target": "ac-2",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "3a869c9452d430664f4d5169320a538c54df597a"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "behavioral: no current record",
+          "static: no current record"
+        ]
+      }
+    ],
+    "ac-3": [
+      {
+        "source": "fold:empty-slot",
+        "label": "empty slot",
+        "target": "ac-3",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "3a869c9452d430664f4d5169320a538c54df597a"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "behavioral: no current record"
+        ]
+      }
+    ],
+    "ac-4": [
+      {
+        "source": "fold:empty-slot",
+        "label": "empty slot",
+        "target": "ac-4",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--stale-decline",
+            "revision": "3a869c9452d430664f4d5169320a538c54df597a"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/stale-decline/spec.md",
+            "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+          }
+        ],
+        "records": [
+          "runtime: no current record"
+        ]
+      }
+    ]
+  },
+  "CaseFile": [
+    {
+      "source": "lint:VL-003",
+      "label": "context[] \"adr/0002-outbox-events@78e3161594fb31fdad17f2ea8…",
+      "inputs": [
+        {
+          "name": "spec",
+          "path": ".verdi/specs/active/stale-decline/spec.md",
+          "revision": "sha256:9253631219f9f8c2f78105e96962f6a7d7a5c1fe3b0e879c16b00e6f5c9492f3"
+        }
+      ],
+      "records": [
+        "context[] \"adr/0002-outbox-events@78e3161594fb31fdad17f2ea8a96b52f33dbf0f3\" pins commit 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3, which is not reachable from HEAD in this repository's history"
+      ]
+    }
+  ],
+  "Disclosures": null,
+  "EvidenceSlots": {
+    "ac-1": [
+      {
+        "Kind": "static",
+        "Empty": true,
+        "Records": 0
+      }
+    ],
+    "ac-2": [
+      {
+        "Kind": "static",
+        "Empty": true,
+        "Records": 0
+      },
+      {
+        "Kind": "behavioral",
+        "Empty": true,
+        "Records": 0
+      }
+    ],
+    "ac-3": [
+      {
+        "Kind": "behavioral",
+        "Empty": true,
+        "Records": 0
+      }
+    ],
+    "ac-4": [
+      {
+        "Kind": "runtime",
+        "Empty": true,
+        "Records": 0
+      }
+    ]
+  }
+}

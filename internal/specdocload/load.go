@@ -276,16 +276,21 @@ func loadSource(ctx context.Context, req Request) (source, error) {
 		// git error that never names which field was missing.
 		return source{}, errors.New("specdocload: ModeAt requires a commit")
 	}
+	pinned := ""
 	if req.Mode == ModeAccepted {
 		branch, ok := specstate.ResolveDefaultBranch(ctx, req.Root)
 		if !ok {
 			return source{}, errors.New("specdocload: the default branch could not be resolved; use a pinned commit or the working tree")
 		}
-		rev = branch.Ref
+		rev, pinned = branch.Ref, branch.Tip
 	}
-	commit, err := gitx.RevParse(ctx, req.Root, rev)
-	if err != nil {
-		return source{}, fmt.Errorf("specdocload: resolving %q: %w", rev, err)
+	commit := pinned // a request's pinned accepted HEAD (ledger SI-356)
+	if commit == "" {
+		resolved, err := gitx.RevParse(ctx, req.Root, rev)
+		if err != nil {
+			return source{}, fmt.Errorf("specdocload: resolving %q: %w", rev, err)
+		}
+		commit = resolved
 	}
 	for _, rel := range []string{store.ActiveSpecRelPath(name), store.SpecRelPath(store.ZoneArchive, name)} {
 		content, err := gitx.Show(ctx, req.Root, commit, rel)

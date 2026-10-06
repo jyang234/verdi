@@ -273,6 +273,12 @@ type boardGitState struct {
 	// correction round 1, finding 1 — closure reopen). Unexported: a
 	// server-side authority fact, never part of the wire model.
 	defaultRef string
+
+	// acceptedTip is the id defaultRef resolved to when the request pinned
+	// its accepted HEAD (specstate.WithAcceptedHead), so the posture's
+	// accepted HEAD is that one resolution, not another (ledger SI-356);
+	// empty otherwise. Unexported, like defaultRef.
+	acceptedTip string
 }
 
 // acceptedRef is the rev accepted-head facts resolve against — the
@@ -710,10 +716,12 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	}
 	def := ""
 	defRef := ""
+	defTip := ""
 	notice := ""
 	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
 		def = resolved.Name
 		defRef = resolved.Ref
+		defTip = resolved.Tip
 	} else {
 		notice = unresolvedDefaultBranchNotice
 	}
@@ -725,7 +733,7 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	if err != nil {
 		return nil, "", err
 	}
-	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef}, notice, nil
+	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef, acceptedTip: defTip}, notice, nil
 }
 
 // ErrBoardNotFound distinguishes 404 from operational failures.
@@ -794,7 +802,8 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		snap, err := s.loadSnapshot(r.Context(), r.PathValue("name"))
+		refresh, err := s.projectWallRefresh(r.Context(), r.PathValue("name"), false)
+		snap := refresh.snap
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -803,7 +812,7 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		etag := `"` + snap.Revision + `"`
+		etag := `"` + refresh.revision + `"`
 		w.Header().Set("ETag", etag)
 		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
 			w.WriteHeader(http.StatusNotModified)

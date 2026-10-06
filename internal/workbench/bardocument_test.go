@@ -3,6 +3,7 @@ package workbench
 import (
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"reflect"
 	"strings"
 	"sync"
@@ -118,8 +119,10 @@ func TestDocumentBarFacts_StateTheLoadCouldNotResolve(t *testing.T) {
 
 // gitCounts counts, through gitx's observer, the two Git reads a page's
 // accepted-HEAD budget is about (Wave 6 §5.3): rev-parses of the accepted
-// ref (with or without ^{commit}), and specstate runs (each begins with a
-// BlobAt, `git ls-tree <ref> -- <spec path>`).
+// ref (with or without ^{commit}), run or replayed by a read session, and
+// specstate runs (each begins with a BlobAt: `git ls-tree <rev> -- <spec
+// path>`, or, inside a read session, its batched read of the spec's
+// directory, `<rev>:<spec dir>`).
 type gitCounts struct {
 	mu                     sync.Mutex
 	acceptedRef, specPath  string
@@ -127,6 +130,26 @@ type gitCounts struct {
 }
 
 func (g *gitCounts) Observe(_ string, args []string) {
+	g.count(args)
+}
+
+// ObserveSession counts what a read session answers without a process
+// (gitx.SessionObserver): a replayed rev-parse, and a BlobAt's batched
+// directory read.
+func (g *gitCounts) ObserveSession(_ string, event gitx.SessionEvent, args []string) {
+	switch event {
+	case gitx.SessionReplayed:
+		g.count(args)
+	case gitx.SessionBatched:
+		if len(args) == 1 && strings.HasSuffix(args[0], ":"+path.Dir(g.specPath)) {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			g.states++
+		}
+	}
+}
+
+func (g *gitCounts) count(args []string) {
 	if len(args) == 0 {
 		return
 	}

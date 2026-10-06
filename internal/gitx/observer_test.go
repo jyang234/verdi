@@ -81,9 +81,10 @@ func TestObserver_SeesPlumbing(t *testing.T) {
 // TestObserverCoversEveryExecSite is the structural guard the review
 // required: it parses every non-test .go file in this package and asserts
 // that the number of exec.Command/exec.CommandContext call sites equals
-// the number of observe( call sites, so a fourth exec site cannot land
-// unobserved without failing this test by construction (today: 3 and 3 —
-// run in exec.go, ConfigValue in configvalue.go, runStdin in plumbing.go).
+// the number of observe( call sites, so a fifth exec site cannot land
+// unobserved without failing this test by construction (today: 4 and 4 —
+// execGit in exec.go, ConfigValue in configvalue.go, runStdin in
+// plumbing.go, and startCatFileBatch in readsession.go).
 func TestObserverCoversEveryExecSite(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

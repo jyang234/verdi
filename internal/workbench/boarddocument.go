@@ -166,11 +166,20 @@ func (s *boardSpecServer) loadDocumentPage(ctx context.Context, name string, kin
 }
 
 // loadDocumentReading is the shared load, reading the checkout through
-// read once the document has loaded.
+// read once the document has loaded. It is the Document page's one
+// application projection per conditional refresh (Wave 6 §5.3; ledger
+// SI-356; BL-158): one read session for the checkout, and one accepted-HEAD
+// resolution (openProjection) that the readiness load, the
+// document's own lifecycle state and closed-spec views, and the checkout's
+// default branch all read at — the snapshot, its revision token and its
+// readiness derived together. Both end with the call; nothing outlives it
+// (spec/readiness-recovery-v2 co-2).
 func (s *boardSpecServer) loadDocumentReading(ctx context.Context, name string, kind specdoc.Kind, read func(context.Context) documentCheckout) (documentSnapshot, specdocload.Result, error) {
 	if !specNameRe.MatchString(name) {
 		return documentSnapshot{}, specdocload.Result{}, fmt.Errorf("workbench: spec %q not found: %w", name, ErrBoardNotFound)
 	}
+	ctx, release := s.openProjection(ctx)
+	defer release()
 
 	var readiness *readinesspilot.Snapshot
 	var readinessDisclosure string

@@ -22,11 +22,15 @@ import (
 // git (internal/fixturegit-backed integration tests separately prove the
 // real adapter end to end). RevParse resolves the default branch to the
 // commit the successor-corpus cache keys on (see successors).
+// LsTreeEntries and RepoPrefix let the corpus scan list the spec zones and
+// the conflicts from one listing of the whole tree (storeTreePaths).
 type gitReader interface {
 	Show(ctx context.Context, dir, commit, path string) ([]byte, error)
 	BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool, err error)
 	FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (commit string, found bool, err error)
 	LsTree(ctx context.Context, dir, ref, path string) ([]string, error)
+	LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error)
+	RepoPrefix(ctx context.Context, dir string) (string, error)
 	RevParse(ctx context.Context, dir, rev string) (string, error)
 }
 
@@ -47,6 +51,14 @@ func (realGitReader) FirstParentBlobLanding(ctx context.Context, dir, ref, path,
 
 func (realGitReader) LsTree(ctx context.Context, dir, ref, path string) ([]string, error) {
 	return gitx.LsTree(ctx, dir, ref, path)
+}
+
+func (realGitReader) LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error) {
+	return gitx.LsTreeEntries(ctx, dir, ref)
+}
+
+func (realGitReader) RepoPrefix(ctx context.Context, dir string) (string, error) {
+	return gitx.RepoPrefix(ctx, dir)
 }
 
 func (realGitReader) RevParse(ctx context.Context, dir, rev string) (string, error) {
@@ -239,11 +251,20 @@ func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
 // why exclusion belongs at lookup time instead) — and then every conflict
 // record (scanConflicts), at the same revision. rev is what every read
 // names: the default branch's ref, or the commit it resolved to when the
-// scan is cached (see successors).
-func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*successorCorpus, error) {
-	paths, err := p.git.LsTree(ctx, root, rev, specZonesPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
+// scan is cached (see successors). In a request that pinned its accepted
+// HEAD (pinned), both lists come from one enumeration of the tree when
+// they can (storeTreePaths); every other scan lists as it always has.
+func (p Projector) scanSuccessors(ctx context.Context, root, rev string, pinned bool) (*successorCorpus, error) {
+	var paths, conflictPaths []string
+	var listed bool
+	var err error
+	if pinned {
+		paths, conflictPaths, listed = p.storeTreePaths(ctx, root, rev)
+	}
+	if !listed {
+		if paths, err = p.git.LsTree(ctx, root, rev, specZonesPrefix); err != nil {
+			return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
+		}
 	}
 	sort.Strings(paths)
 
@@ -331,39 +352,152 @@ func (p Projector) scanSuccessors(ctx context.Context, root, rev string) (*succe
 	for name := range corpus.linkOnlyBy {
 		sort.Strings(corpus.linkOnlyBy[name])
 	}
-	if err := p.scanConflicts(ctx, root, rev, corpus); err != nil {
+	if !listed {
+		if conflictPaths, err = p.git.LsTree(ctx, root, rev, conflictsDir()); err != nil {
+			return nil, fmt.Errorf("specstate: scanning default-branch conflicts: %w", err)
+		}
+	}
+	if err := p.scanConflicts(ctx, root, rev, conflictPaths, corpus); err != nil {
 		return nil, err
 	}
 	return corpus, nil
 }
 
+// storeTreePaths lists, at rev, the paths the two plain listings `git
+// ls-tree -r --name-only <rev> -- .verdi/specs` and `-- .verdi/conflicts`
+// list, from one listing of the whole tree (gitx.LsTreeEntries): the
+// accepted tree enumerated once per projection, not once per directory
+// (Wave 6 §5.3; ledger SI-356) — and, inside the projection's read
+// session, the same listing every other reader of that commit's tree
+// shares. Only a scan pinned to a request's accepted HEAD lists this way
+// (scanSuccessors' pinned): every other caller's git reads are what they
+// always were, which the disclosures view's cache key relies on.
+//
+// It answers only where that listing names exactly the paths the two
+// plain listings name, and reports listed false — the scan then runs the
+// two plain listings at the same rev, exactly as an unpinned scan does —
+// in every other case:
+//
+//   - rev is not a full object id (a listing of a ref name would resolve
+//     the ref again);
+//   - root is not its repository's top level (the plain listings name
+//     paths from root, the whole-tree listing from the top);
+//   - the whole-tree listing fails (it reads every tree of the commit, the
+//     plain listings only the two directories);
+//   - a path under either directory holds a byte a plain listing quotes
+//     (plainListingQuotes);
+//   - a path under either directory begins or ends with whitespace:
+//     gitx.LsTree trims its output, so the plain listing drops a trailing
+//     space from its last path (review P2R-1);
+//   - a path names either directory in another letter case, which a
+//     case-insensitive pathspec (GIT_ICASE_PATHSPECS) would match.
+//
+// The corpus a pinned scan builds is therefore always the one an unpinned
+// scan of the same commit builds, so the process-wide corpus cache answers
+// either kind of caller identically, whichever filled it.
+func (p Projector) storeTreePaths(ctx context.Context, root, rev string) (specs, conflicts []string, listed bool) {
+	if gitx.ValidateFullOID(rev) != nil {
+		return nil, nil, false
+	}
+	if prefix, err := p.git.RepoPrefix(ctx, root); err != nil || prefix != "" {
+		return nil, nil, false
+	}
+	entries, err := p.git.LsTreeEntries(ctx, root, rev)
+	if err != nil {
+		return nil, nil, false
+	}
+	specs, conflicts = []string{}, []string{}
+	for _, e := range entries {
+		var into *[]string
+		switch {
+		case under(e.Path, specZonesPrefix):
+			into = &specs
+		case under(e.Path, conflictsDir()):
+			into = &conflicts
+		case underFolded(e.Path, specZonesPrefix), underFolded(e.Path, conflictsDir()):
+			return nil, nil, false
+		default:
+			continue
+		}
+		if plainListingQuotes(e.Path) || e.Path != strings.TrimSpace(e.Path) {
+			return nil, nil, false
+		}
+		*into = append(*into, e.Path)
+	}
+	return specs, conflicts, true
+}
+
+// underFolded reports whether p lies at or beneath dir under Unicode case
+// folding.
+func underFolded(p, dir string) bool {
+	return strings.EqualFold(p, dir) || (len(p) > len(dir) && p[len(dir)] == '/' && strings.EqualFold(p[:len(dir)], dir))
+}
+
+// under reports whether p is dir itself or lies beneath it — what a plain
+// `ls-tree` pathspec of dir matches.
+func under(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, dir+"/")
+}
+
+// plainListingQuotes reports whether p holds a byte a plain (not -z) `git
+// ls-tree` listing may C-quote: a control character, DEL, a double quote,
+// a backslash, or any byte at or above 0x80 (quoted unless core.quotePath
+// is off). Such a path is listed differently by the two listings.
+func plainListingQuotes(p string) bool {
+	for i := 0; i < len(p); i++ {
+		if c := p[i]; c < 0x20 || c == 0x7f || c == '"' || c == '\\' || c >= 0x80 {
+			return true
+		}
+	}
+	return false
+}
+
 // successors returns the default-branch successor corpus for one
 // ResolveMany call. With a corpus cache it resolves the default branch to
-// its current commit, keys the cache on (root, commit) — never on the ref
-// name, so a branch that has moved is scanned again — and pins the scan
-// to that commit, so a cached corpus is exactly that commit's corpus.
+// its current commit — the request's pinned commit when it pinned one
+// (WithAcceptedHead), so the projection resolves nothing again — keys the
+// cache on (root, commit) — never on the ref name, so a branch that has
+// moved is scanned again — and pins the scan to that commit, so a cached
+// corpus is exactly that commit's corpus.
 //
 // Every other case runs the scan at branch.Ref, as this package did
 // before the cache existed, and caches nothing: no cache; a commit that
-// does not resolve; and a pinned scan that fails. The last one matters
-// for errors: a scan error's text names the revision it read, so
-// re-running the scan at the ref returns the error callers have always
-// seen, never one naming the commit id.
+// does not resolve; and a scan at the resolved commit that fails. The last
+// one matters for errors: a scan error's text names the revision it read,
+// so re-running the scan at the ref returns the error callers have always
+// seen, never one naming the commit id. In a request that pinned its
+// accepted HEAD, that re-run is for the error text alone: a scan at the
+// pinned commit that fails is never answered by the ref's corpus.
 func (p Projector) successors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
 	if p.corpora == nil {
-		return p.scanSuccessors(ctx, root, branch.Ref)
+		return p.scanSuccessors(ctx, root, branch.Ref, false)
 	}
-	commit, err := p.git.RevParse(ctx, root, branch.Ref+"^{commit}")
-	if err != nil || commit == "" {
-		return p.scanSuccessors(ctx, root, branch.Ref)
+	commit := branch.Commit
+	pinned := commit != ""
+	if !pinned {
+		resolved, err := p.git.RevParse(ctx, root, branch.Ref+"^{commit}")
+		if err != nil || resolved == "" {
+			return p.scanSuccessors(ctx, root, branch.Ref, false)
+		}
+		commit = resolved
 	}
 	corpus, err := p.corpora.get(ctx, corpusKey{root: root, commit: commit}, func() (*successorCorpus, error) {
-		return p.scanSuccessors(ctx, root, commit)
+		return p.scanSuccessors(ctx, root, commit, pinned)
 	})
-	if err != nil {
-		return p.scanSuccessors(ctx, root, branch.Ref)
+	switch {
+	case err == nil:
+		return corpus, nil
+	case !pinned:
+		return p.scanSuccessors(ctx, root, branch.Ref, false)
 	}
-	return corpus, nil
+	// A pinned scan that failed is never answered by a scan at the ref,
+	// which may name another commit: the projection reads one (ledger
+	// SI-356, SI-357 (2); review P2R-2). The scan at the ref runs only for
+	// its error text, the one callers have always seen, when it fails too.
+	if _, refErr := p.scanSuccessors(ctx, root, branch.Ref, false); refErr != nil {
+		return nil, refErr
+	}
+	return nil, err
 }
 
 // ResolveMany projects every candidate's effective state, building the
@@ -448,15 +582,30 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		return Result{}, err
 	}
 
-	defaultOID, found, err := p.git.BlobAt(ctx, root, branch.Ref, c.Path)
+	// Every read below names branch.Rev() — the request's pinned commit id
+	// when it pinned one, so the projection reads the one commit it
+	// resolved and git resolves no ref again — and a read that fails at
+	// the id runs again at the ref (atRef), so a failure reports exactly
+	// what it always reported.
+	type blob struct {
+		oid   string
+		found bool
+	}
+	at, err := atRef(branch, func(rev string) (blob, error) {
+		oid, found, err := p.git.BlobAt(ctx, root, rev, c.Path)
+		return blob{oid, found}, err
+	})
 	if err != nil {
 		return Result{}, fmt.Errorf("specstate: resolving %s on %s: %w", c.Path, branch.Ref, err)
 	}
+	defaultOID, found := at.oid, at.found
 	if !found {
 		return Result{State: Proposed, Relation: RelationNew}, nil
 	}
 
-	defaultContent, err := p.git.Show(ctx, root, branch.Ref, c.Path)
+	defaultContent, err := atRef(branch, func(rev string) ([]byte, error) {
+		return p.git.Show(ctx, root, rev, c.Path)
+	})
 	if err != nil {
 		return Result{}, fmt.Errorf("specstate: reading %s at %s: %w", c.Path, branch.Ref, err)
 	}
@@ -472,7 +621,15 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		}, nil
 	}
 
-	landing, found, err := p.git.FirstParentBlobLanding(ctx, root, branch.Ref, c.Path, defaultOID)
+	type landed struct {
+		commit string
+		found  bool
+	}
+	land, err := atRef(branch, func(rev string) (landed, error) {
+		commit, found, err := p.git.FirstParentBlobLanding(ctx, root, rev, c.Path, defaultOID)
+		return landed{commit, found}, err
+	})
+	landing, found := land.commit, land.found
 	if err != nil {
 		return Result{}, fmt.Errorf("specstate: proving first-parent landing for %s@%s: %w", c.Path, defaultOID, err)
 	}
@@ -608,6 +765,25 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		Baseline:    baseline,
 		Disclosures: migrationDisclosures(c.Path, c.Content),
 	}, nil
+}
+
+// atRef runs read at branch.Rev(). When that names the pinned commit and
+// the read fails, it fails: a read at the ref, which may name another
+// commit, never answers it (ledger SI-356, SI-357 (2); review P2R-2). The
+// ref is read only for its error text — the one callers saw before the
+// pin — which is returned when that read fails too; when it succeeds, the
+// pinned read's own failure is returned. A healthy repository never fails
+// the first read.
+func atRef[T any](branch Branch, read func(rev string) (T, error)) (T, error) {
+	v, err := read(branch.Rev())
+	if err == nil || branch.Rev() == branch.Ref {
+		return v, err
+	}
+	var zero T
+	if _, refErr := read(branch.Ref); refErr != nil {
+		return zero, refErr
+	}
+	return zero, err
 }
 
 // specScanIncompleteDisclosure is the witness that the default-branch spec

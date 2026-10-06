@@ -137,6 +137,36 @@ func TestResolveTargetBytes_DirectRef_RemoteRefFallback(t *testing.T) {
 	}
 }
 
+// TestResolveTargetBytes_DirectRef_RemoteRefFallback_Pinned (ledger
+// SI-356): in a request that pinned its accepted HEAD, the fallback reads
+// the default branch at the pinned commit, never by its ref.
+func TestResolveTargetBytes_DirectRef_RemoteRefFallback_Pinned(t *testing.T) {
+	root := t.TempDir()
+	git := noOpGitReader()
+	var reads []string
+	git.showFn = func(_ context.Context, dir, ref, path string) ([]byte, error) {
+		reads = append(reads, ref+":"+path)
+		if ref == "pinnedsha" && path == store.ActiveSpecRelPath("payments") {
+			return []byte(testFeatureSpecMD), nil
+		}
+		return nil, errors.New("not found at ref")
+	}
+	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
+		return specstate.Branch{Name: "main", Ref: "origin/main", Tip: "pinnedsha", Commit: "pinnedsha"}, true
+	}
+	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())
+
+	_, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
+	if err != nil || relPath != store.ActiveSpecRelPath("payments") || foundOnDisk || string(content) != testFeatureSpecMD {
+		t.Fatalf("resolveTargetBytes = (%q, %v, %v), want the pinned commit's bytes", relPath, foundOnDisk, err)
+	}
+	for _, r := range reads {
+		if strings.HasPrefix(r, "origin/main:") {
+			t.Fatalf("the pinned fallback read the ref: %q", reads)
+		}
+	}
+}
+
 func TestResolveTargetBytes_DirectRef_NotFound_NoDefaultBranch(t *testing.T) {
 	root := t.TempDir()
 	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer(), noOpStubReconciler(), noOpFeatureFolder())

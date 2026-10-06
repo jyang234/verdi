@@ -264,9 +264,16 @@ var gitReadOnlyVerbs = map[string]bool{
 
 // gitWriteArgvs returns, in call order, every recorded argv whose
 // subcommand is not on gitReadOnlyVerbs — the run's own write surface.
+// The subcommand follows git's global options: the status reads pass
+// --no-optional-locks ahead of `status` (BL-105), which is what keeps them
+// reads.
 func gitWriteArgvs(argvs [][]string) [][]string {
 	var writes [][]string
-	for _, argv := range argvs {
+	for _, recorded := range argvs {
+		argv := recorded
+		for len(argv) > 0 && strings.HasPrefix(argv[0], "--") {
+			argv = argv[1:]
+		}
 		if len(argv) == 0 || gitReadOnlyVerbs[argv[0]] {
 			continue
 		}
@@ -279,7 +286,7 @@ func gitWriteArgvs(argvs [][]string) [][]string {
 		if argv[0] == "worktree" && len(argv) == 2 && argv[1] == "list" {
 			continue
 		}
-		writes = append(writes, argv)
+		writes = append(writes, recorded)
 	}
 	return writes
 }

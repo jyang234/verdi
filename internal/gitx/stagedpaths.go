@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// stagedPathsArgs is the ONE git invocation StagedPaths makes, spelled out
-// here so the reasoning for each token stays attached to it.
+// stagedPathsArgs is the ONE git invocation StagedPaths makes (behind the
+// global --no-optional-locks, below), spelled out here so the reasoning for
+// each token stays attached to it.
 //
 // `git status --porcelain` — NOT `git diff --cached` and NOT
 // `git diff-index --cached` — is the primitive, because this guard is a
@@ -37,8 +38,14 @@ import (
 // as backward-compatible, its paths are repository-root-relative regardless of
 // the working directory or status.relativePaths, and it reports index-vs-HEAD
 // differences it is not asked to suppress. The two explicit flags buy a cost
-// reduction and a parsing guarantee, nothing about correctness:
+// reduction and a parsing guarantee, nothing about correctness, and the
+// global --no-optional-locks that StagedPaths puts in front of them keeps
+// the read a read:
 //
+//   - --no-optional-locks: `git status` otherwise refreshes a stale index
+//     and writes it back (BL-105; ledger SI-352), so a read path — the
+//     readiness load's repository facts among them — would rewrite the
+//     checkout's .git/index. The answer is the same; only the write goes.
 //   - --untracked-files=no drops the untracked scan entirely: untracked files
 //     are legal during closure and are filtered out below anyway, and the scan
 //     is the expensive part of status on a large checkout.
@@ -72,7 +79,7 @@ var stagedPathsArgs = []string{"status", "--porcelain", "-z", "--untracked-files
 // they are legal alongside the rituals that consult this, which refuse only on
 // index entries a subsequent `git commit` would silently absorb.
 func StagedPaths(ctx context.Context, dir string) ([]string, error) {
-	out, err := run(ctx, dir, stagedPathsArgs...)
+	out, err := run(ctx, dir, append([]string{"--no-optional-locks"}, stagedPathsArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("gitx: StagedPaths(%s): %w", dir, err)
 	}

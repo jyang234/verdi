@@ -1,0 +1,438 @@
+package gitx
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
+)
+
+// countingObserver counts every git process a context launches, by
+// subcommand (the first argument that is not an option).
+type countingObserver struct {
+	mu     sync.Mutex
+	counts map[string]int
+	argv   [][]string
+}
+
+func newCountingObserver() *countingObserver { return &countingObserver{counts: map[string]int{}} }
+
+func (c *countingObserver) Observe(_ string, args []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.argv = append(c.argv, append([]string(nil), args...))
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			c.counts[a]++
+			return
+		}
+	}
+}
+
+func (c *countingObserver) count(sub string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.counts[sub]
+}
+
+func (c *countingObserver) total() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.argv)
+}
+
+// sessionRepo is a three-commit repository whose tree carries every shape a
+// read session must answer exactly as the exec path does: plain text, CRLF
+// text, binary bytes with NULs, an empty file, a file with no final
+// newline, an executable, a symlink, a nested directory, a large file, a
+// path with a space, and a file that the second commit changes.
+func sessionRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	large := strings.Repeat("0123456789abcdef", 1<<13) // 128 KiB, beyond any pipe buffer
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{
+			"plain.txt":           "plain\n",
+			"crlf.txt":            "one\r\ntwo\r\n",
+			"binary.bin":          "a\x00b\x00\xff\n",
+			"empty.txt":           "",
+			"nofinal.txt":         "no final newline",
+			"tool.sh":             "#!/bin/sh\necho tool\n",
+			"dir/nested/deep.md":  "deep\n",
+			"dir/sibling.md":      "sibling\n",
+			"large.txt":           large,
+			"with space/file.txt": "spaced\n",
+			"crname\r":            "a name ending in a carriage return\n",
+			"crdir\r/inner.md":    "inside a directory whose name ends in a carriage return\n",
+			"changes.txt":         "first\n",
+		}, Message: "first"},
+		{Files: map[string]string{"changes.txt": "second\n"}, Message: "second"},
+	})
+	if err := os.Chmod(filepath.Join(repo.Dir, "tool.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("plain.txt", filepath.Join(repo.Dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, repo.Dir, "add", "-A")
+	gitT(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "mode and link")
+	return repo
+}
+
+func gitT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
+}
+
+// sessionPaths is every path the differential tests read, including the
+// shapes the session must hand to the exec path.
+func sessionPaths() []string {
+	return []string{
+		"plain.txt", "crlf.txt", "binary.bin", "empty.txt", "nofinal.txt", "tool.sh",
+		"dir/nested/deep.md", "dir/sibling.md", "large.txt", "with space/file.txt", "changes.txt",
+		"link.txt",                  // a symlink: ls-tree refuses it by mode
+		"dir", "dir/nested", "dir/", // directories, addressed bare and with a slash
+		"missing.txt", "dir/missing.md", // absent at an existing parent
+		"nope/missing.md",                 // absent parent
+		"./plain.txt", "dir/../plain.txt", // relative forms
+		"*.txt", "dir/*.md", // pathspec magic
+		"", // no path at all
+		// Control characters (P1R-2): `cat-file --batch` strips a CR before
+		// its line's LF and a NUL ends git's C string, so a batched read of
+		// these would answer for a different name than the exec reads.
+		"plain.txt\r", "crname\r", "crname", "crdir\r/inner.md", "crdir\r", "dir\r/sibling.md",
+		"plain.txt\x00ignored", "dir/sibling.md\x01",
+	}
+}
+
+// sessionRevs is every revision the differential tests read at.
+func sessionRevs(repo *fixturegit.Repo) []string {
+	return []string{"HEAD", "HEAD~1", repo.Heads[0], "main", "no-such-ref", strings.Repeat("0", 40)}
+}
+
+// TestReadSession_ShowMatchesExec proves Show answers byte for byte, and
+// error for error, the same inside a session as through its own process,
+// over every revision and path shape, read in an order that interleaves
+// different blobs (so a batch that handed one read's bytes to another
+// would differ).
+func TestReadSession_ShowMatchesExec(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	defer release()
+	for _, rev := range sessionRevs(repo) {
+		for _, p := range sessionPaths() {
+			want, wantErr := Show(context.Background(), repo.Dir, rev, p)
+			got, gotErr := Show(ctx, repo.Dir, rev, p)
+			if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+				t.Errorf("Show(%s, %q) in a session = (%q, %v), want (%q, %v)", rev, p, got, gotErr, want, wantErr)
+			}
+		}
+	}
+}
+
+// TestReadSession_BlobAtMatchesExec is BlobAt's differential proof.
+func TestReadSession_BlobAtMatchesExec(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	defer release()
+	for _, rev := range sessionRevs(repo) {
+		for _, p := range sessionPaths() {
+			wantOID, wantFound, wantErr := BlobAt(context.Background(), repo.Dir, rev, p)
+			gotOID, gotFound, gotErr := BlobAt(ctx, repo.Dir, rev, p)
+			if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+				t.Errorf("BlobAt(%s, %q) in a session = (%q, %v, %v), want (%q, %v, %v)", rev, p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+			}
+		}
+	}
+}
+
+// TestReadSession_SubdirectoryMatchesExec: ls-tree reads paths relative to
+// its working directory, so in a subdirectory the session must not answer
+// BlobAt from the top-level tree.
+func TestReadSession_SubdirectoryMatchesExec(t *testing.T) {
+	repo := sessionRepo(t)
+	sub := filepath.Join(repo.Dir, "dir")
+	ctx, release := WithReadSession(context.Background(), sub)
+	defer release()
+	for _, p := range []string{"sibling.md", "nested/deep.md", "dir/sibling.md", "plain.txt"} {
+		wantOID, wantFound, wantErr := BlobAt(context.Background(), sub, "HEAD", p)
+		gotOID, gotFound, gotErr := BlobAt(ctx, sub, "HEAD", p)
+		if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+			t.Errorf("BlobAt(HEAD, %q) from dir/ in a session = (%q, %v, %v), want (%q, %v, %v)", p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+		}
+		want, wantErr := Show(context.Background(), sub, "HEAD", p)
+		got, gotErr := Show(ctx, sub, "HEAD", p)
+		if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+			t.Errorf("Show(HEAD, %q) from dir/ in a session = (%q, %v), want (%q, %v)", p, got, gotErr, want, wantErr)
+		}
+	}
+}
+
+// TestReadSession_BatchesReadsInOneProcess pins the cost: any number of
+// Show and BlobAt reads in one session run one cat-file process (plus one
+// prefix probe for BlobAt), never a show or ls-tree per read.
+func TestReadSession_BatchesReadsInOneProcess(t *testing.T) {
+	repo := sessionRepo(t)
+	obs := newCountingObserver()
+	ctx, release := WithReadSession(WithObserver(context.Background(), obs), repo.Dir)
+	defer release()
+	for _, p := range []string{"plain.txt", "crlf.txt", "binary.bin", "dir/nested/deep.md", "large.txt"} {
+		if _, err := Show(ctx, repo.Dir, "HEAD", p); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := BlobAt(ctx, repo.Dir, "HEAD~1", p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if obs.count("cat-file") != 1 || obs.count("show") != 0 || obs.count("ls-tree") != 0 || obs.total() != 2 {
+		t.Fatalf("ten reads launched %v, want one cat-file and one rev-parse --show-prefix", obs.argv)
+	}
+}
+
+// TestReadSession_RefReadsRunOnce pins that an identical ref-read argv runs
+// one process per session and its answer — including a negative one — is
+// replayed exactly; distinct argv stay distinct reads.
+func TestReadSession_RefReadsRunOnce(t *testing.T) {
+	repo := sessionRepo(t)
+	gitT(t, repo.Dir, "update-ref", "refs/remotes/origin/main", repo.Head)
+	gitT(t, repo.Dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	reads := func(ctx context.Context) string {
+		var b strings.Builder
+		for range 3 {
+			head, err := RevParse(ctx, repo.Dir, "HEAD")
+			b.WriteString(head + errText(err) + "|")
+			branch, err := DefaultBranch(ctx, repo.Dir)
+			b.WriteString(branch + errText(err) + "|")
+			has, err := HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "main")
+			b.WriteString(boolText(has) + errText(err) + "|")
+			has, err = HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "master")
+			b.WriteString(boolText(has) + errText(err) + "|")
+			local, err := HasLocalBranch(ctx, repo.Dir, "nope")
+			b.WriteString(boolText(local) + errText(err) + "|")
+			exists, err := CommitExists(ctx, repo.Dir, repo.Heads[0])
+			b.WriteString(boolText(exists) + errText(err) + "|")
+		}
+		return b.String()
+	}
+	want := reads(context.Background())
+
+	obs := newCountingObserver()
+	ctx, release := WithReadSession(WithObserver(context.Background(), obs), repo.Dir)
+	defer release()
+	if got := reads(ctx); got != want {
+		t.Fatalf("ref reads in a session = %q, want %q", got, want)
+	}
+	if obs.total() != 6 {
+		t.Fatalf("three rounds of six ref reads launched %d processes, want 6 (one per distinct read): %v", obs.total(), obs.argv)
+	}
+}
+
+func boolText(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// TestWithReadSession_Scope covers the session's own contract: a nested
+// call reuses the open session, a different directory gets none, and
+// reads after release still answer, through the exec path.
+func TestWithReadSession_Scope(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	s := sessionFor(ctx, repo.Dir)
+	if s == nil {
+		t.Fatal("WithReadSession opened no session")
+	}
+	nested, nestedRelease := WithReadSession(ctx, repo.Dir+string(filepath.Separator))
+	if sessionFor(nested, repo.Dir) != s {
+		t.Fatal("a nested WithReadSession for the same directory opened a second session")
+	}
+	nestedRelease()
+	if sessionFor(ctx, t.TempDir()) != nil {
+		t.Fatal("a session answered for another directory")
+	}
+	if _, err := Show(ctx, repo.Dir, "HEAD", "plain.txt"); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	release() // idempotent
+	obs := newCountingObserver()
+	got, err := Show(WithObserver(ctx, obs), repo.Dir, "HEAD", "plain.txt")
+	if err != nil || string(got) != "plain\n" {
+		t.Fatalf("Show after release = (%q, %v), want the blob", got, err)
+	}
+	if obs.count("show") != 1 {
+		t.Fatalf("a read after release launched %v, want its own show", obs.argv)
+	}
+}
+
+// TestParseTree_Negative: a malformed tree object is an error, never a
+// guess.
+func TestParseTree_Negative(t *testing.T) {
+	for name, tc := range map[string]struct {
+		data   []byte
+		oidLen int
+	}{
+		"bad id length": {data: []byte("100644 a\x00" + strings.Repeat("x", 20)), oidLen: 16},
+		"no space":      {data: []byte("100644a\x00" + strings.Repeat("x", 20)), oidLen: 20},
+		"no NUL":        {data: []byte("100644 a" + strings.Repeat("x", 20)), oidLen: 20},
+		"truncated id":  {data: []byte("100644 a\x00" + strings.Repeat("x", 19)), oidLen: 20},
+		"empty name":    {data: []byte("100644 \x00" + strings.Repeat("x", 20)), oidLen: 20},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTree(tc.data, tc.oidLen); err == nil {
+				t.Fatal("parseTree: want an error")
+			}
+		})
+	}
+}
+
+// TestReadSession_ReleaseEndsEveryShortcut: after release, a context that
+// still carries the session gets no answer from it — a ref read it had
+// memoized runs again, a reachability it had walked takes the per-commit
+// path — so nothing the session read is answered from after its request.
+func TestReadSession_ReleaseEndsEveryShortcut(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	if _, err := RevParse(ctx, repo.Dir, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := ReachableFromHEAD(ctx, repo.Dir, repo.Heads[0], "HEAD"); err != nil || r != Reachable {
+		t.Fatalf("ReachableFromHEAD = (%v, %v), want reachable", r, err)
+	}
+	release()
+	obs := newCountingObserver()
+	after := WithObserver(ctx, obs)
+	if _, err := RevParse(after, repo.Dir, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := ReachableFromHEAD(after, repo.Dir, repo.Heads[0], "HEAD"); err != nil || r != Reachable {
+		t.Fatalf("ReachableFromHEAD after release = (%v, %v), want reachable", r, err)
+	}
+	if obs.count("rev-parse") != 2 || obs.count("merge-base") != 1 || obs.count("rev-list") != 0 {
+		t.Fatalf("reads after release launched %v, want their own rev-parses and merge-base", obs.argv)
+	}
+}
+
+// TestReadSession_FallsBackWhenTheBatchDies: a batch process that dies
+// mid-session costs only the batching — every read after it is answered,
+// exactly, by its own process.
+func TestReadSession_FallsBackWhenTheBatchDies(t *testing.T) {
+	repo := sessionRepo(t)
+	ctx, release := WithReadSession(context.Background(), repo.Dir)
+	defer release()
+	if _, err := Show(ctx, repo.Dir, "HEAD", "plain.txt"); err != nil {
+		t.Fatal(err)
+	}
+	s := sessionFor(ctx, repo.Dir)
+	if s == nil || s.batch == nil {
+		t.Fatal("the first read started no batch process")
+	}
+	if err := s.batch.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	obs := newCountingObserver()
+	for _, p := range []string{"crlf.txt", "binary.bin", "dir/nested/deep.md"} {
+		want, wantErr := Show(context.Background(), repo.Dir, "HEAD", p)
+		got, gotErr := Show(WithObserver(ctx, obs), repo.Dir, "HEAD", p)
+		if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+			t.Fatalf("Show(%q) after the batch died = (%q, %v), want (%q, %v)", p, got, gotErr, want, wantErr)
+		}
+		wantOID, wantFound, wantErr := BlobAt(context.Background(), repo.Dir, "HEAD", p)
+		gotOID, gotFound, gotErr := BlobAt(WithObserver(ctx, obs), repo.Dir, "HEAD", p)
+		if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+			t.Fatalf("BlobAt(%q) after the batch died = (%q, %v, %v), want (%q, %v, %v)", p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+		}
+	}
+	if obs.count("cat-file") != 0 || obs.count("show") != 3 {
+		t.Fatalf("reads after the batch died launched %v, want their own shows and no new batch", obs.argv)
+	}
+}
+
+// sha256Repo builds a two-commit repository in git's SHA-256 object
+// format, with fixturegit's fixed identity and date. It skips when the
+// local git cannot create one (the format arrived in git 2.29).
+func sha256Repo(t *testing.T) (dir string, heads []string) {
+	t.Helper()
+	dir = t.TempDir()
+	init := exec.CommandContext(t.Context(), "git", "init", "--quiet", "--object-format=sha256", "--initial-branch=main", dir)
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Skipf("the local git cannot create a SHA-256 repository, so this differential cannot run here: %v\n%s", err, out)
+	}
+	env := append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_AUTHOR_DATE=1704067200 +0000",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_COMMITTER_DATE=1704067200 +0000")
+	for i, files := range []map[string]string{
+		{"plain.txt": "plain\n", "dir/sibling.md": "sibling\n", "tool.sh": "#!/bin/sh\n"},
+		{"changes.txt": "second\n", "dir/nested/deep.md": "deep\n"},
+	} {
+		for rel, content := range files {
+			full := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, args := range [][]string{{"add", "-A"}, {"commit", "--quiet", "--no-verify", "-m", "layer"}} {
+			cmd := exec.CommandContext(t.Context(), "git", args...)
+			cmd.Dir, cmd.Env = dir, env
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v (layer %d): %v\n%s", args, i, err, out)
+			}
+		}
+		heads = append(heads, gitT(t, dir, "rev-parse", "HEAD"))
+	}
+	return dir, heads
+}
+
+// TestReadSession_SHA256MatchesExec (P1R-2): in a SHA-256 repository every
+// session answer still equals the exec's, error text included. BlobAt's
+// exec path reads only 40-hex ls-tree records, so its session shortcut
+// must not answer there.
+func TestReadSession_SHA256MatchesExec(t *testing.T) {
+	dir, heads := sha256Repo(t)
+	ctx, release := WithReadSession(context.Background(), dir)
+	defer release()
+	for _, rev := range []string{"HEAD", "HEAD~1", heads[0], "no-such-ref"} {
+		for _, p := range []string{"plain.txt", "dir/sibling.md", "dir/nested/deep.md", "changes.txt", "tool.sh", "dir", "missing.txt", "plain.txt\r"} {
+			want, wantErr := Show(context.Background(), dir, rev, p)
+			got, gotErr := Show(ctx, dir, rev, p)
+			if !bytes.Equal(got, want) || errText(gotErr) != errText(wantErr) {
+				t.Errorf("Show(%s, %q) in a SHA-256 session = (%q, %v), want (%q, %v)", rev, p, got, gotErr, want, wantErr)
+			}
+			wantOID, wantFound, wantErr := BlobAt(context.Background(), dir, rev, p)
+			gotOID, gotFound, gotErr := BlobAt(ctx, dir, rev, p)
+			if gotOID != wantOID || gotFound != wantFound || errText(gotErr) != errText(wantErr) {
+				t.Errorf("BlobAt(%s, %q) in a SHA-256 session = (%q, %v, %v), want (%q, %v, %v)", rev, p, gotOID, gotFound, gotErr, wantOID, wantFound, wantErr)
+			}
+		}
+	}
+	for _, c := range append([]string{heads[0][:7], strings.Repeat("0", 64)}, heads...) {
+		want, wantErr := ReachableFromHEAD(context.Background(), dir, c, "HEAD")
+		got, gotErr := ReachableFromHEAD(ctx, dir, c, "HEAD")
+		if got != want || errText(gotErr) != errText(wantErr) {
+			t.Errorf("ReachableFromHEAD(%s) in a SHA-256 session = (%v, %v), want (%v, %v)", c, got, gotErr, want, wantErr)
+		}
+	}
+}

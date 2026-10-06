@@ -10,8 +10,6 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
-	"github.com/jyang234/verdi/internal/index"
-	"github.com/jyang234/verdi/internal/matrixprojection"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
@@ -353,32 +351,17 @@ type StubReconciler interface {
 // self-contained and discovers internally, so routing closefeature.go
 // through it would discard that shared pass and add a second
 // DiscoverImplementingStories walk to every close. Anyone editing one copy
-// must edit the other; a future shared seam would have to give the port an
-// optional pre-discovered-stories path.
+// must edit the other. Within journey the pre-discovered path exists:
+// gatherEventualFeatureFacts runs one discovery and hands it to both
+// production adapters (discovery.go), while Reconcile alone still
+// discovers for itself.
 type stubReconciler struct{}
 
 // NewStubReconciler returns the production StubReconciler.
 func NewStubReconciler() StubReconciler { return stubReconciler{} }
 
-func (stubReconciler) Reconcile(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.StubReconciliation, error) {
-	ref, err := artifact.ParseRef(spec.ID)
-	if err != nil {
-		return evidence.StubReconciliation{}, fmt.Errorf("journey: parsing spec id %q for stub reconciliation: %w", spec.ID, err)
-	}
-	ix, err := index.Build(root)
-	if err != nil {
-		return evidence.StubReconciliation{}, fmt.Errorf("journey: building index for stub reconciliation: %w", err)
-	}
-	stories, _, _, err := matrixprojection.DiscoverImplementingStories(ctx, root, commit, ref.Name, spec, ix, specstate.NewProjector())
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose), mirroring cmd/verdi/closefeature.go's own reconcileFeatureStubs
-		return evidence.StubReconciliation{}, fmt.Errorf("journey: discovering implementing stories for stub reconciliation: %w", err)
-	}
-	stubStories := make([]evidence.StubStory, 0, len(stories))
-	for _, story := range stories {
-		stubStories = append(stubStories, evidence.StubStory{SpecRef: story.SpecRef, ACIDs: story.ACIDs, Closed: story.Closed})
-	}
-	return evidence.ReconcileStubs(evidence.StubReconcileInput{Spec: spec, Stories: stubStories, Model: mdl})
+func (r stubReconciler) Reconcile(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.StubReconciliation, error) {
+	return r.reconcileDiscovered(spec, mdl, discoverImplementers(ctx, root, commit, spec))
 }
 
 // FeatureFolder is journey's consumer-owned port onto 03 §The feature
@@ -405,39 +388,8 @@ type featureFolder struct{}
 // NewFeatureFolder returns the production FeatureFolder.
 func NewFeatureFolder() FeatureFolder { return featureFolder{} }
 
-func (featureFolder) Fold(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.FeatureResult, error) {
-	ref, err := artifact.ParseRef(spec.ID)
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose), mirroring cmd/verdi/closefeature.go's own foldFeature
-		return evidence.FeatureResult{}, fmt.Errorf("journey: parsing spec id %q for feature fold: %w", spec.ID, err)
-	}
-	ix, err := index.Build(root)
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return evidence.FeatureResult{}, fmt.Errorf("journey: building index for feature fold: %w", err)
-	}
-	_, storiesByAC, _, err := matrixprojection.DiscoverImplementingStories(ctx, root, commit, ref.Name, spec, ix, specstate.NewProjector())
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return evidence.FeatureResult{}, fmt.Errorf("journey: discovering implementing stories for feature fold: %w", err)
-	}
-	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return evidence.FeatureResult{}, fmt.Errorf("journey: loading feature evidence records for the outcome floor: %w", err)
-	}
-	return evidence.FoldFeature(evidence.FeatureInput{
-		Spec:    spec,
-		Stories: storiesByAC,
-		Records: records,
-		// R-RRF-2: closure folds source: ci only — the same authoritative-
-		// only posture cmd/verdi/closefeature.go's foldFeature enforces.
-		Preview:     false,
-		StoreRoot:   root,
-		FeatureSlug: ref.Name,
-		Model:       mdl,
-	})
+func (f featureFolder) Fold(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, mdl *model.Model) (evidence.FeatureResult, error) {
+	return f.foldDiscovered(ctx, root, commit, spec, mdl, discoverImplementers(ctx, root, commit, spec))
 }
 
 // Projector gathers repository and lifecycle facts and (a later stage,

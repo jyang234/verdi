@@ -2,12 +2,14 @@ package specstate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // stubGit is the in-process fake gitReader every projector table test
@@ -50,6 +52,17 @@ func (s stubGit) LsTree(ctx context.Context, dir, ref, path string) ([]string, e
 		panic("stubGit: unexpected LsTree call")
 	}
 	return s.lsTree(ctx, dir, ref, path)
+}
+
+// LsTreeEntries is not modeled: the corpus scan then takes its two plain
+// listings (storeTreePaths), which lsTree answers.
+func (stubGit) LsTreeEntries(ctx context.Context, dir, ref string) ([]gitx.TreeEntry, error) {
+	return nil, errors.New("stubGit: LsTreeEntries is not modeled")
+}
+
+// RepoPrefix is not modeled either, with the same effect.
+func (stubGit) RepoPrefix(ctx context.Context, dir string) (string, error) {
+	return "", errors.New("stubGit: RepoPrefix is not modeled")
 }
 
 // stubCommit is the commit every stubGit resolves the default branch to.
