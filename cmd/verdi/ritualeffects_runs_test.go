@@ -31,7 +31,11 @@ import (
 // TestMain removes), and the other reads them back. Running either test
 // alone runs the table once. A file is kept only when every case ran in
 // every state, so a run cut short, or a -run pattern that selects some
-// cases only, leaves the next test to run the table itself.
+// cases only, leaves the next test to run the table itself. The file
+// lives as long as the test binary, so under -count=N with N above 1 every
+// later iteration judges the first iteration's runs instead of running the
+// table again: the table runs once per test binary, as ledger SI-359 (8)
+// says, never once per iteration (R5c2 review R5C2R-5).
 //
 // The table runs with a process-wide VERDI_GITLOG set, so every gitx call
 // the test process makes is also recorded there (spec/gitx-recorder-seam
@@ -133,7 +137,7 @@ func forEachRitualEffectsRun(t *testing.T, bin string, table map[ws.Verb][]ritua
 	}
 	file := ritualEffectsRunsFile(bin)
 	if kept, ok := readRitualEffectsRuns(t, file, table); ok {
-		t.Logf("judging the %d runs another test made in this test binary (%s; ledger SI-359 (8))", len(kept), file)
+		t.Logf("judging the %d runs kept earlier in this test binary, by the other test or by an earlier -count iteration (%s; ledger SI-359 (8))", len(kept), file)
 		t.Run("cases", func(t *testing.T) {
 			for _, verb := range sortedVerbs(table) {
 				for _, c := range table[verb] {
