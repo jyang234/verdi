@@ -82,6 +82,12 @@ type Fixture struct {
 	Registered string
 	// State is the seeded state Build was asked for.
 	State SeedState
+	// Acting is the checkout the ritual acts on when it is not Dir: a
+	// linked worktree registered before the run, such as a /b/ route's
+	// managed worktree, whose branch @checked-out then names (the
+	// write-scope grammar's "the checkout the ritual acts on"; ledger
+	// SI-348 (4)). "" is Dir. A test sets it after Build, before RunOn.
+	Acting string
 }
 
 // Build returns a fresh Fixture seeded to state: a fixturegit repository

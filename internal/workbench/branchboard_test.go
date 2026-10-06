@@ -3,6 +3,8 @@ package workbench
 import (
 	"context"
 	"errors"
+	"fmt"
+	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // The per-branch fixture specs (spec/draft-boards): two draft feature
@@ -626,12 +629,22 @@ func TestBranchBoard_FailedCut_DisclosedErrorPage(t *testing.T) {
 }
 
 // TestBranchBoard_GitSwitch_RefusesOnFixedBranch: the branch switcher's
-// git-switch action refuses on a per-branch instance — the branch is the
-// address under /b/ (dc-1), and re-pointing the managed worktree would
-// break the seam's branch<->path mapping.
+// git-switch action refuses beneath a per-branch board's /b/ address — the
+// branch is the address (dc-1), and re-pointing the managed worktree would
+// break the seam's branch<->path mapping. Here the managed worktree
+// already exists (an earlier GET cut it), and the refusal leaves it on its
+// branch. design/two-a still has its local ref and is not the serving
+// checkout's branch, so the dispatch's refusedSwitch answers this request
+// before the cached instance sees it. The instance's own guard
+// (actionGitSwitch's fixedBranch refusal) is reached only once
+// refusedSwitch lets a request through, which
+// TestBranchBoard_GitSwitch_InstanceGuardRefuses pins.
 func TestBranchBoard_GitSwitch_RefusesOnFixedBranch(t *testing.T) {
 	root := newBranchBoardFixture(t)
 	h := NewHandler(root)
+	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+		t.Fatalf("GET /b/ board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
 
 	rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/git-switch", `{"branch":"design/two-b"}`)
 	if rec.Code != http.StatusForbidden {
@@ -650,6 +663,542 @@ func TestBranchBoard_GitSwitch_RefusesOnFixedBranch(t *testing.T) {
 	if branch != "design/two-a" {
 		t.Errorf("managed worktree switched to %q", branch)
 	}
+}
+
+// TestBranchBoard_GitSwitch_InstanceGuardRefuses pins the per-branch
+// instance's own refusal (actionGitSwitch on an instance with a
+// fixedBranch), which refusedSwitch otherwise answers first (R3ab review
+// R3-A1). The managed worktree for design/two-a exists and its instance is
+// cached. The branch is then renamed, so design/two-a has no local ref and
+// refusedSwitch lets the switch through to that cached instance. Its guard
+// alone refuses, with 403, and leaves the managed worktree on the renamed
+// branch; without it, the switch would re-point the worktree.
+func TestBranchBoard_GitSwitch_InstanceGuardRefuses(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+		t.Fatalf("GET /b/ board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	wt := filepath.Join(root, ".verdi", "data", "worktrees", "two-a")
+	runGitBB(t, root, "branch", "-m", "design/two-a", "design/renamed")
+	if branch, err := gitx.CurrentBranch(ctx, wt); err != nil || branch != "design/renamed" {
+		t.Fatalf("after the rename the managed worktree is on %q (%v), want design/renamed", branch, err)
+	}
+	if local, err := gitx.HasLocalBranch(ctx, root, "design/two-a"); err != nil || local {
+		t.Fatalf("design/two-a still resolves locally (%v, %v), so refusedSwitch would answer first", local, err)
+	}
+
+	rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/git-switch", `{"branch":"design/two-b"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("git-switch on the cached per-branch instance = %d, want 403\n%s", rec.Code, rec.Body.String())
+	}
+	if want := fmt.Sprintf(fixedBranchSwitchRefusal, "design/two-a"); !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("git-switch refusal = %s, want %q", rec.Body.String(), want)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, wt); err != nil || branch != "design/renamed" {
+		t.Errorf("the managed worktree is on %q (%v) after the refused switch, want design/renamed", branch, err)
+	}
+	assertServingCheckoutClean(t, root)
+}
+
+// TestBranchBoard_GitSwitch_RefusesABranchCheckedOutElsewhere pins
+// git-switch for a branch checked out in another, unmanaged linked
+// worktree (R3ab review R3-A3; ledger SI-347). The dispatch refuses it
+// with 409 naming the holding worktree, as it refuses every /b/ route in
+// that state, so the serving checkout, to which the dispatch would
+// otherwise hand the request, keeps its branch, and nothing is cut.
+func TestBranchBoard_GitSwitch_RefusesABranchCheckedOutElsewhere(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	runGitBB(t, root, "worktree", "add", "--quiet", elsewhere, "design/two-b")
+	// The serving checkout carries draft-a and is not on main, so a switch
+	// it served would show.
+	runGitBB(t, root, "checkout", "--quiet", "design/draft-a")
+	before := repoGitState(t, root)
+
+	rec := bPost(t, NewHandler(root), "/b/design%2Ftwo-b/board/spec/draft-a/api/git-switch", `{"branch":"main"}`)
+	if want := fmt.Sprintf(heldElsewhereRefusal, "design/two-b", resolvedPath(t, elsewhere)); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("git-switch for a branch checked out elsewhere = %d %s, want 409 %q", rec.Code, rec.Body.String(), want)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, root); err != nil || branch != "design/draft-a" {
+		t.Errorf("the serving checkout is on %q (%v) after the refused switch, want design/draft-a", branch, err)
+	}
+	if branch, err := gitx.CurrentBranch(ctx, elsewhere); err != nil || branch != "design/two-b" {
+		t.Errorf("the other worktree is on %q (%v) after the refused switch, want design/two-b", branch, err)
+	}
+	if after := repoGitState(t, root); after != before {
+		t.Errorf("the refused switch changed git state:\nbefore\n%s\nafter\n%s", before, after)
+	}
+}
+
+// resolvedPath is path with its symbolic links resolved, as git reports a
+// worktree's path (a macOS temporary directory resolves under /private).
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+// workState is a checkout's working-tree and index state: git's porcelain
+// status, untracked files listed one by one.
+func workState(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.CommandContext(context.Background(), "git", "-C", dir, "status", "--porcelain=v1", "-z", "--untracked-files=all").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status in %s: %v\n%s", dir, err, out)
+	}
+	return string(out)
+}
+
+// TestBranchBoard_CheckedOutElsewhere_EveryRouteClassRefuses is ledger
+// SI-347 (backlog BL-150): a /b/ branch is answered by the serving
+// instance only when the serving checkout itself holds it. When another
+// worktree holds it — an unmanaged linked worktree, or a managed worktree
+// another serve cut under its own root — every /b/ route refuses before
+// any mutation, with a 409 naming the holding worktree's path, through the
+// per-branch notice the dispatch already answers with (a JSON error on a
+// JSON route, the disclosed error page on a page). One route per class is
+// pinned: the board page, a typed mutation, the branch switch, and Commit
+// and push. The serving checkout is on design/draft-a with work of its
+// own, so a request the serving instance answered (the defect: git 2.34
+// reports a branch checked out elsewhere as git's own "already checked
+// out", which read as checked out here) would commit, push, or switch
+// there. Each refuses before any mutation in SI-354 (1c)'s sense: no ref,
+// worktree registration (the worktree list and admin entries), or index
+// changes, neither checkout's working tree changes, and no managed
+// worktree is cut under the serving root.
+func TestBranchBoard_CheckedOutElsewhere_EveryRouteClassRefuses(t *testing.T) {
+	holders := []struct {
+		name string
+		// hold checks design/two-b out somewhere other than root and
+		// returns that worktree's path.
+		hold func(t *testing.T, root string) string
+	}{
+		{"an unmanaged linked worktree", func(t *testing.T, root string) string {
+			elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+			runGitBB(t, root, "worktree", "add", "--quiet", elsewhere, "design/two-b")
+			return elsewhere
+		}},
+		{"another serve's managed worktree", func(t *testing.T, root string) string {
+			other := filepath.Join(t.TempDir(), "other-serve")
+			runGitBB(t, root, "worktree", "add", "--quiet", "-b", "other-serve", other, "main")
+			path, err := wtmanager.EnsureWorktree(context.Background(), other, "design/two-b")
+			if err != nil {
+				t.Fatalf("EnsureWorktree under the other serve's root: %v", err)
+			}
+			return path
+		}},
+	}
+	classes := []struct {
+		name, method, target, body string
+	}{
+		{"the board page", http.MethodGet, "/b/design%2Ftwo-b/board/spec/draft-a", ""},
+		{"a typed mutation", http.MethodPost, "/b/design%2Ftwo-b/board/spec/draft-a/api/mutate_draft", `{}`},
+		{"the branch switch", http.MethodPost, "/b/design%2Ftwo-b/board/spec/draft-a/api/git-switch", `{"branch":"main"}`},
+		{"Commit and push", http.MethodPost, "/b/design%2Ftwo-b/board/spec/draft-a/api/git-commit", `{"message":"would commit the serving checkout"}`},
+	}
+	for _, holder := range holders {
+		for _, class := range classes {
+			t.Run(holder.name+"/"+class.name, func(t *testing.T) {
+				root := newBranchBoardFixture(t)
+				held := resolvedPath(t, holder.hold(t, root))
+				runGitBB(t, root, "checkout", "--quiet", "design/draft-a")
+				if err := os.WriteFile(filepath.Join(root, "serving-work.txt"), []byte("the serving checkout's own work\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				gitBefore, servingBefore, heldBefore := repoGitState(t, root), workState(t, root), workState(t, held)
+
+				rec := httptest.NewRecorder()
+				NewHandler(root).ServeHTTP(rec, httptest.NewRequest(class.method, class.target, strings.NewReader(class.body)))
+
+				want := fmt.Sprintf(heldElsewhereRefusal, "design/two-b", held)
+				if class.method == http.MethodGet {
+					want = stdhtml.EscapeString(want)
+				}
+				if got := rec.Body.String(); rec.Code != http.StatusConflict || !strings.Contains(got, want) {
+					t.Fatalf("%s %s = %d %s, want 409 naming %q", class.method, class.target, rec.Code, got, want)
+				}
+				if after := repoGitState(t, root); after != gitBefore {
+					t.Errorf("the refusal changed git state:\nbefore\n%s\nafter\n%s", gitBefore, after)
+				}
+				if after := workState(t, root); after != servingBefore {
+					t.Errorf("the refusal changed the serving checkout's work: before %q after %q", servingBefore, after)
+				}
+				if after := workState(t, held); after != heldBefore {
+					t.Errorf("the refusal changed the holding worktree's work: before %q after %q", heldBefore, after)
+				}
+				if branch, err := gitx.CurrentBranch(context.Background(), root); err != nil || branch != "design/draft-a" {
+					t.Errorf("the serving checkout is on %q (%v), want design/draft-a", branch, err)
+				}
+				if _, err := os.Stat(wtmanager.WorktreePath(root, "design/two-b")); !os.IsNotExist(err) {
+					t.Errorf("the refusal cut a managed worktree under the serving root (stat err %v)", err)
+				}
+			})
+		}
+	}
+}
+
+// TestBranchBoards_HeldElsewhere is heldElsewhere's table: it names the
+// worktree holding branch only when that worktree is neither the serving
+// checkout nor the branch's own managed worktree, and fails on a root git
+// cannot read.
+func TestBranchBoards_HeldElsewhere(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	runGitBB(t, root, "worktree", "add", "--quiet", elsewhere, "design/two-b")
+	if _, err := wtmanager.EnsureWorktree(ctx, root, "design/two-a"); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, root, branch, want string
+		wantErr                  bool
+	}{
+		{"the serving checkout's own branch", root, "main", "", false},
+		{"the branch's own managed worktree", root, "design/two-a", "", false},
+		{"a local branch checked out nowhere", root, "design/draft-a", "", false},
+		{"a remote-only branch", root, "design/remote-only", "", false},
+		{"an absent branch", root, "design/never-existed", "", false},
+		{"an unmanaged linked worktree", root, "design/two-b", resolvedPath(t, elsewhere), false},
+		{"a root git cannot read", t.TempDir(), "design/two-b", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newBranchBoards(tt.root, Deps{}, nil).heldElsewhere(ctx, tt.branch)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("heldElsewhere(%s) error = %v, want error %v", tt.branch, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("heldElsewhere(%s) = %q, want %q", tt.branch, got, tt.want)
+			}
+		})
+	}
+}
+
+// repoGitState is everything a /b/ request could mutate in git: every ref
+// with its object, the linked-worktree list, and the worktree admin
+// entries under the git directory.
+func repoGitState(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	for _, args := range [][]string{
+		{"for-each-ref", "--format=%(refname) %(objectname)"},
+		{"worktree", "list", "--porcelain"},
+	} {
+		out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		b.Write(out)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".git", "worktrees"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b.WriteString("admin " + e.Name() + "\n")
+	}
+	return b.String()
+}
+
+// TestBranchBoard_GitSwitch_FirstUseRefusesBeforeTheCut is ledger SI-341
+// (3): a branch switch beneath /b/ for a local branch that is not the
+// serving checkout's own can only be refused (the branch is the address),
+// so the dispatch refuses it before ensuring the branch's managed worktree.
+// The refused first use leaves no worktree, no ref, and no worktree admin
+// entry: a mutation that a refusal leaves behind is outside every
+// declaration (SI-325 (3)). The same request on a remote-only or absent
+// branch keeps its own answer, and on the branch checked out at the serving
+// root it still reaches the serving instance and switches.
+func TestBranchBoard_GitSwitch_FirstUseRefusesBeforeTheCut(t *testing.T) {
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	before := repoGitState(t, root)
+
+	rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/git-switch", `{"branch":"design/two-b"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("first-use git-switch on a /b/ board = %d, want 403\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "the branch is the address") {
+		t.Errorf("git-switch refusal is not disclosed: %s", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "data", "worktrees", "two-a")); !os.IsNotExist(err) {
+		t.Errorf("the refused switch cut the managed worktree (stat err %v)", err)
+	}
+	if after := repoGitState(t, root); after != before {
+		t.Errorf("the refused switch changed git state:\nbefore\n%s\nafter\n%s", before, after)
+	}
+	assertServingCheckoutClean(t, root)
+
+	for _, tc := range []struct {
+		name, target string
+		want         int
+		words        string
+	}{
+		{"a remote-only branch keeps its sealed refusal", "/b/design%2Fremote-only/board/spec/remote-spec/api/git-switch", http.StatusForbidden, "remote-tracking"},
+		{"an absent branch keeps its disclosed 404", "/b/design%2Fnever-existed/board/spec/whatever/api/git-switch", http.StatusNotFound, "no longer resolves"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := bPost(t, h, tc.target, `{"branch":"main"}`)
+			if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.words) {
+				t.Fatalf("POST %s = %d %s, want %d naming %q", tc.target, rec.Code, rec.Body.String(), tc.want, tc.words)
+			}
+		})
+	}
+
+	t.Run("the branch checked out at the serving root still switches", func(t *testing.T) {
+		if err := gitx.Checkout(context.Background(), root, "design/two-b"); err != nil {
+			t.Fatalf("checkout design/two-b: %v", err)
+		}
+		rec := bPost(t, NewHandler(root), "/b/design%2Ftwo-b/board/spec/draft-b/api/git-switch", `{"branch":"main"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("git-switch beneath the serving checkout's own /b/ address = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		assertServingCheckoutClean(t, root)
+	})
+}
+
+// TestBranchBoards_RefusedSwitch is refusedSwitch's table: it answers only
+// a POST api/git-switch, refuses a local branch other than the serving
+// checkout's own with the per-branch instance's 403, lets the serving
+// checkout's branch and a branch with no local ref through, and refuses
+// with a 500 naming the failure when the branch cannot be read. Nothing it
+// answers cuts a worktree.
+func TestBranchBoards_RefusedSwitch(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"README.md": "x\n"}, Message: "seed"}})
+	runGitBB(t, repo.Dir, "branch", "design/other")
+	routes := map[string]boardSpecRoute{}
+	for _, rt := range boardSpecRoutes() {
+		routes[rt.suffix] = rt
+	}
+	tests := []struct {
+		name     string
+		root     string
+		suffix   string
+		method   string
+		action   string
+		branch   string
+		answered bool
+		code     int
+		words    string
+	}{
+		{"a local branch other than the serving one is refused", repo.Dir, routeBoardAPI, http.MethodPost, "git-switch", "design/other", true, http.StatusForbidden, "the branch is the address"},
+		{"the serving checkout's own branch falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-switch", "main", false, 0, ""},
+		{"a branch with no local ref falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-switch", "design/absent", false, 0, ""},
+		{"another api action falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-commit", "design/other", false, 0, ""},
+		{"a GET falls through", repo.Dir, routeBoardAPI, http.MethodGet, "git-switch", "design/other", false, 0, ""},
+		{"another route falls through", repo.Dir, routeBoardPage, http.MethodPost, "git-switch", "design/other", false, 0, ""},
+		{"an unreadable branch refuses naming the failure", t.TempDir(), routeBoardAPI, http.MethodPost, "git-switch", "design/other", true, http.StatusInternalServerError, "could not resolve branch design/other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newBranchBoards(tt.root, Deps{}, nil)
+			req := httptest.NewRequest(tt.method, "/b/x/board/spec/s/api/"+tt.action, strings.NewReader(`{"branch":"main"}`))
+			req.SetPathValue("branch", tt.branch)
+			req.SetPathValue("action", tt.action)
+			rec := httptest.NewRecorder()
+			got := b.refusedSwitch(rec, req, tt.branch, routes[tt.suffix])
+			if got != tt.answered {
+				t.Fatalf("refusedSwitch = %v, want %v (answer %d %s)", got, tt.answered, rec.Code, rec.Body.String())
+			}
+			if tt.answered && (rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.words)) {
+				t.Fatalf("answer = %d %s, want %d naming %q", rec.Code, rec.Body.String(), tt.code, tt.words)
+			}
+			if !tt.answered && rec.Body.Len() != 0 {
+				t.Fatalf("refusedSwitch wrote %q while letting the request through", rec.Body.String())
+			}
+			if _, err := os.Stat(filepath.Join(tt.root, ".verdi", "data", "worktrees")); !os.IsNotExist(err) {
+				t.Fatalf("refusedSwitch touched the worktrees zone (stat err %v)", err)
+			}
+		})
+	}
+}
+
+// TestBranchBoard_GitCommit_FirstUseRefusesBeforeTheCut is ledger SI-348
+// (3): Commit and push beneath /b/ on a branch whose managed worktree is
+// not cut yet has nothing to commit (a fresh worktree is the branch's own
+// tree), so the dispatch refuses it with 400 before ensuring the
+// worktree, leaving no worktree, ref, or admin entry: a cut left behind a
+// refusal is outside every declaration (SI-325 (3)). Once the worktree
+// exists the request reaches the branch's own instance as before and
+// commits a change made there; the serving checkout's own branch is
+// committed by the serving instance, with no cut; and a remote-only or
+// absent branch keeps its own answer.
+func TestBranchBoard_GitCommit_FirstUseRefusesBeforeTheCut(t *testing.T) {
+	ctx := context.Background()
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	before := repoGitState(t, root)
+	commit := "/b/design%2Fdraft-a/board/spec/draft-a/api/git-commit"
+
+	rec := bPost(t, h, commit, `{"message":"first use"}`)
+	if want := fmt.Sprintf(firstUseCommitRefusal, "design/draft-a"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("first-use git-commit = %d %s, want 400 %q", rec.Code, rec.Body.String(), want)
+	}
+	if _, err := os.Stat(wtmanager.WorktreePath(root, "design/draft-a")); !os.IsNotExist(err) {
+		t.Errorf("the refused first-use commit cut the managed worktree (stat err %v)", err)
+	}
+	if after := repoGitState(t, root); after != before {
+		t.Errorf("the refused first-use commit changed git state:\nbefore\n%s\nafter\n%s", before, after)
+	}
+	assertServingCheckoutClean(t, root)
+
+	t.Run("an existing managed worktree commits its change", func(t *testing.T) {
+		if rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+			t.Fatalf("GET /b/ board = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		wt := wtmanager.WorktreePath(root, "design/draft-a")
+		tip, err := gitx.RevParse(ctx, root, "refs/heads/design/draft-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(wt, ".verdi", "specs", "active", "draft-a", "notes.md"), []byte("a board change\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if rec := bPost(t, h, commit, `{"message":"commit the board change"}`); rec.Code != http.StatusOK {
+			t.Fatalf("git-commit on an existing managed worktree = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if after, err := gitx.RevParse(ctx, root, "refs/heads/design/draft-a"); err != nil || after == tip {
+			t.Errorf("design/draft-a is at %s (%v) after the commit, want it moved from %s", after, err, tip)
+		}
+		if branch, err := gitx.CurrentBranch(ctx, root); err != nil || branch != "main" {
+			t.Errorf("the serving checkout is on %q (%v) after the commit, want main", branch, err)
+		}
+		if dirty, err := gitx.StatusDirty(ctx, root); err != nil || dirty {
+			t.Errorf("the serving checkout is dirty (%v, %v) after the managed worktree's commit", dirty, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name, target string
+		want         int
+		words        string
+	}{
+		{"a remote-only branch keeps its sealed refusal", "/b/design%2Fremote-only/board/spec/remote-spec/api/git-commit", http.StatusForbidden, "remote-tracking"},
+		{"an absent branch keeps its disclosed 404", "/b/design%2Fnever-existed/board/spec/whatever/api/git-commit", http.StatusNotFound, "no longer resolves"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := bPost(t, h, tc.target, `{"message":"m"}`)
+			if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.words) {
+				t.Fatalf("POST %s = %d %s, want %d naming %q", tc.target, rec.Code, rec.Body.String(), tc.want, tc.words)
+			}
+		})
+	}
+
+	t.Run("the branch checked out at the serving root commits there, with no cut", func(t *testing.T) {
+		if err := gitx.Checkout(ctx, root, "design/two-b"); err != nil {
+			t.Fatalf("checkout design/two-b: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".verdi", "specs", "active", "draft-b", "notes.md"), []byte("a serving change\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec := bPost(t, NewHandler(root), "/b/design%2Ftwo-b/board/spec/draft-b/api/git-commit", `{"message":"serving commit"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("git-commit beneath the serving checkout's own /b/ address = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if _, err := os.Stat(wtmanager.WorktreePath(root, "design/two-b")); !os.IsNotExist(err) {
+			t.Errorf("a worktree was cut for the branch checked out at the serving root (stat err %v)", err)
+		}
+	})
+}
+
+// TestBranchBoards_RefusedFirstUseCommit is refusedFirstUseCommit's
+// table: it answers only a POST api/git-commit, refuses a local branch
+// other than the serving checkout's own whose managed worktree is not cut,
+// and lets through the serving checkout's branch, a branch whose worktree
+// exists, a branch with no local ref, every other action, method, and
+// route; a branch it cannot read refuses with a 500 naming the failure.
+// Nothing it answers cuts a worktree.
+func TestBranchBoards_RefusedFirstUseCommit(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"README.md": "x\n"}, Message: "seed"}})
+	runGitBB(t, repo.Dir, "branch", "design/other")
+	runGitBB(t, repo.Dir, "branch", "design/cut")
+	cutRoot := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"README.md": "x\n"}, Message: "seed"}})
+	runGitBB(t, cutRoot.Dir, "branch", "design/cut")
+	if _, err := wtmanager.EnsureWorktree(context.Background(), cutRoot.Dir, "design/cut"); err != nil {
+		t.Fatal(err)
+	}
+	routes := map[string]boardSpecRoute{}
+	for _, rt := range boardSpecRoutes() {
+		routes[rt.suffix] = rt
+	}
+	tests := []struct {
+		name     string
+		root     string
+		suffix   string
+		method   string
+		action   string
+		branch   string
+		answered bool
+		code     int
+		words    string
+	}{
+		{"a local branch with no managed worktree is refused", repo.Dir, routeBoardAPI, http.MethodPost, "git-commit", "design/other", true, http.StatusBadRequest, fmt.Sprintf(firstUseCommitRefusal, "design/other")},
+		{"a branch whose managed worktree exists falls through", cutRoot.Dir, routeBoardAPI, http.MethodPost, "git-commit", "design/cut", false, 0, ""},
+		{"the serving checkout's own branch falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-commit", "main", false, 0, ""},
+		{"a branch with no local ref falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-commit", "design/absent", false, 0, ""},
+		{"another api action falls through", repo.Dir, routeBoardAPI, http.MethodPost, "git-switch", "design/other", false, 0, ""},
+		{"a GET falls through", repo.Dir, routeBoardAPI, http.MethodGet, "git-commit", "design/other", false, 0, ""},
+		{"another route falls through", repo.Dir, routeBoardPage, http.MethodPost, "git-commit", "design/other", false, 0, ""},
+		{"an unreadable branch refuses naming the failure", t.TempDir(), routeBoardAPI, http.MethodPost, "git-commit", "design/other", true, http.StatusInternalServerError, "could not resolve branch design/other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newBranchBoards(tt.root, Deps{}, nil)
+			req := httptest.NewRequest(tt.method, "/b/x/board/spec/s/api/"+tt.action, strings.NewReader(`{"message":"m"}`))
+			req.SetPathValue("branch", tt.branch)
+			req.SetPathValue("action", tt.action)
+			rec := httptest.NewRecorder()
+			got := b.refusedFirstUseCommit(rec, req, tt.branch, routes[tt.suffix])
+			if got != tt.answered {
+				t.Fatalf("refusedFirstUseCommit = %v, want %v (answer %d %s)", got, tt.answered, rec.Code, rec.Body.String())
+			}
+			if tt.answered && (rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.words)) {
+				t.Fatalf("answer = %d %s, want %d naming %q", rec.Code, rec.Body.String(), tt.code, tt.words)
+			}
+			if !tt.answered && rec.Body.Len() != 0 {
+				t.Fatalf("refusedFirstUseCommit wrote %q while letting the request through", rec.Body.String())
+			}
+			if tt.root != cutRoot.Dir {
+				if _, err := os.Stat(filepath.Join(tt.root, ".verdi", "data", "worktrees")); !os.IsNotExist(err) {
+					t.Fatalf("refusedFirstUseCommit touched the worktrees zone (stat err %v)", err)
+				}
+			}
+		})
+	}
+}
+
+// TestBranchBoard_FirstUseCutsTheWorktreeOnEveryOtherRoute: every other
+// /b/ route, and every other api action, still ensures the branch's
+// managed worktree on first use, whatever it then answers — only the
+// branch switch (SI-341 (3)) and Commit and push (SI-348 (3)) refuse
+// before the cut.
+func TestBranchBoard_FirstUseCutsTheWorktreeOnEveryOtherRoute(t *testing.T) {
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	path := strings.NewReplacer("{name}", "landed-spec", "{action}", "sticky")
+	for i, rt := range boardSpecRoutes() {
+		t.Run(rt.suffix, func(t *testing.T) {
+			name := fmt.Sprintf("first-use-%d", i)
+			runGitBB(t, root, "branch", "design/"+name, "main")
+			target := "/b/design%2F" + name + path.Replace(rt.suffix)
+			rec := httptest.NewRecorder()
+			if rt.suffix == routeBoardAPI {
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{}`)))
+			} else {
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			}
+			if _, err := os.Stat(filepath.Join(root, ".verdi", "data", "worktrees", name)); err != nil {
+				t.Errorf("%s (answered %d) did not cut the managed worktree on first use: %v", target, rec.Code, err)
+			}
+		})
+	}
+	assertServingCheckoutClean(t, root)
 }
 
 // TestBranchBoard_ReuseAcrossRequests: the second open reuses the cut

@@ -4,8 +4,8 @@
 // fact-gathering (R-RR3-5) can never diverge (CLAUDE.md: "anything used
 // by two or more packages lives in a shared internal/ package").
 //
-// It is a pure move of cmd/verdi's own resolveBranchBase's resolution
-// logic (cmd/verdi/design.go), split from that function's own disclosure
+// It is a pure move of cmd/verdi's own resolveBranchBaseResolution's
+// resolution logic (cmd/verdi/design.go), split from its own disclosure
 // printing: this package returns structured facts only and performs no
 // I/O beyond the read-only git/store calls needed to compute them, and
 // never prints anything.
@@ -52,7 +52,7 @@ type Resolution struct {
 	Commit string
 }
 
-// Resolve implements cmd/verdi's own resolveBranchBase resolution rule
+// Resolve implements cmd/verdi's own resolveBranchBaseResolution rule
 // (dc-7/I-130): first specstate.ResolveDefaultBranch; when that fails,
 // distinguish "no origin remote at all" (the disclosed HEAD fallback)
 // from "origin exists but the default branch is unresolvable or

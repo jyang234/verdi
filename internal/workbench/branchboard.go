@@ -19,6 +19,13 @@
 //   - branch checked out at the serving root -> the serving checkout's own
 //     board instance: that checkout IS the branch's working tree, so the
 //     one instance (and its write serialization) serves both addresses;
+//   - branch checked out in any other worktree (an unmanaged linked one, or
+//     another serve's managed one) -> refused with 409 before any
+//     mutation, naming that worktree (ledger SI-347): it is another
+//     checkout's working tree, served by neither instance; a worktree
+//     mid-rebase or mid-bisect on the branch, which porcelain reports
+//     detached, holds it too, and git's own in-use answer at the cut is
+//     the same 409 (SI-354 (1));
 //   - remote-tracking ref only   -> a sealed read-only render of that
 //     ref's committed content, remoteness disclosed, no worktree cut, no
 //     local branch minted (dc-4);
@@ -34,11 +41,13 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/pathcanon"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
@@ -60,11 +69,11 @@ type branchBoards struct {
 	deps Deps
 
 	// serving is the unprefixed routes' own board instance. When a /b/
-	// branch is already checked out at the serving root itself
-	// (wtmanager.ErrCheckedOutHere), that checkout IS the branch's working
-	// tree, so requests dispatch into this same instance — same tree, same
-	// writeMu — rather than erroring or minting a second writer over the
-	// same files.
+	// branch is checked out at the serving root itself (git's in-use
+	// answer, wtmanager.ErrCheckedOutHere, with the serving checkout on the
+	// branch), that checkout IS the branch's working tree, so requests
+	// dispatch into this same instance — same tree, same writeMu — rather
+	// than erroring or minting a second writer over the same files.
 	serving *boardSpecServer
 
 	// mu guards servers. Per-branch instances are singletons: the board's
@@ -121,12 +130,18 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 			b.renderBranchGone(w, r, branch, rt)
 			return
 		}
+		if b.refusedElsewhere(w, r, branch, rt) {
+			return
+		}
+		if b.refusedSwitch(w, r, branch, rt) || b.refusedFirstUseCommit(w, r, branch, rt) {
+			return
+		}
 		s, err := b.server(r.Context(), branch)
 		switch {
 		case err == nil:
 			rt.handler(s)(w, r)
 		case errors.Is(err, wtmanager.ErrCheckedOutHere):
-			rt.handler(b.serving)(w, r)
+			b.serveCheckedOutHere(w, r, branch, rt)
 		case errors.Is(err, wtmanager.ErrNotLocalBranch):
 			b.serveRemoteOrGone(w, r, branch, rt)
 		default:
@@ -136,6 +151,184 @@ func (b *branchBoards) dispatch(rt boardSpecRoute) http.HandlerFunc {
 		}
 	}
 }
+
+// refusedSwitch answers a branch switch (POST api/git-switch) beneath /b/
+// for a local branch that is not the serving checkout's own, before
+// dispatch ensures that branch's managed worktree, and reports whether it
+// answered. Such a board's instance always refuses the switch (the branch
+// is the address, dc-1; actionGitSwitch), so ensuring the worktree first
+// would leave a cut behind a refusal, a mutation a refusal never leaves
+// (ledger SI-341 (3), SI-325 (3)). The branch checked out at the serving
+// root dispatches into the serving instance, which can switch; a branch
+// with no local ref keeps its remote-only or no-ref answer. Both fall
+// through. A failed read refuses too, before any mutation, naming the
+// failure.
+func (b *branchBoards) refusedSwitch(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	if rt.suffix != routeBoardAPI || r.Method != http.MethodPost || r.PathValue("action") != "git-switch" {
+		return false
+	}
+	ctx := r.Context()
+	local, err := gitx.HasLocalBranch(ctx, b.root, branch)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve branch %s before a branch switch: %v", branch, err))
+		return true
+	}
+	if !local {
+		return false
+	}
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before a branch switch: %v", err))
+		return true
+	}
+	if current == branch {
+		return false
+	}
+	// The per-branch instance's own refusal (actionGitSwitch), answered
+	// before any worktree is cut.
+	writeJSONError(w, http.StatusForbidden, fmt.Sprintf(fixedBranchSwitchRefusal, branch))
+	return true
+}
+
+// refusedFirstUseCommit answers Commit and push (POST api/git-commit)
+// beneath /b/ for a local branch that is not the serving checkout's own and
+// whose managed worktree is not cut yet, before dispatch ensures it, and
+// reports whether it answered (ledger SI-348 (3)). A freshly cut managed
+// worktree is exactly the branch's own tree, so the commit could only fail
+// with nothing to commit: ensuring the worktree first would leave a cut
+// behind that refusal, a mutation a refusal never leaves (SI-325 (3)). The
+// refusal is the instance's own nothing-to-commit answer, 400, given
+// before the cut. A branch whose managed worktree exists reaches its own
+// instance as before; the serving checkout's branch reaches the serving
+// instance; a branch with no local ref keeps its remote-only or no-ref
+// answer. A failed read refuses too, before any mutation, naming the
+// failure.
+func (b *branchBoards) refusedFirstUseCommit(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	if rt.suffix != routeBoardAPI || r.Method != http.MethodPost || r.PathValue("action") != "git-commit" {
+		return false
+	}
+	if _, err := os.Stat(wtmanager.WorktreePath(b.root, branch)); err == nil {
+		return false
+	}
+	ctx := r.Context()
+	local, err := gitx.HasLocalBranch(ctx, b.root, branch)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve branch %s before a commit: %v", branch, err))
+		return true
+	}
+	if !local {
+		return false
+	}
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before a commit: %v", err))
+		return true
+	}
+	if current == branch {
+		return false
+	}
+	writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(firstUseCommitRefusal, branch))
+	return true
+}
+
+// firstUseCommitRefusal is the refusal of Commit and push on a /b/ board
+// whose managed worktree is not cut yet, formatted with its branch.
+const firstUseCommitRefusal = "nothing to commit: branch %s has no working tree of its own here yet, so it carries no uncommitted change; open its board, make a change, then commit"
+
+// refusedElsewhere answers every /b/ request for a branch checked out in a
+// worktree other than the serving checkout and the branch's own managed
+// worktree, and reports whether it answered (ledger SI-347; backlog
+// BL-150). Only the serving checkout's own branch is served by the serving
+// instance, and only the managed worktree's own branch by its per-branch
+// instance; any other holder — an unmanaged linked worktree, or a managed
+// worktree another serve cut under its own root — is another checkout's
+// working tree, which this server neither serves nor mutates. So the
+// request is refused with 409 before any mutation, naming that worktree,
+// through the same per-branch notice a failed cut answers with. A failed
+// read refuses too, before any mutation, naming the failure.
+func (b *branchBoards) refusedElsewhere(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) bool {
+	holder, err := b.heldElsewhere(r.Context(), branch)
+	if err != nil {
+		b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not resolve where branch %s is checked out before serving its board: %v", branch, err))
+		return true
+	}
+	if holder == "" {
+		return false
+	}
+	b.renderBranchNotice(w, r, rt, http.StatusConflict, fmt.Sprintf(heldElsewhereRefusal, branch, holder))
+	return true
+}
+
+// heldElsewhereRefusal is the refusal of a /b/ request for a branch checked
+// out in another worktree, formatted with the branch and that worktree's
+// path as git reports it.
+const heldElsewhereRefusal = "branch %s is checked out in another worktree, %s: this server serves a branch only from its own checkout or from the branch's managed worktree under its own data zone, so it refuses rather than read or change another checkout's files; open the branch's board from a serve rooted in that worktree, or check the branch out somewhere else first"
+
+// heldElsewhere returns the path, as git reports it, of the worktree that
+// has branch checked out when that worktree is neither the serving
+// checkout nor branch's own managed worktree under the serving root, and
+// "" otherwise: when the serving checkout holds branch (the same test
+// gitx.WorktreeAdd makes before reporting it checked out here), when its
+// managed worktree does, and when no worktree does. Two read-only git
+// calls; nothing is written.
+func (b *branchBoards) heldElsewhere(ctx context.Context, branch string) (string, error) {
+	current, err := gitx.CurrentBranch(ctx, b.root)
+	if err != nil {
+		return "", err
+	}
+	if current == branch {
+		return "", nil
+	}
+	entries, err := gitx.WorktreeList(ctx, b.root)
+	if err != nil {
+		return "", err
+	}
+	managed := pathcanon.Canonical(wtmanager.WorktreePath(b.root, branch))
+	for _, e := range entries {
+		if e.Branch != branch {
+			continue
+		}
+		if pathcanon.Canonical(e.Path) == managed {
+			return "", nil
+		}
+		return e.Path, nil
+	}
+	return "", nil
+}
+
+// serveCheckedOutHere answers wtmanager's ErrCheckedOutHere: git refused
+// the cut because branch is in use by a worktree (ledger SI-354 (1)). Only
+// when the serving checkout itself is on branch is that checkout the
+// branch's working tree, so only then does the serving instance answer.
+// Any other holder is SI-347's refusal, a 409 given before any mutation: a
+// worktree mid-rebase or mid-bisect on branch, which porcelain reports
+// detached, so refusedElsewhere could not name it; git names it in its own
+// refusal, which the worktree-manager seam does not carry, so the answer
+// states that git reports the branch in use by another worktree. A failed
+// read refuses too, before any mutation, naming the failure.
+func (b *branchBoards) serveCheckedOutHere(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) {
+	current, err := gitx.CurrentBranch(r.Context(), b.root)
+	if err != nil {
+		b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not resolve the serving checkout's branch before serving branch %s's board: %v", branch, err))
+		return
+	}
+	if current != branch {
+		b.renderBranchNotice(w, r, rt, http.StatusConflict, fmt.Sprintf(inUseElsewhereRefusal, branch))
+		return
+	}
+	rt.handler(b.serving)(w, r)
+}
+
+// inUseElsewhereRefusal is SI-347's refusal of a /b/ request for a branch
+// git reports in use by another worktree that porcelain does not list as
+// holding it (ledger SI-354 (1)), formatted with the branch.
+const inUseElsewhereRefusal = "git reports branch %s in use by another worktree (checked out there, or mid-rebase or mid-bisect on it), though no worktree lists it as its branch: this server serves a branch only from its own checkout or from the branch's managed worktree under its own data zone, so it refuses rather than read or change another checkout's files; finish or abort that worktree's rebase or bisect, or open the branch's board from a serve rooted in that worktree"
+
+// fixedBranchSwitchRefusal is the one refusal of a branch switch on a
+// per-branch board, formatted with that board's branch: actionGitSwitch
+// answers it on the branch's own instance, and refusedSwitch answers it
+// before the instance's worktree is ever cut.
+const fixedBranchSwitchRefusal = "this board serves branch %s at its own /b/ address — the branch is the address here, so switching this working tree is not available; open the other branch's board from the directory instead"
 
 // validBranchSegment reports whether branch (the decoded path segment) is
 // shaped like a name git could hold: no empty, "." or ".." path segments.
@@ -336,12 +529,19 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 // real local branch failed, and the failure is named to the human instead
 // of buried in a log behind a dead link.
 func (b *branchBoards) renderCutFailure(w http.ResponseWriter, r *http.Request, branch string, err error, rt boardSpecRoute) {
-	msg := fmt.Sprintf("could not prepare the working tree for branch %s: %v", branch, err)
+	b.renderBranchNotice(w, r, rt, http.StatusInternalServerError, fmt.Sprintf("could not prepare the working tree for branch %s: %v", branch, err))
+}
+
+// renderBranchNotice is the per-branch notice a /b/ route answers with when
+// the dispatch refuses it or fails before reaching a board instance: a
+// JSON route gets the JSON error shape, a page the disclosed error page,
+// both at status and naming msg.
+func (b *branchBoards) renderBranchNotice(w http.ResponseWriter, r *http.Request, rt boardSpecRoute, status int, msg string) {
 	if rt.json {
-		writeJSONError(w, http.StatusInternalServerError, msg)
+		writeJSONError(w, status, msg)
 		return
 	}
-	renderError(r.Context(), w, b.root, http.StatusInternalServerError, errors.New(msg))
+	renderError(r.Context(), w, b.root, status, errors.New(msg))
 }
 
 // renderBranchGone is dc-4's no-ref shape: the disclosed notice page —

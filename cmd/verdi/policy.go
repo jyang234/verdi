@@ -248,11 +248,13 @@ func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, s
 		return 2
 	}
 
-	baseRef, ok := resolveBranchBase(ctx, root, "policy adopt", stdout, stderr)
+	// Cut at the resolved base's commit, never its ref name, so the cut
+	// writes no upstream configuration (ledger SI-341 (6)).
+	base, ok := resolveBranchBaseResolution(ctx, root, "policy adopt", stdout, stderr)
 	if !ok {
 		return 2
 	}
-	if !checkoutNewBranchDisclosed(ctx, root, "policy adopt", "policy/adopt", baseRef, stdout, stderr) {
+	if !checkoutNewBranchDisclosed(ctx, root, "policy adopt", "policy/adopt", base.Commit, stdout, stderr) {
 		return 2
 	}
 

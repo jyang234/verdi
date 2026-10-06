@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -401,4 +402,123 @@ func TestPushAndHasRemote(t *testing.T) {
 	if err != nil || len(out) == 0 {
 		t.Fatalf("bare origin has no main after push: %v", err)
 	}
+}
+
+// TestWorktreeAdd_InUseElsewhere_TypedRefusal pins WorktreeAdd's fallback
+// over both wordings git gives a branch in use by another worktree (ledger
+// SI-354 (1)): "is already checked out at" before git 2.42, and "is
+// already used by worktree at" from git 2.42 on, which CI's git prints.
+// Both are the typed ErrBranchCheckedOut; any other refusal, such as a
+// missing but still registered worktree at the path, keeps git's own
+// words. A stand-in git answers dir's current branch as main and
+// refuses the add, so each wording is pinned whatever git is installed.
+func TestWorktreeAdd_InUseElsewhere_TypedRefusal(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name   string
+		stderr string
+		typed  bool
+	}{
+		{"git before 2.42", "Preparing worktree (checking out 'design/x')\nfatal: 'design/x' is already checked out at '/elsewhere'", true},
+		{"git 2.42 and later", "Preparing worktree (checking out 'design/x')\nfatal: 'design/x' is already used by worktree at '/elsewhere'", true},
+		{"another refusal", "fatal: invalid reference: design/x", false},
+		// A managed worktree whose directory was deleted without a prune:
+		// git refuses the path, not the branch, and that refusal is no
+		// in-use answer, so it keeps git's own words.
+		{"a missing but registered worktree at the path", "Preparing worktree (checking out 'design/x')\nfatal: '/root/.verdi/data/worktrees/x' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shimDir := t.TempDir()
+			stderrPath := filepath.Join(shimDir, "stderr")
+			if err := os.WriteFile(stderrPath, []byte(tt.stderr+"\n"), 0o644); err != nil {
+				t.Fatalf("writing stand-in stderr: %v", err)
+			}
+			script := "#!/bin/sh\nif [ \"$1\" = symbolic-ref ]; then echo main; exit 0; fi\ncat '" + stderrPath + "' >&2\nexit 128\n"
+			if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+				t.Fatalf("writing stand-in git: %v", err)
+			}
+			t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := WorktreeAdd(ctx, t.TempDir(), filepath.Join(t.TempDir(), "x"), "design/x")
+			if err == nil {
+				t.Fatal("WorktreeAdd over a refusing git = nil, want an error")
+			}
+			if got := errors.Is(err, ErrBranchCheckedOut); got != tt.typed {
+				t.Fatalf("errors.Is(%v, ErrBranchCheckedOut) = %v, want %v", err, got, tt.typed)
+			}
+			if last := tt.stderr[strings.LastIndex(tt.stderr, "fatal: "):]; !tt.typed && !strings.Contains(err.Error(), strings.SplitN(last, "\n", 2)[0]) {
+				t.Fatalf("WorktreeAdd error = %v, want git's own words %q", err, last)
+			}
+		})
+	}
+}
+
+// TestWorktreeAdd_HeldMidOperation is the same refusal against the
+// installed git (ledger SI-354 (1)): a linked worktree holding the branch,
+// plainly, mid-rebase, or mid-bisect, where `worktree list --porcelain`
+// reports it detached, still holds it for git, and WorktreeAdd answers the
+// typed ErrBranchCheckedOut with no directory cut. Run it under each git
+// the build meets (CI's 2.55 words the refusal the 2.42+ way).
+func TestWorktreeAdd_HeldMidOperation(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		hold func(t *testing.T, wt string)
+	}{
+		{"checked out", func(*testing.T, string) {}},
+		{"mid-rebase", func(t *testing.T, wt string) {
+			if out, err := gitInDir(ctx, wt, "rebase", "--force-rebase", "--exec", "false", "main"); err == nil {
+				t.Fatalf("the rebase did not stop:\n%s", out)
+			}
+		}},
+		{"mid-bisect", func(t *testing.T, wt string) {
+			if out, err := gitInDir(ctx, wt, "bisect", "start", "HEAD", "HEAD~2"); err != nil {
+				t.Fatalf("git bisect start: %v\n%s", err, out)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildRepo(t)
+			if out, err := gitInDir(ctx, repo.Dir, "branch", "design/held", "main"); err != nil {
+				t.Fatalf("git branch: %v\n%s", err, out)
+			}
+			wt := filepath.Join(t.TempDir(), "holder")
+			if out, err := gitInDir(ctx, repo.Dir, "worktree", "add", "--quiet", wt, "design/held"); err != nil {
+				t.Fatalf("git worktree add: %v\n%s", err, out)
+			}
+			if err := os.WriteFile(filepath.Join(wt, "held.txt"), []byte("held\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"add", "held.txt"}, {"commit", "--quiet", "-m", "held"}} {
+				if out, err := gitInDir(ctx, wt, args...); err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+			}
+			tt.hold(t, wt)
+
+			path := filepath.Join(t.TempDir(), "cut")
+			err := WorktreeAdd(ctx, repo.Dir, path, "design/held")
+			if !errors.Is(err, ErrBranchCheckedOut) {
+				t.Fatalf("WorktreeAdd for a branch held %s = %v, want ErrBranchCheckedOut", tt.name, err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("WorktreeAdd left %s behind (stat err %v)", path, err)
+			}
+		})
+	}
+}
+
+// gitInDir runs git in dir with a fixed identity and no editor, returning
+// its combined output.
+func gitInDir(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Verdi Fixture", "GIT_AUTHOR_EMAIL=fixture@verdi.invalid",
+		"GIT_COMMITTER_NAME=Verdi Fixture", "GIT_COMMITTER_EMAIL=fixture@verdi.invalid",
+		"GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }

@@ -193,10 +193,13 @@ func cmdDesignStartSupersede(args []string, stdout, stderr io.Writer) int {
 // nothing here reads or writes any checkout state until
 // checkoutNewDesignBranch, still the last preparation step before it).
 func runDesignStartSupersede(ctx context.Context, root, predName, newName string, mdl *model.Model, runner upstream.Runner, goTest goTestRunner, stdout, stderr io.Writer) int {
-	baseRef, ok := resolveDesignStartBase(ctx, root, stdout, stderr)
+	base, ok := resolveDesignStartBase(ctx, root, stdout, stderr)
 	if !ok {
 		return 2
 	}
+	// The name check reads the base's tree by its ref name (and names it
+	// in its refusal); the cut below is made at the resolved commit.
+	baseRef := base.Ref
 
 	// The successor-side preconditions live in internal/supersede beside
 	// the predecessor guard (ValidateSuccessorName), so the board's Revise
@@ -255,10 +258,11 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 
 	// Preparation boundary (mirroring runDesignStart, design.go's own R1/
 	// SI-198 comment): everything above is read-only validation. Only now
-	// does this verb touch Git — the checkout switch (dc-2), using the base
-	// ref already resolved above.
+	// does this verb touch Git — the checkout switch (dc-2), at the base
+	// commit already resolved above, never the ref's name, so the cut
+	// writes no upstream configuration (ledger SI-341 (6)).
 	branch := "design/" + newName
-	if !checkoutNewDesignBranch(ctx, root, branch, baseRef, stdout, stderr) {
+	if !checkoutNewDesignBranch(ctx, root, branch, base.Commit, stdout, stderr) {
 		return 2
 	}
 

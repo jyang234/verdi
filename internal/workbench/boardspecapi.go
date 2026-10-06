@@ -1035,8 +1035,7 @@ func (s *boardSpecServer) actionGitSwitch(ctx context.Context, w http.ResponseWr
 		// managed worktree the worktree-manager seam owns for fixedBranch —
 		// the surprise mutation feature dc-1 forbids. The other branch's
 		// board is one directory click away at its own /b/ address.
-		writeJSONError(w, http.StatusForbidden, fmt.Sprintf(
-			"this board serves branch %s at its own /b/ address — the branch is the address here, so switching this working tree is not available; open the other branch's board from the directory instead", s.fixedBranch))
+		writeJSONError(w, http.StatusForbidden, fmt.Sprintf(fixedBranchSwitchRefusal, s.fixedBranch))
 		return
 	}
 	dirty, err := gitx.StatusDirty(ctx, s.root)

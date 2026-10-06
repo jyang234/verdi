@@ -30,7 +30,8 @@ func Run(t testing.TB, ctx context.Context, d Driver, decl ws.Declaration, state
 }
 
 // RunOn snapshots fx, drives one ritual through d, snapshots fx again,
-// and evaluates the pair against decl. A test that needs more seeding than
+// and evaluates the pair against decl, with @checked-out bound in
+// fx.Acting (EvaluateIn). A test that needs more seeding than
 // a SeedState gives adds it to fx before calling RunOn. A driver that
 // reports no verb's exit class (verbExit) — a binary that never started, a
 // request never answered — fails the test: the run is judged neither a
@@ -52,7 +53,7 @@ func RunOn(t testing.TB, ctx context.Context, fx *Fixture, d Driver, decl ws.Dec
 	if err != nil {
 		t.Fatalf("ritualwitness: RunOn: the after snapshot: %v", err)
 	}
-	verdicts, err := Evaluate(decl, exit, before, after, log)
+	verdicts, err := EvaluateIn(decl, fx.Acting, exit, before, after, log)
 	if err != nil {
 		t.Fatalf("ritualwitness: RunOn: %v", err)
 	}

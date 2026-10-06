@@ -37,9 +37,9 @@ type Ritual func(ctx context.Context, dir string) (exit int, err error)
 // spec/ritual-effect-witness dc-1 names the entry points: InProcess runs a
 // synthetic ritual; Binary (driver_binary.go) runs a CLI verb as the built
 // binary; Workbench (driver_workbench.go) sends a workbench action through
-// the running server's handler. The last two cannot supply a command log
-// before spec/gitx-recorder-seam lands one. An MCP driver drops in the same
-// way.
+// the running server's handler; MCP (driver_mcp.go) calls one tool on the
+// MCP server, run in process. The last three cannot supply a command log
+// before spec/gitx-recorder-seam lands one.
 type Driver interface {
 	Run(ctx context.Context, dir string) (exit int, log CommandLog, err error)
 }

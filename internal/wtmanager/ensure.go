@@ -114,14 +114,14 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
-// isAlreadyCheckedOut reports whether err is WorktreeAdd's checked-out-here
-// refusal for a branch already checked out at root itself (the only such
-// case reachable here, since a managed worktree is never cut twice for the
-// same branch — reuse always wins first). It matches gitx's TYPED
-// gitx.ErrBranchCheckedOut, which gitx.WorktreeAdd raises proactively from
-// root's own current branch before `git worktree add` runs — never from
-// parsing git's version-dependent "already checked out" stderr, whose
-// wording differs across git builds (the D6-8 environment-parity class).
+// isAlreadyCheckedOut reports whether err is WorktreeAdd's in-use refusal:
+// branch checked out at root itself, which gitx.WorktreeAdd detects
+// proactively from root's own current branch before `git worktree add`
+// runs, or in use by another worktree, including one mid-rebase or
+// mid-bisect on it, which it reads from git's own refusal in both of that
+// refusal's wordings (ledger SI-354 (1)). It matches gitx's TYPED
+// gitx.ErrBranchCheckedOut and never parses stderr itself; the consumer
+// re-checks gitx.CurrentBranch(root) to tell root from another holder.
 func isAlreadyCheckedOut(err error) bool {
 	return errors.Is(err, gitx.ErrBranchCheckedOut)
 }
