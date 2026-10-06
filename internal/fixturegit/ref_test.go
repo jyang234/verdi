@@ -2,7 +2,6 @@ package fixturegit
 
 import (
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -45,13 +44,7 @@ func runRecorded(t *testing.T, fn func(tb testing.TB)) *fatalRecorder {
 
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
-	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(runGitOutput(t, dir, nil, args...))
 }
 
 func twoLayers(t *testing.T) *Repo {
