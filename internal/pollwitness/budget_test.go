@@ -142,6 +142,37 @@ func TestPollWitness_ProjectionBudget(t *testing.T) {
 	}
 }
 
+// TestPollWitness_AnnotatedTagHeadBudget (review P2R-3; ledger SI-357
+// (1)): when origin/main names an annotated tag's object, the pin resolves
+// the tag and peels it once, and every reader of the accepted tree lists
+// the peeled commit — so a cold projection of each path still enumerates
+// the accepted tree at most once, as does the refresh after it.
+func TestPollWitness_AnnotatedTagHeadBudget(t *testing.T) {
+	for _, path := range budgetPaths() {
+		t.Run(path.name, func(t *testing.T) {
+			repo := buildRealShapedStore(t)
+			git(t, repo.Dir, commitEnv(), "tag", "-a", "-m", "accepted", "accepted-tag", "refs/remotes/origin/main")
+			tag := strings.TrimSpace(gitOut(t, repo.Dir, "rev-parse", "accepted-tag"))
+			git(t, repo.Dir, nil, "update-ref", "refs/remotes/origin/main", tag)
+			acc, explicit := acceptedOf(t, repo.Dir)
+			if len(acc.IDs) != 2 || acc.IDs[0] == acc.IDs[1] {
+				t.Fatalf("origin/main does not name a tag object: %q", acc.IDs)
+			}
+			project := path.open(repo.Dir)
+			// stale-decline is accepted on origin/main, so its projection
+			// reads the corpus as well as the views: two readers of the tree.
+			for _, spec := range []string{"stale-decline", realShapedStory, realShapedFeature} {
+				first := &readcensus.Census{}
+				etag := project(t, gitx.WithObserver(context.Background(), first), spec, "")
+				checkBudget(t, spec+" first projection", first.Budget(acc), explicit)
+				refresh := &readcensus.Census{}
+				project(t, gitx.WithObserver(context.Background(), refresh), spec, etag)
+				checkBudget(t, spec+" refresh", refresh.Budget(acc), explicit)
+			}
+		})
+	}
+}
+
 // TestPollWitness_EachRefreshResolvesItsOwnHead (ledger SI-356;
 // readiness-recovery-v2 co-2): the accepted HEAD a refresh reads at is
 // resolved by that refresh. After origin/main advances between two polls,
