@@ -4971,8 +4971,8 @@ body:not(.board-page) > footer.site-foot,
    the recede desaturates and flattens a card instead of fading it, so its
    text keeps AA contrast; a focused card never recedes; the rings hold
    under hover; a clamped card's ⋯ mark is a button that reads its full
-   text; and the status pill sits inside the canvas, in flow at its foot,
-   where it covers nothing. */
+   text; and the status pill sits in the wall frame's row below the
+   canvas, in normal flow, where it covers nothing. */
 
 /* ---- the canvas in the stacked layout (Wave 6 §5.2: usable at 320 px
    and at 200 % zoom) — below 60rem the shared rules stack the layout into
@@ -4986,9 +4986,14 @@ body:not(.board-page) > footer.site-foot,
 /* ---- the wall frame: the canvas, then the status pill's reserved row
    below it in normal flow (SI-358 (4)). Before the asset measures, the
    canvas keeps its content-sized height; measured, it is bounded to what
-   the viewport leaves below the frame's top and above the row, scrolling
-   inside, so the row is in view whenever any of the canvas is and the
-   pill covers nothing at any width or zoom ---- */
+   the viewport alone leaves below the row and a margin (never less than
+   one card), scrolling inside, so the frame fits the viewport wherever it
+   sits on the page, the row is in view whenever the frame fills the
+   viewport, and the pill covers nothing at any width or zoom. The bound
+   (the measured mark and --wall-canvas-height) is hosted on
+   #boardv2-region, which a swap never replaces, so a swapped-in canvas
+   is bounded the moment it is inserted and the swap's restored scroll
+   offsets are not clamped away (Wave 6 §5.1) ---- */
 .board-layout > .wall-frame {
   flex: 1 1 auto;
   min-width: 0;
@@ -4996,7 +5001,7 @@ body:not(.board-page) > footer.site-foot,
   flex-direction: column;
 }
 .wall-frame > .boardv2-canvas { flex: none; }
-.wall-frame--measured > .boardv2-canvas {
+[data-wall-measured] .wall-frame > .boardv2-canvas {
   min-height: 0 !important;
   height: var(--wall-canvas-height);
 }
@@ -5018,8 +5023,23 @@ body:not(.board-page) > footer.site-foot,
 }
 /* the authoring wall's pin toolbox tab is fixed at the viewport's lower
    left until the toolbar retires it (wall-canvas-v2 ac-3): the row leaves
-   its band free, so the pill never meets it */
-.mode-authoring .wall-status-row { padding-left: 12rem; }
+   its band free, so the pill never meets it — beside the band (the tab
+   ends about 9rem from the frame's edge), or, where the asset finds the
+   frame too narrow for that to leave the pill room to read and the
+   viewport tall enough for the frame to fit with a taller row, on a line
+   of its own above the band (the tab's top is about 2.9rem up). Where
+   the viewport is too short for even the floor canvas and a wrapped row
+   to fit together (a short window at 200 % zoom), the row leads the
+   canvas instead: the pill stays in view with the canvas's top and keeps
+   the band's margin, since the tab's band still sweeps the frame as the
+   page scrolls */
+.mode-authoring .wall-status-row { padding-left: 10rem; }
+.mode-authoring [data-wall-row="stacked"] .wall-status-row { padding: 8px 0 3.25rem; }
+[data-wall-row="leading"] .wall-status-row {
+  order: -1;
+  padding: 4px 0 8px;
+}
+.mode-authoring [data-wall-row="leading"] .wall-status-row { padding-left: 10rem; }
 
 /* ---- every paper's shadow is composed from two custom properties: the
    ring the selection sets and the resting or lifted shadow. A hover rule,
@@ -5261,8 +5281,9 @@ body:not(.board-page) > footer.site-foot,
    is hidden from assistive technology so nothing is said twice */
 .wall-status-row .wall-status {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
   max-width: 100%;
   overflow: hidden;
   padding: 6px 12px;
@@ -5288,11 +5309,13 @@ body:not(.board-page) > footer.site-foot,
   white-space: nowrap;
 }
 .wall-status-id { flex: none; font-weight: 700; }
+/* the summary is never clipped (ac-2: the pill names the card AND its
+   threads): it wraps within the pill, onto a line below the id when the
+   two cannot share one, breaking a long ref where it must */
 .wall-status-summary {
+  flex: 1 1 12ch;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   opacity: 0.75;
 }
 

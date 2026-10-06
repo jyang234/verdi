@@ -33,11 +33,23 @@ import { transformRotates } from "./helpers";
 // After the lane's review (SI-358): the emphasis holds under hover and a
 // receded card keeps its text legible and its focus ring visible; the
 // status pill is drawn in the wall frame's reserved row below the canvas,
-// in view whenever the canvas is, and covers nothing at 1440 px, 320 px
-// and 200 % zoom — beside a tall sticky and under a paper mid-drag; the
-// pill's words reach a live region outside the swapped region, never
-// re-announced across a slow double click; and the wall passes the
-// accessibility scan with a selection active, in light and dark.
+// in view whenever the frame fills the viewport, and covers nothing at
+// 1440 px, 320 px and 200 % zoom — beside a tall sticky and under a paper
+// mid-drag; the pill's words reach a live region outside the swapped
+// region, never re-announced across a slow double click; and the wall
+// passes the accessibility scan with a selection active, in light and
+// dark. After the closure check: the canvas is bounded by the viewport
+// alone (never by where the frame sits on the page), a region swap keeps
+// its scroll on both axes, and the pill's summary stays readable at 320 px
+// in every mode.
+
+// The selection asset's bound (wallselect.js measure), mirrored here so the
+// tests state the contract in numbers: the canvas is the least of its
+// content height and the viewport's height less the status row and this
+// margin, never under one card (boardlayout CardHeight, 140 px) plus a
+// 10 px margin above and below it.
+const VIEW_MARGIN = 16;
+const CANVAS_FLOOR = 160;
 
 const WALL = {
   SPEC: "decline-canvas-wall",
@@ -87,6 +99,26 @@ const pill = (page: Page) => page.getByTestId("wall-status");
 const live = (page: Page) => page.getByTestId("wall-status-live");
 const overlayThreads = (page: Page) => page.locator("#board-canvas svg.yarn-overlay path.yarn-thread");
 const baseThreads = (page: Page) => page.locator("#board-canvas svg.yarn-svg path.yarn-thread");
+
+// frameIntoView scrolls the page so the wall frame's top meets the
+// viewport's: the frame is bounded to the viewport, so the frame then fills
+// it and its row is in view, with the canvas scrolling inside itself.
+const frameIntoView = (page: Page) =>
+  page.getByTestId("wall-frame").evaluate((el) => el.scrollIntoView({ block: "start" }));
+
+// scrollOf reads the canvas's scroll offsets, rounded.
+const scrollOf = (page: Page) => canvas(page).evaluate((el) => [Math.round(el.scrollLeft), Math.round(el.scrollTop)]);
+
+// parkSticky moves this wall's one sticky through the scratch write the
+// wall accepts and waits for the swap that carries it: the poll's region
+// swap is the one under test wherever a test forces a swap.
+async function parkSticky(page: Page, x: number, y: number): Promise<void> {
+  const moved = await page.request.post(boardPath(WALL.SPEC) + "/api/sticky-position", {
+    data: { id: WALL.STICKY_ID, x, y },
+  });
+  expect(moved.status(), await moved.text()).toBe(200);
+  await expect(page.getByTestId(`sticky-${WALL.STICKY_ID}`)).toHaveCSS("top", `${y}px`, { timeout: 8_000 });
+}
 
 // Computed-style readers: the ring is the first shadow in the list, a
 // spread with no blur ("0px 0px 0px 3px"); the recede is a grayscale
@@ -454,6 +486,97 @@ test.describe("wall-canvas", () => {
     await expect(live(page)).toHaveText(`dc-1 exempts → ${WALL.ADR_REF}`);
   });
 
+  test("a region swap keeps the canvas's scroll on both axes (Wave 6 §5.1; co-2)", async ({ page }) => {
+    // The canvas is bounded to the viewport, so on a short window it
+    // scrolls vertically as well as horizontally. The sticky is parked far
+    // down and right first, so both axes have room whatever the file's
+    // earlier tests left.
+    await page.setViewportSize({ width: 1440, height: 600 });
+    await openWall(page);
+    await parkSticky(page, 1408, 900);
+    const room = await canvas(page).evaluate((el) => ({ x: el.scrollWidth - el.clientWidth, y: el.scrollHeight - el.clientHeight }));
+    expect(room.x, "the canvas scrolls horizontally").toBeGreaterThanOrEqual(240);
+    expect(room.y, "the canvas scrolls vertically").toBeGreaterThanOrEqual(160);
+    await canvas(page).evaluate((el) => {
+      el.scrollLeft = 200;
+      el.scrollTop = 120;
+    });
+    await expect.poll(() => scrollOf(page)).toEqual([200, 120]);
+    // A forced swap replaces the canvas. The swap restores the offsets on
+    // the new canvas before the asset measures it, so the new canvas must
+    // be bounded the moment it is inserted — a content-tall canvas would
+    // clamp the vertical offset to 0 (the closure check's witness: (200,
+    // 120) became (200, 0)).
+    await parkSticky(page, 1408, 920);
+    await expect.poll(() => scrollOf(page)).toEqual([200, 120]);
+    // And the swap left the bound in place: the canvas still scrolls.
+    expect(await canvas(page).evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThanOrEqual(160);
+  });
+
+  test("the canvas is bounded by the viewport alone at 1440 px, 320 px and 200 % zoom (Wave 6 §5.2)", async ({ page }) => {
+    for (const shape of [
+      { width: 1440, height: 900, zoom: "" },
+      { width: 320, height: 640, zoom: "" },
+      { width: 720, height: 450, zoom: "200%" },
+    ]) {
+      const label = `${shape.width}×${shape.height}${shape.zoom ? " at " + shape.zoom : ""}`;
+      await page.setViewportSize({ width: shape.width, height: shape.height });
+      await page.goto(boardPath(WALL.SPEC));
+      await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+      if (shape.zoom) {
+        await page.evaluate((z) => {
+          (document.body.style as unknown as { zoom: string }).zoom = z;
+        }, shape.zoom);
+        await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      }
+      await expect(page.locator("#boardv2-region")).toHaveAttribute("data-wall-measured", "true");
+      // Lengths in the frame's own scale (a zoomed body scales its boxes).
+      const m = await page.evaluate(() => {
+        const c = document.getElementById("board-canvas") as HTMLElement;
+        const f = c.closest(".wall-frame") as HTMLElement;
+        const row = f.querySelector(".wall-status-row") as HTMLElement;
+        const scale = f.getBoundingClientRect().width / f.offsetWidth;
+        return {
+          scale,
+          frameTop: f.getBoundingClientRect().top + window.scrollY,
+          height: c.getBoundingClientRect().height / scale,
+          content: parseFloat(c.style.minHeight),
+          view: document.documentElement.clientHeight / scale,
+          row: row.getBoundingClientRect().height / scale,
+          viewport: document.documentElement.clientHeight,
+        };
+      });
+      // The bound reads the viewport alone: the frame's place on the page
+      // (thousands of pixels down at 320 px, where the layout stacks) does
+      // not enter it. At one card plus margin, at least; at most the
+      // viewport.
+      const want = Math.max(CANVAS_FLOOR, Math.min(m.content, m.view - m.row - VIEW_MARGIN));
+      expect(Math.abs(m.height - want), `${label}: canvas ${m.height}, want ${want} (frame top ${m.frameTop}, view ${m.view}, row ${m.row}, content ${m.content})`).toBeLessThanOrEqual(1);
+      expect(m.height, `${label}: at least one card plus margin`).toBeGreaterThanOrEqual(CANVAS_FLOOR);
+      expect(m.height * m.scale, `${label}: at most the viewport`).toBeLessThanOrEqual(m.viewport);
+      // A card can be brought fully into view by scrolling: the page to
+      // the frame, the canvas to the card. ac-2 is the lowest object card,
+      // the reference card the rightmost.
+      for (const [el, what] of [
+        [page.getByTestId("card-ac-2"), "ac-2"],
+        [page.getByTestId(refCardTestId(WALL.ADR_REF)), "the reference card"],
+      ] as [Locator, string][]) {
+        await el.scrollIntoViewIfNeeded();
+        const box = (await el.boundingBox())!;
+        const clip = (await canvas(page).boundingBox())!;
+        const vp = await page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }));
+        expect(box.y, `${label}: ${what} top in the viewport`).toBeGreaterThanOrEqual(-0.5);
+        expect(box.y + box.height, `${label}: ${what} bottom in the viewport`).toBeLessThanOrEqual(vp.h + 0.5);
+        expect(box.x, `${label}: ${what} left in the viewport`).toBeGreaterThanOrEqual(-0.5);
+        expect(box.x + box.width, `${label}: ${what} right in the viewport`).toBeLessThanOrEqual(vp.w + 0.5);
+        expect(box.y, `${label}: ${what} top inside the canvas`).toBeGreaterThanOrEqual(clip.y - 0.5);
+        expect(box.y + box.height, `${label}: ${what} bottom inside the canvas`).toBeLessThanOrEqual(clip.y + clip.height + 0.5);
+        expect(box.x, `${label}: ${what} left inside the canvas`).toBeGreaterThanOrEqual(clip.x - 0.5);
+        expect(box.x + box.width, `${label}: ${what} right inside the canvas`).toBeLessThanOrEqual(clip.x + clip.width + 0.5);
+      }
+    }
+  });
+
   test("the status pill covers no content or control at 1440 px, 320 px and 200 % zoom (SI-358 (4))", async ({ page }) => {
     // A tall comment sticky at the canvas's bottom-left: taller than the
     // server's working estimate, so the canvas's content outgrows its
@@ -510,31 +633,71 @@ test.describe("wall-canvas", () => {
       await expect(pill(page)).toBeAttached();
       expect(await pill(page).evaluate((el) => el.parentElement?.getAttribute("data-testid"))).toBe("wall-status-row");
       expect(await overlapsOf(page), `${label}: the pill covers nothing beside a tall sticky`).toEqual([]);
-      // Selecting a card near the top, with that card in view, leaves the
-      // pill in the viewport: the canvas is bounded to the room the
-      // viewport has below the frame's top, so its row is in view whenever
-      // any of the canvas is.
+      // With a card near the top selected and the frame scrolled into
+      // view, the pill is in the viewport: the canvas is bounded to the
+      // room the viewport has, so the frame fills it and its row is in
+      // view — or, where the viewport is too short for even the floor
+      // canvas and the row, the row leads the canvas and shows with its
+      // top.
       const ac1 = page.getByTestId("card-ac-1");
       await ac1.scrollIntoViewIfNeeded();
       await select("ac-1");
       await expect(ac1).toHaveAttribute("data-selected", "true");
+      await frameIntoView(page);
       await inViewport(`${label}, ac-1 selected`);
       expect(await overlapsOf(page), `${label}: the pill covers nothing with ac-1 selected`).toEqual([]);
       // A paper mid-drag over the canvas's foot, where the pill used to
       // sit, cannot meet it either: the pill is not in the scroll area.
       const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
       await sticky.scrollIntoViewIfNeeded();
+      await frameIntoView(page);
       const grip = (await sticky.locator(".sticky-body").boundingBox())!;
       const foot = (await canvas(page).boundingBox())!;
+      const viewH = await page.evaluate(() => document.documentElement.clientHeight);
       await page.mouse.move(grip.x + grip.width / 2, grip.y + 10);
       await page.mouse.down();
-      await page.mouse.move(foot.x + 80, foot.y + foot.height - 20, { steps: 8 });
+      // The canvas's visible foot: on the short zoomed viewport the canvas
+      // itself runs past the viewport's edge.
+      await page.mouse.move(foot.x + 80, Math.min(foot.y + foot.height - 20, viewH - 10), { steps: 8 });
       await expect(sticky).toHaveClass(/dragging/);
       expect(await overlapsOf(page), `${label}: the pill covers nothing under a paper mid-drag`).toEqual([]);
       await inViewport(`${label}, mid-drag`);
       await page.mouse.up();
       await expect(page.getByTestId("autosave-status")).toHaveText("saved", { timeout: 8_000 });
     }
+  });
+
+  test("the pill's summary is readable at 320 px in authoring (ac-2; SI-358 (4))", async ({ page }) => {
+    // At 320 px the row is 256 px wide; beside the band the authoring
+    // wall's fixed pin-toolbox tab holds, the pill had 64 px and its
+    // summary 1 px. The pill takes a line of its own above the band
+    // instead, and the summary wraps rather than clips.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openWall(page);
+    const dc1 = page.getByTestId("card-dc-1");
+    await dc1.click();
+    await expect(dc1).toHaveAttribute("data-selected", "true");
+    const summary = pill(page).locator(".wall-status-summary");
+    await expect(summary).toHaveText(`exempts → ${WALL.ADR_REF}`);
+    // Fully visible: the summary's rendered width is not less than its
+    // content's, and the pill clips none of it.
+    const fit = await pill(page).evaluate((el) => {
+      const s = el.querySelector(".wall-status-summary") as HTMLElement;
+      return { sw: s.scrollWidth, cw: s.clientWidth, pw: el.scrollWidth, pcw: el.clientWidth, ph: el.scrollHeight, pch: el.clientHeight };
+    });
+    expect(fit.cw, `the summary's rendered width (${fit.cw}) holds its content (${fit.sw})`).toBeGreaterThanOrEqual(fit.sw);
+    expect(fit.pcw, "the pill clips nothing across").toBeGreaterThanOrEqual(fit.pw);
+    expect(fit.pch, "the pill clips nothing down").toBeGreaterThanOrEqual(fit.ph);
+    expect(fit.cw, "the summary has room to read").toBeGreaterThanOrEqual(120);
+    // And the pill still covers nothing — the toolbox tab included — with
+    // the frame filling the viewport, where the tab's band meets the row.
+    await frameIntoView(page);
+    const tabEl = page.locator("#pin-toolbox-tab");
+    await expect(tabEl).toBeVisible();
+    expect(await overlapsOf(page), "the pill covers nothing at 320 px").toEqual([]);
+    const tab = (await tabEl.boundingBox())!;
+    const box = (await pill(page).boundingBox())!;
+    expect(box.y + box.height, `the pill (bottom ${box.y + box.height}) sits above the toolbox tab (top ${tab.y})`).toBeLessThanOrEqual(tab.y);
   });
 
   test("a slow double click never re-announces the same selection (SI-358 (5); Wave 6 §5.2)", async ({ page }) => {

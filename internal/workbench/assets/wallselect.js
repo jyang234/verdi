@@ -27,9 +27,14 @@
 // outside the swapped region (boardspecrender.go), rewritten only when
 // they change — a clear is held long enough for a slow double click to
 // bring the same words back unspoken — so an unchanged selection is
-// never re-announced (Wave 6 §5.2). The frame bounds the canvas to what
-// the viewport leaves below the frame's top and above the row, so the
-// row is in view whenever any of the canvas is.
+// never re-announced (Wave 6 §5.2). The canvas is bounded to the viewport
+// alone — what it leaves below the row and a margin, never less than one
+// card — so the frame fits the viewport wherever it sits on the page: the
+// page scrolls the frame into view, the canvas scrolls inside itself, and
+// the row is in view whenever the frame fills the viewport. The bound is
+// hosted on #boardv2-region, which a swap never replaces, so a swapped-in
+// canvas is bounded the moment it is inserted and the swap's restored
+// scroll offsets survive (§5.1).
 //
 // Marks (read by the stylesheet, by F5c's Document chips, and by the
 // lanes that follow): data-selected="true" on the selected card or chip,
@@ -63,8 +68,23 @@
   // clicks apart by more than CLEAR_DELAY but inside the OS interval)
   // clears and re-selects, and the same words must not be spoken again.
   var LIVE_HOLD = 600;
-  var ROW_HEIGHT = 44; // the reserved row's height, in CSS px
-  var CANVAS_FLOOR = 128; // the least the bounded canvas shrinks to, in CSS px
+  var VIEW_MARGIN = 16; // CSS px left below the frame when it fills the viewport
+  var CANVAS_FLOOR = 160; // the least the bounded canvas shrinks to: one card (140) plus a 10 px margin above and below
+  // The row's layout (data-wall-row on the region; the stylesheet reads
+  // it). The authoring wall's fixed pin-toolbox tab holds the viewport's
+  // lower left, and the row keeps the pill clear of it to the right (the
+  // stylesheet's band). Where the frame is narrower than ROW_STACK_WIDTH
+  // that leaves the pill too little room to read, so the pill takes a
+  // line of its own above the band ("stacked") — safe only while the
+  // viewport is tall enough for the frame to fit with that taller row,
+  // since a band reserved below the pill protects it only when the
+  // frame's foot can reach the viewport's. Below ROW_FIT_HEIGHT (a short
+  // window at 200 % zoom) not even the floor canvas and a wrapped row fit
+  // together, so the row leads the canvas ("leading"): the pill stays in
+  // view with the canvas's top, keeps the band's margin, and the canvas's
+  // foot is reached by scrolling the page.
+  var ROW_STACK_WIDTH = 480; // CSS px of frame width below which the pill takes its own line
+  var ROW_FIT_HEIGHT = 320; // CSS px of viewport height below which the row leads the canvas
 
   var selection = null; // { kind: "card" | "thread", key: string } | null
   var spoken = ""; // the live region's current words, so unchanged words are never rewritten
@@ -79,26 +99,37 @@
     return region.querySelector(".wall-frame");
   }
 
-  // measure bounds the canvas to the viewport (SI-358 (4)): its height is
-  // the least of its content-sized min-height (the server's inline style)
-  // and what the viewport leaves below the frame's top and above the row,
-  // never under CANVAS_FLOOR. The frame's document-relative top does not
-  // move with the scroll, so the bound holds at every scroll position; a
-  // zoomed body scales the frame's box, so lengths are read in its scale.
+  // measure bounds the canvas to the viewport (SI-358 (4); Wave 6 §5.2):
+  // its height is the least of its content-sized min-height (the server's
+  // inline style) and what the viewport leaves below the row and
+  // VIEW_MARGIN, never under CANVAS_FLOOR. Where the frame sits on the
+  // page does not enter it: at 320 px the layout stacks and the frame
+  // starts thousands of pixels down, which must not shrink the canvas to
+  // its floor. A zoomed body scales the frame's box, so lengths are read
+  // in its scale. The row's layout is chosen first, so its height is the
+  // one the bound subtracts. The bound lives on the region, which a swap
+  // never replaces (§5.1: the swap's restored scroll offsets survive).
   function measure() {
     var f = frame();
     var c = canvas();
-    if (!f || !c) return;
+    var row = f && f.querySelector(".wall-status-row");
+    if (!f || !c || !row) return;
     var content = parseFloat(c.style.minHeight);
     if (!(content > 0)) return;
-    var box = f.getBoundingClientRect();
-    var scale = f.offsetWidth ? box.width / f.offsetWidth : 1;
+    var scale = f.offsetWidth ? f.getBoundingClientRect().width / f.offsetWidth : 1;
     if (!(scale > 0)) scale = 1;
-    var top = box.top + (window.scrollY || 0);
-    var room = (document.documentElement.clientHeight - top) / scale - ROW_HEIGHT;
+    var view = document.documentElement.clientHeight / scale;
+    if (view < ROW_FIT_HEIGHT) {
+      region.setAttribute("data-wall-row", "leading");
+    } else if (f.offsetWidth < ROW_STACK_WIDTH) {
+      region.setAttribute("data-wall-row", "stacked");
+    } else {
+      region.removeAttribute("data-wall-row");
+    }
+    var room = view - row.getBoundingClientRect().height / scale - VIEW_MARGIN;
     var height = Math.max(CANVAS_FLOOR, Math.min(content, room));
-    f.style.setProperty("--wall-canvas-height", Math.round(height) + "px");
-    f.classList.add("wall-frame--measured");
+    region.style.setProperty("--wall-canvas-height", Math.round(height) + "px");
+    region.setAttribute("data-wall-measured", "true");
   }
   function esc(s) {
     return window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
