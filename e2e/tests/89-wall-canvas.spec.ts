@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { SHOWCASE, boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
+import { EDGE, SHOWCASE, boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
 import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
 
 // spec/wall-canvas-v2 ac-1 and ac-2 (lane F2a): every card renders at the
@@ -35,8 +35,9 @@ import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from ".
 // path (WALL.WRITABLE_PATH, its own design branch, where the domain is
 // live and every pin is drawn; cmd/e2eharness/provision_board.go
 // canvasWallWritablePath). Review and read-only modes are read on the
-// harness's review mirror and sealed wall (SHOWCASE.REVIEW_SPEC,
-// SHOWCASE.READONLY_SPEC). Writes stay inside this file, ordered so a
+// harness's badge review rig and sealed wall (EDGE.BADGE_REVIEW_SPEC,
+// SHOWCASE.READONLY_SPEC), both of which carry yarn, so each renders the
+// yarn key the modes' toolbar must offer. Writes stay inside this file, ordered so a
 // later test here still finds what it needs; every run provisions a fresh
 // store.
 //
@@ -979,34 +980,32 @@ test.describe("wall-canvas", () => {
     await expect(relatesChip).toHaveCount(0);
 
     // Review and read-only modes: only the yarn key and the read actions,
-    // with nothing, a card, and a thread selected. The yarn key is the
-    // wall's own: the server renders it only where the wall has yarn
-    // (writeYarnKey), so the review mirror, which has no thread, has no
-    // key to open and its toolbar offers nothing; the sealed wall has both.
+    // with nothing, a card, and a thread selected. The badge review rig
+    // and the sealed wall both carry yarn, so each renders the yarn key
+    // (writeYarnKey) and the toolbar offers exactly it with nothing
+    // selected, the read actions beside it with a card selected, and it
+    // alone with a thread selected.
     for (const [spec, mode] of [
-      [SHOWCASE.REVIEW_SPEC, "review"],
+      [EDGE.BADGE_REVIEW_SPEC, "review"],
       [SHOWCASE.READONLY_SPEC, "readonly"],
     ] as const) {
       await page.goto(boardPath(spec));
       await expect(canvas(page)).toHaveAttribute("data-board-mode", mode);
       const chips = page.locator("#board-canvas .yarn-chip");
-      if (mode === "readonly") await expect(chips.first()).toBeVisible();
-      const key = (await page.getByTestId("yarn-key").count()) > 0 ? ["yarn-key"] : [];
-      expect(key.length > 0, `${mode}: the yarn key is rendered exactly where the wall has yarn`).toBe((await chips.count()) > 0);
-      await expect.poll(() => actionsOf(page), `${mode}: nothing selected`).toEqual(key);
+      await expect(chips.first()).toBeVisible();
+      await expect(page.getByTestId("yarn-key")).toHaveCount(1);
+      await expect.poll(() => actionsOf(page), `${mode}: nothing selected`).toEqual(["yarn-key"]);
       await expect(toolbar.locator(".wall-toolbar-hint")).toHaveCount(0);
       const card = page.locator("#board-canvas .objcard").first();
       await card.scrollIntoViewIfNeeded();
       await card.click();
       await expect(card).toHaveAttribute("data-selected", "true");
-      await expect.poll(() => actionsOf(page), `${mode}: a card selected`).toEqual(["read", ...key]);
+      await expect.poll(() => actionsOf(page), `${mode}: a card selected`).toEqual(["read", "yarn-key"]);
       await expect(toolbar.locator(".wall-toolbar-count")).toBeVisible();
-      if ((await chips.count()) > 0) {
-        await chips.first().scrollIntoViewIfNeeded();
-        await chips.first().click();
-        await expect(chips.first()).toHaveAttribute("data-selected", "true");
-        await expect.poll(() => actionsOf(page), `${mode}: a thread selected`).toEqual(key);
-      }
+      await chips.first().scrollIntoViewIfNeeded();
+      await chips.first().click();
+      await expect(chips.first()).toHaveAttribute("data-selected", "true");
+      await expect.poll(() => actionsOf(page), `${mode}: a thread selected`).toEqual(["yarn-key"]);
       await expect(toolbar.getByRole("button", { name: /Sticky|Card|Pin an artifact|Edit|Graduate|Delete|Remove|Retype/ })).toHaveCount(0);
     }
   });
