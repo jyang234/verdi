@@ -345,18 +345,18 @@ func TestWallMarks_UnwiredWallDrawsTheNotice(t *testing.T) {
 		t.Fatalf("the unwired poll's marks = %+v at %s, the page embeds %s", snap.Marks, snap.Revision, rev)
 	}
 
-	// The fragment — the plain region a mutation swaps in — composes no
-	// marks (SI-362 (2)): no notice and no mark, so it is the poll's
-	// region without the one notice.
+	// The fragment — the region a mutation swaps in — carries the same
+	// instance-fixed notice, loaded from no readiness (SI-364 (3)), so it
+	// is the poll's region byte for byte.
 	rec := httptest.NewRecorder()
 	unwired.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path+"/fragment", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET fragment = %d\n%s", rec.Code, rec.Body.String())
 	}
 	fragment := rec.Body.String()
-	requireMarkMarkup(t, "the fragment", fragment, nil, []string{`data-testid="wall-marks-unavailable"`, `class="readiness-mark"`, `class="readiness-dot"`})
-	if strings.Replace(snap.HTML, noticeOf(marksUnwired), "", 1) != fragment {
-		t.Fatal("the unwired poll's region is not the fragment plus the one notice")
+	requireMarkMarkup(t, "the fragment", fragment, []string{notice}, []string{`class="readiness-mark"`, `class="readiness-dot"`})
+	if fragment != snap.HTML {
+		t.Fatal("the unwired fragment is not the poll's region")
 	}
 }
 
@@ -420,4 +420,105 @@ func TestSealedASDView_MarksUnavailable(t *testing.T) {
 	if want := unavailableMarks(marksSealed("origin/design/x")); v.Marks == nil || !reflect.DeepEqual(*v.Marks, want) {
 		t.Fatalf("sealed marks = %+v, want %+v", v.Marks, want)
 	}
+}
+
+// saveAndPoll posts one typed edit of ac-1 at mount (a wall address)
+// against the wall checked out at wallRoot, and returns the mutation
+// response's fresh projection: its revision and region.
+func saveAndPoll(t *testing.T, h http.Handler, mount, wallRoot string) (revision, html string) {
+	t.Helper()
+	body := mutateEnvelope(t, wallRoot, marksWallName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "a stale notice is retracted, today", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, mount+"/api/mutate_draft", strings.NewReader(body)))
+	var out struct {
+		Result     json.RawMessage     `json:"result"`
+		Projection *mutationProjection `json:"projection"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Result == nil || out.Projection == nil {
+		t.Fatalf("POST %s mutate_draft = %d, want a landed save with its fresh projection\n%s", mount, rec.Code, rec.Body.String())
+	}
+	return out.Projection.Revision, out.Projection.HTML
+}
+
+// TestWallMarks_FixedUnavailableSaveMatchesThePoll (SI-364 (3); SI-362
+// (1)): on a wall whose marks are fixed for the server instance — no
+// loader wired, or a /b/ wall whose branch is not the serving root's — a
+// save's fresh projection and the fragment carry the poll's one
+// unavailable notice, computed without a readiness load, so the save's
+// revision is the token the next poll answers 304 to, and its region is
+// the poll's. The sealed render has no save and no poll route; its
+// fragment and page carry the same notice.
+func TestWallMarks_FixedUnavailableSaveMatchesThePoll(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+		serve  func(t *testing.T, root string) (h http.Handler, mount, wallRoot string, loader *swapLoader)
+	}{
+		{
+			name:   "unwired",
+			reason: marksUnwired,
+			serve: func(_ *testing.T, root string) (http.Handler, string, string, *swapLoader) {
+				return NewHandlerWith(root, Deps{Design: testDesignBridge{}}), "/board/spec/" + marksWallName, root, nil
+			},
+		},
+		{
+			name:   "a /b/ branch wall",
+			reason: marksBranchWall("design/" + marksWallName),
+			serve: func(t *testing.T, root string) (http.Handler, string, string, *swapLoader) {
+				gitOut(t, root, "checkout", "--quiet", "design/marks-other")
+				wt, err := wtmanager.EnsureWorktree(context.Background(), root, "design/"+marksWallName)
+				if err != nil {
+					t.Fatalf("cutting the /b/ wall's worktree: %v", err)
+				}
+				loader := &swapLoader{}
+				h := NewHandlerWith(root, Deps{Design: testDesignBridge{}, ReadinessLoader: loader})
+				return h, "/b/design%2F" + marksWallName + "/board/spec/" + marksWallName, wt, loader
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, mount, wallRoot, loader := tc.serve(t, newMarksWallFixture(t))
+			want := unavailableMarks(tc.reason)
+			saved, savedHTML := saveAndPoll(t, h, mount, wallRoot)
+			if !strings.Contains(savedHTML, `data-testid="wall-marks-unavailable"`) || !strings.Contains(savedHTML, stdhtml.EscapeString(tc.reason)) {
+				t.Fatalf("the save's region lacks the notice %q", tc.reason)
+			}
+			rec, _ := pollWall(t, context.Background(), h, mount, saved)
+			if rec.Code != http.StatusNotModified {
+				t.Fatalf("the poll after a save, sent the save's revision, = %d, want 304: the save and the poll disagree on the token", rec.Code)
+			}
+			_, snap := pollWall(t, context.Background(), h, mount, "")
+			if snap.Revision != saved || snap.HTML != savedHTML || snap.Marks == nil || !reflect.DeepEqual(*snap.Marks, want) {
+				t.Fatalf("the poll = (%s, marks %+v), the save = %s: want one token over one region", snap.Revision, snap.Marks, saved)
+			}
+			frag := httptest.NewRecorder()
+			h.ServeHTTP(frag, httptest.NewRequestWithContext(t.Context(), http.MethodGet, mount+"/fragment", nil))
+			if frag.Code != http.StatusOK || frag.Body.String() != snap.HTML {
+				t.Fatalf("the fragment (%d) differs from the poll's region", frag.Code)
+			}
+			if loader != nil && len(loader.loads) != 0 {
+				t.Fatalf("the /b/ wall loaded readiness for %q", loader.loads)
+			}
+		})
+	}
+
+	t.Run("sealed", func(t *testing.T) {
+		root := newBranchBoardFixture(t)
+		h := NewHandler(root)
+		mount := "/b/design%2Fremote-only/board/spec/remote-spec"
+		page := bGet(t, h, mount)
+		frag := bGet(t, h, mount+"/fragment")
+		if page.Code != http.StatusOK || frag.Code != http.StatusOK {
+			t.Fatalf("sealed page = %d, fragment = %d", page.Code, frag.Code)
+		}
+		reason := marksSealed("origin/design/remote-only")
+		if !strings.Contains(frag.Body.String(), stdhtml.EscapeString(reason)) || strings.Count(frag.Body.String(), `data-testid="wall-marks-unavailable"`) != 1 {
+			t.Fatal("the sealed fragment lacks the one sealed notice")
+		}
+		if !strings.Contains(page.Body.String(), frag.Body.String()) {
+			t.Fatal("the sealed page's region is not the fragment's")
+		}
+	})
 }

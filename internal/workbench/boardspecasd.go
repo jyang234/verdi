@@ -845,47 +845,38 @@ func (s *boardSpecServer) projectWallRefresh(ctx context.Context, name string, c
 // session and pinned accepted HEAD — and, when composeReadiness is set,
 // composes its readiness marks (SI-360): on a wall served from the
 // serving root, the spec's readiness loaded in that session and the marks
-// derived from it, which the snapshot's revision then covers; on a /b/
-// wall whose branch is not the serving root's, no readiness load — the
-// loader reads the serving checkout, whose branch is not the wall's
-// (SI-338) — and the unavailable notice's reason; with no loader wired,
-// the reason that says so. The last two are constants of this server
-// instance, which the snapshot's own revision already determines.
+// derived from it, which the snapshot's revision then covers. On a wall
+// whose marks are fixed for this server instance (instanceMarks: a /b/
+// wall whose branch is not the serving root's, or no loader wired) the
+// load already carries them and nothing more is loaded; the snapshot's
+// own revision determines them (SI-362 (1)).
 func (s *boardSpecServer) composeWall(ctx context.Context, name string, composeReadiness bool) (wallRefresh, error) {
 	proj, git, asd, err := s.loadASD(ctx, name)
 	if err != nil {
 		return wallRefresh{}, err
 	}
 	out := wallRefresh{proj: proj, git: git, asd: asd}
-	if !composeReadiness {
+	if !composeReadiness || s.instanceMarks() != nil {
 		return out, nil
 	}
-	switch {
-	case s.fixedBranch != "":
-		marks := unavailableMarks(marksBranchWall(s.fixedBranch))
-		asd.Marks = &marks
-	case s.readinessLoader == nil:
-		marks := unavailableMarks(marksUnwired)
-		asd.Marks = &marks
-	default:
-		readiness, err := s.readinessLoader.Load(ctx, "spec/"+name)
-		if err != nil {
-			out.readinessErr = err
-		} else {
-			out.readiness = &readiness
-		}
-		marks := deriveWallMarks(wallMarksInputFor(name, proj, asd, out.readiness, out.readinessErr))
-		asd.Marks = &marks
-		if asd.readinessRevision, err = readinessRevision(out.readiness, out.readinessErr, asd.Marks); err != nil {
-			return wallRefresh{}, fmt.Errorf("workbench: the composed refresh's revision: %w", err)
-		}
+	readiness, err := s.readinessLoader.Load(ctx, "spec/"+name)
+	if err != nil {
+		out.readinessErr = err
+	} else {
+		out.readiness = &readiness
+	}
+	marks := deriveWallMarks(wallMarksInputFor(name, proj, asd, out.readiness, out.readinessErr))
+	asd.Marks = &marks
+	if asd.readinessRevision, err = readinessRevision(out.readiness, out.readinessErr, asd.Marks); err != nil {
+		return wallRefresh{}, fmt.Errorf("workbench: the composed refresh's revision: %w", err)
 	}
 	return out, nil
 }
 
 // loadSnapshot builds one complete snapshot: one composed page projection
 // (loadASD) rendered once, then the revision token over the whole
-// serialized content.
+// serialized content. It loads no readiness, so its marks are this
+// instance's fixed ones, or none on a serving-root wall (SI-364 (3)).
 func (s *boardSpecServer) loadSnapshot(ctx context.Context, name string) (*asdSnapshot, error) {
 	proj, git, asd, err := s.loadASD(ctx, name)
 	if err != nil {

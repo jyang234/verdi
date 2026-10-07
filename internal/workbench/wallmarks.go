@@ -97,6 +97,29 @@ func unavailableMarks(reason string) wallMarks {
 	return wallMarks{Unavailable: reason}
 }
 
+// instanceMarks is the readiness marks fixed for this server instance
+// (SI-360 (3); SI-362 (1); SI-364 (3)): on a /b/ wall whose branch is not
+// the serving root's, and on a server with no readiness loader wired, the
+// marks' input can never be read, so every response that renders the
+// region — the page, the poll, the fragment and a mutation's fresh
+// projection — carries the one unavailable reason, computed without
+// loading readiness, and their regions and tokens agree. nil on a
+// serving-root wall with a loader, whose marks only a composed refresh
+// derives.
+func (s *boardSpecServer) instanceMarks() *wallMarks {
+	var reason string
+	switch {
+	case s.fixedBranch != "":
+		reason = marksBranchWall(s.fixedBranch)
+	case s.readinessLoader == nil:
+		reason = marksUnwired
+	default:
+		return nil
+	}
+	marks := unavailableMarks(reason)
+	return &marks
+}
+
 // marksBranchWall is the reason on a /b/ wall whose branch is not the
 // serving root's (SI-360 (3)): no readiness is loaded there, because the
 // readiness loader reads the serving checkout, whose branch differs from

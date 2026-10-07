@@ -551,7 +551,8 @@ func effectiveMode(underReview bool, st specstate.Result, git *boardGitState) bo
 // except that the page and the snapshot also compose the readiness marks
 // (composeWall), and on a wall that loads readiness their token covers it
 // where a mutation's does not, so the poll after a mutation there answers
-// once with the composed facts.
+// once with the composed facts. A wall whose marks are fixed for the
+// instance carries them here, so all three agree there (SI-364 (3)).
 // The summary is computed fresh per request (co-1) from git and the
 // working tree's own spec.md bytes loadBoard already read — never a second
 // file read, never persisted.
@@ -570,7 +571,8 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 
 // loadASDView is the ASD projection without the changes summary: one
 // loadBoard plus the ASD rendered facts (posture header, shell,
-// capabilities view, client mutation facts), and the working tree's
+// capabilities view, client mutation facts, and the readiness marks fixed
+// for this server instance, if any — SI-364 (3)), and the working tree's
 // spec.md bytes loadBoard read. The fragment, which carries no git state
 // of its own, renders from this and never pays for the summary.
 func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, []byte, error) {
@@ -583,6 +585,7 @@ func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardP
 		return nil, nil, nil, nil, err
 	}
 	asd.reviewNotice = reviewNotice
+	asd.Marks = s.instanceMarks()
 	return proj, git, asd, extras.raw, nil
 }
 

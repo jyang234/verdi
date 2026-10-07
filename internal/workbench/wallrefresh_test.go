@@ -296,7 +296,8 @@ func TestResolvePostureHeads_PinnedAcceptedHead(t *testing.T) {
 // draws the unavailable notice in the region (lane M-ui) — while a
 // plain refresh's token is an unscoped load's revision, byte for byte,
 // whatever the loader would say, and so is a composed refresh's that
-// loaded none (its marks are then a constant of the server).
+// loaded none (its marks are then a constant of the server, which an
+// unscoped load carries too: SI-364 (3)).
 func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 	wall := refreshWalls(t)[0]
 	bare := &boardSpecServer{root: wall.root, design: readinessGapCapsBridge()}
@@ -319,7 +320,17 @@ func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 		}
 		return refresh
 	}
-	alone, err := bare.loadSnapshot(context.Background(), wall.name)
+	// alone is a plain load on a serving-root wall with a loader wired: no
+	// readiness, no marks. unwired is the same load where no loader is
+	// wired, which carries that instance's fixed notice (SI-364 (3)).
+	alone, err := (&boardSpecServer{root: wall.root, design: readinessGapCapsBridge(), readinessLoader: fixedSnapshotLoader{snap: snapA}}).loadSnapshot(context.Background(), wall.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.Marks != nil {
+		t.Fatalf("a plain load on a serving-root wall carries marks %+v", alone.Marks)
+	}
+	unwired, err := bare.loadSnapshot(context.Background(), wall.name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,30 +355,28 @@ func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 	if again := refreshWith(fixedSnapshotLoader{snap: snapA}, true); again.snap.Revision != a.snap.Revision {
 		t.Fatalf("the same readiness derived two composed tokens: %s, %s", a.snap.Revision, again.snap.Revision)
 	}
-	for _, loader := range []ReadinessLoader{fixedSnapshotLoader{snap: snapA}, fixedSnapshotLoader{snap: snapB}, erroringReadinessLoader{err: errBoom}, nil} {
+	for _, loader := range []ReadinessLoader{fixedSnapshotLoader{snap: snapA}, fixedSnapshotLoader{snap: snapB}, erroringReadinessLoader{err: errBoom}} {
 		if plain := refreshWith(loader, false); plain.snap.Revision != alone.Revision {
 			t.Fatalf("a plain refresh's token %s is not an unscoped load's revision %s", plain.snap.Revision, alone.Revision)
 		}
 	}
+	if plain := refreshWith(nil, false); plain.snap.Revision != unwired.Revision {
+		t.Fatalf("an unwired plain refresh's token %s is not an unwired load's %s", plain.snap.Revision, unwired.Revision)
+	}
 	// A composed refresh with no loader digests no readiness (SI-362 (1)):
-	// its token is the plain token over its region, which carries the
-	// unwired notice (lane M-ui) — the one byte-level difference from an
-	// unscoped load, so a plain projection's response (the mutation's)
-	// and this poll differ by the notice alone.
+	// its marks are the instance's fixed notice, which a plain load — the
+	// mutation response's and the fragment's — carries too (SI-364 (3)),
+	// so the poll and a save share one region and one token; that region
+	// is the serving-root wall's plain one plus the one notice.
 	none := refreshWith(nil, true)
 	if none.asd.readinessRevision != "" {
 		t.Fatalf("a composed refresh with no loader digested readiness %q", none.asd.readinessRevision)
 	}
-	proj, git, asd, err := bare.loadASD(context.Background(), wall.name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	asd.Marks = none.snap.Marks
-	if again := newASDSnapshot(proj, git, asd); again.Revision != none.snap.Revision || again.HTML != none.snap.HTML {
-		t.Fatalf("a composed refresh with no loader carries token %s over its region, want the plain token over the same region with the notice, %s", none.snap.Revision, again.Revision)
+	if none.snap.Revision != unwired.Revision || none.snap.HTML != unwired.HTML {
+		t.Fatalf("a composed refresh with no loader carries token %s, an unwired plain load (a save's) %s: want one token over one region", none.snap.Revision, unwired.Revision)
 	}
 	if !strings.Contains(none.snap.HTML, `data-testid="wall-marks-unavailable"`) || strings.Replace(none.snap.HTML, noticeOf(marksUnwired), "", 1) != alone.HTML {
-		t.Fatal("the unwired composed region is not the unscoped load's plus the one notice")
+		t.Fatal("the unwired region is not the plain serving-root region plus the one notice")
 	}
 }
 
