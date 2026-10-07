@@ -455,7 +455,7 @@ func stubUnreconciledBlockers(in eventualInput, verb string) []Blocker {
 			// normalized; the witness and clearing condition below name
 			// the raw slug, so the operator still reads the slug they
 			// wrote.
-			ID:        "stub-unreconciled/" + sanitizeStubSlug(sr.Slug),
+			ID:        "stub-unreconciled/" + SanitizeStubSlug(sr.Slug),
 			Reason:    ReasonStubUnreconciled,
 			Class:     ClassMechanical,
 			Witnesses: []string{fmt.Sprintf("stub %s: unreconciled (no realized-by coverage, no withdrawal note)", sr.Slug)},
@@ -683,12 +683,15 @@ func sanitizeIDSegment(raw, fallbackPrefix string) string {
 // validateNonEmpty), never constrained to this package's grammar.
 func sanitizeConflictID(raw string) string { return sanitizeIDSegment(raw, "row") }
 
-// sanitizeStubSlug normalizes a feature stub slug (C1). A slug is already
+// SanitizeStubSlug normalizes a feature stub slug (C1) into the last
+// segment of its stub-unreconciled blocker id. A slug is already
 // validated by internal/artifact's simpleNameRe
 // (^[a-z0-9]+(?:-[a-z0-9]+)*$), so the ONLY reachable normalization is
 // the letter prefix a DIGIT-led slug needs ("2fa-login" -> "s-2fa-login");
-// every letter-led slug passes through unchanged.
-func sanitizeStubSlug(raw string) string { return sanitizeIDSegment(raw, "s") }
+// every letter-led slug passes through unchanged. Exported as the one
+// rule a consumer maps a stub's slug to its blocker id through — the
+// wall's readiness marks (ledger SI-360 (1)) — never a copy of it.
+func SanitizeStubSlug(raw string) string { return sanitizeIDSegment(raw, "s") }
 
 // dedupeConflictIDs sanitizes each raw id in report order, appending -2,
 // -3, ... deterministically (resolution (d)) when normalization collides
