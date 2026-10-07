@@ -93,7 +93,7 @@ func projectCard(e refindex.Entry, tree specTreeMeta, cc cardContext) cardFacts 
 	} else {
 		c.title = e.Title
 		if c.title == "" && e.Disclosed == nil {
-			c.titleUnproven = disclosure.Render(disclosure.New("workbench:title-unproven", e.Ref, "no draft title was decoded for this entry"))
+			c.titleUnproven = disclosure.Render(disclosure.New("workbench:title-unproven", e.Ref, "no title was decoded from this design branch's spec"))
 		}
 	}
 	c.move = moveOf(e, c.review, cc.corpus, cc.words)
@@ -198,12 +198,11 @@ func reviewOf(e refindex.Entry, rc reviewConsultation) reviewState {
 	}
 }
 
-// moveKind names a next move (SI-366 (2)'s table) — a closed enum whose
-// zero value is "no move".
+// moveKind names a next move (SI-366 (2)'s table) — a closed enum; the
+// zero value, no kind, is "no move".
 type moveKind string
 
 const (
-	moveNone          moveKind = ""
 	moveOpenWall      moveKind = "open-wall"
 	moveInspectBranch moveKind = "inspect-branch"
 	moveAwaitingMerge moveKind = "awaiting-merge"
@@ -337,7 +336,7 @@ func coverageOf(e refindex.Entry, tree specTreeMeta, corpus corpusRead) coverage
 		return coverageRead{}
 	}
 	if !tree.boardServable {
-		return coverageRead{applies: true, unproven: "the feature has no active-zone working-tree file, so its wall cannot be served"}
+		return coverageRead{applies: true, unproven: "no active-zone working-tree file exists to serve its wall"}
 	}
 	if corpus.err != nil {
 		return coverageRead{applies: true, unproven: "the corpus index could not be built: " + corpus.err.Error()}

@@ -99,8 +99,28 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	body.WriteString(`<p class="home-import"><a href="` + routeSpecImportPage + `" data-testid="home-import-link">Import existing spec</a> &mdash; bring an existing Markdown or native spec onto a new design branch as it is: previewed and mapped mechanically, nothing invented, nothing created until you confirm.</p>`)
 
 	// The whole-store directory (spec/directory-home ac-1): the ref-index
-	// seam consumed once, then the per-render forge consultation.
+	// seam consumed once, the render's one clock reading, the corpus index
+	// built once (the other-records listing below and the cards'
+	// backlinks — built ahead of the directory so its cards can read it;
+	// spec/index-v2 ac-4, SI-366 (12)), then the per-render forge
+	// consultation.
 	entries, indexErr := home.Index(ctx)
+	now := home.Clock()
+	ix, corpusErr := home.Corpus(root)
+	corpus := newCorpusRead(ix, corpusErr)
+	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
+
+	// Every entry's card facts (indexcards.go), projected once from the
+	// inputs above — no second computation of any of them.
+	var cards []cardFacts
+	if indexErr == nil {
+		cards = homeCards(root, entries, cardContext{
+			review: reviewConsultation{configured: home.OpenMRs != nil, failed: mrNotice != "", inReview: inReview},
+			corpus: corpus,
+			now:    now,
+			words:  classWords{m: home.Model},
+		})
+	}
 
 	// The leading status glance (spec/home-status-glance dc-1): a second,
 	// additive rendering pass over the SAME entries/indexErr above — no
@@ -110,15 +130,14 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	// any other evidence-bearing state (dc-3).
 	writeGlanceSection(&body, root, entries, indexErr, home.Model)
 
-	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
-	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil, home.Model, home.Clock())
+	writeDirectorySection(&body, cards, indexErr, mrNotice, home.OpenMRs != nil, home.Model, now)
 
 	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
 	// conflict) — a surviving affordance of the old home page, still read
 	// from the serving working tree (they have no per-branch story).
-	if ix, err := index.Build(root); err != nil {
+	if corpus.err != nil {
 		body.WriteString(`<p class="notice">Could not read the corpus for this store: `)
-		body.WriteString(stdhtml.EscapeString(err.Error()))
+		body.WriteString(stdhtml.EscapeString(corpus.err.Error()))
 		body.WriteString(`</p>`)
 	} else {
 		writeOtherKindsSection(&body, ix)

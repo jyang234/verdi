@@ -199,7 +199,7 @@ func TestCoverageOf(t *testing.T) {
 		{name: "a desk entry: no call to action", e: desk, tree: featureTree(), corpus: corpusRead{links: stories}, want: coverageRead{}},
 		{name: "a design-branch entry: no call to action", e: draft, tree: featureTree(), corpus: corpusRead{links: stories}, want: coverageRead{}},
 		{name: "an unreadable working tree: unproven", e: acceptedFeature(), tree: specTreeMeta{unreadable: "spec/f's working-tree file does not decode: x"}, corpus: corpusRead{links: stories}, want: coverageRead{applies: true, unproven: "spec/f's working-tree file does not decode: x"}},
-		{name: "no active-zone file: unproven", e: acceptedFeature(), tree: archiveOnly, corpus: corpusRead{links: stories}, want: coverageRead{applies: true, unproven: "the feature has no active-zone working-tree file, so its wall cannot be served"}},
+		{name: "no active-zone file: unproven", e: acceptedFeature(), tree: archiveOnly, corpus: corpusRead{links: stories}, want: coverageRead{applies: true, unproven: "no active-zone working-tree file exists to serve its wall"}},
 		{name: "an unbuilt corpus: unproven", e: acceptedFeature(), tree: featureTree(), corpus: corpusRead{err: errors.New("duplicate ref")}, want: coverageRead{applies: true, unproven: "the corpus index could not be built: duplicate ref"}},
 	}
 	for _, tt := range tests {
@@ -300,7 +300,7 @@ func TestProjectCard(t *testing.T) {
 		{
 			name: "a design draft with no decoded title: empty and disclosed, never its ref",
 			e:    refindex.Entry{Ref: "spec/untitled", Source: refindex.SourceRemote, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Date: before(day)},
-			want: cardFacts{name: "untitled", titleUnproven: "disclosed-unproven [workbench:title-unproven] spec/untitled: no draft title was decoded for this entry", age: ageFact{text: "1 d ago", days: 1}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}},
+			want: cardFacts{name: "untitled", titleUnproven: "disclosed-unproven [workbench:title-unproven] spec/untitled: no title was decoded from this design branch's spec", age: ageFact{text: "1 d ago", days: 1}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}},
 		},
 		{
 			name: "a branch with no draft spec: no title, its own disclosure, disclosed",
