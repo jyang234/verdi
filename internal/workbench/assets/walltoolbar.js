@@ -684,7 +684,10 @@
       }
       if ((e.key === "Enter" || e.key === " ") && t.classList.contains("yarn-chip")) {
         e.preventDefault();
-        t.click(); // the chip is the button that selects its thread
+        // The chip is the button that selects its thread: selected through
+        // the seam, not a synthetic click, which the selection's press
+        // guard reads as the tail of the last pointer drag (F2c, ac-6).
+        if (seam()) seam().selectElement(t);
         return;
       }
       if (e.key !== "Enter" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;

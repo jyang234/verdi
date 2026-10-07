@@ -1885,13 +1885,9 @@
     openCardEditor(card);
   }
 
-  // openCardEditor's domain gate lives INSIDE the one shared entry, so
-  // mouse and keyboard paths refuse identically — before any text is
-  // invested (review fix I-1).
-
-  // openCardEditor is the ONE inline-editor entry, shared by the mouse
-  // (double-click) and the keyboard (Enter on a focused card) — complete
-  // keyboard access without a second edit path (design §5.2).
+  // openCardEditor is the ONE inline-editor entry, the mouse's double click
+  // and the keyboard's (__BOARDV2API__.editCard), with the domain gate inside
+  // so every path refuses alike before any text is invested (review fix I-1).
   function openCardEditor(card) {
     if (!authoring || editing) return;
     if (!domainWrites) {
@@ -2889,18 +2885,15 @@
   }
 
   function onKeyDown(e) {
-    if (e.key === "Enter" && e.target && e.target.classList && e.target.classList.contains("objcard")) {
-      openCardEditor(e.target);
-      e.preventDefault();
-      return;
-    }
     if (e.key === "Escape") {
       pending = null;
-      hideAllDialogs();
-      closeRefPeek();
-      closeExpandDialog();
-      closeBadgeDrawer();
-      closePinTray();
+      // Innermost first, one layer per press (ac-6); the selection is wallkeys.js's.
+      var bd = document.getElementById("modal-backdrop");
+      if (bd && !bd.hidden) hideAllDialogs();
+      else if (document.getElementById("expand-dialog")) closeExpandDialog();
+      else if (document.getElementById("ref-peek")) closeRefPeek();
+      else if (openDrawer) closeBadgeDrawer();
+      else closePinTray();
     }
   }
 
