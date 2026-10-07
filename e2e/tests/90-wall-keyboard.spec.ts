@@ -578,6 +578,77 @@ test.describe("wall-canvas", () => {
     expect(await interactionLive(page)).toBe(false);
     await page.reload();
     await expect(page.locator('[data-testid^="sticky-"]')).toHaveCount(stickies);
+
+    // -- Combined layers, one press closing exactly one, in SI-363 (2)'s
+    // amended order (the closure check's R-1 and R-2).
+    // The branch menu with the focus inside it, on a menuitem.
+    await select();
+    await tabUntil(page, "Tab reaches the branch switcher", focusIs(page, "branch-switcher"));
+    await page.keyboard.press("Enter");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => document.activeElement?.closest("#branch-menu") !== null && document.activeElement?.getAttribute("role") === "menuitem")).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    // The focus the hidden item would have kept returns to the switcher.
+    await expect(page.getByTestId("branch-switcher")).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // openSlotWithText opens the constraint slot from the keyboard and
+    // types into it; the text keeps it open once the focus leaves.
+    const openSlotWithText = async (text: string) => {
+      await tabUntil(page, "Tab reaches the constraint slot", focusIs(page, "slot-open-co"));
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("slot-text-co")).toBeFocused();
+      await page.keyboard.type(text);
+    };
+
+    // A slot with text under the posture popover: the first press closes
+    // only the popover, through topbar.js, and the text survives; the
+    // second cancels the slot; the third clears the selection.
+    await select();
+    await openSlotWithText("survives the popover");
+    await tabUntil(page, "Shift+Tab reaches the posture summary", focusIs(page, "topbar-posture"), true);
+    await page.keyboard.press("Enter");
+    await expect(popover).toHaveJSProperty("open", true);
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await page.keyboard.press("Escape");
+    await expect(popover).toHaveJSProperty("open", false);
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await expect(page.getByTestId("slot-text-co")).toHaveValue("survives the popover");
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(coSlot).not.toHaveAttribute("data-open", /./);
+    expect(await interactionLive(page)).toBe(false);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // The same under a reference card's peek, which a click opens (and
+    // which selects the card): the peek closes first, through
+    // boardspec.js, the text survives; then the slot; then the selection.
+    await select();
+    await openSlotWithText("survives the peek");
+    const ref = page.getByTestId(refCardTestId(WALL.ADR_REF));
+    await ref.scrollIntoViewIfNeeded();
+    await ref.click();
+    await expect(ref).toHaveAttribute("data-selected", "true");
+    const peek = page.locator("#ref-peek");
+    await expect(peek).toBeVisible();
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await page.keyboard.press("Escape");
+    await expect(peek).toHaveCount(0);
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await expect(page.getByTestId("slot-text-co")).toHaveValue("survives the peek");
+    await expect(ref).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(coSlot).not.toHaveAttribute("data-open", /./);
+    expect(await interactionLive(page)).toBe(false);
+    await expect(ref).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
   });
 
   test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {

@@ -299,19 +299,28 @@
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       var key = e.key;
       if (key === "Escape") {
-        if (t.closest(FIELDS) || modalOpen()) return; // the field's own, or the modal layer's (boardspec.js)
+        // SI-363 (2) as amended: the modal layer (boardspec.js); the branch
+        // menu, even with the focus inside it; a field's own key, and the
+        // peek's, the tray's (boardspec.js) or the popover's (topbar.js);
+        // an unfocused slot or draft; then the selection. One layer a press.
+        if (modalOpen()) return;
+        var menu = shown("branch-menu");
+        if (menu) {
+          // A focus inside the menu would be left on a hidden item, and
+          // the next key read as the menu's: it returns to the switcher.
+          var inside = menu.contains(document.activeElement);
+          menu.hidden = true;
+          var switcher = inside && document.querySelector('[data-testid="branch-switcher"]');
+          if (switcher) switcher.focus({ preventScroll: true });
+          return;
+        }
+        if (t.closest(FIELDS) || dialogOpen()) return;
         var field = openField();
         if (field) {
           cancelOpen(field);
           e.preventDefault();
           return;
         }
-        var menu = shown("branch-menu");
-        if (menu) {
-          menu.hidden = true;
-          return;
-        }
-        if (dialogOpen()) return; // the peek's, the tray's (boardspec.js) or the popover's (topbar.js)
         if (!seam() || !seam().selection()) return;
         clear();
         return;
