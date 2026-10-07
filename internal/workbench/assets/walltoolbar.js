@@ -589,16 +589,10 @@
     slot.appendChild(form);
     text.focus();
 
-    function close() {
-      if (!slot.hasAttribute("data-open")) return;
-      slot.removeAttribute("data-open");
-      form.remove();
-      if (api()) api().resumeHeldRefresh();
-    }
     text.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") {
         ev.stopPropagation(); // the slot closes; open dialogs are not its business
-        close();
+        closeSlot(slot);
         var open = slot.querySelector(".wall-slot-open");
         if (open) open.focus();
         return;
@@ -609,19 +603,37 @@
         var asd = window.__verdiASD;
         if (!value || !asd || !asd.declareOp) return;
         var declared = asd.declareOp(op, value);
-        close();
+        closeSlot(slot);
         asd.mutate([declared], {});
       }
     });
-    // Leaving an empty slot closes it; a slot with text stays open, so
-    // nothing typed is silently lost and nothing is silently written.
-    slot.addEventListener("focusout", function () {
-      setTimeout(function () {
-        if (!slot.isConnected || slot.contains(document.activeElement)) return;
-        if (!text.value.trim()) close();
-      }, 0);
-    });
   }
+
+  // closeSlot closes a slot's current form, whichever open made it, and
+  // resumes a refresh the open slot held.
+  function closeSlot(slot) {
+    if (!slot.hasAttribute("data-open")) return;
+    slot.removeAttribute("data-open");
+    var form = slot.querySelector(".wall-slot-form");
+    if (form) form.remove();
+    if (api()) api().resumeHeldRefresh();
+  }
+
+  // Leaving an empty slot closes it; a slot with text stays open, so
+  // nothing typed is silently lost and nothing is silently written. One
+  // listener serves every slot and every open: a listener added per open
+  // outlived its form, and its close took a later open's hold with it,
+  // so the next swap destroyed the text (F2BR-1).
+  document.addEventListener("focusout", function (e) {
+    var t = e.target;
+    var slot = t instanceof Element ? t.closest(".wall-slot[data-open]") : null;
+    if (!slot) return;
+    setTimeout(function () {
+      if (!slot.isConnected || !slot.hasAttribute("data-open") || slot.contains(document.activeElement)) return;
+      var text = slot.querySelector(".wall-slot-text");
+      if (!text || !text.value.trim()) closeSlot(slot);
+    }, 0);
+  });
 
   document.addEventListener("click", function (e) {
     var t = e.target;

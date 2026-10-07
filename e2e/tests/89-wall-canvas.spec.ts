@@ -274,6 +274,22 @@ async function dragPin(page: Page, fromId: string, target: Locator): Promise<{ x
   return drop;
 }
 
+// stickyPosition reads a sticky's stored position from its inline style,
+// the server's own px.
+const stickyPosition = (sticky: Locator) =>
+  sticky.evaluate((el) => ({ x: parseFloat((el as HTMLElement).style.left), y: parseFloat((el as HTMLElement).style.top) }));
+
+// backgroundMove writes a sticky's position outside the page, as another
+// author would, and waits for the poll to carry the change: the next
+// snapshot that is not a 304. Whether the wall then shows it is the
+// caller's to assert — a held projection does not (co-2).
+async function backgroundMove(page: Page, id: string, x: number, y: number): Promise<void> {
+  const carried = page.waitForResponse((r) => r.url().endsWith("/snapshot") && r.status() === 200);
+  const moved = await page.request.post(WALL.WRITABLE_PATH + "/api/sticky-position", { data: { id, x, y } });
+  expect(moved.status(), await moved.text()).toBe(200);
+  await carried;
+}
+
 // assertCardsReceiptsAndLayers is ac-1's one shared assertion routine
 // (SI-355 (1)): footprints and rotation, the receipts' exact texts, the
 // stub's slug as its first line, and the two yarn layers.
@@ -1251,5 +1267,41 @@ test.describe("wall-canvas", () => {
     await expect(ac1).toHaveAttribute("data-selected", "true");
     await page.reload();
     await expect(page.getByTestId("card-ac-1").locator(".card-text")).toHaveText(edited);
+  });
+
+  test("a reopened add slot keeps its hold across a background change (co-2; Wave 6 §5.1)", async ({ page }) => {
+    // A slot opened, cancelled and opened again keeps its hold: with text
+    // typed and the focus gone to a card, it stays open and holds the
+    // projection, so a change that lands meanwhile waits for the slot to
+    // close, and the typed text survives it. The sticky is moved back
+    // after, so the wall is as it was.
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const coSlot = page.getByTestId("slot-co");
+    await coSlot.scrollIntoViewIfNeeded();
+    await page.getByTestId("slot-open-co").click();
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await page.keyboard.press("Escape");
+    await expect(coSlot).not.toHaveAttribute("data-open", /./);
+    await page.getByTestId("slot-open-co").click();
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await page.getByTestId("slot-text-co").fill("typed, then the focus left");
+    await ac1.scrollIntoViewIfNeeded();
+    await ac1.click();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    expect(await interactionLive(page), "the reopened slot holds the projection").toBe(true);
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+    const at = await stickyPosition(sticky);
+    await backgroundMove(page, WALL.STICKY_ID, at.x, at.y + 8);
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await expect(page.getByTestId("slot-text-co")).toHaveValue("typed, then the focus left");
+    await expect(sticky).toHaveCSS("top", `${at.y}px`);
+    await page.getByTestId("slot-text-co").focus();
+    await page.keyboard.press("Escape");
+    await expect(coSlot).not.toHaveAttribute("data-open", /./);
+    await expect(sticky).toHaveCSS("top", `${at.y + 8}px`);
+    await backgroundMove(page, WALL.STICKY_ID, at.x, at.y);
+    await expect(sticky).toHaveCSS("top", `${at.y}px`);
   });
 });
