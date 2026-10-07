@@ -1080,6 +1080,14 @@ test.describe("wall-canvas", () => {
     const confirm = page.getByRole("alertdialog", { name: /confirm supersedes/i });
     await expect(confirm).toBeVisible();
     await expect(confirm.locator("#edge-confirm-consequence")).toHaveText(table.consequences.supersedes);
+    // The consequence is read for longer than the toolbar gives a chosen
+    // thread to appear (15 s): the page's clock jumps 16 s while the
+    // confirmation is open, and the thread it then writes is still the
+    // selection, since the write posts at Confirm, not at the choice.
+    await page.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 16_000;
+    });
     await confirm.getByRole("button", { name: "Confirm" }).click();
     await expectAutosaved(page);
     const supersedes = page.locator(`.yarn-chip[data-layer="spec"][data-edge-type="supersedes"][data-from="dc-1"][data-to="${WALL.ADR_REF}"]`);

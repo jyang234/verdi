@@ -522,6 +522,13 @@
         pendingSelect = { from: pickerPair.from, to: pickerPair.to, type: choice.getAttribute("data-edge-choice"), until: Date.now() + 15000 };
         return;
       }
+      // A gate-bearing type posts its write when its confirmation's OK is
+      // pressed, not when it is chosen: the deadline runs from there, so a
+      // consequence read slowly still selects the thread it writes (F2BR-2).
+      if (pendingSelect && t.closest("#edge-confirm-ok")) {
+        pendingSelect.until = Date.now() + 15000;
+        return;
+      }
       if (t.closest("#edge-picker-cancel, #edge-confirm-cancel, #modal-backdrop")) {
         pendingSelect = null;
         pickerPair = null;
