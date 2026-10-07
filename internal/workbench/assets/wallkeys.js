@@ -182,12 +182,13 @@
 
   // -- Enter on a focused card ---------------------------------------------------------
 
-  // Enter on a focused object card selects it and opens the card editor
-  // (boardspec.js's one editor entry, with its domain gate); Enter with
-  // the focus elsewhere is walltoolbar.js's, on the selection.
+  // Enter on a focused object card — the card itself, never a control
+  // inside it, whose Enter is its own — selects it and opens the card
+  // editor (boardspec.js's one editor entry, with its domain gate); Enter
+  // with the focus elsewhere is walltoolbar.js's, on the selection.
   function enterOnCard(t) {
     var c = canvas();
-    var card = t.closest(".objcard");
+    var card = t.classList.contains("objcard") ? t : null;
     if (!card || !c || !c.contains(card) || !api() || !seam()) return false;
     if (selectedCard() !== card) seam().selectElement(card);
     api().editCard(card);
