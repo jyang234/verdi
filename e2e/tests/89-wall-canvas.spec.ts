@@ -106,13 +106,43 @@ async function expectFootprint(el: Locator, what: string, w: number, h: number |
   expect(transformRotates(transform), `${what} is rotated: ${transform}`).toBe(false);
 }
 
+// receiptOverlaps lists the pairs among a paper's prose, obligation rows,
+// coverage or claims chip, badge row, mark and (on a stub) meta line whose
+// boxes intersect by more than half a pixel on both axes (SI-365 (1), (5):
+// the register never overlaps anything). Empty is the only passing value.
+async function receiptOverlaps(card: Locator): Promise<string[]> {
+  return card.evaluate((node) => {
+    const parts: [string, Element][] = [];
+    const add = (name: string, el: Element | null) => { if (el) parts.push([name, el]); };
+    add("prose", node.querySelector(".card-text, .stub-title"));
+    add("meta", node.querySelector(".stub-meta"));
+    node.querySelectorAll(".card-obligations .obligation").forEach((o, i) => add(`obligation ${i + 1}`, o));
+    add("chip", node.querySelector(".coverage-chip, .oq-claims"));
+    add("badges", node.querySelector(".card-badges"));
+    add("mark", node.querySelector(".readiness-mark"));
+    const out: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      for (let j = i + 1; j < parts.length; j++) {
+        const a = parts[i][1].getBoundingClientRect();
+        const b = parts[j][1].getBoundingClientRect();
+        const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (w > 0.5 && h > 0.5) out.push(`${parts[i][0]} × ${parts[j][0]} (${Math.round(w * h)} px²)`);
+      }
+    }
+    return out;
+  });
+}
+
 // expectMark asserts one paper's readiness mark (dc-1; SI-350 (1); the
 // handoff's "readiness marks"): the dot — 10 px in its 2 px ring, round,
 // straddling the card's right edge in its top band, hidden from the
 // accessibility tree — and the one chip whose word is the meaning, its
 // title naming the Focus next concerns that name the card (each given
-// concern among them), drawn inside the card and never over its prose.
-// owner is the paper's testid stem (an object id, or stub-<slug>).
+// concern among them), drawn inside the card on its head line (SI-365
+// (5)(c)): above the prose, over no receipt, and topmost at its centre so
+// its title is a hover away. owner is the paper's testid stem (an object
+// id, or stub-<slug>).
 async function expectMark(page: Page, card: Locator, owner: string, word: string, concerns: string[]): Promise<void> {
   const dot = page.getByTestId(`readiness-dot-${owner}`);
   const mark = page.getByTestId(`readiness-mark-${owner}`);
@@ -127,6 +157,7 @@ async function expectMark(page: Page, card: Locator, owner: string, word: string
   }
   await expect(card.locator(`[data-testid="readiness-mark-${owner}"]`), `${owner}: the mark is the card's own`).toHaveCount(1);
   await expect(card.locator(`[data-testid="readiness-dot-${owner}"]`), `${owner}: the dot is the card's own`).toHaveCount(1);
+  await card.scrollIntoViewIfNeeded();
   const cardBox = (await card.boundingBox())!;
   const dotBox = (await dot.boundingBox())!;
   const markBox = (await mark.boundingBox())!;
@@ -139,8 +170,21 @@ async function expectMark(page: Page, card: Locator, owner: string, word: string
   expect(markBox.x, `${owner}: the chip is inside the card`).toBeGreaterThanOrEqual(cardBox.x);
   expect(markBox.x + markBox.width, `${owner}: the chip is inside the card`).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
   expect(markBox.y + markBox.height, `${owner}: the chip is inside the card`).toBeLessThanOrEqual(cardBox.y + cardBox.height + 0.5);
-  const proseBox = (await card.locator(".card-text, .stub-meta").first().boundingBox())!;
-  expect(markBox.y, `${owner}: the chip never sits on the prose`).toBeGreaterThanOrEqual(proseBox.y + proseBox.height - 0.5);
+  expect(markBox.y, `${owner}: the chip is inside the card`).toBeGreaterThanOrEqual(cardBox.y - 0.5);
+  // The head line (SI-365 (5)(c), replacing the foot-row truth): the chip
+  // ends above the prose — the card text, or a stub's title — and no
+  // receipt or prose box meets it.
+  const proseBox = (await card.locator(".card-text, .stub-title").first().boundingBox())!;
+  expect(markBox.y + markBox.height, `${owner}: the chip sits on the head line, above the prose`).toBeLessThanOrEqual(proseBox.y + 0.5);
+  expect(await receiptOverlaps(card), `${owner}: nothing overlaps`).toEqual([]);
+  // Topmost at its centre: the chip itself answers elementFromPoint, so
+  // nothing paints over its word and its title tooltip is reachable.
+  const chipBox = (await chips.boundingBox())!;
+  const topmost = await page.evaluate(
+    ([x, y]) => { const el = document.elementFromPoint(x, y); return el ? `${el.tagName.toLowerCase()}.${el.className}` : null; },
+    [chipBox.x + chipBox.width / 2, chipBox.y + chipBox.height / 2],
+  );
+  expect(topmost, `${owner}: the chip is topmost at its centre`).toMatch(/^span\.readiness-chip$/);
 }
 
 // markChip is one paper's mark chip row.
@@ -387,14 +431,17 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
   await expect(page.locator("#board-canvas .readiness-dot")).toHaveCount(3);
   await expect(page.getByTestId("readiness-mark-ac-1")).toHaveCount(0);
   await expect(page.getByTestId("wall-marks-unavailable")).toHaveCount(0);
-  // Beside the coverage chip, which keeps its text (dc-1): the same
-  // bottom row, the mark after the chip and never over it.
-  const coverageAC2 = page.getByTestId(coverageChipTestId("ac-2"));
-  await expect(coverageAC2).toHaveText("no stub");
-  const coverageBox = (await coverageAC2.boundingBox())!;
-  const markAC2Box = (await page.getByTestId("readiness-mark-ac-2").boundingBox())!;
-  expect(Math.abs(coverageBox.y + coverageBox.height - (markAC2Box.y + markAC2Box.height)), "the mark shares the coverage chip's row").toBeLessThanOrEqual(2);
-  expect(markAC2Box.x, "the mark follows the coverage chip").toBeGreaterThanOrEqual(coverageBox.x + coverageBox.width);
+  // The register (SI-365 (1), (5)): the coverage chips keep their full
+  // text (dc-1; never ellipsized), and on the AC cards nothing meets
+  // anything — prose, obligation rows, chip, badges, mark. This replaces
+  // the foot-row truth ("the mark shares the coverage chip's row"), which
+  // SI-365 (5)(c) retired for the head line.
+  for (const id of ["ac-1", "ac-2"]) {
+    const chip = page.getByTestId(coverageChipTestId(id));
+    await expect(chip).toHaveText(id === "ac-1" ? "covered by 1 stub" : "no stub");
+    expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth), `${id}: the coverage chip shows its full text`).toBe(true);
+    expect(await receiptOverlaps(page.getByTestId(`card-${id}`)), `${id}: nothing overlaps`).toEqual([]);
+  }
 
   // The stub's slug is its first line, inside the card: the first child,
   // the one hook the scoping specs share, laid out within the card's box
@@ -928,6 +975,21 @@ test.describe("wall-canvas", () => {
         targets: v.nodes.slice(0, 3).map((n) => n.target.join(" ")),
       }));
       expect(violations, `${scheme}: ${JSON.stringify(violations, null, 2)}`).toEqual([]);
+
+      // The same scan with a MARKED card selected (SI-365 (5)): ac-2 wears
+      // the "no stub" chip on its head line, at full strength while the
+      // other papers recede.
+      const ac2 = page.getByTestId("card-ac-2");
+      await ac2.click();
+      await expect(ac2).toHaveAttribute("data-selected", "true");
+      await expect(markChip(page, "ac-2")).toHaveText(["no stub"]);
+      const marked = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(
+        marked.violations.map((v) => ({ id: v.id, impact: v.impact, targets: v.nodes.slice(0, 3).map((n) => n.target.join(" ")) })),
+        `${scheme}, ac-2 selected`,
+      ).toEqual([]);
+      await dc1.click();
+      await expect(dc1).toHaveAttribute("data-selected", "true");
 
       // Tab from the selected card lands on the next card, receded: focus
       // lifts the recede and the ring reads at 3:1 or better against the
