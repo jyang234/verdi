@@ -17,13 +17,11 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/refindex"
@@ -524,25 +522,9 @@ func writeSourceChip(buf *bytes.Buffer, src refindex.Source) {
 // the ACTIVE-zone file exists, which is what makes /board/spec/<name>
 // servable. Every failure degrades to zero values: the directory entry
 // itself never depends on the working tree (dc-2 — the index is computed
-// from refs; this is trim, not truth).
+// from refs; this is trim, not truth). It is readSpecTreeMeta's trim
+// (indexcardsread.go), the one working-tree read the index cards share.
 func specWorkingTreeMeta(root, name string) (title string, class artifact.SpecClass, story string, boardServable bool) {
-	path := store.ActiveSpecPath(root, name)
-	data, err := os.ReadFile(path)
-	if err == nil {
-		boardServable = true
-	} else {
-		path = store.ArchiveSpecPath(root, name)
-		if data, err = os.ReadFile(path); err != nil {
-			return "", "", "", false
-		}
-	}
-	fm, _, err := artifact.SplitFrontmatter(data)
-	if err != nil {
-		return "", "", "", boardServable
-	}
-	m, err := artifactview.DecodeMeta("spec", fm)
-	if err != nil {
-		return "", "", "", boardServable
-	}
-	return m.Base.Title, m.Class, m.Story, boardServable
+	m := readSpecTreeMeta(root, name)
+	return m.title, m.class, m.story, m.boardServable
 }
