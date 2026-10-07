@@ -5377,6 +5377,21 @@ body:not(.board-page) > footer.site-foot,
   right: 0;
   bottom: calc(100% - 4px - round(down, calc(100% - 4px), var(--card-line)));
 }
+/* a dense stub whose title track is empty (SI-365 (6)) has no room above
+   the title's bottom edge for the cue: anchored to that edge, it cannot
+   fit there and falls back to the card's foot corner, right of
+   Instantiate, inside the padding — never on the head line. A stub whose
+   title has a line keeps the cue on that line, as the rule above places
+   it. Browsers without anchor positioning keep the rule above. */
+@supports (anchor-name: --a) {
+  .boardv2-canvas .stubcard > .stub-title { anchor-name: --stub-prose; }
+  .boardv2-canvas .stubcard > .clamp-more {
+    grid-row: 3 / auto; /* the auto end line is the padding edge */
+    bottom: anchor(--stub-prose bottom);
+    position-try-fallbacks: --stub-foot;
+  }
+  @position-try --stub-foot { inset: auto 0 0 auto; }
+}
 .boardv2-canvas .stubcard > .stub-meta {
   grid-row: 4;
   grid-column: 1 / -1;
