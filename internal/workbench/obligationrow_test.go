@@ -239,10 +239,17 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // (`<div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar"
 // aria-label="Wall actions"></div>`) — on every wall alike; these
 // read-only story walls render no add slot (the domain is not live) and
-// every other byte of the story render is as it was.
+// every other byte of the story render is as it was. Re-pinned a fourth
+// time by spec/wall-canvas-v2 (lane F2b's fix pass, Wave 6 §5.1): every
+// yarn chip carries its stable key, ` data-testid="yarn-chip-<layer>-
+// <type>-<from>-<to>[-<annotation id>]"`, after its identity attributes
+// and before its data-can-* ones, so a region swap restores the focus to
+// the chip that had it — on every wall alike (one chip on each of these
+// walls); the story renders with the keys stripped are byte-identical to
+// the third pin's, so every other byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "bd05766fb6ac1887c015e8bda7ead811feb1543f09dbc7187bb187a467ce2b66"
-	slotStoryWallDigestBase = "994205aa135785425dc6369a1822a99ea5e2c1f00e952842ff8d4ce68c6a715b"
+	storyWallDigestBase     = "696b72a8b2bda9ab8cf7f9a0227a31c813f44cc39ce4a94cac25c2434311cbaa"
+	slotStoryWallDigestBase = "8124f87e124482bfd292e80990e3064db645e6a635e832b945f81ec29b05d32f"
 )
 
 func renderDigest(body string) string {
