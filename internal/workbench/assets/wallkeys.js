@@ -1,11 +1,11 @@
 // The wall's keyboard (spec/wall-canvas-v2 ac-6; ledger SI-350 (4),
-// SI-361 (3); BL-173 (3); lane F2c). The arrows move the selection within
-// a column (up and down) and across columns (left and right, to the
-// nearest card by position) and reveal the card inside the bounded
-// canvas; Enter on a focused card edits it; Delete removes the selected
-// card or thread through the existing confirmation, and refuses a declared
-// stub in the trash's own words; Escape clears the selection, last of all
-// the layers.
+// SI-361 (3), SI-363; BL-173 (3); lane F2c). The arrows move the selection
+// on the handoff's grid — within a column (up and down) and to the
+// adjacent column at the same row (left and right) — and reveal the card
+// inside the bounded canvas; Enter on a focused card edits it; Delete
+// removes the selected card or thread through the existing confirmation,
+// and refuses a declared stub in the trash's own words; Escape clears the
+// selection, last of all the layers.
 //
 // A new asset for the new behaviour (co-1: boardspec.js does not grow).
 // Built on the selection seam (wallselect.js: window.__WALLSELECT__), the
@@ -15,18 +15,22 @@
 // of what may be deleted). It owns no data and holds no projection: the
 // selection is the seam's, and every write is boardspec.js's.
 //
-// The layers Escape closes, innermost first, one per press: an inline
-// editor or an open slot (their own listeners, which stop the key), then
-// the modal layer or one open dialog (boardspec.js's Escape, which closes
-// one layer per press), then the selection (here). The arrows and Delete
-// rest while a field, a dialog or a menu has the focus, and under a
-// modal, so a key typed into an editor never reaches the card (ac-5; the
-// Delete mutant). Focus follows the selection the arrows move, onto the
-// card itself — the handoff's cards are focusable only when they are
-// object cards, so the others take tabindex=-1 as they are reached, and
-// again after a swap, so the swap's focus restore can land — and the
-// reveal is immediate: no viewport animation is introduced, so Wave 6
-// §5.2's reduced-motion rule has nothing to reduce.
+// The layers Escape closes, innermost first, one per press (SI-363 (2)):
+// a focused editor, slot or draft (their own listeners, which stop the
+// key); the modal layer (boardspec.js's Escape); an open slot or draft
+// whose focus has left (cancelled here through its own field); the
+// branch menu (closed here: it has no backdrop, so boardspec.js's chain
+// cannot see it); the reference peek or the pin tray (boardspec.js) and
+// the top bar's posture popover (topbar.js, whose key is not also a
+// clear); then the selection. The arrows and Delete rest while a field,
+// a control, a dialog or a menu has the focus, and under a modal, so a
+// key typed into an editor never reaches the card (ac-5; the Delete
+// mutant). Focus follows the selection the arrows move, onto the card
+// itself — the handoff's cards are focusable only when they are object
+// cards, so the others take tabindex=-1 as they are reached, and again
+// after a swap, so the swap's focus restore can land, selected or not —
+// and the reveal is immediate: no viewport animation is introduced, so
+// Wave 6 §5.2's reduced-motion rule has nothing to reduce.
 (function () {
   "use strict";
 
@@ -36,10 +40,10 @@
 
   var CARDS = ".objcard, .stubcard, .refcard, .sticky";
   var REVEAL_MARGIN = 40; // px the revealed card keeps inside the canvas's visible box (the handoff's ≥ 40 px)
-  var COLUMN_SLACK = 100; // px of horizontal distance within which cards count as one column (half a card)
   // The focus a key belongs to: a field, a dialog, a menu, a control.
   var FIELDS = "input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], [role=menu]";
-  var CONTROLS = FIELDS + ", button, a, [role=toolbar]";
+  var CONTROLS = FIELDS + ", button, a, summary, [role=toolbar]";
+  var focusedKey = null; // the last card that had the focus, by its test id
 
   function canvas() {
     return document.getElementById("board-canvas");
@@ -60,13 +64,21 @@
     if (bd && !bd.hidden) return true;
     return !!(document.getElementById("expand-dialog") || document.getElementById("drawer-backdrop"));
   }
-  // dialogOpen mirrors boardspec.js's Escape chain: the modal layer, the
-  // reference peek, the pin tray. While any is open, Escape is that
-  // chain's, not the selection's.
+  function shown(id) {
+    var el = document.getElementById(id);
+    return el && !el.hidden ? el : null;
+  }
+  // openField: the field of an open add slot or sticky draft the focus
+  // has left (a focused one takes its own Escape).
+  function openField() {
+    var c = canvas();
+    return c ? c.querySelector(".wall-slot[data-open] textarea, .sticky-draft textarea") : null;
+  }
+  // dialogOpen: a layer another script closes on Escape — the modal layer,
+  // the reference peek and the pin tray (boardspec.js's chain), the top
+  // bar's posture popover (topbar.js). While one is open, the key is its.
   function dialogOpen() {
-    if (modalOpen() || document.getElementById("ref-peek")) return true;
-    var tray = document.getElementById("pin-tray");
-    return !!(tray && !tray.hidden);
+    return modalOpen() || !!document.getElementById("ref-peek") || !!shown("pin-tray") || !!document.querySelector("details.topbar-posture[open]");
   }
 
   // -- the cards and their geometry ----------------------------------------------------
@@ -105,40 +117,73 @@
     return card && c && c.contains(card) && !card.classList.contains("sticky-draft") ? card : null;
   }
 
-  // neighbour picks the card an arrow moves to. Up and down stay in the
-  // column: among the cards whose footprint shares the current card's
-  // horizontal span, the nearest above or below. Left and right cross to
-  // the nearest column on that side — the smallest horizontal distance
-  // between centres, with COLUMN_SLACK gathering that column's cards —
-  // and within it to the card nearest by vertical position. At the wall's
-  // edge there is none.
-  function neighbour(cur, key) {
-    var all = cards(canvas());
-    var r = box(cur);
-    var vertical = key === "ArrowUp" || key === "ArrowDown";
-    var cands = [];
-    for (var i = 0; i < all.length; i++) {
-      if (all[i] === cur) continue;
-      var b = box(all[i]);
-      if (vertical) {
-        if (b.x >= r.x + r.w || b.x + b.w <= r.x) continue;
-        var dy = key === "ArrowUp" ? r.cy - b.cy : b.cy - r.cy;
-        if (dy > 0) cands.push({ el: all[i], d: dy, dy: 0 });
-      } else {
-        var dx = key === "ArrowLeft" ? r.cx - b.cx : b.cx - r.cx;
-        if (dx > 0) cands.push({ el: all[i], d: dx, dy: Math.abs(b.cy - r.cy) });
+  // grid is the handoff's model (SI-363 (1)): the zone columns the server
+  // labels, left to right (the scratch lane included; without labels,
+  // every distinct card left is a column), each card in exactly one
+  // column — the one nearest its centre by x, so an off-grid paper, a
+  // dragged sticky or card, still has a place — and each column's cards
+  // ordered by y, then by document order where two share a y.
+  function grid() {
+    var c = canvas();
+    var cols = [];
+    var labels = c.querySelectorAll(".zone-label");
+    for (var i = 0; i < labels.length; i++) {
+      var x = parseFloat(labels[i].style.left);
+      var w = parseFloat(labels[i].style.width);
+      if (isFinite(x) && isFinite(w)) cols.push({ cx: x + w / 2, cards: [] });
+    }
+    var all = cards(c);
+    if (!cols.length) {
+      var seen = {};
+      for (var j = 0; j < all.length; j++) {
+        var bj = box(all[j]);
+        if (!seen[bj.x]) {
+          seen[bj.x] = true;
+          cols.push({ cx: bj.cx, cards: [] });
+        }
       }
     }
-    if (!cands.length) return null;
-    var nearest = Infinity;
-    for (var j = 0; j < cands.length; j++) nearest = Math.min(nearest, cands[j].d);
-    var best = null;
-    for (var k = 0; k < cands.length; k++) {
-      var cd = cands[k];
-      if (cd.d > nearest + COLUMN_SLACK) continue;
-      if (!best || cd.dy < best.dy || (cd.dy === best.dy && cd.d < best.d)) best = cd;
+    cols.sort(function (a, b) {
+      return a.cx - b.cx;
+    });
+    for (var k = 0; k < all.length; k++) {
+      var b = box(all[k]);
+      var best = null;
+      for (var m = 0; m < cols.length; m++) {
+        var d = Math.abs(cols[m].cx - b.cx);
+        if (!best || d < best.d) best = { d: d, col: cols[m] };
+      }
+      if (best) best.col.cards.push({ el: all[k], y: b.y, order: k });
     }
-    return best.el;
+    for (var n = 0; n < cols.length; n++) {
+      cols[n].cards.sort(function (a, b) {
+        return a.y - b.y || a.order - b.order;
+      });
+    }
+    return cols;
+  }
+
+  // neighbour picks the card an arrow moves to. Up and down move within
+  // the column; left and right move to the adjacent column — the nearest
+  // one on that side with a card in it — at the same row, clamped to that
+  // column's length. At the wall's edge there is none.
+  function neighbour(cur, key) {
+    var cols = grid();
+    for (var ci = 0; ci < cols.length; ci++) {
+      var rows = cols[ci].cards;
+      for (var ri = 0; ri < rows.length; ri++) {
+        if (rows[ri].el !== cur) continue;
+        if (key === "ArrowUp") return ri > 0 ? rows[ri - 1].el : null;
+        if (key === "ArrowDown") return ri + 1 < rows.length ? rows[ri + 1].el : null;
+        var step = key === "ArrowLeft" ? -1 : 1;
+        for (var cj = ci + step; cj >= 0 && cj < cols.length; cj += step) {
+          var next = cols[cj].cards;
+          if (next.length) return next[Math.min(ri, next.length - 1)].el;
+        }
+        return null;
+      }
+    }
+    return null;
   }
 
   // reveal scrolls the bounded canvas so the card sits REVEAL_MARGIN inside
@@ -165,8 +210,11 @@
     el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
+  function focusable(el) {
+    if (el && !el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+  }
   function focusCard(el) {
-    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    focusable(el);
     el.focus({ preventScroll: true });
   }
 
@@ -218,7 +266,17 @@
     return true;
   }
 
-  // -- Escape clears the selection, last ---------------------------------------------------
+  // -- Escape: an unfocused slot or draft, the branch menu, then the selection ----------------
+
+  // cancelOpen presses Escape in an open slot's or draft's own field on
+  // the user's behalf: the slot closes through walltoolbar.js's handler
+  // and the draft dies through boardspec.js's — one cancel path each, no
+  // copy — and the focus comes back to where it was.
+  function cancelOpen(field) {
+    var had = document.activeElement;
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    if (had && had !== document.body && had.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
+  }
 
   // clear clears the selection and keeps the focus where it was; a focus
   // the toolbar's refill could not keep (its action is gone with the
@@ -241,7 +299,19 @@
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       var key = e.key;
       if (key === "Escape") {
-        if (t.closest(FIELDS) || dialogOpen()) return; // the field's, or boardspec.js's chain
+        if (t.closest(FIELDS) || modalOpen()) return; // the field's own, or the modal layer's (boardspec.js)
+        var field = openField();
+        if (field) {
+          cancelOpen(field);
+          e.preventDefault();
+          return;
+        }
+        var menu = shown("branch-menu");
+        if (menu) {
+          menu.hidden = true;
+          return;
+        }
+        if (dialogOpen()) return; // the peek's, the tray's (boardspec.js) or the popover's (topbar.js)
         if (!seam() || !seam().selection()) return;
         clear();
         return;
@@ -264,11 +334,19 @@
     true
   );
 
-  // A swap replaces the cards: the selected card is made focusable again
-  // before the transport restores the focus to it by its key
-  // (boardspecasd.js applyRegion: the event fires before restoreFocus).
+  // A swap replaces the cards: the selected card and the card that had
+  // the focus are made focusable again before the transport restores the
+  // focus by its key (boardspecasd.js applyRegion: the event fires before
+  // restoreFocus), selection or not — Escape clears the selection and
+  // leaves the focus on the card.
+  document.addEventListener("focusin", function (e) {
+    var t = e.target;
+    var c = canvas();
+    if (t instanceof Element && c && c.contains(t) && t.matches(CARDS)) focusedKey = t.getAttribute("data-testid");
+  });
   document.addEventListener("wall-region-swapped", function () {
-    var sel = selectedCard();
-    if (sel && !sel.hasAttribute("tabindex")) sel.setAttribute("tabindex", "-1");
+    focusable(selectedCard());
+    var again = focusedKey && region.querySelector('[data-testid="' + focusedKey + '"]');
+    if (again && again.matches(CARDS)) focusable(again);
   });
 })();

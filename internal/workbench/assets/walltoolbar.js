@@ -691,9 +691,12 @@
         return;
       }
       if (e.key !== "Enter" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      // Enter edits the selected card (ac-5) when the key is not another
-      // control's: a focused object card is boardspec.js's own.
-      if (t.closest("input, textarea, select, button, a, [contenteditable], [role=dialog], [role=alertdialog], [role=menu], .objcard, .yarn-chip")) return;
+      // Enter edits the selected card (ac-5) only where the key is nobody
+      // else's: the focus is on the page itself, on the canvas, or on a
+      // focused stub, reference or sticky. A focused object card's Enter is
+      // wallkeys.js's, and every control — a <summary> included — keeps
+      // its own (F2c).
+      if (!(t === document.body || t.id === "board-canvas" || t.matches(".stubcard, .refcard, .sticky"))) return;
       var confirm = document.getElementById("edge-confirm");
       if ((picker && !picker.hidden) || (confirm && !confirm.hidden)) return;
       var sel = selected();

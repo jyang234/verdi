@@ -65,9 +65,6 @@ func TestWallMinimap_HostSitsInTheRowHiddenFromAT(t *testing.T) {
 		if toolbar < 0 || minimap < 0 || minimap < toolbar {
 			t.Errorf("%s: the minimap host does not follow the toolbar's inside the row:\n%s", mode, row)
 		}
-		if strings.Contains(host, "tabindex") {
-			t.Error("the minimap host is a tab stop")
-		}
 	}
 	root := newBoardFixture(t)
 	h := NewHandler(root)

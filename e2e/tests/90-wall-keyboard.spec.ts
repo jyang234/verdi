@@ -1,14 +1,16 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { refCardTestId, stubCardTestId } from "./fixtures";
-import { dragToTrash, expectAutosaved, wallToolbar } from "./helpers";
+import { dragToTrash, expectAutosaved, grabPoint, wallToolbar } from "./helpers";
 
 // spec/wall-canvas-v2 ac-6 (lane F2c): the keyboard reaches every card and
-// action — the arrows move the selection within and across columns and
-// reveal the card, Enter edits, Escape closes the innermost open thing one
-// layer per press, Delete removes the selected card or thread through the
-// existing confirmation, and the trash and Delete both refuse a declared
-// stub in plain language — and a minimap shows every card and the viewport
-// and moves the viewport when dragged.
+// action — the arrows move the selection on the handoff's grid, within a
+// column and to the adjacent column at the same row (SI-363 (1)), and
+// reveal the card; Enter edits; Escape closes the innermost open thing one
+// layer per press (SI-363 (2)); Delete, and Backspace as the handoff's ⌫,
+// removes the selected card or thread through the existing confirmation;
+// and the trash and Delete both refuse a declared stub in plain language —
+// and a minimap shows every card and the viewport and moves the viewport
+// when dragged.
 //
 // The last test is the producer its obligation names
 // (.verdi/obligations/wall-canvas-v2/ac-6--behavioral.md), titled exactly
@@ -91,6 +93,44 @@ async function tabUntil(page: Page, what: string, done: () => Promise<boolean>, 
 }
 const focusIs = (page: Page, key: string) => async () => (await activeKey(page)) === key;
 const focusOnAction = (page: Page, action: string) => async () => (await activeAction(page)) === action;
+
+// interactionLive reads boardspec.js's hold contract (co-2).
+const interactionLive = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __BOARDV2API__: { interactionLive: () => boolean } }).__BOARDV2API__.interactionLive());
+
+// stickyPosition reads a sticky's stored position from its inline style,
+// the server's own px.
+const stickyPosition = (sticky: Locator) =>
+  sticky.evaluate((el) => ({ x: parseFloat((el as HTMLElement).style.left), y: parseFloat((el as HTMLElement).style.top) }));
+
+// forceSwap asks the transport for a fresh projection past its conditional
+// token and waits for the region swap it applies (boardspecasd.js
+// refresh(force); the `wall-region-swapped` event), writing nothing.
+const forceSwap = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        const t = setTimeout(() => resolve("no swap"), 8000);
+        document.addEventListener(
+          "wall-region-swapped",
+          () => {
+            clearTimeout(t);
+            setTimeout(() => resolve("swapped"), 50);
+          },
+          { once: true },
+        );
+        (window as unknown as { __verdiASD: { refresh: (force: boolean) => Promise<void> } }).__verdiASD.refresh(true);
+      }),
+  );
+
+// gridOf reads the zone grid the keyboard follows: the server's zone
+// labels, left to right, each a column's left edge and width.
+const gridOf = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("#board-canvas .zone-label"))
+      .map((l) => ({ kind: (l.getAttribute("data-testid") || "").replace("zone-label-", ""), x: parseFloat(l.style.left), w: parseFloat(l.style.width) }))
+      .sort((a, b) => a.x - b.x),
+  );
 
 // columnsOf groups the wall's cards into columns by their left edge, left
 // to right, each column top to bottom, by test id.
@@ -340,6 +380,226 @@ test.describe("wall-canvas", () => {
     }
   });
 
+  test("every card is reachable by the arrows, on the grid and off it (SI-363 (1))", async ({ page }) => {
+    // The handoff's model: the zone columns left to right, each card in
+    // the column nearest its centre, rows by y; Up and Down within the
+    // column, Left and Right to the adjacent column at the same row,
+    // clamped. A breadth-first search over real arrow presses from the
+    // first card must reach every card: the fixture's eight, the sticky
+    // dragged off the grid so its box straddles the stub and reference
+    // bands, and a twin paper with the very centre of that sticky — a
+    // DOM-only clone, since the server's display-time collision
+    // resolution (boardlayout/display.go) nudges two stored overlapping
+    // papers apart, so no stored wall can hold two equal centres.
+    await page.setViewportSize(DESKTOP);
+    await openWritableWall(page);
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+    const home = await stickyPosition(sticky);
+    const grid = await gridOf(page);
+    const col = (kind: string) => grid.find((g) => g.kind === kind)!;
+    expect(grid.map((g) => g.kind)).toEqual(["acceptance-criterion", "constraint", "decision", "open-question", "stub", "reference", "scratch"]);
+    const stubBand = col("stub");
+    const refBand = col("reference");
+    // A raw drag never scrolls: the sticky comes into view first, then
+    // the pointer carries it by the distance to its new place.
+    const target = { x: stubBand.x + stubBand.w - 97, y: home.y + 160 };
+    const grip = await grabPoint(page, sticky);
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + (target.x - home.x), grip.y + (target.y - home.y), { steps: 8 });
+    await page.mouse.up();
+    await expectAutosaved(page);
+    const moved = await stickyPosition(sticky);
+    const width = await sticky.evaluate((el) => (el as HTMLElement).offsetWidth);
+    expect(moved.x, "the sticky left the scratch lane").not.toBe(home.x);
+    expect(moved.x, "the sticky's box reaches into the stub band").toBeLessThan(stubBand.x + stubBand.w);
+    expect(moved.x + width, "the sticky's box reaches into the reference band").toBeGreaterThan(refBand.x);
+    const stickyCentre = moved.x + width / 2;
+    expect(Math.abs(stickyCentre - (stubBand.x + stubBand.w / 2)), "nearer the stub column than the reference column by its centre").toBeLessThan(
+      Math.abs(stickyCentre - (refBand.x + refBand.w / 2)),
+    );
+    // The twin: the same box, so the same centre, in the document after it.
+    const twinKey = "a-twin";
+    await page.evaluate(
+      ([id, key]) => {
+        const el = document.querySelector<HTMLElement>(`[data-testid="sticky-${id}"]`)!;
+        const twin = el.cloneNode(true) as HTMLElement;
+        twin.removeAttribute("data-selected");
+        twin.removeAttribute("tabindex");
+        twin.setAttribute("data-id", key);
+        twin.setAttribute("data-testid", `sticky-${key}`);
+        el.parentElement!.appendChild(twin);
+      },
+      [WALL.STICKY_ID, twinKey],
+    );
+    const keys: string[] = await page.evaluate((sel) => {
+      const seam = (window as unknown as { __WALLSELECT__: { keyOf: (el: Element) => { key: string } } }).__WALLSELECT__;
+      return Array.from(document.querySelectorAll(sel))
+        .filter((el) => !el.classList.contains("sticky-draft"))
+        .map((el) => seam.keyOf(el).key);
+    }, CARD_SELECTOR);
+    expect(keys.length).toBe(9);
+    expect(keys[0]).toBe("ac-1");
+    // The search. Each press is a real keystroke from the card it starts
+    // on, which the seam selects and focuses first — the state a Tab stop
+    // and an arrow leave — so every edge is the keyboard's own.
+    const place = (key: string) =>
+      page.evaluate((k) => {
+        const w = window as unknown as {
+          __WALLSELECT__: { select: (s: { kind: string; key: string }) => void; elementOf: (s: { kind: string; key: string }) => HTMLElement | null };
+        };
+        w.__WALLSELECT__.select({ kind: "card", key: k });
+        const el = w.__WALLSELECT__.elementOf({ kind: "card", key: k })!;
+        if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+        el.focus({ preventScroll: true });
+      }, key);
+    const current = () =>
+      page.evaluate(() => {
+        const s = (window as unknown as { __WALLSELECT__: { selection: () => { key: string } | null } }).__WALLSELECT__.selection();
+        return s ? s.key : null;
+      });
+    const reached = new Set<string>([keys[0]]);
+    const queue = [keys[0]];
+    const edges = new Map<string, string | null>();
+    while (queue.length) {
+      const k = queue.shift()!;
+      for (const arrow of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+        await place(k);
+        await page.keyboard.press(arrow);
+        const n = await current();
+        edges.set(`${k} ${arrow}`, n);
+        if (n && !reached.has(n)) {
+          reached.add(n);
+          queue.push(n);
+        }
+      }
+    }
+    expect(keys.filter((k) => !reached.has(k)), "cards the arrows never reach").toEqual([]);
+    // The model's edges: the straddling sticky joined the stub column
+    // below the stub; the twin, with the same centre, is the next row by
+    // document order; Left and Right keep the row, clamped to the
+    // neighbouring column's length.
+    const stubKey = `stub:${WALL.STUB_SLUG}`;
+    expect(edges.get(`${stubKey} ArrowDown`)).toBe(WALL.STICKY_ID);
+    expect(edges.get(`${WALL.STICKY_ID} ArrowDown`)).toBe(twinKey);
+    expect(edges.get(`${twinKey} ArrowUp`)).toBe(WALL.STICKY_ID);
+    expect(edges.get(`${WALL.STICKY_ID} ArrowUp`)).toBe(stubKey);
+    expect(edges.get(`${twinKey} ArrowRight`)).toBe(WALL.ADR_REF);
+    expect(edges.get(`${twinKey} ArrowLeft`)).toBe("oq-1");
+    expect(edges.get(`${WALL.ADR_REF} ArrowLeft`)).toBe(stubKey);
+    expect(edges.get(`oq-1 ArrowRight`)).toBe(stubKey);
+    expect(edges.get(`ac-2 ArrowRight`), "co-1 is the constraint column's only row").toBe("co-1");
+    expect(edges.get(`ac-1 ArrowLeft`), "the wall's edge").toBe("ac-1");
+    // The wall as it was: the twin leaves the document and the sticky
+    // returns to the scratch lane through the write the wall accepts.
+    await page.evaluate((key) => document.querySelector(`[data-testid="sticky-${key}"]`)?.remove(), twinKey);
+    const back = await page.request.post(WALL.WRITABLE_PATH + "/api/sticky-position", { data: { id: WALL.STICKY_ID, x: home.x, y: home.y } });
+    expect(back.status(), await back.text()).toBe(200);
+    await page.reload();
+    expect(await stickyPosition(page.getByTestId(`sticky-${WALL.STICKY_ID}`))).toEqual(home);
+    await expect(page.locator(CARD_SELECTOR)).toHaveCount(8);
+  });
+
+  test("Escape closes the branch menu, leaves the posture popover its own key, and cancels an unfocused slot or draft before the selection (SI-363 (2))", async ({ page }) => {
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const select = async () => {
+      await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+    };
+
+    // The branch menu has no backdrop: Escape closes it, and only then
+    // the selection.
+    await select();
+    await tabUntil(page, "Tab reaches the branch switcher", focusIs(page, "branch-switcher"));
+    await page.keyboard.press("Enter");
+    const menu = page.locator("#branch-menu");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // The top bar's posture popover: Enter on its focused summary toggles
+    // it and opens no editor (F2CR-4); its Escape is topbar.js's, which
+    // closes it and returns the focus to the summary, not also a clear.
+    await select();
+    await tabUntil(page, "Shift+Tab reaches the posture summary", focusIs(page, "topbar-posture"), true);
+    const popover = page.getByTestId("asd-posture-tech");
+    await page.keyboard.press("Enter");
+    await expect(popover).toHaveJSProperty("open", true);
+    await expect(editor(page)).toHaveCount(0);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(popover).toHaveJSProperty("open", false);
+    await expect(page.getByTestId("topbar-posture")).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // An open add slot whose focus has left (its text keeps it open and
+    // holds the projection): Escape cancels it first, leaving the focus
+    // where it was; the next Escape clears the selection.
+    await select();
+    await tabUntil(page, "Tab reaches the constraint slot", focusIs(page, "slot-open-co"));
+    await page.keyboard.press("Enter");
+    const coSlot = page.getByTestId("slot-co");
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    await expect(page.getByTestId("slot-text-co")).toBeFocused();
+    await page.keyboard.type("kept until Escape");
+    await tabUntil(page, "Shift+Tab returns to ac-1", focusIs(page, "card-ac-1"), true);
+    await expect(coSlot).toHaveAttribute("data-open", "true");
+    expect(await interactionLive(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(coSlot).not.toHaveAttribute("data-open", /./);
+    expect(await interactionLive(page)).toBe(false);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await expect(ac1).toBeFocused();
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // A sticky draft whose focus has left (text without a type keeps it,
+    // with its hint): Escape discards it, and nothing is written.
+    const stickies = await page.locator('[data-testid^="sticky-"]').count();
+    await tabUntil(page, "Tab reaches the sticky action", focusOnAction(page, "sticky"));
+    await page.keyboard.press("Enter");
+    const draft = page.locator(".sticky-draft");
+    await expect(draft.getByRole("textbox", { name: "Sticky text" })).toBeFocused();
+    await page.keyboard.type("unsent");
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest(".sticky-draft"))).toBe(false);
+    await expect(draft).toBeVisible();
+    await expect(draft.getByTestId("sticky-type-hint")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(draft).toHaveCount(0);
+    expect(await interactionLive(page)).toBe(false);
+    await page.reload();
+    await expect(page.locator('[data-testid^="sticky-"]')).toHaveCount(stickies);
+  });
+
+  test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {
+    await openWritableWall(page);
+    const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
+    await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    for (let i = 0; i < 6 && (await stub.getAttribute("data-selected")) !== "true"; i++) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(stub).toBeFocused();
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+    await expect(stub).toBeFocused();
+    expect(await forceSwap(page)).toBe("swapped");
+    await expect(page.getByTestId(stubCardTestId(WALL.STUB_SLUG))).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId(refCardTestId(WALL.ADR_REF))).toHaveAttribute("data-selected", "true");
+    await expect(page.getByTestId(refCardTestId(WALL.ADR_REF))).toBeFocused();
+  });
+
   test("The keyboard and the minimap reach every card", async ({ page }) => {
     await page.setViewportSize(SMALL);
     await openWritableWall(page);
@@ -372,9 +632,9 @@ test.describe("wall-canvas", () => {
     await expect(ac1).toBeFocused();
     await page.keyboard.press("ArrowUp");
     await expect(ac1).toHaveAttribute("data-selected", "true");
-    // Right crosses to every column in turn — the nearest card by
-    // position — each revealed as the canvas scrolls under it; the far
-    // columns start beyond the canvas's right edge.
+    // Right crosses to the adjacent column in turn, at the same row
+    // (SI-363 (1)), each card revealed as the canvas scrolls under it;
+    // the far columns start beyond the canvas's right edge.
     const far = (await page.getByTestId(columns[columns.length - 1][0]).boundingBox())!;
     const port = (await canvas(page).boundingBox())!;
     expect(far.x, "the scratch column starts beyond the canvas's right edge").toBeGreaterThan(port.x + port.width);
@@ -545,7 +805,8 @@ test.describe("wall-canvas", () => {
     );
     await page.keyboard.press("Enter");
     await expect(exempts).toHaveAttribute("data-selected", "true");
-    await page.keyboard.press("Delete");
+    // Backspace deletes as Delete does (the handoff's ⌫/Del; SI-363 (3)).
+    await page.keyboard.press("Backspace");
     await expect(confirm(page)).toBeVisible();
     await expect(confirm(page)).toHaveAttribute("aria-label", "Remove exempts");
     await tabUntil(page, "Tab reaches Confirm", focusIs(page, "edge-confirm-ok"));
