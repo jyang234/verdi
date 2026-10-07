@@ -123,6 +123,11 @@
       var region = document.getElementById("boardv2-region");
       if (region) region.innerHTML = html;
     }
+    // The swap emptied the wall toolbar's host (the server renders it
+    // empty; walltoolbar.js fills it from the selection). Let it refill
+    // before the focus restore below, so an action that had the focus is
+    // found again by its key (spec/wall-canvas-v2; Wave 6 §5.1).
+    document.dispatchEvent(new Event("wall-region-swapped"));
     reopenDisclosures(keys);
     restoreFocus(focused);
   }

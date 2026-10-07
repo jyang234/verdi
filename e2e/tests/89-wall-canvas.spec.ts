@@ -1311,4 +1311,35 @@ test.describe("wall-canvas", () => {
     await backgroundMove(page, WALL.STICKY_ID, at.x, at.y);
     await expect(sticky).toHaveCSS("top", `${at.y}px`);
   });
+
+  test("a background swap keeps the focus on the toolbar's action and on a chip (Wave 6 §5.1)", async ({ page }) => {
+    // A change that lands from outside swaps the region under the toolbar
+    // and the chips: the focus stays on the same action, and on the same
+    // chip, each found again by its stable key. The sticky is moved and
+    // moved back, so the wall is as it was.
+    await openWritableWall(page);
+    const toolbar = wallToolbar(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+    await ac1.scrollIntoViewIfNeeded();
+    await ac1.click();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    const edit = toolbar.getByRole("button", { name: "Edit", exact: true });
+    await edit.focus();
+    await expect(edit).toBeFocused();
+    const at = await stickyPosition(sticky);
+    await backgroundMove(page, WALL.STICKY_ID, at.x, at.y + 8);
+    await expect(sticky).toHaveCSS("top", `${at.y + 8}px`);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await expect(edit).toBeFocused();
+
+    const exemptsChip = page.locator('.yarn-chip[data-edge-type="exempts"]');
+    await exemptsChip.scrollIntoViewIfNeeded();
+    await exemptsChip.focus();
+    await expect(exemptsChip).toBeFocused();
+    await backgroundMove(page, WALL.STICKY_ID, at.x, at.y);
+    await expect(sticky).toHaveCSS("top", `${at.y}px`);
+    await expect(exemptsChip).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+  });
 });

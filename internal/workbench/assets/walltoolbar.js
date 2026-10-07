@@ -122,10 +122,14 @@
     if (text) n.textContent = text;
     return n;
   }
+  // Every action carries a stable key, data-testid="wall-action-<action>",
+  // which the region swap's focus restore reads (boardspecasd.js focusKey
+  // and restoreFocus), so a focused action is found again after the swap.
   function button(action, label, kbd) {
     var b = node("button", "wall-toolbar-btn", label);
     b.type = "button";
     b.setAttribute("data-wall-action", action);
+    b.setAttribute("data-testid", "wall-action-" + action);
     if (kbd) {
       var k = node("kbd", "", kbd);
       k.setAttribute("aria-hidden", "true");
@@ -236,6 +240,7 @@
     if (doc && (objcard || stub)) {
       var read = node("a", "wall-toolbar-link", "Read in document \u2197");
       read.setAttribute("data-wall-action", "read");
+      read.setAttribute("data-testid", "wall-action-read");
       read.href = doc + (objcard ? "#" + key : "#plan");
       h.appendChild(read);
     }
@@ -291,6 +296,8 @@
     if (!h) return;
     var row = h.parentNode;
     var before = row ? row.offsetHeight : 0;
+    // A refill keeps the focus on the action that had it, by its key.
+    var focused = h.contains(document.activeElement) ? document.activeElement.getAttribute("data-testid") : null;
     while (h.firstChild) h.removeChild(h.firstChild);
     var s = seam() ? seam().selection() : null;
     var target = s && seam().elementOf(s);
@@ -303,6 +310,10 @@
     } else {
       h.setAttribute("data-wall-context", "card");
       renderCard(h, target);
+    }
+    if (focused) {
+      var again = h.querySelector('[data-testid="' + focused + '"]');
+      if (again) again.focus({ preventScroll: true });
     }
     // The row's height feeds the canvas's bound (wallselect.js measure):
     // a toolbar that wrapped differently re-measures it.
@@ -693,6 +704,12 @@
   // -- swaps and the selection -------------------------------------------------------
 
   document.addEventListener("wall-selection", render);
+  // The transport's swap replaces the host with the server's empty one and
+  // says so before it restores the focus it noted (boardspecasd.js
+  // applyRegion): the host is refilled inside the swap, so a focused
+  // action is found again by its key (F2BR-3). The observer below is the
+  // fallback for a swap that does not say so.
+  document.addEventListener("wall-region-swapped", render);
   new MutationObserver(function () {
     var h = host();
     if (h && !h.childElementCount) render(); // a swap replaced the host

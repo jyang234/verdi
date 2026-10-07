@@ -155,11 +155,13 @@ func TestScopingCanvas_ScopingYarnChips(t *testing.T) {
 		p := scopingRenderProjection(t, mode)
 		body := renderBoardRegion(p, &boardGitState{}, testASDView())
 		// The chip is the button that selects its thread (spec/wall-canvas-v2
-		// ac-2; SI-350 (5)): role and focus, then the contract's attributes.
+		// ac-2; SI-350 (5)): role and focus, then the contract's attributes,
+		// then the stable key the region swap's focus restore reads (Wave 6
+		// §5.1).
 		for _, want := range []string{
-			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping">`,
-			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping">`,
-			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-two" data-to="oq-1" data-layer="scoping">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping" data-testid="yarn-chip-scoping-covers-stub:plain-one-ac-1">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping" data-testid="yarn-chip-scoping-resolves-stub:spike-one-oq-1">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-two" data-to="oq-1" data-layer="scoping" data-testid="yarn-chip-scoping-resolves-stub:spike-two-oq-1">`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: scoping yarn chip missing: %q", mode, want)

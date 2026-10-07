@@ -757,6 +757,17 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if e.AnnotationID != "" {
 			b.WriteString(` data-annotation-id="` + esc(e.AnnotationID) + `"`)
 		}
+		// The chip's stable key, after its identity and before what it
+		// offers: the region swap's focus restore reads it (boardspecasd.js
+		// focusKey and restoreFocus), so a focused chip is found again
+		// after the swap replaces it (Wave 6 §5.1). The thread's identity
+		// names it — layer, type, both endpoints and, for a scratch thread,
+		// its annotation id.
+		chipTestID := "yarn-chip-" + e.Layer + "-" + e.Type + "-" + e.From + "-" + e.To
+		if e.AnnotationID != "" {
+			chipTestID += "-" + e.AnnotationID
+		}
+		b.WriteString(` data-testid="` + esc(chipTestID) + `"`)
 		if editableSpecEdge {
 			b.WriteString(` data-can-retype="true"`)
 		}

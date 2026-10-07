@@ -123,9 +123,21 @@ func TestWallToolbar_ChipsAreSelectButtonsCarryingTheirLegalActions(t *testing.T
 			if len(chips) != 4 {
 				t.Fatalf("sliced %d chips, want 4", len(chips))
 			}
+			// Each chip carries its own stable key, the thread's identity,
+			// which the region swap's focus restore reads (Wave 6 §5.1);
+			// no two chips share one.
+			keys := map[string]bool{}
 			for _, chip := range chips {
 				if !strings.Contains(chip, ` role="button" tabindex="0" data-edge-type="`) {
 					t.Errorf("a chip is not the focusable button that selects its thread:\n%s", chip)
+				}
+				_, after, found := strings.Cut(chip, ` data-testid="yarn-chip-`)
+				if !found {
+					t.Errorf("a chip carries no stable yarn-chip- key:\n%s", chip)
+				} else if key, _, _ := strings.Cut(after, `"`); keys[key] {
+					t.Errorf("two chips share the key %q:\n%s", key, chip)
+				} else {
+					keys[key] = true
 				}
 				for _, forbidden := range []string{"<button", "data-retype", "data-delete=", "data-graduate=", "graduate-btn", "delete-btn"} {
 					if strings.Contains(chip, forbidden) {
@@ -137,6 +149,9 @@ func TestWallToolbar_ChipsAreSelectButtonsCarryingTheirLegalActions(t *testing.T
 				}
 			}
 			edit := chipFor(t, chips, "dc-1", "adr/0001-outbox-events")
+			if !strings.Contains(edit, ` data-testid="yarn-chip-spec-exempts-dc-1-adr/0001-outbox-events"`) {
+				t.Errorf("the spec edge's key is not its layer, type and endpoints:\n%s", edit)
+			}
 			if got := strings.Contains(edit, `data-can-retype="true"`); got != tc.editRetype {
 				t.Errorf("editable spec edge retype offered = %v, want %v:\n%s", got, tc.editRetype, edit)
 			}
@@ -154,6 +169,9 @@ func TestWallToolbar_ChipsAreSelectButtonsCarryingTheirLegalActions(t *testing.T
 				t.Errorf("the document-level chip lost its off-board label:\n%s", doc)
 			}
 			thread := chipFor(t, chips, "ac-1", "dc-1")
+			if !strings.Contains(thread, ` data-testid="yarn-chip-annotation-relates-ac-1-dc-1-a-01J8Z0K3BBBBBBBBBBBBBBBBBB"`) {
+				t.Errorf("the scratch thread's key does not end in its annotation id:\n%s", thread)
+			}
 			if got := strings.Contains(thread, `data-can-graduate="thread"`); got != tc.threadGrad {
 				t.Errorf("card-to-card scratch thread graduation offered = %v, want %v:\n%s", got, tc.threadGrad, thread)
 			}
