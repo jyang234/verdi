@@ -76,14 +76,15 @@ func marshalJSON(t *testing.T, v any) string {
 }
 
 // TestProjectWallRefresh_ComposedBudget is the wall's composition seam's
-// structural witness (Wave 6 §5.3; ledger SI-168, SI-356): a refresh that
-// composes the spec's readiness load with the wall's snapshot — what the
-// marks will need — is one application projection: one read session, one
-// accepted-HEAD resolution (one discovery, one explicit resolution, no
-// read naming the ref again), at most one accepted-tree enumeration, and
-// no write, on the first refresh in a fresh repository and on the next.
-// Its bytes are the parts' own: the snapshot is the one an unscoped load
-// renders, and the readiness the one a load alone derives.
+// structural witness (Wave 6 §5.3; ledger SI-168, SI-356, SI-360 (2)): a
+// refresh that composes the spec's readiness load with the wall's
+// snapshot — what the marks need — is one application projection: one
+// read session, one accepted-HEAD resolution (one discovery, one explicit
+// resolution, no read naming the ref again), at most one accepted-tree
+// enumeration, and no write, on the first refresh in a fresh repository
+// and on the next. Its bytes are the parts' own: the snapshot is the one
+// an unscoped load renders but for the marks and the revision covering
+// them, and the readiness the one a load alone derives.
 func TestProjectWallRefresh_ComposedBudget(t *testing.T) {
 	for _, wall := range refreshWalls(t) {
 		t.Run(wall.name, func(t *testing.T) {
@@ -108,8 +109,13 @@ func TestProjectWallRefresh_ComposedBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := marshalJSON(t, refresh.snap), marshalJSON(t, alone); got != want {
-				t.Fatalf("the refresh's snapshot differs from an unscoped load's:\n got: %s\nwant: %s", got, want)
+			if refresh.snap.Marks == nil || refresh.snap.Revision == alone.Revision {
+				t.Fatalf("the composed snapshot carries marks %+v and revision %s (an unscoped load's: %s)", refresh.snap.Marks, refresh.snap.Revision, alone.Revision)
+			}
+			bare := *refresh.snap
+			bare.Marks, bare.Revision = nil, alone.Revision
+			if got, want := marshalJSON(t, bare), marshalJSON(t, alone); got != want {
+				t.Fatalf("the refresh's snapshot differs from an unscoped load's beyond its marks and revision:\n got: %s\nwant: %s", got, want)
 			}
 			readiness, err := s.readinessLoader.Load(context.Background(), "spec/"+wall.name)
 			if err != nil {
@@ -122,21 +128,30 @@ func TestProjectWallRefresh_ComposedBudget(t *testing.T) {
 	}
 }
 
-// TestProjectWallRefresh_PlainServesTheSnapshot: the /snapshot route is
-// the plain refresh — one projection, no readiness — and serves exactly
-// the bytes an unscoped load renders, its revision token as the ETag.
-func TestProjectWallRefresh_PlainServesTheSnapshot(t *testing.T) {
+// TestProjectWallRefresh_SnapshotRouteServesTheComposedRefresh: a plain
+// refresh is exactly the snapshot an unscoped load renders, and the
+// /snapshot route serves the composed refresh (SI-360 (2)): the bytes of
+// the composed snapshot, its revision token as the ETag, in one
+// application projection.
+func TestProjectWallRefresh_SnapshotRouteServesTheComposedRefresh(t *testing.T) {
 	for _, wall := range refreshWalls(t) {
 		t.Run(wall.name, func(t *testing.T) {
 			s := refreshServer(wall.root)
-			refresh, err := s.projectWallRefresh(context.Background(), wall.name, false)
+			plain, err := s.projectWallRefresh(context.Background(), wall.name, false)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if refresh.readiness != nil || refresh.readinessErr != nil {
+			if plain.readiness != nil || plain.readinessErr != nil || plain.snap.Marks != nil {
 				t.Fatal("a plain refresh composed readiness")
 			}
 			alone, err := s.loadSnapshot(context.Background(), wall.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := marshalJSON(t, plain.snap), marshalJSON(t, alone); got != want {
+				t.Fatalf("a plain refresh's snapshot differs from an unscoped load's:\n got: %s\nwant: %s", got, want)
+			}
+			composed, err := s.projectWallRefresh(context.Background(), wall.name, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,11 +166,11 @@ func TestProjectWallRefresh_PlainServesTheSnapshot(t *testing.T) {
 				t.Fatalf("GET snapshot = %d\n%s", rec.Code, rec.Body.String())
 			}
 			want := httptest.NewRecorder()
-			writeJSON(want, http.StatusOK, alone)
-			if rec.Body.String() != want.Body.String() || rec.Header().Get("ETag") != `"`+alone.Revision+`"` {
-				t.Fatalf("the served snapshot differs from an unscoped load's:\n got: %s\nwant: %s", rec.Body.String(), want.Body.String())
+			writeJSON(want, http.StatusOK, composed.snap)
+			if rec.Body.String() != want.Body.String() || rec.Header().Get("ETag") != `"`+composed.snap.Revision+`"` {
+				t.Fatalf("the served snapshot differs from the composed refresh's:\n got: %s\nwant: %s", rec.Body.String(), want.Body.String())
 			}
-			checkRefreshBudget(t, "the plain poll", census.Budget(wall.acc))
+			checkRefreshBudget(t, "the served poll", census.Budget(wall.acc))
 		})
 	}
 }
@@ -168,6 +183,9 @@ func TestProjectWallRefresh_NoLoaderNoReadiness(t *testing.T) {
 	refresh, err := s.projectWallRefresh(context.Background(), wall.name, true)
 	if err != nil || refresh.snap == nil || refresh.readiness != nil || refresh.readinessErr != nil {
 		t.Fatalf("refresh = (%+v, %v), want the snapshot alone", refresh, err)
+	}
+	if want := unavailableMarks(marksUnwired); refresh.snap.Marks == nil || refresh.snap.Marks.Unavailable != want.Unavailable || refresh.snap.Marks.Objects != nil || refresh.snap.Marks.Stubs != nil {
+		t.Fatalf("an unwired wall's marks = %+v, want the notice %+v", refresh.snap.Marks, want)
 	}
 	if _, err := s.projectWallRefresh(context.Background(), "no-such-wall", true); err == nil {
 		t.Fatal("a refresh of a wall that does not exist succeeded")
@@ -260,10 +278,12 @@ func TestResolvePostureHeads_PinnedAcceptedHead(t *testing.T) {
 }
 
 // TestProjectWallRefresh_RevisionCoversReadiness (Wave 6 §5.1; review
-// P2R-4): a composed refresh's revision covers the readiness it composes —
-// changing only the readiness (another snapshot, or a loader failure)
-// changes the composed token — while a plain refresh's token is the
-// snapshot's own revision, byte for byte, whatever the loader would say.
+// P2R-4; SI-360 (2)): a composed refresh's revision covers the readiness
+// it composes — changing only the readiness (another snapshot, or a
+// loader failure) changes the token over an unchanged region — while a
+// plain refresh's token is an unscoped load's revision, byte for byte,
+// whatever the loader would say, and so is a composed refresh's that
+// loaded none (its marks are then a constant of the server).
 func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 	wall := refreshWalls(t)[0]
 	snapA := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Head: "a"}
@@ -277,27 +297,31 @@ func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 		}
 		return refresh
 	}
+	alone, err := (&boardSpecServer{root: wall.root, design: readinessGapCapsBridge()}).loadSnapshot(context.Background(), wall.name)
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := refreshWith(fixedSnapshotLoader{snap: snapA}, true)
 	b := refreshWith(fixedSnapshotLoader{snap: snapB}, true)
 	failed := refreshWith(erroringReadinessLoader{err: errBoom}, true)
-	if a.snap.Revision != b.snap.Revision || a.snap.Revision != failed.snap.Revision {
-		t.Fatalf("the snapshot moved with the readiness alone: %s, %s, %s", a.snap.Revision, b.snap.Revision, failed.snap.Revision)
+	if a.snap.HTML != b.snap.HTML || a.snap.HTML != failed.snap.HTML || a.snap.HTML != alone.HTML {
+		t.Fatal("the region moved with the readiness alone")
 	}
-	if a.revision == b.revision || a.revision == failed.revision || b.revision == failed.revision {
-		t.Fatalf("a readiness change left the composed token unchanged: %s, %s, %s", a.revision, b.revision, failed.revision)
+	if a.snap.Revision == b.snap.Revision || a.snap.Revision == failed.snap.Revision || b.snap.Revision == failed.snap.Revision {
+		t.Fatalf("a readiness change left the composed token unchanged: %s, %s, %s", a.snap.Revision, b.snap.Revision, failed.snap.Revision)
 	}
-	if a.revision == a.snap.Revision {
-		t.Fatal("the composed token is the snapshot's alone")
+	if a.snap.Revision == alone.Revision {
+		t.Fatal("the composed token is the wall's alone")
 	}
-	if again := refreshWith(fixedSnapshotLoader{snap: snapA}, true); again.revision != a.revision {
-		t.Fatalf("the same readiness derived two composed tokens: %s, %s", a.revision, again.revision)
+	if again := refreshWith(fixedSnapshotLoader{snap: snapA}, true); again.snap.Revision != a.snap.Revision {
+		t.Fatalf("the same readiness derived two composed tokens: %s, %s", a.snap.Revision, again.snap.Revision)
 	}
 	for _, loader := range []ReadinessLoader{fixedSnapshotLoader{snap: snapA}, fixedSnapshotLoader{snap: snapB}, erroringReadinessLoader{err: errBoom}, nil} {
-		if plain := refreshWith(loader, false); plain.revision != a.snap.Revision {
-			t.Fatalf("a plain refresh's token %s is not the snapshot's revision %s", plain.revision, a.snap.Revision)
+		if plain := refreshWith(loader, false); plain.snap.Revision != alone.Revision {
+			t.Fatalf("a plain refresh's token %s is not an unscoped load's revision %s", plain.snap.Revision, alone.Revision)
 		}
 	}
-	if none := refreshWith(nil, true); none.revision != a.snap.Revision {
-		t.Fatalf("a composed refresh with no loader carries token %s, want the snapshot's %s", none.revision, a.snap.Revision)
+	if none := refreshWith(nil, true); none.snap.Revision != alone.Revision {
+		t.Fatalf("a composed refresh with no loader carries token %s, want an unscoped load's %s", none.snap.Revision, alone.Revision)
 	}
 }

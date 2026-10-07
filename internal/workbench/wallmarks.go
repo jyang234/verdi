@@ -71,6 +71,23 @@ type wallMarksInput struct {
 	LoadErr           error
 }
 
+// wallMarksInputFor is the marks' input for one loaded wall of spec name:
+// its object cards and stub cards, its branch and worktree HEAD, and the
+// readiness its refresh loaded, or the load's failure.
+func wallMarksInputFor(name string, proj *BoardProjection, asd *asdView, readiness *readinesspilot.Snapshot, loadErr error) wallMarksInput {
+	in := wallMarksInput{
+		Ref: "spec/" + name, Branch: asd.Branch, Head: asd.WorktreeHead,
+		Readiness: readiness, LoadErr: loadErr,
+	}
+	for _, c := range proj.Cards {
+		in.ObjectIDs = append(in.ObjectIDs, c.ID)
+	}
+	for _, sv := range proj.StubViews {
+		in.StubSlugs = append(in.StubSlugs, sv.Slug)
+	}
+	return in
+}
+
 // unavailableMarks is the marks of a wall whose marks' input cannot be
 // read: the one reason, and no mark.
 func unavailableMarks(reason string) wallMarks {

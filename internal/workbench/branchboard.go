@@ -438,6 +438,10 @@ func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 		CapsFailure: &DesignFailure{Classification: "operational", Code: "sealed-remote-board",
 			Detail: "a remote-only branch's board is a read-only render of " + ref + "'s committed content; capabilities require a working tree"},
 	}
+	// The readiness marks are unreadable on the sealed render (SI-352
+	// (1)): its one notice says why, and no card carries a mark.
+	marks := unavailableMarks(marksSealed(ref))
+	v.Marks = &marks
 	v.Shell = deriveASDShell(asdShellInput{
 		ProblemPresent: proj.Problem != "",
 		OutcomePresent: proj.Outcome != "",
