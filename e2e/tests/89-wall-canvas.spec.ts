@@ -489,15 +489,25 @@ test.describe("wall-canvas", () => {
       /^The readiness marks are unavailable: this wall serves branch design\/decline-canvas-wall from its own working tree, and readiness derives only for the serving checkout's branch, so the two cannot describe one commit\.$/,
     );
     await expect(page.locator("#board-canvas .readiness-mark, #board-canvas .readiness-dot, #board-canvas [data-mark]")).toHaveCount(0);
+    // The notice sits in the board's disclosure channel, outside the
+    // canvas, so it covers no card (SI-364 (2); SI-358 (4)): never a
+    // child of #board-canvas, always of .board-notices.
+    await expect(page.locator("#board-canvas").getByTestId("wall-marks-unavailable")).toHaveCount(0);
+    await expect(page.locator(".board-notices").getByTestId("wall-marks-unavailable")).toHaveCount(1);
     await expect(page.getByTestId(coverageChipTestId("ac-2"))).toHaveText("no stub");
     await expect(page.getByTestId(coverageChipTestId("ac-1"))).toHaveText("covered by 1 stub");
   });
 
   test("the marks return with the composed poll after the page's own save (SI-362 (2), (7)(a))", async ({ page }) => {
-    // A save's mutation response is plain: the region it applies carries
-    // no marks and no notice, and the next composed poll re-applies the
-    // region with the marks. The sticky is dragged by the pointer, the
-    // one write this wall accepts from the page, and moved back after.
+    // The drag's write is sticky-position, a legacy action: its response
+    // is the {dirty} receipt and carries no projection, so nothing is
+    // applied from it. The refresh that follows (boardspec.js mutate →
+    // refreshFragment → __verdiASD.refresh) is the composed snapshot,
+    // which the moved position makes a 200 that re-applies the region
+    // with the marks. A plain mutation response (SI-362 (2)) is the typed
+    // mutate_draft path, which this test does not exercise. The sticky is
+    // dragged by the pointer, the one write this wall accepts from the
+    // page, and moved back after.
     await openWall(page);
     await expect(markChip(page, "ac-2")).toHaveText(["no stub"]);
     const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
