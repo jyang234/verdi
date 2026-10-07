@@ -135,4 +135,13 @@ type Entry struct {
 	// disclosure.Disclosure carries only one Text string apiece, so the
 	// two reasons are never conflated into one field.
 	DateDisclosed *disclosure.Disclosure
+	// Title is an ordinary design-branch draft's own title, decoded from
+	// the spec.md content the design-branch walk already reads to resolve
+	// it — no git read of its own (spec/index-v2 ac-2; SI-366 (1)). It is
+	// empty for a default-branch entry, whose consumers keep reading the
+	// serving working tree's title, and for a degraded (no-draft-spec)
+	// entry, which has no content to title. It is never derived from the
+	// ref: a draft that fails to decode fails the walk as an operational
+	// error before any title could be invented for it.
+	Title string
 }
