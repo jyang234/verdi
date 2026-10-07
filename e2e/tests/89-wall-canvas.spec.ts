@@ -13,13 +13,14 @@ import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from ".
 // The tests are the producers their obligations name
 // (.verdi/obligations/wall-canvas-v2/ac-1--behavioral.md,
 // ac-2--behavioral.md), titled exactly as the claims spell them under the
-// obligations' `wall-canvas ›` prefix (SI-350 (12)). ac-1's producer is
-// HELD (test.fixme, SI-355): its claim includes the readiness mark, which
-// waits on the owner's decision (SI-352); the same assertion routine runs
-// unheld under a second title no obligation names, so the cards, receipts
-// and yarn layers are exercised in every run. The lane that lands the mark
-// adds its assertion to the held test, removes the hold, and deletes the
-// second test, in one change (SI-355 (3)).
+// obligations' `wall-canvas ›` prefix (SI-350 (12)). ac-1's producer was
+// held (test.fixme, SI-355) while the readiness mark waited on the owner's
+// decision (SI-352); lane M-ui drew the mark from the composed refresh's
+// facts (SI-360, SI-362) and lifted the hold in one change (SI-355 (3)):
+// the test asserts the mark, and the unheld copy that ran meanwhile is
+// gone. The marks are read on the serving path, whose readiness shares
+// the wall's branch and head; the writable path shows the one
+// unavailable notice instead (SI-350 (2); SI-360 (3)).
 //
 // The wall is this file's own fixture (cmd/e2eharness/provision_board.go,
 // canvasWallSpecName), served from the serving branch in authoring mode
@@ -104,6 +105,46 @@ async function expectFootprint(el: Locator, what: string, w: number, h: number |
   const transform = await el.evaluate((node) => getComputedStyle(node).transform);
   expect(transformRotates(transform), `${what} is rotated: ${transform}`).toBe(false);
 }
+
+// expectMark asserts one paper's readiness mark (dc-1; SI-350 (1); the
+// handoff's "readiness marks"): the dot — 10 px in its 2 px ring, round,
+// straddling the card's right edge in its top band, hidden from the
+// accessibility tree — and the one chip whose word is the meaning, its
+// title naming the Focus next concerns that name the card (each given
+// concern among them), drawn inside the card and never over its prose.
+// owner is the paper's testid stem (an object id, or stub-<slug>).
+async function expectMark(page: Page, card: Locator, owner: string, word: string, concerns: string[]): Promise<void> {
+  const dot = page.getByTestId(`readiness-dot-${owner}`);
+  const mark = page.getByTestId(`readiness-mark-${owner}`);
+  const chips = mark.locator(".readiness-chip");
+  await expect(dot).toHaveAttribute("aria-hidden", "true");
+  await expect(chips).toHaveText([word]);
+  await expect(chips).toHaveAttribute("data-mark", word);
+  await expect(chips).toHaveAttribute("title", /^Focus next: /);
+  const title = (await chips.getAttribute("title"))!;
+  for (const concern of concerns) {
+    expect(title.slice("Focus next: ".length).split(", "), `${owner}: the chip's title names ${concern}`).toContain(concern);
+  }
+  await expect(card.locator(`[data-testid="readiness-mark-${owner}"]`), `${owner}: the mark is the card's own`).toHaveCount(1);
+  await expect(card.locator(`[data-testid="readiness-dot-${owner}"]`), `${owner}: the dot is the card's own`).toHaveCount(1);
+  const cardBox = (await card.boundingBox())!;
+  const dotBox = (await dot.boundingBox())!;
+  const markBox = (await mark.boundingBox())!;
+  expect(Math.abs(dotBox.width - 14), `${owner}: dot width ${dotBox.width}`).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(dotBox.height - 14), `${owner}: dot height ${dotBox.height}`).toBeLessThanOrEqual(0.5);
+  expect(await dot.evaluate((el) => getComputedStyle(el).borderRadius), `${owner}: the dot is round`).toBe("50%");
+  expect(Math.abs(dotBox.x + dotBox.width / 2 - (cardBox.x + cardBox.width)), `${owner}: the dot straddles the card's right edge`).toBeLessThanOrEqual(4);
+  expect(dotBox.y, `${owner}: the dot sits in the card's top band`).toBeGreaterThanOrEqual(cardBox.y);
+  expect(dotBox.y + dotBox.height, `${owner}: the dot sits in the card's top band`).toBeLessThanOrEqual(cardBox.y + 30);
+  expect(markBox.x, `${owner}: the chip is inside the card`).toBeGreaterThanOrEqual(cardBox.x);
+  expect(markBox.x + markBox.width, `${owner}: the chip is inside the card`).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
+  expect(markBox.y + markBox.height, `${owner}: the chip is inside the card`).toBeLessThanOrEqual(cardBox.y + cardBox.height + 0.5);
+  const proseBox = (await card.locator(".card-text, .stub-meta").first().boundingBox())!;
+  expect(markBox.y, `${owner}: the chip never sits on the prose`).toBeGreaterThanOrEqual(proseBox.y + proseBox.height - 0.5);
+}
+
+// markChip is one paper's mark chip row.
+const markChip = (page: Page, owner: string) => page.getByTestId(`readiness-mark-${owner}`).locator(".readiness-chip");
 
 const canvas = (page: Page) => page.getByTestId("board");
 // The visual pill, in the frame's row while something is selected, and the
@@ -333,6 +374,28 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
   await expect(page.getByTestId(slotChipTestId("ac-1", "attestation"))).toHaveText("attested");
   await expect(page.getByTestId(slotChipTestId("ac-2", "attestation"))).toHaveText("no attestation");
 
+  // The readiness mark (dc-1; SI-350 (1)): the cards Focus next names —
+  // ac-2 by success/coverage/ac-2, oq-1 by shape/question/oq-1, the stub
+  // by review/blocker/stub-unreconciled/<slug> — wear the dot and the
+  // chip, whose word is the meaning (Wave 6 §5.2); nothing else wears
+  // one, and no notice is drawn: the serving path's readiness shares the
+  // wall's branch and head.
+  await expectMark(page, page.getByTestId("card-ac-2"), "ac-2", "no stub", ["success/coverage/ac-2"]);
+  await expectMark(page, page.getByTestId("card-oq-1"), "oq-1", "unresolved", ["shape/question/oq-1"]);
+  await expectMark(page, stub, `stub-${WALL.STUB_SLUG}`, "unresolved", [`review/blocker/stub-unreconciled/${WALL.STUB_SLUG}`]);
+  await expect(page.locator("#board-canvas .readiness-mark")).toHaveCount(3);
+  await expect(page.locator("#board-canvas .readiness-dot")).toHaveCount(3);
+  await expect(page.getByTestId("readiness-mark-ac-1")).toHaveCount(0);
+  await expect(page.getByTestId("wall-marks-unavailable")).toHaveCount(0);
+  // Beside the coverage chip, which keeps its text (dc-1): the same
+  // bottom row, the mark after the chip and never over it.
+  const coverageAC2 = page.getByTestId(coverageChipTestId("ac-2"));
+  await expect(coverageAC2).toHaveText("no stub");
+  const coverageBox = (await coverageAC2.boundingBox())!;
+  const markAC2Box = (await page.getByTestId("readiness-mark-ac-2").boundingBox())!;
+  expect(Math.abs(coverageBox.y + coverageBox.height - (markAC2Box.y + markAC2Box.height)), "the mark shares the coverage chip's row").toBeLessThanOrEqual(2);
+  expect(markAC2Box.x, "the mark follows the coverage chip").toBeGreaterThanOrEqual(coverageBox.x + coverageBox.width);
+
   // The stub's slug is its first line, inside the card: the first child,
   // the one hook the scoping specs share, laid out within the card's box
   // and above the kind line; the pin after it anchors the coverage yarn
@@ -392,6 +455,11 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
   await expect(page.getByTestId("card-ac-1")).toHaveAttribute("data-selected", "true");
   await expect(baseThreads(page)).toHaveCount(2);
   await expect(overlayThreads(page)).toHaveCount(1);
+  // The marks survive the selection: the server's markup, which the
+  // selection's attributes leave alone.
+  await expect(markChip(page, "ac-2")).toHaveText(["no stub"]);
+  await expect(markChip(page, `stub-${WALL.STUB_SLUG}`)).toHaveText(["unresolved"]);
+  await expect(page.locator("#board-canvas .readiness-dot")).toHaveCount(3);
   const overlay = page.locator("#board-canvas svg.yarn-overlay");
   expect(await zIndexOf(overlay)).toBeGreaterThan(cardZ);
   await expect(overlayThreads(page)).toHaveClass(/yarn-thread--type-covers/);
@@ -402,26 +470,53 @@ async function assertCardsReceiptsAndLayers(page: Page): Promise<void> {
 }
 
 test.describe("wall-canvas", () => {
-  // Held (SI-355): the claim includes the readiness mark, which waits on
-  // the owner's decision (SI-352). Skipped counts as falsified, so ac-1
-  // stays unproven, never a pass; the reason rides the run's report as an
-  // annotation (SI-358 (7)).
-  test.fixme(
-    "Cards at the new footprint with their receipts, and yarn in two layers",
-    {
-      annotation: {
-        type: "fixme",
-        description:
-          "held: the claim's readiness mark waits on the owner's decision (SI-352); the same routine runs unheld under the SI-355 title below",
-      },
-    },
-    async ({ page }) => {
-      await assertCardsReceiptsAndLayers(page);
-    },
-  );
-
-  test("cards, receipts, and yarn layers before the readiness mark (SI-355)", async ({ page }) => {
+  test("Cards at the new footprint with their receipts, and yarn in two layers", async ({ page }) => {
     await assertCardsReceiptsAndLayers(page);
+  });
+
+  test("the readiness marks are unavailable on a wall whose branch is not the serving root's (SI-350 (2); SI-360 (3))", async ({ page }) => {
+    // The writable path serves the wall from its own design branch, and
+    // readiness derives only for the serving checkout's branch, so the
+    // two cannot describe one commit: one notice in the board's
+    // disclosure vocabulary says so, and no card wears a dot or a chip —
+    // the coverage chips keep their own texts (dc-1).
+    await openWritableWall(page);
+    const notice = page.getByTestId("wall-marks-unavailable");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(notice).toHaveClass(/(^| )board-notice( |$)/);
+    await expect(notice).toHaveText(
+      /^The readiness marks are unavailable: this wall serves branch design\/decline-canvas-wall from its own working tree, and readiness derives only for the serving checkout's branch, so the two cannot describe one commit\.$/,
+    );
+    await expect(page.locator("#board-canvas .readiness-mark, #board-canvas .readiness-dot, #board-canvas [data-mark]")).toHaveCount(0);
+    await expect(page.getByTestId(coverageChipTestId("ac-2"))).toHaveText("no stub");
+    await expect(page.getByTestId(coverageChipTestId("ac-1"))).toHaveText("covered by 1 stub");
+  });
+
+  test("the marks return with the composed poll after the page's own save (SI-362 (2), (7)(a))", async ({ page }) => {
+    // A save's mutation response is plain: the region it applies carries
+    // no marks and no notice, and the next composed poll re-applies the
+    // region with the marks. The sticky is dragged by the pointer, the
+    // one write this wall accepts from the page, and moved back after.
+    await openWall(page);
+    await expect(markChip(page, "ac-2")).toHaveText(["no stub"]);
+    const sticky = page.getByTestId(`sticky-${WALL.STICKY_ID}`);
+    const at = await stickyPosition(sticky);
+    await sticky.scrollIntoViewIfNeeded();
+    const grip = (await sticky.locator(".sticky-body").boundingBox())!;
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + grip.width / 2 + 24, grip.y + 26, { steps: 6 });
+    await page.mouse.up();
+    await expectAutosaved(page);
+    await expect(markChip(page, "ac-2")).toHaveText(["no stub"], { timeout: 8_000 });
+    await expect(markChip(page, "oq-1")).toHaveText(["unresolved"]);
+    await expect(markChip(page, `stub-${WALL.STUB_SLUG}`)).toHaveText(["unresolved"]);
+    await expect(page.locator("#board-canvas .readiness-mark")).toHaveCount(3);
+    await expect(page.getByTestId("wall-marks-unavailable")).toHaveCount(0);
+    const moved = await page.request.post(boardPath(WALL.SPEC) + "/api/sticky-position", { data: { id: WALL.STICKY_ID, x: at.x, y: at.y } });
+    expect(moved.status(), await moved.text()).toBe(200);
+    await expect(sticky).toHaveCSS("top", `${at.y}px`, { timeout: 8_000 });
   });
 
   test("Selecting a card emphasizes its threads and names them", async ({ page }) => {
@@ -554,6 +649,12 @@ test.describe("wall-canvas", () => {
     await expect(pill(page).locator(".wall-status-id")).toHaveText("dc-1");
     await expect(pill(page).locator(".wall-status-summary")).toHaveText(`exempts → ${WALL.ADR_REF}`);
     await expect(live(page)).toHaveText(`dc-1 exempts → ${WALL.ADR_REF}`);
+    // The marks are re-drawn with the composed region the poll swapped in
+    // (SI-360 (2)): the server's markup, swap after swap.
+    await expect(markChip(page, "ac-2")).toHaveText(["no stub"]);
+    await expect(markChip(page, "oq-1")).toHaveText(["unresolved"]);
+    await expect(page.getByTestId(`readiness-dot-stub-${WALL.STUB_SLUG}`)).toHaveCount(1);
+    await expect(page.locator("#board-canvas .readiness-mark")).toHaveCount(3);
   });
 
   test("a region swap keeps the canvas's scroll on both axes (Wave 6 §5.1; co-2)", async ({ page }) => {
