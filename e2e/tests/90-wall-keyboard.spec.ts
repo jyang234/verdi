@@ -128,10 +128,11 @@ async function expectRevealed(page: Page, card: Locator, what: string): Promise<
   expect(box.y + box.height, `${what}: inside the viewport at the foot`).toBeLessThanOrEqual(vp.height + 0.5);
 }
 
-// minimapGeometry reads the minimap against the canvas: the scale the asset
-// derives (the frame's inner box over the canvas's scroll size), the
-// viewport frame's box inside the minimap, the canvas's scroll state, and
-// the blocks drawn.
+// minimapGeometry reads the minimap against the canvas, in one step so a
+// rebuild cannot slip between two reads: the scale the asset derives (the
+// frame's inner box over the canvas's scroll size), the viewport frame's
+// box inside the minimap and its centre in the viewport, the canvas's
+// scroll state, and the blocks drawn.
 const minimapGeometry = (page: Page) =>
   page.evaluate((pad) => {
     const h = document.querySelector<HTMLElement>('[data-testid="wall-minimap"]')!;
@@ -142,6 +143,7 @@ const minimapGeometry = (page: Page) =>
     return {
       scale: Math.min((h.clientWidth - 2 * pad) / c.scrollWidth, (h.clientHeight - 2 * pad) / c.scrollHeight),
       view: vr ? { left: vr.left - hr.left - h.clientLeft, top: vr.top - hr.top - h.clientTop, width: vr.width, height: vr.height } : null,
+      centre: vr ? { x: vr.left + vr.width / 2, y: vr.top + vr.height / 2 } : null,
       scroll: {
         left: c.scrollLeft,
         top: c.scrollTop,
@@ -429,12 +431,12 @@ test.describe("wall-canvas", () => {
     near(g.view!.height, g.scroll.height * g.scale, "frame height");
     const before = g.scroll;
     const scale = g.scale;
-    const fb = (await mm.locator(".wall-minimap-view").boundingBox())!;
+    const from = g.centre!;
     const dx = 40;
     const dy = 12;
-    await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+    await page.mouse.move(from.x, from.y);
     await page.mouse.down();
-    await page.mouse.move(fb.x + fb.width / 2 + dx, fb.y + fb.height / 2 + dy, { steps: 4 });
+    await page.mouse.move(from.x + dx, from.y + dy, { steps: 4 });
     await page.mouse.up();
     g = await minimapGeometry(page);
     expect(g.scroll.left, "the viewport moved right").toBeGreaterThan(before.left);

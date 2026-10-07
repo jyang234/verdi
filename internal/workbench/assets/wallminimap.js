@@ -48,8 +48,10 @@
   }
 
   // build redraws the blocks — one per card, the card's canvas box scaled
-  // into the host's inner box — and the viewport frame over them. The
-  // scale fits the canvas's whole scroll extent, so every card is shown.
+  // into the host's inner box — under the viewport frame. The scale fits
+  // the canvas's whole scroll extent, so every card is shown. The frame
+  // is one node for the host's life: blocks are drawn before it, so a
+  // rebuild never detaches the frame a pointer, or a test, holds.
   function build() {
     raf = null;
     var h = host();
@@ -59,7 +61,14 @@
     var hh = h.clientHeight - 2 * PAD;
     if (w <= 0 || hh <= 0) return;
     scale = Math.min(w / Math.max(c.scrollWidth, 1), hh / Math.max(c.scrollHeight, 1));
-    while (h.firstChild) h.removeChild(h.firstChild);
+    var view = h.querySelector(".wall-minimap-view");
+    if (!view) {
+      view = document.createElement("div");
+      view.className = "wall-minimap-view";
+      h.appendChild(view);
+    }
+    var old = h.querySelectorAll(".wall-minimap-card");
+    for (var j = 0; j < old.length; j++) h.removeChild(old[j]);
     var els = c.querySelectorAll(CARDS);
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
@@ -73,11 +82,8 @@
       b.style.top = PAD + el.offsetTop * scale + "px";
       b.style.width = Math.max(2, el.offsetWidth * scale) + "px";
       b.style.height = Math.max(2, el.offsetHeight * scale) + "px";
-      h.appendChild(b);
+      h.insertBefore(b, view);
     }
-    var view = document.createElement("div");
-    view.className = "wall-minimap-view";
-    h.appendChild(view);
     sync();
   }
 
