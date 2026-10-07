@@ -84,8 +84,9 @@ func readGitLog(t *testing.T, path string) []GitLogRecord {
 	return out
 }
 
-// execSite is one of gitx's three exec sites, driven through an exported
-// function that reaches it, with the argv it issues.
+// execSite is one of gitx's four exec sites, driven through an exported
+// function that reaches it (the read session's batch process directly:
+// started, asked for one object, stopped), with the argv it issues.
 type execSite struct {
 	name string
 	call func(ctx context.Context, dir string) error
@@ -106,6 +107,15 @@ func gitLogExecSites() []execSite {
 			_, err := WriteBlob(ctx, dir, []byte("logged\n"))
 			return err
 		}, []string{"hash-object", "-w", "--stdin"}},
+		{"the batch process (startCatFileBatch)", func(ctx context.Context, dir string) error {
+			b, err := startCatFileBatch(ctx, dir)
+			if err != nil {
+				return err
+			}
+			defer b.stop()
+			_, _, err = b.read("HEAD")
+			return err
+		}, []string{"cat-file", "--batch"}},
 	}
 }
 
@@ -144,7 +154,7 @@ func TestGitLog_UnsetRecordsNothing(t *testing.T) {
 	}
 }
 
-// TestGitLog_EveryExecSiteRecords: each of gitx's three exec sites appends
+// TestGitLog_EveryExecSiteRecords: each of gitx's four exec sites appends
 // one record, in execution order, naming the argv after "git", the
 // absolute directory, and this process's pid; and the observer still sees
 // the same calls.
@@ -264,7 +274,8 @@ func TestGitLog_ConcurrentCallsNeverTear(t *testing.T) {
 			return appendGitLog(repo.Dir, []string{"marker", strconv.Itoa(g), strconv.Itoa(i), strings.Repeat("x", 4096+g*97)})
 		}},
 		{"every exec site", 8, 3, func(ctx context.Context, g, i int) error {
-			s := gitLogExecSites()[(g+i)%3]
+			sites := gitLogExecSites()
+			s := sites[(g+i)%len(sites)]
 			if err := s.call(ctx, repo.Dir); err != nil {
 				return err
 			}
