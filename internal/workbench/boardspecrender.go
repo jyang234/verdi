@@ -337,7 +337,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// (renderBoardRegion feeds both page and fragment) so the board never
 	// renders as if a skipped input were simply absent (constitution 2/10).
 	hasCaseFile := p.Problem != "" || p.Outcome != ""
-	if p.DomainRefusal != "" || len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
+	marksNotice := asd.Marks.notice()
+	if p.DomainRefusal != "" || len(p.Notices) > 0 || marksNotice != "" || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
 		b.WriteString(`<div class="board-notices">`)
 		// The domain-refusal explanation (review fix I-1): why this live
 		// scratch wall offers no spec edits, named FIRST — before any
@@ -352,6 +353,15 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		}
 		for _, n := range p.Notices {
 			b.WriteString(`<div class="board-notice" data-testid="board-notice" role="status">` + esc(n) + `</div>`)
+		}
+		// The readiness marks' one unavailable notice (spec/wall-canvas-v2
+		// ac-1, dc-1; SI-350 (2), SI-360 (4)): when the marks' input could
+		// not be read, the wall says so here, in the same disclosure
+		// channel, and no card below wears a mark — wallmarksrender.go.
+		// A view that composed no marks (the fragment, a mutation's fresh
+		// projection) has no notice to give (SI-362 (2)).
+		if marksNotice != "" {
+			writeMarksNotice(&b, marksNotice)
 		}
 		// A wall with no case-file header at all (a grandfathered spec
 		// carrying neither problem nor outcome) still discloses its
@@ -461,6 +471,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if feature {
 			writeScopingReceipts(&b, p, c)
 		}
+		// The readiness mark (spec/wall-canvas-v2 ac-1, dc-1; SI-350 (1)):
+		// a card a Focus next concern names wears the dot and the chip,
+		// beside the coverage chip above, which keeps its text —
+		// wallmarksrender.go. Drawn only from composed, readable marks.
+		writeReadinessMark(&b, c.ID, asd.Marks.forObject(c.ID))
 		// An AC card discloses its evidence obligations (ac-2) — populated
 		// for every class's AC cards that declare evidence kinds
 		// (attachObligations, R-RR2-7), so a non-empty list is a
@@ -593,6 +608,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		// The meta line projects the same declared bindings the data
 		// attributes above carry (handoff: `resolves oq-2 · claims no AC yet`).
 		b.WriteString(`<p class="stub-meta" data-testid="stub-meta-` + esc(sv.Slug) + `">` + esc(stubMetaText(sv.Resolves, sv.AcceptanceCriteria)) + `</p>`)
+		// The stub's readiness mark (spec/wall-canvas-v2 ac-1; SI-350 (1),
+		// SI-360 (1)): named by its stub-unreconciled concern, the card
+		// wears the dot and the chip under its meta line — wallmarksrender.go.
+		writeReadinessMark(&b, "stub-"+sv.Slug, asd.Marks.forStub(sv.Slug))
 		// A stub is a rendered board object too (spec/badge-computes dc-3:
 		// a dangling stub reference anchors to the stub's own card) — its
 		// chip row rides the card in every mode, before the sealed wall's

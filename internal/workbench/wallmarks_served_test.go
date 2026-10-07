@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"encoding/json"
+	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -168,6 +169,11 @@ func TestWallMarks_ServedPoll(t *testing.T) {
 	if got, want := snap.Marks.Stubs["2fa-x"], (wallMark{Concern: "review/blocker/stub-unreconciled/s-2fa-x", Chip: markChipUnresolved}); got != want {
 		t.Errorf("stub 2fa-x mark = %+v, want %+v", got, want)
 	}
+	// The served region draws those facts (lane M-ui): each named card's
+	// mark with its own word, and no unavailable notice.
+	requireMarkMarkup(t, "the served poll's region", snap.HTML,
+		[]string{servedMarkChip("ac-2", markChipNoStub), servedMarkChip("oq-1", markChipUnresolved), servedMarkChip("stub-2fa-x", markChipUnresolved), `data-testid="readiness-dot-ac-2"`},
+		[]string{`data-testid="wall-marks-unavailable"`})
 
 	readiness, err := s.readinessLoader.Load(context.Background(), "spec/"+marksWallName)
 	if err != nil {
@@ -182,9 +188,14 @@ func TestWallMarks_ServedPoll(t *testing.T) {
 		t.Fatalf("the served marks differ from a derivation over a load alone:\n got: %+v\nwant: %+v", snap.Marks, alone)
 	}
 
-	if page, _ := pageRevision(t, h, path); page != snap.Revision {
+	page, body := pageRevision(t, h, path)
+	if page != snap.Revision {
 		t.Fatalf("the page embeds revision %s, the poll serves %s: the client's first poll could never be a 304", page, snap.Revision)
 	}
+	// The page's region is the poll's: it draws the same marks.
+	requireMarkMarkup(t, "the page's region", body,
+		[]string{servedMarkChip("ac-2", markChipNoStub), servedMarkChip("oq-1", markChipUnresolved), servedMarkChip("stub-2fa-x", markChipUnresolved)},
+		[]string{`data-testid="wall-marks-unavailable"`})
 	warm := &readcensus.Census{}
 	if rec, _ := pollWall(t, gitx.WithObserver(context.Background(), warm), h, path, snap.Revision); rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
 		t.Fatalf("the client's next poll with the body's revision = %d (%d bytes), want an empty 304", rec.Code, rec.Body.Len())
@@ -199,6 +210,28 @@ func containsMark(marks []wallMark, want wallMark) bool {
 		}
 	}
 	return false
+}
+
+// servedMarkChip is the start of one paper's served mark markup through
+// its first chip's word (wallmarksrender.go).
+func servedMarkChip(owner, word string) string {
+	return `<span class="readiness-mark" data-testid="readiness-mark-` + owner + `"><span class="readiness-chip" data-mark="` + word + `"`
+}
+
+// requireMarkMarkup asserts a served region carries each wanted mark
+// substring and none of the absent ones.
+func requireMarkMarkup(t *testing.T, label, html string, want, absent []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(html, w) {
+			t.Errorf("%s lacks %s", label, w)
+		}
+	}
+	for _, a := range absent {
+		if strings.Contains(html, a) {
+			t.Errorf("%s carries %s", label, a)
+		}
+	}
 }
 
 // swapLoader is a test-only ReadinessLoader whose snapshot a test swaps
@@ -228,7 +261,10 @@ func (l *swapLoader) set(snap readinesspilot.Snapshot, err error) {
 // one that moves a mark, one that moves no mark, and a load that starts
 // failing — changes the composed revision, so the client's next poll,
 // sent with the revision the last body carried, is a 200 with the new
-// facts; and an unchanged readiness answers that poll 304.
+// facts drawn in its region (lane M-ui: a moved mark moves the region, a
+// change that moves no mark moves the token over the region the same
+// marks drew before, and a failed load draws the notice); and an
+// unchanged readiness answers that poll 304.
 func TestWallMarks_ReadinessAloneMovesThePoll(t *testing.T) {
 	root := newMarksWallFixture(t)
 	head := gitOut(t, root, "rev-parse", "HEAD")
@@ -250,23 +286,32 @@ func TestWallMarks_ReadinessAloneMovesThePoll(t *testing.T) {
 		t.Fatalf("an unchanged readiness answered the client's next poll %d, want 304", rec.Code)
 	}
 
+	ac2Mark, oq1Mark, notice := servedMarkChip("ac-2", markChipNoStub), servedMarkChip("oq-1", markChipUnresolved), `data-testid="wall-marks-unavailable"`
+	requireMarkMarkup(t, "the first body's region", first.HTML, []string{ac2Mark}, []string{oq1Mark, notice})
+
 	last := first
 	for _, step := range []struct {
-		name string
-		snap readinesspilot.Snapshot
-		err  error
+		name        string
+		snap        readinesspilot.Snapshot
+		err         error
+		want, never string // the region's markup after the step
+		sameAsFirst bool   // the region is the first body's: the same marks drawn again
 	}{
-		{name: "a readiness change that moves a mark", snap: moved},
-		{name: "a readiness change that moves no mark", snap: unmarked},
-		{name: "a readiness load that fails", err: errBoom},
+		{name: "a readiness change that moves a mark", snap: moved, want: oq1Mark, never: ac2Mark},
+		{name: "a readiness change that moves no mark", snap: unmarked, want: ac2Mark, never: oq1Mark, sameAsFirst: true},
+		{name: "a readiness load that fails", err: errBoom, want: notice, never: `class="readiness-mark"`},
 	} {
 		loader.set(step.snap, step.err)
 		rec, next := pollWall(t, context.Background(), h, path, last.Revision)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: the client's next poll = %d, want 200 with the new readiness", step.name, rec.Code)
 		}
-		if next.Revision == last.Revision || next.HTML != first.HTML {
-			t.Fatalf("%s: revision %s -> %s, region changed %v: want a new token over an unchanged region", step.name, last.Revision, next.Revision, next.HTML != first.HTML)
+		if next.Revision == last.Revision || next.Revision == first.Revision {
+			t.Fatalf("%s: revision %s -> %s: want a new token", step.name, last.Revision, next.Revision)
+		}
+		requireMarkMarkup(t, step.name+": the region", next.HTML, []string{step.want}, []string{step.never})
+		if (next.HTML == first.HTML) != step.sameAsFirst {
+			t.Fatalf("%s: the region is the first body's: %v, want %v", step.name, next.HTML == first.HTML, step.sameAsFirst)
 		}
 		if rec, _ := pollWall(t, context.Background(), h, path, next.Revision); rec.Code != http.StatusNotModified {
 			t.Fatalf("%s: the poll after it = %d, want 304", step.name, rec.Code)
@@ -278,35 +323,40 @@ func TestWallMarks_ReadinessAloneMovesThePoll(t *testing.T) {
 	}
 }
 
-// TestWallMarks_PageCarriesNoMarkup (SI-360 (4); brief item 5): the marks
-// and the unavailable notice are render data only. A wall page and its
-// snapshot whose marks are readable, and the same wall's whose marks are
-// unavailable, render the same bytes but for the page's embedded revision.
-func TestWallMarks_PageCarriesNoMarkup(t *testing.T) {
+// TestWallMarks_UnwiredWallDrawsTheNotice (SI-362 (4); lane M-ui, which
+// retired M-go's placeholder TestWallMarks_PageCarriesNoMarkup): a server
+// with no readiness loader wired serves the wall with the one unavailable
+// notice naming that reason, and no mark, on its page and in its poll
+// alike; a mutation's response, which composes no marks, carries neither.
+func TestWallMarks_UnwiredWallDrawsTheNotice(t *testing.T) {
 	root := newMarksWallFixture(t)
 	path := "/board/spec/" + marksWallName
-	marked := refreshServer(root)
-	withMarks := NewHandlerWith(root, Deps{Design: marked.design, ReadinessLoader: marked.readinessLoader})
-	unwired := NewHandlerWith(root, Deps{Design: marked.design})
+	unwired := NewHandlerWith(root, Deps{Design: readinessGapCapsBridge()})
 
-	markedRev, markedPage := pageRevision(t, withMarks, path)
-	plainRev, plainPage := pageRevision(t, unwired, path)
-	if markedRev == plainRev {
-		t.Fatal("the composed page's revision does not cover its readiness")
+	rev, body := pageRevision(t, unwired, path)
+	notice := `<div class="board-notice wall-marks-notice" data-testid="wall-marks-unavailable" role="status">The readiness marks are unavailable: ` + marksUnwired + `.</div>`
+	requireMarkMarkup(t, "the unwired page", body, []string{notice}, []string{`class="readiness-mark"`, `class="readiness-dot"`})
+	if strings.Count(body, `data-testid="wall-marks-unavailable"`) != 1 {
+		t.Fatalf("the unwired page draws %d notices", strings.Count(body, `data-testid="wall-marks-unavailable"`))
 	}
-	if strings.ReplaceAll(markedPage, markedRev, plainRev) != plainPage {
-		t.Fatal("the page's bytes differ beyond its embedded revision: the marks reached the markup")
+	_, snap := pollWall(t, context.Background(), unwired, path, "")
+	requireMarkMarkup(t, "the unwired poll's region", snap.HTML, []string{notice}, []string{`class="readiness-mark"`, `class="readiness-dot"`})
+	if snap.Marks == nil || snap.Marks.Unavailable != marksUnwired || snap.Revision != rev {
+		t.Fatalf("the unwired poll's marks = %+v at %s, the page embeds %s", snap.Marks, snap.Revision, rev)
 	}
-	_, markedSnap := pollWall(t, context.Background(), withMarks, path, "")
-	_, plainSnap := pollWall(t, context.Background(), unwired, path, "")
-	if markedSnap.HTML != plainSnap.HTML {
-		t.Fatal("the snapshot's region differs with the marks: the marks reached the markup")
+
+	// The fragment — the plain region a mutation swaps in — composes no
+	// marks (SI-362 (2)): no notice and no mark, so it is the poll's
+	// region without the one notice.
+	rec := httptest.NewRecorder()
+	unwired.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path+"/fragment", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET fragment = %d\n%s", rec.Code, rec.Body.String())
 	}
-	if markedSnap.Marks == nil || markedSnap.Marks.Unavailable != "" || plainSnap.Marks == nil || plainSnap.Marks.Unavailable != marksUnwired {
-		t.Fatalf("marks: composed %+v, unwired %+v", markedSnap.Marks, plainSnap.Marks)
-	}
-	if plainSnap.Revision != plainRev {
-		t.Fatalf("the unwired wall's poll serves %s, its page embeds %s", plainSnap.Revision, plainRev)
+	fragment := rec.Body.String()
+	requireMarkMarkup(t, "the fragment", fragment, nil, []string{`data-testid="wall-marks-unavailable"`, `class="readiness-mark"`, `class="readiness-dot"`})
+	if strings.Replace(snap.HTML, noticeOf(marksUnwired), "", 1) != fragment {
+		t.Fatal("the unwired poll's region is not the fragment plus the one notice")
 	}
 }
 
@@ -337,9 +387,15 @@ func TestWallMarks_BranchWallLoadsNoReadiness(t *testing.T) {
 		if want := unavailableMarks(marksBranchWall("design/marks-other")); snap.Marks == nil || !reflect.DeepEqual(*snap.Marks, want) {
 			t.Fatalf("the /b/ wall's marks = %+v, want %+v", snap.Marks, want)
 		}
-		if page, _ := pageRevision(t, h, path); page != snap.Revision {
+		// The region draws the one notice with that reason, and no mark
+		// (SI-350 (2)), on the poll and the page alike.
+		notice := `data-testid="wall-marks-unavailable" role="status">The readiness marks are unavailable: ` + stdhtml.EscapeString(marksBranchWall("design/marks-other")) + `.</div>`
+		requireMarkMarkup(t, round+": the /b/ poll's region", snap.HTML, []string{notice}, []string{`class="readiness-mark"`, `class="readiness-dot"`})
+		page, body := pageRevision(t, h, path)
+		if page != snap.Revision {
 			t.Fatalf("the /b/ page embeds %s, its poll serves %s", page, snap.Revision)
 		}
+		requireMarkMarkup(t, round+": the /b/ page", body, []string{notice}, []string{`class="readiness-mark"`, `class="readiness-dot"`})
 		if rec, _ := pollWall(t, context.Background(), h, path, snap.Revision); rec.Code != http.StatusNotModified {
 			t.Fatalf("the /b/ wall's next poll = %d, want 304", rec.Code)
 		}

@@ -112,10 +112,22 @@ func TestProjectWallRefresh_ComposedBudget(t *testing.T) {
 			if refresh.snap.Marks == nil || refresh.snap.Revision == alone.Revision {
 				t.Fatalf("the composed snapshot carries marks %+v and revision %s (an unscoped load's: %s)", refresh.snap.Marks, refresh.snap.Revision, alone.Revision)
 			}
+			// The marks reach the region's markup (lane M-ui): the composed
+			// snapshot is an unscoped load rendered with the refresh's marks,
+			// but for the revision covering them.
+			proj, git, asd, err := s.loadASD(context.Background(), wall.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			asd.Marks = refresh.snap.Marks
+			marked := newASDSnapshot(proj, git, asd)
 			bare := *refresh.snap
-			bare.Marks, bare.Revision = nil, alone.Revision
-			if got, want := marshalJSON(t, bare), marshalJSON(t, alone); got != want {
-				t.Fatalf("the refresh's snapshot differs from an unscoped load's beyond its marks and revision:\n got: %s\nwant: %s", got, want)
+			bare.Revision = marked.Revision
+			if got, want := marshalJSON(t, bare), marshalJSON(t, marked); got != want {
+				t.Fatalf("the refresh's snapshot differs from an unscoped load's rendered with its marks, beyond the revision:\n got: %s\nwant: %s", got, want)
+			}
+			if m := refresh.snap.Marks; (m.Unavailable != "" || len(m.Objects)+len(m.Stubs) > 0) && marked.HTML == alone.HTML {
+				t.Fatalf("marks %+v never reached the region", m)
 			}
 			readiness, err := s.readinessLoader.Load(context.Background(), "spec/"+wall.name)
 			if err != nil {
@@ -279,15 +291,25 @@ func TestResolvePostureHeads_PinnedAcceptedHead(t *testing.T) {
 
 // TestProjectWallRefresh_RevisionCoversReadiness (Wave 6 §5.1; review
 // P2R-4; SI-360 (2)): a composed refresh's revision covers the readiness
-// it composes — changing only the readiness (another snapshot, or a
-// loader failure) changes the token over an unchanged region — while a
+// it composes — changing only the readiness changes the token, over an
+// unchanged region when the change moves no mark, and a loader failure
+// draws the unavailable notice in the region (lane M-ui) — while a
 // plain refresh's token is an unscoped load's revision, byte for byte,
 // whatever the loader would say, and so is a composed refresh's that
 // loaded none (its marks are then a constant of the server).
 func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 	wall := refreshWalls(t)[0]
-	snapA := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Head: "a"}
-	snapB := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Head: "b"}
+	bare := &boardSpecServer{root: wall.root, design: readinessGapCapsBridge()}
+	_, _, view, err := bare.loadASD(context.Background(), wall.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two readable snapshots of this wall naming no card: the same (empty)
+	// marks, so the same region, under two tokens (lane M-ui: the marks
+	// reach the region, so only a change that moves no mark leaves it).
+	snapA := readinesspilot.Snapshot{TargetRef: "spec/" + wall.name, Branch: view.Branch, Head: view.WorktreeHead}
+	snapB := snapA
+	snapB.StaleNotice = "Derived at HEAD " + view.WorktreeHead + " for this request."
 	refreshWith := func(loader ReadinessLoader, compose bool) wallRefresh {
 		t.Helper()
 		s := &boardSpecServer{root: wall.root, design: readinessGapCapsBridge(), readinessLoader: loader}
@@ -297,15 +319,21 @@ func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 		}
 		return refresh
 	}
-	alone, err := (&boardSpecServer{root: wall.root, design: readinessGapCapsBridge()}).loadSnapshot(context.Background(), wall.name)
+	alone, err := bare.loadSnapshot(context.Background(), wall.name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := refreshWith(fixedSnapshotLoader{snap: snapA}, true)
 	b := refreshWith(fixedSnapshotLoader{snap: snapB}, true)
 	failed := refreshWith(erroringReadinessLoader{err: errBoom}, true)
-	if a.snap.HTML != b.snap.HTML || a.snap.HTML != failed.snap.HTML || a.snap.HTML != alone.HTML {
-		t.Fatal("the region moved with the readiness alone")
+	if a.snap.Marks == nil || a.snap.Marks.Unavailable != "" || len(a.snap.Marks.Objects)+len(a.snap.Marks.Stubs) != 0 {
+		t.Fatalf("the readable snapshot's marks = %+v, want readable and empty", a.snap.Marks)
+	}
+	if a.snap.HTML != b.snap.HTML || a.snap.HTML != alone.HTML {
+		t.Fatal("the region moved with a readiness change that moved no mark")
+	}
+	if failed.snap.HTML == alone.HTML || !strings.Contains(failed.snap.HTML, `data-testid="wall-marks-unavailable"`) {
+		t.Fatal("a failed load's region carries no unavailable notice")
 	}
 	if a.snap.Revision == b.snap.Revision || a.snap.Revision == failed.snap.Revision || b.snap.Revision == failed.snap.Revision {
 		t.Fatalf("a readiness change left the composed token unchanged: %s, %s, %s", a.snap.Revision, b.snap.Revision, failed.snap.Revision)
@@ -321,7 +349,30 @@ func TestProjectWallRefresh_RevisionCoversReadiness(t *testing.T) {
 			t.Fatalf("a plain refresh's token %s is not an unscoped load's revision %s", plain.snap.Revision, alone.Revision)
 		}
 	}
-	if none := refreshWith(nil, true); none.snap.Revision != alone.Revision {
-		t.Fatalf("a composed refresh with no loader carries token %s, want an unscoped load's %s", none.snap.Revision, alone.Revision)
+	// A composed refresh with no loader digests no readiness (SI-362 (1)):
+	// its token is the plain token over its region, which carries the
+	// unwired notice (lane M-ui) — the one byte-level difference from an
+	// unscoped load, so a plain projection's response (the mutation's)
+	// and this poll differ by the notice alone.
+	none := refreshWith(nil, true)
+	if none.asd.readinessRevision != "" {
+		t.Fatalf("a composed refresh with no loader digested readiness %q", none.asd.readinessRevision)
 	}
+	proj, git, asd, err := bare.loadASD(context.Background(), wall.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asd.Marks = none.snap.Marks
+	if again := newASDSnapshot(proj, git, asd); again.Revision != none.snap.Revision || again.HTML != none.snap.HTML {
+		t.Fatalf("a composed refresh with no loader carries token %s over its region, want the plain token over the same region with the notice, %s", none.snap.Revision, again.Revision)
+	}
+	if !strings.Contains(none.snap.HTML, `data-testid="wall-marks-unavailable"`) || strings.Replace(none.snap.HTML, noticeOf(marksUnwired), "", 1) != alone.HTML {
+		t.Fatal("the unwired composed region is not the unscoped load's plus the one notice")
+	}
+}
+
+// noticeOf is the unavailable notice's markup for one reason, inside the
+// board's notices wrapper when the wall has no other notice.
+func noticeOf(reason string) string {
+	return `<div class="board-notices"><div class="board-notice wall-marks-notice" data-testid="wall-marks-unavailable" role="status">The readiness marks are unavailable: ` + reason + `.</div></div>`
 }

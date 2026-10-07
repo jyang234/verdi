@@ -5171,6 +5171,77 @@ body:not(.board-page) > footer.site-foot,
   pointer-events: none;
 }
 
+/* ---- the readiness mark (spec/wall-canvas-v2 ac-1, dc-1; ledger SI-350
+   (1)–(2), SI-360 (4), SI-362 (2); lane M-ui) ----
+   A card a Focus next concern names wears the handoff's mark: a 10 px
+   pending dot ringed in the card's paper at its top-right corner, and a
+   chip in the receipts' register whose word ("no stub" / "unresolved")
+   carries the meaning — never the colour alone (Wave 6 §5.2). dc-1 keeps
+   the card's coverage chip and its text: the mark's chips sit beside it
+   in the same bottom row — at the row's end when the card wears a
+   coverage chip, which then yields the room (ellipsis; its text intact)
+   — and at the row's start otherwise. A stub card (a flex column) wears
+   its chip in flow under the meta line. The dot and the chips are the
+   server's markup in the region, so each composed refresh re-draws them;
+   a mutation response's region carries none (SI-362 (2)). Tokens only
+   (SI-326): the chip's tint is mixed toward the card's paper, which
+   keeps --st-pending at AA on it in both schemes. */
+.boardv2-canvas .readiness-dot {
+  position: absolute;
+  top: 8px;
+  right: -5px;
+  z-index: 3;
+  box-sizing: content-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--card);
+  border-radius: 50%;
+  background: var(--st-pending);
+  pointer-events: none;
+}
+.boardv2-canvas .readiness-mark {
+  position: absolute;
+  left: 0.9rem;
+  bottom: 0.5rem;
+  display: inline-flex;
+  flex-wrap: wrap-reverse;
+  gap: 0.25rem;
+  max-width: calc(100% - 1.8rem);
+  pointer-events: none;
+}
+.boardv2-canvas .readiness-chip {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 0.06rem 0.45rem;
+  border: 1px solid var(--st-pending);
+  border-radius: 999px;
+  color: var(--st-pending);
+  background: color-mix(in srgb, var(--st-pending-tint) 60%, var(--card));
+}
+/* beside the coverage chip: the mark takes the row's end, the coverage
+   chip keeps the start and yields the room */
+.boardv2-canvas .objcard:has(.coverage-chip) .readiness-mark {
+  left: auto;
+  right: 0.9rem;
+  max-width: calc(100% - 1.8rem - 3.6rem);
+}
+.boardv2-canvas .objcard:has(.readiness-mark) .coverage-chip { max-width: calc(100% - 1.8rem - 5rem); }
+/* a card wearing badges keeps its receipts a column: the mark moves up a
+   row with the coverage chip (the shared rule above) */
+.boardv2-canvas .objcard:has(.card-badges) .readiness-mark { bottom: 1.75rem; }
+/* the text gives a line back so the mark never sits on the prose */
+.boardv2-canvas .objcard:has(.readiness-mark) .card-text { -webkit-line-clamp: 3; }
+.boardv2-canvas .objcard:has(.card-badges):has(.readiness-mark) .card-text { -webkit-line-clamp: 2; }
+/* on a stub card the chip sits in flow under the meta line */
+.boardv2-canvas .stubcard .readiness-mark {
+  position: static;
+  margin-top: 4px;
+}
+
 /* ---- reference cards ---- */
 .boardv2-canvas .refcard {
   width: 200px;
