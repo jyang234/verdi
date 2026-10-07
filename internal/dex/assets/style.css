@@ -5172,16 +5172,16 @@ body:not(.board-page) > footer.site-foot,
 }
 
 /* ---- the readiness mark (spec/wall-canvas-v2 ac-1, dc-1; ledger SI-350
-   (1)–(2), SI-360 (4), SI-362 (2); lane M-ui) ----
+   (1)–(2), SI-360 (4), SI-362 (2), SI-365 (5); lane M-ui) ----
    A card a Focus next concern names wears the handoff's mark: a 10 px
    pending dot ringed in the card's paper at its top-right corner, and a
-   chip in the receipts' register whose word ("no stub" / "unresolved")
-   carries the meaning — never the colour alone (Wave 6 §5.2). dc-1 keeps
-   the card's coverage chip and its text: the mark's chips sit beside it
-   in the same bottom row — at the row's end when the card wears a
-   coverage chip, which then yields the room (ellipsis; its text intact)
-   — and at the row's start otherwise. A stub card (a flex column) wears
-   its chip in flow under the meta line. The dot and the chips are the
+   chip whose word ("no stub" / "unresolved") carries the meaning — never
+   the colour alone (Wave 6 §5.2). The chip sits on the card's head line,
+   after the kind lockup (SI-365 (5)(c), the fallback (2) allows): the
+   foot register cannot hold it beside the coverage chip and keep one
+   prose line on the densest real cards. dc-1 keeps the coverage chip and
+   its full text. The chip takes the pointer, so its title (the concerns
+   naming the card) is a hover away. The dot and the chip are the
    server's markup in the region, so each composed refresh re-draws them;
    a mutation response's region carries none (SI-362 (2)). Tokens only
    (SI-326): the chip's tint is mixed toward the card's paper, which
@@ -5200,19 +5200,14 @@ body:not(.board-page) > footer.site-foot,
   pointer-events: none;
 }
 .boardv2-canvas .readiness-mark {
-  position: absolute;
-  left: 0.9rem;
-  bottom: 0.5rem;
-  display: inline-flex;
-  flex-wrap: wrap-reverse;
-  gap: 0.25rem;
-  max-width: calc(100% - 1.8rem);
-  pointer-events: none;
+  display: flex;
+  min-width: 0;
 }
 .boardv2-canvas .readiness-chip {
   font-family: var(--mono);
   font-size: 0.56rem;
   font-weight: 600;
+  line-height: 1.15;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -5222,24 +5217,197 @@ body:not(.board-page) > footer.site-foot,
   color: var(--st-pending);
   background: color-mix(in srgb, var(--st-pending-tint) 60%, var(--card));
 }
-/* beside the coverage chip: the mark takes the row's end, the coverage
-   chip keeps the start and yields the room */
-.boardv2-canvas .objcard:has(.coverage-chip) .readiness-mark {
-  left: auto;
-  right: 0.9rem;
-  max-width: calc(100% - 1.8rem - 3.6rem);
+
+/* ---- the object card's register (spec/wall-canvas-v2 ac-1, dc-1;
+   ledger SI-365 (1), (5)) ----
+   The card is a grid of three tracks: the head line, the prose, and the
+   foot register — obligation rows, then the coverage or claims chip, then
+   the badge row — in flow, so no receipt can overlap another or the
+   prose. The prose takes the middle track in whole lines (round() on the
+   track's height; --card-line is the card's own 14 px × 1.4), so a denser
+   card loses prose lines and a card denser than any today may show none
+   (a disclosed residual, SI-365 (5)(d)). The receipts are tight — 1.15
+   line-height, 1–2 px gaps — because the footprint holds three obligation
+   rows, a chip and a badge row above one prose line only so. The head
+   line's margin is dropped: grid margins do not collapse, and the prose's
+   own 6 px keeps the gap. The docs site's .obligation pill (its padding,
+   border, tint and 0.78rem type) cascades onto the wall's rows and nearly
+   doubles them; it is reset here, in the canvas scope only (SI-365 (4),
+   (5)(a)). The ⋯ cue sits in the prose's track, on its last line's tail,
+   never on the register. The yarn handle and the dot stay absolute to
+   the card, as before. */
+.boardv2-canvas .objcard {
+  --card-line: 19.6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  column-gap: 6px;
 }
-.boardv2-canvas .objcard:has(.readiness-mark) .coverage-chip { max-width: calc(100% - 1.8rem - 5rem); }
-/* a card wearing badges keeps its receipts a column: the mark moves up a
-   row with the coverage chip (the shared rule above) */
-.boardv2-canvas .objcard:has(.card-badges) .readiness-mark { bottom: 1.75rem; }
-/* the text gives a line back so the mark never sits on the prose */
-.boardv2-canvas .objcard:has(.readiness-mark) .card-text { -webkit-line-clamp: 3; }
-.boardv2-canvas .objcard:has(.card-badges):has(.readiness-mark) .card-text { -webkit-line-clamp: 2; }
-/* on a stub card the chip sits in flow under the meta line */
-.boardv2-canvas .stubcard .readiness-mark {
+.boardv2-canvas .objcard > .card-kind {
+  grid-row: 1;
+  grid-column: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.boardv2-canvas .objcard > .readiness-mark {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: start;
+}
+/* the two canvas classes outrank the shared per-receipt clamps
+   (.objcard:has(…):has(…) .card-text): the clamp here is the four lines
+   an empty card holds, and the track's height does the rest */
+.board-canvas.boardv2-canvas .objcard > .card-text {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 6px 0 0;
+  max-height: round(down, calc(100% - 6px), var(--card-line));
+  -webkit-line-clamp: 4;
+}
+.boardv2-canvas .objcard > .clamp-more {
+  grid-row: 2 / 3; /* both lines named: an absolute item's auto end line is the padding edge */
+  grid-column: 1 / 3;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 6px - round(down, calc(100% - 6px), var(--card-line)));
+}
+/* the inline editor takes the prose's track and paints over the
+   register while it is open (the prose is hidden meanwhile) */
+.boardv2-canvas .objcard > .card-editor {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  align-self: start;
+  position: relative;
+  z-index: 1;
+  margin: 6px 0 0;
+}
+.boardv2-canvas .objcard > .card-obligations {
+  grid-row: 3;
+  grid-column: 1 / -1;
   position: static;
-  margin-top: 4px;
+  margin-top: 2px;
+  gap: 1px;
+}
+.boardv2-canvas .objcard .obligation {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+  line-height: 1.15;
+}
+.boardv2-canvas .objcard .obligation-kind,
+.boardv2-canvas .objcard .obligation-title,
+.boardv2-canvas .objcard .obligation-badge,
+.boardv2-canvas .objcard .slot-chip { line-height: 1.15; }
+.boardv2-canvas .objcard > .coverage-chip,
+.boardv2-canvas .objcard > .oq-claims {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  position: static;
+  justify-self: start;
+  max-width: 100%;
+  margin-top: 2px;
+  line-height: 1.15;
+}
+.boardv2-canvas .objcard > .card-badges {
+  grid-row: 5;
+  grid-column: 1 / -1;
+  position: static;
+  margin: 2px 0 0;
+  gap: 1px 0.18rem;
+}
+.boardv2-canvas .objcard .badge-chip { line-height: 1.15; }
+/* a superseded decision's §6 lines follow the register (SI-278); the
+   card grows for them as before */
+.boardv2-canvas .objcard > .objsupersede-lines {
+  grid-row: 6;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+/* ---- the stub card's register (SI-365 (5)(e)) ----
+   The same grid: the slug line, the head line with the mark, the title in
+   whole lines, the meta line, then the foot — badges, story links, the
+   Correct stub button, the instantiated notice, Instantiate — in flow and
+   inside the card. The story links take the receipts' mono register
+   (one line each, ellipsized), because at the paper's 14 px they wrapped
+   and pushed Instantiate out of the card. */
+.boardv2-canvas .stubcard {
+  --card-line: 18.2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  column-gap: 6px;
+}
+.boardv2-canvas .stubcard > .stub-tab {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  line-height: 1.15;
+}
+.boardv2-canvas .stubcard > .card-kind {
+  grid-row: 2;
+  grid-column: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.boardv2-canvas .stubcard > .readiness-mark {
+  grid-row: 2;
+  grid-column: 2;
+  align-self: start;
+}
+.boardv2-canvas .stubcard > .stub-title {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 4px 0 0;
+  max-height: round(down, calc(100% - 4px), var(--card-line));
+  -webkit-line-clamp: 4;
+}
+.boardv2-canvas .stubcard > .clamp-more {
+  grid-row: 3 / 4;
+  grid-column: 1 / 3;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 4px - round(down, calc(100% - 4px), var(--card-line)));
+}
+.boardv2-canvas .stubcard > .stub-meta {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+.boardv2-canvas .stubcard > .card-badges,
+.boardv2-canvas .stubcard > .stub-story-link,
+.boardv2-canvas .stubcard > .asd-stub-correct,
+.boardv2-canvas .stubcard > .stub-instantiated-notice,
+.boardv2-canvas .stubcard > .stub-instantiate {
+  grid-column: 1 / -1;
+  justify-self: start;
+  max-width: 100%;
+  margin: 1px 0 0;
+}
+.boardv2-canvas .stubcard > .card-badges { margin-top: 2px; gap: 1px 0.18rem; }
+.boardv2-canvas .stubcard .badge-chip { line-height: 1.15; }
+.boardv2-canvas .stubcard > .stub-story-link,
+.boardv2-canvas .stubcard > .stub-instantiated-notice {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.boardv2-canvas .stubcard > .stub-instantiated-notice { margin: 1px 0 0; }
+.boardv2-canvas .stubcard > .stub-instantiate {
+  margin-top: 2px;
+  line-height: 1.15;
 }
 
 /* ---- reference cards ---- */
