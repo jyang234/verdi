@@ -60,9 +60,10 @@ func TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset(t *testing.T) {
 	if !strings.Contains(region, `<div class="board-layout"><div class="wall-frame" data-testid="wall-frame"><div id="board-canvas" `) {
 		t.Error("the canvas is not the wall frame's first child")
 	}
-	// The row hosts the contextual toolbar (ac-3, lane F2b) and nothing
-	// else of the server's: the pill is still the asset's.
-	if !strings.Contains(region, `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div></div></div><aside class="board-side">`) {
+	// The row hosts the contextual toolbar (ac-3, lane F2b) and the
+	// minimap's host (ac-6, lane F2c) and nothing else of the server's:
+	// the pill is still the asset's.
+	if !strings.Contains(region, `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div></div><aside class="board-side">`) {
 		t.Error("the status row does not follow the canvas inside the frame, before the rail")
 	}
 }

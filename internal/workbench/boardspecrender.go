@@ -206,6 +206,8 @@ window.__BOARDV2__ = {{.StateJSON}};
 <script src="/assets/boardspecasd.js"></script>
 <script src="/assets/wallselect.js"></script>
 <script src="/assets/walltoolbar.js"></script>
+<script src="/assets/wallkeys.js"></script>
+<script src="/assets/wallminimap.js"></script>
 </body>
 </html>
 `))
@@ -805,8 +807,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	b.WriteString(`</div>`) // board-canvas
 	// The status row hosts the contextual toolbar (ac-3): the toolbar asset
 	// fills it from the selection and the mode, and the selection asset
-	// draws the status pill beside it.
-	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div></div>`)
+	// draws the status pill beside it. At the row's right end sits the
+	// minimap's host (ac-6): the minimap asset draws every card and the
+	// canvas's viewport into it and moves the viewport when it is dragged.
+	// In the row it covers no paper, label or control (SI-358 (4)); a
+	// pointer aid hidden from assistive technology, whose keyboard path
+	// is the arrows that reveal every card (Wave 6 §5.2).
+	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div>`)
 	b.WriteString(`</div>`) // wall-frame
 
 	// The side rail, top-down by consequence: the commit affordance (the

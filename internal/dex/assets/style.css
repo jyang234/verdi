@@ -5600,4 +5600,77 @@ body:not(.board-page) > footer.site-foot,
   line-height: 1.4;
   resize: vertical;
 }
+
+/* == The keyboard and the minimap (spec/wall-canvas-v2 ac-6; ledger
+   SI-358 (4), SI-361 (3); lane F2c) =============================================
+   The minimap sits at the status row's right end, after the toolbar, not
+   over the cork's corner as the handoff drew it: the row is where SI-358
+   (4) put the pill so it covers nothing, and the minimap follows it
+   there. The handoff's chrome otherwise: 165 × 77, --card at 92 %, 1px
+   --rule, radius 4; cards as blocks in the kind colour at 55 %, the
+   stub, reference and sticky blocks in their paper colours; the viewport
+   frame 1.5px --ink over a faint fill. Tokens only (SI-326): the
+   handoff's grey fill is mixed from --muted-solid. The frame moves with
+   the scroll at once, with no transition. Where the row leads the canvas
+   (a short zoomed viewport, wallselect.js ROW_FIT_HEIGHT) the minimap
+   keeps to the toolbar's line, so the canvas keeps what height there is.
+   The arrows focus the card they select, so every card kind shows the
+   focus ring the object card already had (Wave 6 §5.2: visible focus). */
+.wall-minimap {
+  position: relative;
+  order: 3;
+  flex: none;
+  box-sizing: border-box;
+  width: 165px;
+  height: 77px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wall-minimap[data-dragging] { cursor: grabbing; }
+[data-wall-row="leading"] .wall-minimap {
+  width: 94px;
+  height: 44px;
+}
+.wall-minimap-card {
+  position: absolute;
+  border-radius: 1px;
+  background: var(--muted-solid);
+  opacity: 0.55;
+}
+.wall-minimap-card[data-kind="acceptance-criterion"] { background: var(--st-evidenced); }
+.wall-minimap-card[data-kind="constraint"] { background: var(--st-violated); }
+.wall-minimap-card[data-kind="decision"] { background: var(--authored); }
+.wall-minimap-card[data-kind="open-question"] { background: var(--st-waived); }
+.wall-minimap-card[data-kind="stub"] {
+  background: var(--stub-paper);
+  box-shadow: inset 0 0 0 1px var(--stub-edge);
+  opacity: 1;
+}
+.wall-minimap-card[data-kind="reference"] { background: var(--frozen-tint); opacity: 1; }
+.wall-minimap-card[data-kind="sticky"] { background: var(--note-unknown-bg); opacity: 1; }
+.wall-minimap-card[data-sticky-type="comment"] { background: var(--note-comment-bg); }
+.wall-minimap-card[data-sticky-type="question"] { background: var(--note-question-bg); }
+.wall-minimap-card[data-sticky-type="decision-needed"] { background: var(--note-decision-bg); }
+.wall-minimap-card[data-sticky-type="agent-task"] { background: var(--note-agent-bg); }
+.wall-minimap-card[data-sticky-type="story"] { background: var(--note-story-bg); }
+.wall-minimap-card[data-sticky-type="spike"] { background: var(--note-spike-bg); }
+.wall-minimap-view {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  background: color-mix(in srgb, var(--muted-solid) 12%, transparent);
+  pointer-events: none;
+}
+.boardv2-canvas .stubcard:focus-visible,
+.boardv2-canvas .refcard:focus-visible,
+.boardv2-canvas .sticky:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 /* verdi:workbench-only:end */

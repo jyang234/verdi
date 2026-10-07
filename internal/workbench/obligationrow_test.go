@@ -247,9 +247,14 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // the chip that had it — on every wall alike (one chip on each of these
 // walls); the story renders with the keys stripped are byte-identical to
 // the third pin's, so every other byte of the story render is as it was.
+// Re-pinned a fifth time by spec/wall-canvas-v2 (lane F2c, ac-6, SI-358
+// (4)): the status row hosts the minimap after the toolbar (`<div class=
+// "wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div>`
+// before the row's close) — on every wall alike, the one insertion since
+// the fourth pin — and every other byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "696b72a8b2bda9ab8cf7f9a0227a31c813f44cc39ce4a94cac25c2434311cbaa"
-	slotStoryWallDigestBase = "8124f87e124482bfd292e80990e3064db645e6a635e832b945f81ec29b05d32f"
+	storyWallDigestBase     = "b12483cbea13f583d616c4fbb2a5205425d480fdabea37c7d89366aa2f24292e"
+	slotStoryWallDigestBase = "55a1f662f7e91d98acf453f87fb0c98c2cadb929d815ecf1e02761b53c587657"
 )
 
 func renderDigest(body string) string {

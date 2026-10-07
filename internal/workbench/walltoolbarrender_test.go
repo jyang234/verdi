@@ -360,7 +360,7 @@ func TestWallToolbar_SlotOnlyWhereItFits(t *testing.T) {
 func TestWallToolbar_RowHostsTheToolbarAndTheTabIsRetired(t *testing.T) {
 	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
 		region := renderBoardRegion(toolbarProjection(mode, ""), &boardGitState{}, testASDView())
-		const row = `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div></div></div><aside class="board-side">`
+		const row = `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div></div><aside class="board-side">`
 		if !strings.Contains(region, row) {
 			t.Errorf("%s: the status row does not host the toolbar after the canvas, before the rail", mode)
 		}
