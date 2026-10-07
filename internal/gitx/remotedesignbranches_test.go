@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 func TestRemoteDesignBranches_Happy(t *testing.T) {
@@ -12,18 +14,12 @@ func TestRemoteDesignBranches_Happy(t *testing.T) {
 	ctx := context.Background()
 
 	// Simulated remote-tracking refs, created directly at a known commit
-	// (UpdateRef, plumbing.go) — hermetic, no network fetch (CLAUDE.md: "no
+	// (fixturegit.CreateRef) — hermetic, no network fetch (CLAUDE.md: "no
 	// network in any test").
-	if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/design/foo", repo.Head); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/design/foo: %v", err)
-	}
-	if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/design/bar", repo.Heads[0]); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/design/bar: %v", err)
-	}
+	fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/design/foo", repo.Head)
+	fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/design/bar", repo.Heads[0])
 	// A remote-tracking ref outside the design/ namespace must not appear.
-	if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/main", repo.Head); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/main: %v", err)
-	}
+	fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/main", repo.Head)
 
 	got, err := RemoteDesignBranches(ctx, repo.Dir)
 	if err != nil {

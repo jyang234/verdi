@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 func TestCurrentBranch_Happy(t *testing.T) {
@@ -130,9 +132,7 @@ func TestHasLocalBranch_Negative(t *testing.T) {
 		// Fabricate a remote-tracking ref directly (no clone/fetch, co-2:
 		// no network in any test) — HasLocalBranch must say false for
 		// this even though *some* ref named design/remote-only exists.
-		if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/design/remote-only", repo.Head); err != nil {
-			t.Fatalf("seeding remote-tracking ref: %v", err)
-		}
+		fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/design/remote-only", repo.Head)
 		has, err := HasLocalBranch(ctx, repo.Dir, "design/remote-only")
 		if err != nil {
 			t.Fatalf("HasLocalBranch(design/remote-only): unexpected error: %v", err)
@@ -152,15 +152,13 @@ func TestHasLocalBranch_Negative(t *testing.T) {
 
 // TestHasRemoteTrackingBranch_Happy proves D6-6's hermetic building block
 // finds a fabricated refs/remotes/origin/<branch> ref (no clone/fetch, no
-// network — the ref is seeded directly via UpdateRef, same idiom
+// network — the ref is seeded directly via fixturegit.CreateRef, same idiom
 // TestHasLocalBranch_Negative's remote-tracking subtest uses).
 func TestHasRemoteTrackingBranch_Happy(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()
 
-	if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/main", repo.Head); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/main: %v", err)
-	}
+	fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/main", repo.Head)
 
 	has, err := HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "main")
 	if err != nil {

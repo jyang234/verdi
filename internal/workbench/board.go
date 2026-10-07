@@ -401,7 +401,7 @@ func boardCommitHandler(root string) http.HandlerFunc {
 			return
 		}
 
-		res, err := commitdesign.Run(context.Background(), commitdesign.Input{
+		res, err := commitdesign.Run(context.WithoutCancel(r.Context()), commitdesign.Input{
 			Root: root, BoardKey: key, SpecName: req.Name, StoryRef: req.StoryRef, ModelDigest: modelDigest,
 		})
 		if err != nil {

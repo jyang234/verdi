@@ -70,8 +70,13 @@ func TestMain(m *testing.M) {
 // "orphan-stdin" does as "orphan" with a grandchild (spec "drain") that
 // inherits its standard input instead; spec "drain" reads its standard
 // input to its end, writes "eof" to the file helperEOFFileEnv names, and
-// exits 0, or exits 3 if the input has not ended within lingerFor.
+// exits 0, or exits 3 if the input has not ended within lingerFor. The
+// specs that run git through gitx, and so write the binary's
+// VERDI_GITLOG, are helperGitxVerb's.
 func helperVerb(spec string) int {
+	if exit, ok := helperGitxVerb(spec); ok {
+		return exit
+	}
 	switch spec {
 	case "orphan":
 		return startGrandchild("linger", nil, os.Stdout, os.Stderr)

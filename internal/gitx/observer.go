@@ -53,19 +53,31 @@ const (
 
 // observeSession notifies the context's observer of a session event when
 // the observer implements SessionObserver. It starts no process, so it is
-// not one of observe's exec sites.
+// not one of observe's exec sites, and it appends no VERDI_GITLOG record:
+// the log holds one record per git execution (ledger SI-359 (1)).
 func observeSession(ctx context.Context, dir string, event SessionEvent, args []string) {
 	if obs, ok := ctx.Value(observerKey{}).(SessionObserver); ok && obs != nil {
 		obs.ObserveSession(dir, event, args)
 	}
 }
 
-// observe notifies the context's observer, if any. Called at the top of
-// all three of gitx's exec sites: run, ConfigValue, and runStdin
-// (plumbing.go) — R-RR3-2 amended after Task 1 review corrected the
-// original premise that ConfigValue was the only exec site bypassing run.
-func observe(ctx context.Context, dir string, args []string) {
+// observe is gitx's single observe point, called at the top of all four
+// of gitx's exec sites: execGit (exec.go), ConfigValue (configvalue.go),
+// runStdin (plumbing.go), and the read session's batch process
+// (startCatFileBatch, readsession.go) — R-RR3-2 amended after Task 1
+// review corrected the original premise that ConfigValue was the only
+// exec site bypassing run.
+// It first appends the call's record to the VERDI_GITLOG file when that
+// variable is set (gitlog.go), then notifies the context's observer, if
+// any. A non-nil error means the record failed: the exec site returns it
+// without running git, and no observer has been told of a call that never
+// ran.
+func observe(ctx context.Context, dir string, args []string) error {
+	if err := appendGitLog(dir, args); err != nil {
+		return err
+	}
 	if obs, ok := ctx.Value(observerKey{}).(Observer); ok && obs != nil {
 		obs.Observe(dir, args)
 	}
+	return nil
 }

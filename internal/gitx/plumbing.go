@@ -1,7 +1,8 @@
 package gitx
 
-// Low-level plumbing (blob/tree/commit-tree/update-ref) for a caller that
-// must build a new commit — and a new branch pointing at it — WITHOUT
+// Low-level plumbing (blob/tree/commit-tree, and a branch created at a
+// commit) for a caller that must build a new commit — and a new branch
+// pointing at it — WITHOUT
 // ever touching the calling process's real index or working tree, and
 // without moving HEAD or checking anything out (spec/scoping-canvas ac-6:
 // the workbench's stub-instantiate board action scaffolds a new story
@@ -24,9 +25,12 @@ import (
 // environment, e.g. GIT_INDEX_FILE), returning stdout. Only the plumbing
 // operations in this file need stdin/env beyond what run (exec.go)
 // already covers. It is gitx's third exec site (R-RR3-2 amended after
-// Task 1 review) and, like run and ConfigValue, calls observe first.
+// Task 1 review) and, like run and ConfigValue, calls observe first,
+// returning its error before git runs.
 func runStdin(ctx context.Context, dir string, env []string, stdin []byte, args ...string) ([]byte, error) {
-	observe(ctx, dir, args)
+	if err := observe(ctx, dir, args); err != nil {
+		return nil, fmt.Errorf("gitx: git %s (dir %s): %w", strings.Join(args, " "), dir, err)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if len(env) > 0 {
@@ -103,20 +107,40 @@ func CommitTree(ctx context.Context, dir, tree, parent, message string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
-// zeroOID is git's "no object" sentinel (40 zeros) — passed as
-// update-ref's expected old value to make ref creation atomic and
-// create-only (git refuses if the ref already points anywhere).
-const zeroOID = "0000000000000000000000000000000000000000"
-
-// UpdateRef creates ref (e.g. "refs/heads/design/foo") pointing at
-// commit, WITHOUT touching HEAD, the index, or the working tree — `git
-// update-ref <ref> <commit> <zero-oid>`, whose three-argument form is
-// atomically create-only: it fails if ref already exists, rather than
-// silently moving it (stub-instantiate: "fail closed if the branch
-// exists").
+// UpdateRef creates the branch ref (a full refname under refs/heads/, e.g.
+// "refs/heads/design/foo") pointing at commit, WITHOUT touching HEAD, the
+// index, or the working tree — `git branch <name> <commit>`, which is
+// create-only: it fails if the branch already exists, rather than silently
+// moving it (stub-instantiate: "fail closed if the branch exists"), and
+// configures no upstream for a commit start point. It keeps its name and
+// full-ref signature, and its argv carries no forbidden token
+// (internal/gitforbid; ritual-write-scope-v3 dc-8, ledger SI-359 (5)).
+//
+// Before running git it refuses what `git branch` cannot create as asked,
+// so the function is create-only for every input (ledger SI-359 (5b),
+// (5c)): a ref outside refs/heads/, for which git would silently create
+// refs/heads/<that ref>; an empty short name; a short name starting with
+// "-", which git would parse as an option (refs/heads/-f would force-move
+// an existing branch); a short name containing "@{", which git expands to
+// another branch (@{-1}, @{u}) and creates; and a start point that is not
+// a full object id (ValidateFullOID), since an option ("-f") force-moves a
+// branch and a symbolic start point under branch.autoSetupMerge=always
+// writes upstream configuration.
 func UpdateRef(ctx context.Context, dir, ref, commit string) error {
-	if _, err := runStdin(ctx, dir, nil, nil, "update-ref", ref, commit, zeroOID); err != nil {
-		return fmt.Errorf("gitx: UpdateRef(%s): ref may already exist: %w", ref, err)
+	name, ok := strings.CutPrefix(ref, "refs/heads/")
+	switch {
+	case !ok || name == "":
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing a ref that is not a branch under refs/heads/", ref)
+	case strings.HasPrefix(name, "-"):
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing a branch name git would read as an option", ref)
+	case strings.Contains(name, "@{"):
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing a branch name git would expand to another branch", ref)
+	}
+	if err := ValidateFullOID(commit); err != nil {
+		return fmt.Errorf("gitx: UpdateRef(%s): refusing start point %q: %w", ref, commit, err)
+	}
+	if _, err := runStdin(ctx, dir, nil, nil, "branch", name, commit); err != nil {
+		return fmt.Errorf("gitx: UpdateRef(%s): branch may already exist: %w", ref, err)
 	}
 	return nil
 }

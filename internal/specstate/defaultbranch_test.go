@@ -26,12 +26,10 @@ func buildBranchRepo(t *testing.T) *fixturegit.Repo {
 }
 
 // fabricateRemoteRef seeds refs/remotes/origin/<branch> at commit directly
-// via gitx.UpdateRef — no clone, no fetch, no network.
+// via fixturegit.CreateRef — no clone, no fetch, no network.
 func fabricateRemoteRef(t *testing.T, dir, branch, commit string) {
 	t.Helper()
-	if err := gitx.UpdateRef(context.Background(), dir, "refs/remotes/origin/"+branch, commit); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/%s: %v", branch, err)
-	}
+	fixturegit.CreateRef(t, dir, "refs/remotes/origin/"+branch, commit)
 }
 
 // fabricateLocalBranch seeds a LOCAL branch ref (refs/heads/<branch>) at

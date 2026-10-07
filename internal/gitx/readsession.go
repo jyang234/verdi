@@ -340,9 +340,20 @@ type catFileBatch struct {
 	stdout *bufio.Reader
 }
 
+// startCatFileBatch starts the session's batch process, gitx's fourth exec
+// site. It passes the observe point once, at the start, with the process's
+// argv: the object names it is sent later are its input, not git
+// executions, so they are told to a SessionObserver (SessionBatched) and
+// recorded in no VERDI_GITLOG line, as runStdin's input is not (ledger
+// SI-359 (1), (3)). observe's error — a VERDI_GITLOG record that failed —
+// is returned before git runs, so no batch process starts unrecorded; the
+// session then takes the exec path, whose own observe records or refuses
+// each read.
 func startCatFileBatch(ctx context.Context, dir string) (*catFileBatch, error) {
 	args := []string{"cat-file", "--batch"}
-	observe(ctx, dir, args)
+	if err := observe(ctx, dir, args); err != nil {
+		return nil, fmt.Errorf("gitx: git %s (dir %s): %w", strings.Join(args, " "), dir, err)
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	stdin, err := cmd.StdinPipe()

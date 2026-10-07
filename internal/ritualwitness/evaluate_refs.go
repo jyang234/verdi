@@ -8,12 +8,17 @@ import (
 )
 
 // commandLog discloses a driver that supplied no command log (SI-325 (8)):
-// nothing the log alone could attribute is attributed.
+// nothing the log alone could attribute is attributed. The verdict names
+// why when the driver said (CommandLog.Reason).
 func (e *evaluation) commandLog() []Verdict {
 	if e.at.ok {
 		return nil
 	}
-	return []Verdict{{Field: "command_log", Status: Unattributable, Detail: "the driver supplied no git command log"}}
+	detail := "the driver supplied no git command log"
+	if e.at.reason != "" {
+		detail += ": " + e.at.reason
+	}
+	return []Verdict{{Field: "command_log", Status: Unattributable, Detail: detail}}
 }
 
 // localRefs judges every ref of the repository outside refs/remotes —

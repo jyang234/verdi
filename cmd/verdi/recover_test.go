@@ -129,9 +129,10 @@ func recoverWriteStaleWriterLock(t *testing.T, repo *fixturegit.Repo) string {
 // exit 2) was entirely unproven — deleting the guard in recover.go left
 // the whole TestRecover suite green. Extracted so the reaction itself,
 // not just recovery.CommandLog.Forbidden()'s own upstream matching, has a
-// direct table test: one entry per ForbiddenTokens rule (exact match,
-// the "--"-prefix rule, and R-RR3-17's short "-f" flag) plus a clean
-// entry that must print nothing and report false.
+// direct table test: one entry per rule of the shared token list in
+// internal/gitforbid (exact match, the "--"-prefix rule, and R-RR3-17's
+// short "-f" flag) plus a clean entry that must print nothing and report
+// false.
 func TestReportForbiddenCommands_Table(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
