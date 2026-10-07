@@ -1,28 +1,11 @@
 package recovery
 
 import (
-	"strings"
 	"sync"
 
+	"github.com/jyang234/verdi/internal/gitforbid"
 	"github.com/jyang234/verdi/internal/gitx"
 )
-
-// ForbiddenTokens is dc-4/ac-9's own command-surface guard: no recovery
-// run's git command log may contain any of these as a whole argv
-// element, or — for a "--"-prefixed flag — as an argv element's prefix
-// ("--force" matches both "--force" and "--force-with-lease"). "-f"
-// (R-RR3-17) is the short force flag `git push -f` / `git branch -f` /
-// `git checkout -f` all accept, which "--force" alone does not catch; a
-// recovery run never legitimately passes it to any command it issues.
-// The check is over argv ELEMENTS only, never message TEXT: `commit -m
-// "reset the counter"` is not forbidden merely because its (whole,
-// single) message argument happens to start with the word "reset" — an
-// exact one-word match ("commit -m reset") would still be forbidden by
-// construction, since the check cannot distinguish a message argument
-// from any other bare argv element, but this is unreachable inside a
-// recovery run: neither of this feature's two executors
-// (branchcut.Unwind, reclaim.Apply) ever issues a `git commit`.
-var ForbiddenTokens = []string{"reset", "restore", "clean", "stash", "--force", "-f", "update-ref"}
 
 // CommandLog records every gitx invocation on a context via the
 // gitx.Observer seam (R-RR3-2): recover.go (a later task) attaches one
@@ -63,8 +46,8 @@ func (l *CommandLog) Entries() [][]string {
 	return out
 }
 
-// Forbidden returns the recorded commands whose argv contains any
-// ForbiddenTokens match, in call order.
+// Forbidden returns the recorded commands whose argv contains a forbidden
+// token (IsForbiddenArgv), in call order.
 func (l *CommandLog) Forbidden() [][]string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -77,37 +60,19 @@ func (l *CommandLog) Forbidden() [][]string {
 	return out
 }
 
-// IsForbiddenArgv reports whether argv — one command's whole argument
-// list — contains a ForbiddenTokens match by matchesForbiddenToken's own
-// rule (exact equality, or the "--"-prefix rule for a "--"-prefixed
-// token). Exported so a caller gating on the SAME rule Forbidden uses
-// (cmd/verdi's recover.go, R-RR3-10's own runtime reaction) scans through
-// this one seam rather than a bespoke copy that can silently drift from
-// it (fix round 1, M4).
+// IsForbiddenArgv reports whether argv, one command's whole argument list,
+// contains a forbidden token: dc-4/ac-9's command-surface guard, no
+// recovery run's git command log may contain one. The tokens and the
+// matching rule are the one shared list's (gitforbid.Tokens and
+// gitforbid.Forbids, spec/gitx-recorder-seam dc-1), which carries -f
+// besides ac-9's six (R-RR3-17, ledger SI-224): a recovery run never
+// legitimately passes it to any command it issues. Neither of this
+// feature's two executors (branchcut.Unwind, reclaim.Apply) issues a `git
+// commit`, so the rule's one blind spot, an exact one-word commit message,
+// is unreachable here. Exported so a caller gating on the SAME rule
+// Forbidden uses (cmd/verdi's recover.go, R-RR3-10's own runtime reaction)
+// scans through this one seam rather than a bespoke copy that can silently
+// drift from it (fix round 1, M4).
 func IsForbiddenArgv(argv []string) bool {
-	for _, arg := range argv {
-		if matchesForbiddenToken(arg) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchesForbiddenToken reports whether arg — one whole argv element —
-// matches a ForbiddenTokens entry: exact equality always counts; for a
-// "--"-prefixed flag token, arg being prefixed by it also counts (closing
-// "--force-with-lease" over "--force" without opening plain tokens like
-// "reset" to a raw string-prefix match, which would wrongly flag an
-// unrelated argument that merely starts with the same word, such as a
-// commit message).
-func matchesForbiddenToken(arg string) bool {
-	for _, ft := range ForbiddenTokens {
-		if arg == ft {
-			return true
-		}
-		if strings.HasPrefix(ft, "--") && strings.HasPrefix(arg, ft) {
-			return true
-		}
-	}
-	return false
+	return gitforbid.Forbids(argv)
 }

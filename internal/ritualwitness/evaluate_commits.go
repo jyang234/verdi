@@ -55,10 +55,10 @@ func (e *evaluation) commits() []Verdict {
 			switch {
 			case e.foreign(f):
 			case e.stagePathAdmits(f):
-				out = append(out, Verdict{Field: "stage_paths", Detail: detail, Status: classify(true, e.commitPathAttributed(f))})
+				out = append(out, Verdict{Field: "stage_paths", Detail: detail, Status: classify(true, e.commitPathAttributed(id, f))})
 			case untracked(e.b, f) && e.decl.UntrackedMayEnter:
 				out = append(out, Verdict{Field: "untracked_may_enter", Detail: "commit " + short(id) + " recorded previously-untracked " + f,
-					Status: classify(true, e.commitPathAttributed(f))})
+					Status: classify(true, e.commitPathAttributed(id, f))})
 			default:
 				out = append(out, Verdict{Field: "stage_paths", Detail: detail, Status: Outside})
 			}
@@ -80,14 +80,23 @@ func (e *evaluation) commitLoggedInFixture() bool {
 	return false
 }
 
-// commitPathAttributed is SI-329 (8′) for a path a created commit
-// recorded: a logged commit in the fixture whose pathspec matches it, or
-// one that names no paths (commit without "--", commit-tree), whose
-// attribution stays per worktree — the disclosed residual.
-func (e *evaluation) commitPathAttributed(f string) bool {
+// commitPathAttributed is SI-329 (8′) for a path f that the created
+// commit id recorded: a logged commit in the fixture whose pathspec
+// matches it, or one that names no paths (commit without "--",
+// commit-tree), whose attribution stays per worktree — the disclosed
+// residual. A commit-tree logged in a worktree the ritual added counts
+// too, even when that worktree's HEAD does not own the commit it created,
+// but only for the commit it created, matched by its parent argument: id's
+// first parent must be the call's -p commit (ledger SI-359 (12), refining
+// SI-325 (8), as SI-329 (8′) reconciles it; R5c2 review R5C2R-2).
+// commit-tree moves no HEAD, so the commit lands wherever a later call
+// puts it, a new design/<slug> branch for the board's /b/ commit. A commit
+// logged there stays excluded, since ownership (ownerWorktree) attributes
+// the commit it makes.
+func (e *evaluation) commitPathAttributed(id, f string) bool {
 	for _, c := range e.at.in("", primCommit, primCommitTree) {
 		wt := e.at.worktreeOf(c.Dir)
-		if e.addedWT[wt] {
+		if e.addedWT[wt] && !e.commitTreeMade(c, id) {
 			continue
 		}
 		specs, named := c.pathspecs()
@@ -96,6 +105,14 @@ func (e *evaluation) commitPathAttributed(f string) bool {
 		}
 	}
 	return false
+}
+
+// commitTreeMade reports whether c is a commit-tree that may have made
+// the created commit id: id's first parent is the commit c's -p argument
+// names (SI-359 (12) as SI-329 (8′) reconciles it).
+func (e *evaluation) commitTreeMade(c loggedCall, id string) bool {
+	parent := c.commitTreeParent()
+	return parent != "" && strings.EqualFold(parent, e.firstParent(id))
 }
 
 // ownerWorktree returns the added worktree a created commit belongs to

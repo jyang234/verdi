@@ -10,8 +10,8 @@ import "reflect"
 // its administrative entry (id, lock) — is outside unless a declared
 // worktree pattern covers that worktree. Each is attributed to a logged
 // gitx call naming the worktree's canonical path or running inside it; no
-// gitx primitive writes an administrative entry directly, so an admitted
-// change to one is unattributable.
+// gitx primitive writes an administrative entry or a worktree's own ref
+// directly, so an admitted change to either is unattributable.
 func (e *evaluation) worktrees() []Verdict {
 	var out []Verdict
 	for _, p := range unionKeys(e.linkedB, e.linkedA) {
@@ -36,8 +36,12 @@ func (e *evaluation) worktrees() []Verdict {
 // only to a logged checkout there naming its target; each index entry,
 // attributed as in the main worktree but for checkouts (whose tree
 // difference a linked worktree's sensors do not read); each of its own
-// refs, a create attributed to a logged update-ref there naming it; and
-// its administrative entry, which no gitx primitive writes.
+// refs (refs/worktree/*, refs/bisect/*), created, changed, or deleted;
+// and its administrative entry. No gitx primitive writes a worktree's own
+// ref or its administrative entry, so a change to either is never
+// attributed: unattributable when a declared pattern admits the worktree,
+// outside otherwise, whatever the log holds (ledger SI-359 (16)). That is
+// the fail-closed reading; gitx.UpdateRef creates only refs/heads/*.
 func (e *evaluation) preExistingWorktree(p string, bw, aw Worktree) []Verdict {
 	admitted := e.worktreeAdmitted(p, true)
 	var out []Verdict
@@ -68,12 +72,8 @@ func (e *evaluation) preExistingWorktree(p string, bw, aw Worktree) []Verdict {
 		if had && has && bv == av {
 			continue
 		}
-		attributed := false
-		for _, c := range e.at.in(p, primUpdateRef) {
-			attributed = attributed || (!had && c.createdRef() == ref)
-		}
 		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": ref " + ref + " " + changeVerb(had, has),
-			Status: classify(admitted, attributed)})
+			Status: classify(admitted, false)})
 	}
 	if bw.ID != aw.ID || bw.Locked != aw.Locked || bw.LockReason != aw.LockReason || bw.Present != aw.Present {
 		out = append(out, Verdict{Field: "worktrees", Detail: "worktree " + p + ": administrative entry changed",

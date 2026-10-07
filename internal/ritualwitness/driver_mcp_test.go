@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
 )
 
@@ -61,7 +63,10 @@ func mcpResult(result string) string {
 // (ledger SI-341 (5)): a tool result whose isError is false is exit 0; a
 // result whose isError is true, or a JSON-RPC error, is 2 with the
 // server's words in the error; and a transport failure or a response that
-// is neither is -1, no verb's exit. The command log is always unavailable.
+// is neither is -1, no verb's exit. A run that ends in a verb's exit
+// carries the log of the observer attached through Serve's context (the
+// fake runs no git, so it holds no call); a run that ends in no verb's
+// exit carries none.
 func TestMCP_Run(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -111,9 +116,7 @@ func TestMCP_Run(t *testing.T) {
 			if exit != tt.wantExit {
 				t.Fatalf("exit = %d, want %d (err %v)", exit, tt.wantExit, err)
 			}
-			if log.OK || log.Calls != nil {
-				t.Fatalf("log = %+v, want unavailable: the MCP server supplies no command log", log)
-			}
+			checkInProcessLog(t, exit, log, 0)
 			if (err != nil) != (tt.wantErr != nil) {
 				t.Fatalf("err = %v, want an error naming %q", err, tt.wantErr)
 			}
@@ -219,8 +222,8 @@ func verdiMCP(ctx context.Context, root string, r io.Reader, w io.Writer) error 
 
 // TestMCP_RunsTheRepositoryServer drives the real in-process MCP server
 // over a fixture: a tool that answers is a clean run, a tool error is exit
-// 2 naming the server's words, and through RunOn the log is unavailable,
-// so the run is unproven, never a pass inferred from an absent log.
+// 2 naming the server's words, and through RunOn the server's command log
+// is supplied, so a read-only tool's run passes.
 func TestMCP_RunsTheRepositoryServer(t *testing.T) {
 	ctx := context.Background()
 	fx := BuildWith(t, ctx, SeedClean, map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n"})
@@ -247,17 +250,97 @@ func TestMCP_RunsTheRepositoryServer(t *testing.T) {
 	}
 
 	res := RunOn(t, boundedContext(t, ctx), fx, MCP{Serve: verdiMCP, Tool: "search_artifacts", Arguments: json.RawMessage(`{"query":"anything"}`)}, branchDecl())
+	if !res.Log.OK {
+		t.Fatalf("log = %+v, want the server's command log", res.Log)
+	}
 	want := []Verdict{
-		v("command_log", Unattributable, "the driver supplied no git command log"),
 		v("index_carry", Within, "declares no_commit; observed no_commit"),
 	}
 	if diff := verdictDiff(res.Verdicts, want); diff != "" {
 		t.Fatal(diff)
 	}
-	if got := Outcome(res.Verdicts); got != Unproven {
-		t.Fatalf("Outcome = %s, want unproven", got)
+	if got := Outcome(res.Verdicts); got != Pass {
+		t.Fatalf("Outcome = %s, want pass", got)
 	}
 	if res.Exit != 0 || res.Err != nil {
 		t.Fatalf("RunOn = exit %d, %v; want a clean run", res.Exit, res.Err)
+	}
+}
+
+// TestMCP_RunOnAttributesThroughServesContext: the observer the driver
+// attaches through Serve's context reaches every gitx call the server
+// makes on that context or one derived from it, so the effect a logged
+// gitx call made is attributed and the run passes; a tool error carries
+// its log too; and a branch made with plain git stays unattributable with
+// the log present (spec/gitx-recorder-seam ac-2; ledger SI-359 (1)).
+func TestMCP_RunOnAttributesThroughServesContext(t *testing.T) {
+	ctx := context.Background()
+	answer := func(isError bool) string {
+		return mcpResult(`{"content":[{"type":"text","text":"done"}],"isError":` + strconv.FormatBool(isError) + `}`)
+	}
+	serving := func(act func(ctx context.Context, root string) error, isError bool) func(context.Context, string, io.Reader, io.Writer) error {
+		return func(ctx context.Context, root string, r io.Reader, w io.Writer) error {
+			br := bufio.NewReader(r)
+			if _, err := br.ReadString('\n'); err != nil {
+				return err
+			}
+			if err := act(context.WithoutCancel(ctx), root); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, answer(isError)+"\n"); err != nil {
+				return err
+			}
+			_, _ = io.Copy(io.Discard, br)
+			return nil
+		}
+	}
+	viaGitx := func(branch string) func(context.Context, string) error {
+		return func(ctx context.Context, root string) error {
+			head, err := gitx.RevParse(ctx, root, "HEAD")
+			if err != nil {
+				return err
+			}
+			return gitx.UpdateRef(ctx, root, "refs/heads/"+branch, head)
+		}
+	}
+	viaPlainGit := func(branch string) func(context.Context, string) error {
+		return func(ctx context.Context, root string) error {
+			_, err := plainGit(ctx, root, "branch", branch)
+			return err
+		}
+	}
+	readOnly := func(ctx context.Context, root string) error {
+		_, err := gitx.RevParse(ctx, root, "HEAD")
+		return err
+	}
+	noCommit := v("index_carry", Within, "declares no_commit; observed no_commit")
+	for _, tt := range []struct {
+		name        string
+		serve       func(context.Context, string, io.Reader, io.Writer) error
+		exit, calls int
+		want        []Verdict
+		outcome     RunOutcome
+	}{
+		{"a branch made through gitx", serving(viaGitx("made-by-tool"), false), 0, 2,
+			[]Verdict{v("refs_create", Within, "refs/heads/made-by-tool created"), noCommit}, Pass},
+		{"a tool error after a read", serving(readOnly, true), 2, 1,
+			[]Verdict{v("index_carry", Within, "declares no_commit; observed refused")}, Pass},
+		{"a branch made with plain git", serving(viaPlainGit("made-by-tool"), false), 0, 0,
+			[]Verdict{v("refs_create", Unattributable, "refs/heads/made-by-tool created"), noCommit}, Unproven},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := Build(t, ctx, SeedClean)
+			res := RunOn(t, boundedContext(t, ctx), fx, MCP{Serve: tt.serve, Tool: "make_branch"}, branchDecl())
+			if res.Exit != tt.exit {
+				t.Fatalf("exit = %d, want %d (err %v)", res.Exit, tt.exit, res.Err)
+			}
+			checkInProcessLog(t, res.Exit, res.Log, tt.calls)
+			if diff := verdictDiff(res.Verdicts, tt.want); diff != "" {
+				t.Fatal(diff)
+			}
+			if got := Outcome(res.Verdicts); got != tt.outcome {
+				t.Fatalf("Outcome = %s, want %s", got, tt.outcome)
+			}
+		})
 	}
 }

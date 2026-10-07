@@ -2,10 +2,15 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/pathcanon"
 	"github.com/jyang234/verdi/internal/ritualwitness"
 	ws "github.com/jyang234/verdi/internal/writescope"
 )
@@ -298,3 +303,117 @@ func TestRitualEffectsTable_StandInsNameEachGap(t *testing.T) {
 		t.Errorf("rows are marked for %d gap(s), want %d: %v", len(marked), len(wantMarked), marked)
 	}
 }
+
+// TestSinkWindowCompare is the completeness check on synthetic runs (ledger
+// SI-359 (7); R5c2 review R5C2R-1): the process-wide records of this
+// process in the run's own directories must equal the observer's log
+// record for record. A dropped call (recorded, not observed) and an extra
+// call (observed, not recorded) are each named, with their counts; a
+// record in another directory, or of another process, is outside the
+// comparison; a run without a log, or a window that could not be read,
+// is a gap of its own.
+func TestSinkWindowCompare(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	other := filepath.Join(t.TempDir(), "another-run")
+	wt := filepath.Join(t.TempDir(), "linked")
+	pid := os.Getpid()
+	rec := func(dir string, p int, args ...string) gitx.GitLogRecord {
+		return gitx.GitLogRecord{Args: args, Dir: dir, PID: p}
+	}
+	call := func(dir string, args ...string) ritualwitness.Call { return ritualwitness.Call{Dir: dir, Args: args} }
+	head := []string{"rev-parse", "--verify", "HEAD"}
+	add := []string{"add", "--", "a.txt"}
+	tests := []struct {
+		name     string
+		window   []gitx.GitLogRecord
+		err      error
+		log      ritualwitness.CommandLog
+		compared int
+		gaps     []string // a word of each gap, in order; nil for none
+	}{
+		{"equal, record for record", []gitx.GitLogRecord{rec(root, pid, head...), rec(root+"/sub", pid, add...), rec(bare, pid, "for-each-ref")},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...), call(root+"/sub", add...), call(bare, "for-each-ref")}}, 3, nil},
+		{"equal in another order", []gitx.GitLogRecord{rec(root, pid, add...), rec(root, pid, head...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...), call(root, add...)}}, 2, nil},
+		{"a linked worktree's records count", []gitx.GitLogRecord{rec(wt, pid, head...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(wt, head...)}}, 1, nil},
+		{"a dropped call", []gitx.GitLogRecord{rec(root, pid, head...), rec(root, pid, add...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...)}}, 2,
+			[]string{"recorded `git add -- a.txt` in " + pathcanon.Canonical(root) + " 1 more time(s) than the driver's observer"}},
+		{"a call dropped twice", []gitx.GitLogRecord{rec(root, pid, head...), rec(root, pid, head...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{}}, 2,
+			[]string{"`git rev-parse --verify HEAD` in " + pathcanon.Canonical(root) + " 2 more time(s)"}},
+		{"an extra call", []gitx.GitLogRecord{rec(root, pid, head...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...), call(root, add...)}}, 1,
+			[]string{"the driver's observer logged `git add -- a.txt` in " + pathcanon.Canonical(root) + " 1 more time(s)"}},
+		{"records in another directory are outside", []gitx.GitLogRecord{rec(root, pid, head...), rec(other, pid, add...), rec(root+"-sibling", pid, add...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...)}}, 1, nil},
+		{"records of another process are outside", []gitx.GitLogRecord{rec(root, pid, head...), rec(root, pid+1, add...)},
+			nil, ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{call(root, head...)}}, 1, nil},
+		{"no command log", nil, nil, ritualwitness.CommandLog{Reason: "gone"}, 0, []string{"supplied no command log to compare with the process-wide VERDI_GITLOG: gone"}},
+		{"an unreadable window", nil, errors.New("line 3: trailing data"),
+			ritualwitness.CommandLog{OK: true, Calls: []ritualwitness.Call{}}, 0, []string{"could not read the process-wide VERDI_GITLOG: line 3: trailing data"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := &sinkWindow{window: tt.window, err: tt.err}
+			res := ritualwitness.Result{Log: tt.log,
+				Before: ritualwitness.Snapshot{Root: root},
+				After:  ritualwitness.Snapshot{Root: root, Worktrees: []ritualwitness.Worktree{{Path: wt}}}}
+			compared, gaps := w.compare(res, &ritualwitness.Fixture{Dir: root, Bare: bare})
+			if compared != tt.compared {
+				t.Errorf("compared %d record(s), want %d", compared, tt.compared)
+			}
+			if len(gaps) != len(tt.gaps) {
+				t.Fatalf("gaps = %q, want %d naming %q", gaps, len(tt.gaps), tt.gaps)
+			}
+			for i, w := range tt.gaps {
+				if !strings.Contains(gaps[i], w) {
+					t.Errorf("gap %q, want it to name %q", gaps[i], w)
+				}
+			}
+		})
+	}
+}
+
+// TestSinkRecords: the process-wide VERDI_GITLOG is read strictly, whole
+// lines only, so a record still being written is left for a later read; a
+// missing file holds no record, and a malformed line is an error.
+func TestSinkRecords(t *testing.T) {
+	dir := t.TempDir()
+	good := `{"args":["status"],"dir":"/r","pid":7}` + "\n"
+	tests := []struct {
+		name    string
+		data    *string
+		want    int
+		wantErr bool
+	}{
+		{"a missing file", nil, 0, false},
+		{"an empty file", ptr(""), 0, false},
+		{"whole records", ptr(good + good), 2, false},
+		{"a record still being written is left unread", ptr(good + `{"args":["sta`), 1, false},
+		{"an unknown field", ptr(`{"args":["status"],"dir":"/r","pid":7,"x":1}` + "\n"), 0, true},
+		{"trailing data", ptr(`{"args":["status"],"dir":"/r","pid":7} {}` + "\n"), 0, true},
+		{"not JSON", ptr("garbage\n"), 0, true},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, fmt.Sprintf("log-%d.jsonl", i))
+			if tt.data != nil {
+				if err := os.WriteFile(path, []byte(*tt.data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := sinkRecords(path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("sinkRecords = %v, %v; want an error: %v", got, err, tt.wantErr)
+			}
+			if !tt.wantErr && len(got) != tt.want {
+				t.Fatalf("sinkRecords = %+v, want %d record(s)", got, tt.want)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

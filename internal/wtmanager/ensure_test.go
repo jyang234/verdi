@@ -173,9 +173,7 @@ func TestEnsureWorktree_Negative_RemoteTrackingOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gitx.UpdateRef(ctx, repo.Dir, "refs/remotes/origin/design/y", head); err != nil {
-		t.Fatalf("seeding remote-tracking ref: %v", err)
-	}
+	fixturegit.CreateRef(t, repo.Dir, "refs/remotes/origin/design/y", head)
 
 	_, err = EnsureWorktree(ctx, repo.Dir, "design/y")
 	if err == nil {

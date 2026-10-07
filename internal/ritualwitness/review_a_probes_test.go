@@ -357,7 +357,7 @@ func TestZZ_P9b_FailedCommitAttributesOutOfGitxMove(t *testing.T) {
 	// gitx. The probe now asserts that within result, so closing the
 	// residual turns it red.
 	if !zzHas(res.Verdicts, "refs_move", Within, "refs/heads/main") {
-		t.Errorf("PINNED DISCLOSURE changed: ledger SI-325 (8)'s residual (a failed logged `git commit` credited with a branch move made outside gitx) no longer reads within; if spec/gitx-recorder-seam ac-1 closed it, update doc.go's residual paragraph and this probe")
+		t.Errorf("PINNED DISCLOSURE changed: ledger SI-325 (8)'s residual (a failed logged `git commit` credited with a branch move made outside gitx) no longer reads within; spec/gitx-recorder-seam ac-1 narrows it without closing it (SI-359 (9)), so whatever change closed it must update doc.go's residual paragraph and this probe")
 	}
 }
 
@@ -369,12 +369,12 @@ func TestZZ_P10_FullRefnameArgvIsUnattributable(t *testing.T) {
 		if err != nil {
 			return 2, err
 		}
-		return 0, gitx.UpdateRef(ctx, dir, "refs/heads/design/x", head) // the real stub-instantiate primitive today
+		return 0, gitx.UpdateRef(ctx, dir, "refs/heads/design/x", head) // the real stub-instantiate primitive, `git branch <name> <commit>` since dc-8
 	}}, decl, SeedClean)
 	t.Logf("log=%v", res.Log.Calls)
 	t.Logf("verdicts:\n%s", formatVerdicts(res.Verdicts))
 	if zzHas(res.Verdicts, "refs_create", Unattributable, "design/x") {
-		t.Logf("NOTE (fails toward unattributable): gitx.UpdateRef's full refname argv does not attribute its own ref create")
+		t.Logf("NOTE (fails toward unattributable): gitx.UpdateRef's `branch <name> <commit>` argv does not attribute its own ref create")
 	}
 }
 

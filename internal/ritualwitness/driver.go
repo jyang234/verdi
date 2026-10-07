@@ -16,14 +16,20 @@ type Call struct {
 
 // CommandLog is what a Driver recorded of a ritual's git invocations, or
 // the disclosed absence of one. OK is false when the driver cannot supply a
-// log — a built binary before spec/gitx-recorder-seam's command-log hook
-// lands (dc-1) — and Evaluate then reports the absence as its own
+// log — a Binary run whose VERDI_GITLOG file it cannot read whole, a run
+// that ends in no verb's exit, or a test driver standing in for one that
+// has none — and Evaluate then reports the absence as its own
 // unattributable verdict and attributes nothing from the log: every effect
 // that only the log could attribute is unattributable, never inferred from
 // an absent log's zero value.
 type CommandLog struct {
 	Calls []Call
 	OK    bool
+	// Reason is why the log is unavailable, when OK is false and the
+	// driver knows: a Binary run whose VERDI_GITLOG file it could not
+	// read whole says so here even on a clean exit, which carries no
+	// error (R5c1 review R5C1R-5).
+	Reason string
 }
 
 // Ritual is a synthetic, in-process ritual: git operations run against dir
@@ -38,8 +44,11 @@ type Ritual func(ctx context.Context, dir string) (exit int, err error)
 // synthetic ritual; Binary (driver_binary.go) runs a CLI verb as the built
 // binary; Workbench (driver_workbench.go) sends a workbench action through
 // the running server's handler; MCP (driver_mcp.go) calls one tool on the
-// MCP server, run in process. The last three cannot supply a command log
-// before spec/gitx-recorder-seam lands one.
+// MCP server, run in process. Each supplies the command log
+// spec/gitx-recorder-seam ac-2 records through gitx's one observe point:
+// InProcess, Workbench, and MCP attach a gitx.Observer through the context
+// the code under test receives, and Binary reads the file the built binary
+// appends to under VERDI_GITLOG (ledger SI-359 (1)).
 type Driver interface {
 	Run(ctx context.Context, dir string) (exit int, log CommandLog, err error)
 }

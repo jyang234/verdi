@@ -55,7 +55,8 @@ func TestReadCIEnv(t *testing.T) {
 // ref, (3) NEW: the hermetic local fallback (exactly one of
 // refs/remotes/origin/main or refs/remotes/origin/master), (4) "" unknown
 // — against real git state via fixturegit fake remotes (no network: every
-// ref here is fabricated directly with gitx.UpdateRef/symbolic-ref, never
+// ref here is fabricated directly with gitx.UpdateRef, fixturegit.CreateRef
+// or symbolic-ref, never
 // a real clone or `ls-remote`).
 func TestResolveDefaultBranch(t *testing.T) {
 	ctx := context.Background()
@@ -150,15 +151,13 @@ func buildBranchRepo(t *testing.T) *fixturegit.Repo {
 }
 
 // fabricateRemoteRef seeds refs/remotes/origin/<branch> at commit directly
-// via gitx.UpdateRef — no clone, no fetch, no network — modeling exactly
+// via fixturegit.CreateRef — no clone, no fetch, no network — modeling exactly
 // what actions/checkout's specific-ref fetch leaves behind on a fresh
 // GitHub checkout (D6-6): the remote-tracking ref for the fetched branch,
 // but no refs/remotes/origin/HEAD symbolic ref.
 func fabricateRemoteRef(t *testing.T, dir, branch, commit string) {
 	t.Helper()
-	if err := gitx.UpdateRef(context.Background(), dir, "refs/remotes/origin/"+branch, commit); err != nil {
-		t.Fatalf("seeding refs/remotes/origin/%s: %v", branch, err)
-	}
+	fixturegit.CreateRef(t, dir, "refs/remotes/origin/"+branch, commit)
 }
 
 // fabricateLocalBranch seeds a LOCAL branch ref (refs/heads/<branch>) at

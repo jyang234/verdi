@@ -15,4 +15,11 @@
 //
 // Every function execs the system git binary and wraps a non-zero exit with
 // the command and its stderr, so failures are legible without a debugger.
+//
+// Every exec passes one observe point first (observer.go): a gitx.Observer
+// attached to the call's context sees the call, and when the test-only
+// VERDI_GITLOG environment variable names a file, the call's record is
+// appended to it (gitlog.go, GitLogEnv). VERDI_GITLOG is a test hook the
+// product never sets; it lets a test record the built binary's whole git
+// command log (spec/gitx-recorder-seam dc-2).
 package gitx

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // Binary is the built-binary Driver (spec/ritual-effect-witness dc-1):
@@ -23,11 +25,34 @@ import (
 // classification.
 //
 // The binary roots its own context (parent dc-10), so no gitx.Observer a
-// test attaches reaches it, and until spec/gitx-recorder-seam's
-// VERDI_GITLOG hook lands it records no command log: Run reports the log
-// unavailable (CommandLog.OK false), never an empty log inferred from
-// silence, and Evaluate reads every effect only the log could attribute as
-// unattributable.
+// test attaches reaches it. Its command log comes instead from the file
+// VERDI_GITLOG names (gitx.GitLogEnv; spec/gitx-recorder-seam ac-2, dc-2;
+// ledger SI-359 (1), (3)): Run gives each run its own empty file there,
+// stripping any value the test process carries, and reads it back once
+// the binary has exited. Every line must be one whole record that decodes
+// strictly, with an argv, an absolute directory, and a pid; Run keeps the
+// records of the process it started, in order, and reports the log with
+// CommandLog.OK true.
+//
+// A log Run cannot read whole fails closed: when the file is gone or any
+// line in it is not such a record, Run reports the log unavailable
+// (CommandLog.OK false), never fewer calls, so Evaluate reads every effect
+// only the log could attribute as unattributable. CommandLog.Reason names
+// why, on every exit, and Evaluate's command_log verdict carries it; a
+// non-zero exit's error names it too, while a clean exit carries no error
+// (R5c1 review R5C1R-5). A run that ends in no verb's exit (-1) carries no
+// log. The file is named by an absolute path, so a relative TMPDIR cannot
+// put it in the fixture the binary runs in.
+//
+// Disclosed, not proven: the pid filter drops the records of any process
+// the binary starts that inherits VERDI_GITLOG, a verdi re-exec among them.
+// No verb starts one today; if one ever does, its git calls vanish from
+// this log, from attribution, and from the forbidden-token witness (SI-359
+// (15)). Git that a child program runs itself is outside the log too
+// (SI-359 (4b)). A record spells each invalid UTF-8 byte of an argument or
+// directory as U+FFFD (gitx.GitLogRecord), so an effect on such a path is
+// never attributed: it reads unattributable, failing closed, while
+// forbidden-token matching is unaffected (R5c1 review R5C1R-2).
 type Binary struct {
 	// Path is the built binary.
 	Path string
@@ -157,8 +182,10 @@ func PinCIEnv(t testing.TB, ci CIEnv) {
 }
 
 // environ is the binary's environment: the test process's own without the
-// pinned CI variables, GOTRACEBACK=single, Env, and the CI field's values.
-func (d Binary) environ() ([]string, error) {
+// pinned CI variables or VERDI_GITLOG, GOTRACEBACK=single, Env, VERDI_GITLOG
+// naming gitLog, and the CI field's values. Env may set neither a pinned
+// CI variable nor VERDI_GITLOG.
+func (d Binary) environ(gitLog string) ([]string, error) {
 	pinned := ciEnvKeys()
 	key := func(kv string) string {
 		k, _, _ := strings.Cut(kv, "=")
@@ -168,16 +195,87 @@ func (d Binary) environ() ([]string, error) {
 		if k := key(kv); slices.Contains(pinned, k) {
 			return nil, fmt.Errorf("ritualwitness: Binary: Env sets %s; set it through the CI field, which every run pins", k)
 		}
+		if k := key(kv); k == gitx.GitLogEnv {
+			return nil, fmt.Errorf("ritualwitness: Binary: Env sets %s; every run sets it to the run's own command log", k)
+		}
 	}
 	var env []string
 	for _, kv := range os.Environ() {
-		if !slices.Contains(pinned, key(kv)) {
+		if k := key(kv); !slices.Contains(pinned, k) && k != gitx.GitLogEnv {
 			env = append(env, kv)
 		}
 	}
 	env = append(env, "GOTRACEBACK=single")
 	env = append(env, d.Env...)
+	env = append(env, gitx.GitLogEnv+"="+gitLog)
 	return append(env, d.CI.pairs()...), nil
+}
+
+// newGitLog creates a run's own empty command log file and returns its
+// absolute path. Created before the binary starts, it exists whether or
+// not the binary runs git, so its absence afterwards is a failure, never a
+// run without git. The path is absolute even when TMPDIR is relative,
+// because the binary runs in the fixture and would resolve a relative
+// VERDI_GITLOG there (R5c1 review R5C1R-5).
+func newGitLog() (string, error) {
+	f, err := os.CreateTemp("", "verdi-gitlog-*.jsonl")
+	if err != nil {
+		return "", fmt.Errorf("ritualwitness: Binary: creating the command log: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("ritualwitness: Binary: creating the command log: %w", err)
+	}
+	abs, err := filepath.Abs(f.Name())
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("ritualwitness: Binary: naming the command log absolutely: %w", err)
+	}
+	return abs, nil
+}
+
+// readGitLog reads the command log at path and returns the calls of the
+// process pid, in order. It refuses the whole log when the file cannot be
+// read, when it does not end in a newline (a record cut short), or when
+// any line, whichever pid it names, is not one strictly decoded record
+// with an argv, an absolute directory, and a positive pid.
+func readGitLog(path string, pid int) ([]Call, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("ritualwitness: Binary: reading the command log: %w", err)
+	}
+	if len(data) == 0 {
+		return []Call{}, nil
+	}
+	if data[len(data)-1] != '\n' {
+		return nil, errors.New("ritualwitness: Binary: the command log's last record is cut short (no newline)")
+	}
+	calls := []Call{}
+	for i, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		var rec gitx.GitLogRecord
+		if err := decodeStrict([]byte(line), &rec); err != nil {
+			return nil, fmt.Errorf("ritualwitness: Binary: command log line %d %q: %w", i+1, line, err)
+		}
+		if len(rec.Args) == 0 || !filepath.IsAbs(rec.Dir) || rec.PID <= 0 {
+			return nil, fmt.Errorf("ritualwitness: Binary: command log line %d %q: want an argv, an absolute directory, and a pid", i+1, line)
+		}
+		if rec.PID == pid {
+			calls = append(calls, Call{Dir: rec.Dir, Args: rec.Args})
+		}
+	}
+	return calls, nil
+}
+
+// commandLog is the log a run that exited with a code reports: the calls
+// of process pid in the command log at path, or, when that log cannot be
+// read whole, an unavailable log naming the reason, which is also
+// returned.
+func commandLog(path string, pid int) (CommandLog, error) {
+	calls, err := readGitLog(path, pid)
+	if err != nil {
+		return CommandLog{Reason: err.Error()}, err
+	}
+	return CommandLog{Calls: calls, OK: true}, nil
 }
 
 // Run implements Driver. A non-zero exit returns its code with an error
@@ -194,12 +292,20 @@ func (d Binary) environ() ([]string, error) {
 // while its Stdin has not reached EOF returns -1 once the context ends or
 // binaryWaitDelay passes (Stdin); and a binary that outlives its context
 // is killed, its output closed within that delay, and returns -1 naming
-// the context. None of them hangs the run.
+// the context. None of them hangs the run. An Env that sets VERDI_GITLOG
+// runs nothing and returns -1. Every run that ends in an exit code returns
+// the binary's command log (Binary), or the log unavailable when it cannot
+// be read whole.
 func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 	if d.Path == "" {
 		return -1, CommandLog{}, errors.New("ritualwitness: Binary: no binary path")
 	}
-	env, err := d.environ()
+	logPath, err := newGitLog()
+	if err != nil {
+		return -1, CommandLog{}, err
+	}
+	defer func() { _ = os.Remove(logPath) }()
+	env, err := d.environ(logPath)
 	if err != nil {
 		return -1, CommandLog{}, err
 	}
@@ -221,6 +327,7 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 		return -1, CommandLog{}, fmt.Errorf("ritualwitness: running %s: %w", d.Path, err)
 	}
 	feed.start(d.Stdin)
+	pid := cmd.Process.Pid
 	err = cmd.Wait()
 	if err != nil {
 		feed.abandon()
@@ -229,7 +336,10 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 			filepath.Base(d.Path), strings.Join(d.Args, " "), stdinErr)
 	}
 	if err == nil {
-		return 0, CommandLog{}, nil
+		// A clean exit carries no error: the broken log's reason stays in
+		// the log itself (CommandLog.Reason).
+		log, _ := commandLog(logPath, pid)
+		return 0, log, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 && goCrash(stderr.String()) {
@@ -237,9 +347,11 @@ func (d Binary) Run(ctx context.Context, dir string) (int, CommandLog, error) {
 			filepath.Base(d.Path), strings.Join(d.Args, " "), strings.TrimSpace(stderr.String()))
 	}
 	if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
-		return exitErr.ExitCode(), CommandLog{}, fmt.Errorf("ritualwitness: %s %s exited %d\nstdout: %s\nstderr: %s",
+		verbErr := fmt.Errorf("ritualwitness: %s %s exited %d\nstdout: %s\nstderr: %s",
 			filepath.Base(d.Path), strings.Join(d.Args, " "), exitErr.ExitCode(),
 			strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
+		log, logErr := commandLog(logPath, pid)
+		return exitErr.ExitCode(), log, errors.Join(verbErr, logErr)
 	}
 	if errors.Is(err, exec.ErrWaitDelay) {
 		return -1, CommandLog{}, fmt.Errorf("ritualwitness: %s %s exited but left its output open past %s (a process it started still holds it), which is no verb's exit: %w",

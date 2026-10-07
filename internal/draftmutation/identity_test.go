@@ -3,10 +3,14 @@ package draftmutation
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -77,6 +81,86 @@ func TestIdentityDetachedAndInvalidRoots(t *testing.T) {
 	if _, err := ResolveCanonicalIdentity(context.Background(), root, "spec/sample", fakeIdentityReader{root: dirtyRoot, branch: "design/sample", head: strings.Repeat("a", 40)}); err == nil || !strings.Contains(err.Error(), "clean") {
 		t.Fatalf("unclean checkout error = %v", err)
 	}
+}
+
+// rootReads records the git reads gitx runs on its context.
+type rootReads struct {
+	mu   sync.Mutex
+	argv []string
+}
+
+func (r *rootReads) Observe(_ string, args []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.argv = append(r.argv, strings.Join(args, " "))
+}
+
+// TestGitIdentityReader_CheckoutRoot proves the real reader's top-level
+// lookup: the repository's top level from the top level itself or from
+// any directory below it, read through gitx so the observer sees it
+// (spec/gitx-recorder-seam dc-3), and an error, never a guessed root,
+// outside a repository.
+func TestGitIdentityReader_CheckoutRoot(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"store/deep/a.txt": "a\n"}, Message: "seed"}})
+	spaced := initRepoAt(t, filepath.Join(t.TempDir(), "checkout "))
+	cases := []struct {
+		name    string
+		start   string
+		env     map[string]string
+		want    string // the top level, before symbolic links are resolved
+		wantErr bool
+	}{
+		{name: "the top level", start: repo.Dir, want: repo.Dir},
+		{name: "a directory below the top level", start: filepath.Join(repo.Dir, "store", "deep"), want: repo.Dir},
+		// The pre-gitx read trimmed git's output, so a top level whose name
+		// ends in a space resolved to a sibling that does not exist.
+		{name: "a top level whose name ends in a space", start: spaced, want: spaced},
+		// The pre-gitx read took stdout and stderr combined, so git's trace
+		// lines on stderr became part of the root.
+		{name: "git writing trace output on stderr", start: repo.Dir, env: map[string]string{"GIT_TRACE": "1"}, want: repo.Dir},
+		{name: "outside any repository", start: t.TempDir(), wantErr: true},
+		{name: "a directory that does not exist", start: filepath.Join(t.TempDir(), "missing"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			reads := &rootReads{}
+			got, err := GitIdentityReader{}.CheckoutRoot(gitx.WithObserver(context.Background(), reads), tc.start)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "draftmutation: resolving Git checkout root") {
+					t.Fatalf("CheckoutRoot(%s) = %q, %v; want the checkout-root error", tc.start, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CheckoutRoot: %v", err)
+			}
+			want, err := filepath.EvalSymlinks(tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("CheckoutRoot = %q, want the top level %q", got, want)
+			}
+			if len(reads.argv) != 1 || !strings.HasPrefix(reads.argv[0], "rev-parse --show-toplevel") {
+				t.Fatalf("observed git reads %q, want the one top-level read through gitx", reads.argv)
+			}
+		})
+	}
+}
+
+// initRepoAt creates dir and an empty git repository in it.
+func initRepoAt(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.CommandContext(t.Context(), "git", "-C", dir, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("git init %q: %v\n%s", dir, err, out)
+	}
+	return dir
 }
 
 type fakeStateProjector struct {
