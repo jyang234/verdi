@@ -56,12 +56,10 @@
     return (kind || "").replace(/-/g, " ");
   }
 
-  // keyOfCard mirrors wallselect.js's card key: the grammar the chips'
-  // endpoints use.
+  // keyOfCard is the seam's card key (wallselect.js keyOf): the one grammar
+  // the chips' endpoints use, derived nowhere else.
   function keyOfCard(el) {
-    if (el.classList.contains("stubcard")) return "stub:" + el.getAttribute("data-stub");
-    if (el.classList.contains("refcard")) return el.getAttribute("data-ref");
-    return el.getAttribute("data-id");
+    return seam().keyOf(el).key;
   }
 
   // labelOf names an endpoint the way the status pill does.
