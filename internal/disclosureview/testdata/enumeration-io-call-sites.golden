@@ -11,6 +11,7 @@ github.com/jyang234/verdi/internal/gitx plumbing.go os.CreateTemp call 1
 github.com/jyang234/verdi/internal/gitx plumbing.go os.Environ call 1
 github.com/jyang234/verdi/internal/gitx plumbing.go os.Remove call 2
 github.com/jyang234/verdi/internal/gitx plumbing.go os/exec.CommandContext call 1
+github.com/jyang234/verdi/internal/gitx readsession.go os/exec.CommandContext call 1
 github.com/jyang234/verdi/internal/gitx shallow.go os.Stat call 1
 github.com/jyang234/verdi/internal/lint cienv.go os.Getenv call 5
 github.com/jyang234/verdi/internal/lint snapshot.go os.IsNotExist call 7

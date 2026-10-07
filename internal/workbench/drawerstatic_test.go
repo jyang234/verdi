@@ -11,9 +11,10 @@ import (
 // obligation: exactly ONE drawer-body renderer in internal/workbench,
 // taking the canonical derivation record (badgeView, its local mirror) as
 // its sole data input; no call from the drawer render path back into
-// lint, decisionsweep, or evidence recomputation; and assets/boardspec.js
-// free of any derivation-data templating — the client only toggles and
-// positions the server-rendered hidden drawer element. The same
+// lint, decisionsweep, or evidence recomputation; and every client asset
+// the server embeds (boardspec.js and every asset added since) free of
+// any derivation-data templating — the client only toggles and positions
+// the server-rendered hidden drawer element. The same
 // deliberately-minimal source-text witness badgesstatic_test.go already
 // established for this package.
 func TestDrawerRenderer_StaticEvidence(t *testing.T) {
@@ -68,17 +69,35 @@ func TestDrawerRenderer_StaticEvidence(t *testing.T) {
 		}
 	}
 
-	// boardspec.js never templates derivation data: it does not even READ
-	// the serialized record (data-badge-record stays the server's opener
-	// contract, consumed by tests and agents) — the client's whole drawer
-	// role is toggling/positioning the server-rendered hidden sibling.
-	js, err := os.ReadFile(filepath.Join("assets", "boardspec.js"))
+	// No client asset templates derivation data — boardspec.js nor any
+	// asset added since (spec/wall-canvas-v2 co-1 ships new behaviour in
+	// new assets), walked in the embedded FS the server serves: none even
+	// READS the serialized record
+	// (data-badge-record stays the server's opener contract, consumed by
+	// tests and agents) — the client's whole drawer role is
+	// toggling/positioning the server-rendered hidden sibling.
+	assets, err := workbenchAssets(embeddedAssets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(js), "data-badge-record") {
-		t.Error("assets/boardspec.js reads data-badge-record — the client must never template derivation data (dc-1)")
+	if len(assets) == 0 {
+		t.Fatal("no client asset was enumerated: the witness would be vacuous")
 	}
+	for _, name := range badgeRecordReaders(assets) {
+		t.Errorf("assets/%s reads data-badge-record — the client must never template derivation data (dc-1)", name)
+	}
+}
+
+// badgeRecordReaders names every asset handed to it that reads the
+// serialized derivation record (data-badge-record), in input order.
+func badgeRecordReaders(assets []workbenchAsset) []string {
+	var out []string
+	for _, a := range assets {
+		if strings.Contains(string(a.data), "data-badge-record") {
+			out = append(out, a.name)
+		}
+	}
+	return out
 }
 
 // TestDrawerNoClock_StaticEvidence is derivation-drawer ac-4's STATIC
@@ -98,5 +117,29 @@ func TestDrawerNoClock_StaticEvidence(t *testing.T) {
 				t.Errorf("%s contains %q — no drawer render path may read or format a clock", f, forbidden)
 			}
 		}
+	}
+}
+
+// TestBadgeRecordReaders: the client-templating witness names every asset
+// that reads the serialized derivation record — an asset added after this
+// guard was written included — and none that does not.
+func TestBadgeRecordReaders(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		assets []workbenchAsset
+		want   []string
+	}{
+		{"clean", []workbenchAsset{{name: "boardspec.js", data: []byte("el.hidden = !el.hidden;\n")}}, nil},
+		{"a new asset templating the record", []workbenchAsset{
+			{name: "boardspec.js", data: []byte("el.hidden = !el.hidden;\n")},
+			{name: "walltoolbar.js", data: []byte("JSON.parse(btn.getAttribute('data-badge-record'))\n")},
+		}, []string{"walltoolbar.js"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := badgeRecordReaders(tc.assets)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("badgeRecordReaders = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -1044,7 +1044,10 @@ func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 	authoringBody := getBoard(t, h, boardFixtureName).Body.String()
-	for _, want := range []string{`class="delete-btn"`, `data-retype`} {
+	// The affordances are the toolbar's (spec/wall-canvas-v2 ac-3, SI-350
+	// (5)): the chip carries them as data-can-* attributes the toolbar
+	// projects, no longer as inner buttons.
+	for _, want := range []string{`data-can-delete="edge"`, `data-can-retype="true"`} {
 		if !strings.Contains(authoringBody, want) {
 			t.Errorf("authoring board missing %s", want)
 		}
@@ -1059,7 +1062,7 @@ func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		proj.Mode = mode
 		frozen := renderBoardRegion(proj, &boardGitState{}, testASDView())
-		for _, banned := range []string{`class="delete-btn"`, `data-retype`, `class="graduate-btn"`} {
+		for _, banned := range []string{`class="delete-btn"`, `data-retype`, `class="graduate-btn"`, `data-can-`, `wall-slot`} {
 			if strings.Contains(frozen, banned) {
 				t.Errorf("%s board renders %s", mode, banned)
 			}
@@ -1290,7 +1293,7 @@ func TestBoardSpec_ReviewMode(t *testing.T) {
 		t.Errorf("review stickies = %d, want 3 (never dropped)", got)
 	}
 	// A mirror, not an editing surface.
-	for _, absent := range []string{"Commit &amp; push", "Add sticky", "yarn-handle", "graduate-btn"} {
+	for _, absent := range []string{"Commit &amp; push", "Add sticky", "yarn-handle", "graduate-btn", "data-can-", "wall-slot"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("review mode still renders %q", absent)
 		}

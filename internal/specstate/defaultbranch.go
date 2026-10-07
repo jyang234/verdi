@@ -42,7 +42,21 @@ import (
 // local branch is consulted only as the genuine fallback, when no
 // remote-tracking ref for that name exists at all (e.g. CI checkouts with
 // no "origin" remote configured).
+//
+// Within a request that pinned root's accepted HEAD (WithAcceptedHead),
+// it returns that one resolution — Tip and Commit set — and resolves
+// nothing again: every consumer of the projection shares it (Wave 6 §5.3;
+// ledger SI-356).
 func ResolveDefaultBranch(ctx context.Context, root string) (Branch, bool) {
+	if pin := pinFor(ctx, root); pin != nil {
+		return pin.branch, pin.ok
+	}
+	return resolveDefaultBranch(ctx, root)
+}
+
+// resolveDefaultBranch is ResolveDefaultBranch's resolution: the name
+// chain, then the ref the name resolves to.
+func resolveDefaultBranch(ctx context.Context, root string) (Branch, bool) {
 	name, ok := resolveDefaultBranchName(ctx, root)
 	if !ok {
 		return Branch{}, false

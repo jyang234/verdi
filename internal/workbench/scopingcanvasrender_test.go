@@ -154,10 +154,14 @@ func TestScopingCanvas_ScopingYarnChips(t *testing.T) {
 	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
 		p := scopingRenderProjection(t, mode)
 		body := renderBoardRegion(p, &boardGitState{}, testASDView())
+		// The chip is the button that selects its thread (spec/wall-canvas-v2
+		// ac-2; SI-350 (5)): role and focus, then the contract's attributes,
+		// then the stable key the region swap's focus restore reads (Wave 6
+		// §5.1).
 		for _, want := range []string{
-			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping">`,
-			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping">`,
-			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="resolves" data-from="stub:spike-two" data-to="oq-1" data-layer="scoping">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping" data-testid="yarn-chip-scoping-covers-stub:plain-one-ac-1">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping" data-testid="yarn-chip-scoping-resolves-stub:spike-one-oq-1">`,
+			`<div class="yarn-chip yarn-chip--scoping" role="button" tabindex="0" data-edge-type="resolves" data-from="stub:spike-two" data-to="oq-1" data-layer="scoping" data-testid="yarn-chip-scoping-resolves-stub:spike-two-oq-1">`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: scoping yarn chip missing: %q", mode, want)
@@ -184,7 +188,10 @@ func TestScopingCanvas_ScopingEdgesCarryNoAffordances(t *testing.T) {
 			if strings.Contains(chip, "<button") {
 				t.Errorf("%s: a scoping chip renders an affordance:\n%s", mode, chip)
 			}
-			for _, forbidden := range []string{"data-retype", "data-graduate", "data-delete"} {
+			// The toolbar projects a chip's legal actions from its data-can-*
+			// attributes (spec/wall-canvas-v2 ac-3, SI-350 (5)): a scoping
+			// chip offers none.
+			for _, forbidden := range []string{"data-retype", "data-graduate", "data-delete", "data-can-"} {
 				if strings.Contains(chip, forbidden) {
 					t.Errorf("%s: a scoping chip carries %s:\n%s", mode, forbidden, chip)
 				}
@@ -376,10 +383,12 @@ func TestScopingCanvas_ProtoStickyAffordances(t *testing.T) {
 	}
 	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 
+	// The Graduate itself is the contextual toolbar's (spec/wall-canvas-v2
+	// ac-3; SI-350 (5)): the sticky says which graduation it offers.
 	for _, want := range []string{
 		`sticky--story`,
 		`data-testid="yarn-handle-` + stickyID + `"`,
-		`data-graduate="stub"`,
+		`data-can-graduate="stub"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("proto-sticky affordances missing %q", want)
@@ -391,7 +400,7 @@ func TestScopingCanvas_ProtoStickyAffordances(t *testing.T) {
 	if strings.Contains(body, `data-testid="yarn-handle-a-01J8Z0K3CCCCCCCCCCCCCCCCCC"`) {
 		t.Error("a plain comment sticky grew a yarn handle")
 	}
-	if !strings.Contains(body, `data-graduate="sticky"`) {
+	if !strings.Contains(body, `data-can-graduate="sticky"`) {
 		t.Error("the plain sticky lost its object graduate menu")
 	}
 }
@@ -430,10 +439,12 @@ func TestScopingCanvas_AttributionThreadHasNoPickerGraduate(t *testing.T) {
 	if end := strings.Index(chip, "</div>"); end >= 0 {
 		chip = chip[:end]
 	}
-	if strings.Contains(chip, `data-graduate="thread"`) {
+	// The affordances are the toolbar's (spec/wall-canvas-v2 ac-3; SI-350
+	// (5)): the chip names them as data-can-* attributes.
+	if strings.Contains(chip, `data-graduate="thread"`) || strings.Contains(chip, `data-can-graduate`) {
 		t.Error("attribution thread offers the picker graduate")
 	}
-	if !strings.Contains(chip, `data-delete="thread"`) {
+	if !strings.Contains(chip, `data-can-delete="thread"`) {
 		t.Error("attribution thread lost its delete affordance")
 	}
 }

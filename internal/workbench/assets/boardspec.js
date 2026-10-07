@@ -187,8 +187,12 @@
     if (op && !op.hidden) return true;
     var stub = document.getElementById("asd-stub-dialog");
     if (stub && !stub.hidden) return true;
+    // The open edge type picker and an open add slot hold the swap too
+    // (spec/wall-canvas-v2 co-2; SI-350 (13)).
+    var picker = document.getElementById("edge-picker");
+    if (picker && !picker.hidden) return true;
     var c = canvas();
-    return !!(c && c.querySelector(".sticky-draft"));
+    return !!(c && c.querySelector(".sticky-draft, .wall-slot[data-open]"));
   }
 
   function applyFragment(html) {
@@ -463,20 +467,27 @@
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
   }
 
-  // edgeAnchor: the point where the ray from a card's center toward
-  // `toward` crosses the card's border — threads tie to card EDGES, so
-  // yarn never runs through a card's text (it reads as strikethrough).
+  // edgeAnchor: the midpoint of the card's side facing `toward` (the
+  // dominant axis picks the side) — threads tie to card EDGES, so yarn
+  // never runs through a card's text (handoff "Yarn"; SI-350 (8)).
   function edgeAnchor(el, toward) {
     var r = rectOf(el);
     var cx = r.x + r.w / 2;
     var cy = r.y + r.h / 2;
     var dx = toward.x - cx;
     var dy = toward.y - cy;
-    if (dx === 0 && dy === 0) return { x: cx, y: cy };
-    var sx = dx !== 0 ? r.w / 2 / Math.abs(dx) : Infinity;
-    var sy = dy !== 0 ? r.h / 2 / Math.abs(dy) : Infinity;
-    var t = Math.min(sx, sy);
-    return { x: cx + dx * t, y: cy + dy * t };
+    if (Math.abs(dx) >= Math.abs(dy)) return { x: dx < 0 ? r.x : r.x + r.w, y: cy };
+    return { x: cx, y: dy < 0 ? r.y : r.y + r.h };
+  }
+
+  // pinAnchor: a stub card's pin, centred on its top edge — the anchor of
+  // its projected coverage yarn (dc-3: an anchor, not a handle).
+  function pinAnchor(el) {
+    var r = rectOf(el);
+    return { x: r.x + r.w / 2, y: r.y };
+  }
+  function anchorOf(el, toward) {
+    return el.classList.contains("stubcard") ? pinAnchor(el) : edgeAnchor(el, toward);
   }
 
   function ensureYarnSvg() {
@@ -521,20 +532,23 @@
       var offboard = !fromEl || !toEl;
       var a, b, cx, cy, knots;
       if (!offboard) {
-        a = edgeAnchor(fromEl, centerOf(toEl));
-        b = edgeAnchor(toEl, centerOf(fromEl));
+        a = anchorOf(fromEl, centerOf(toEl));
+        b = anchorOf(toEl, centerOf(fromEl));
+        // The control point sits off the chord, perpendicular, by
+        // min(70, 0.18·length).
         var dx = b.x - a.x;
         var dy = b.y - a.y;
-        var sag = 8 + Math.sqrt(dx * dx + dy * dy) * 0.06;
-        cx = (a.x + b.x) / 2;
-        cy = (a.y + b.y) / 2 + sag;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var off = Math.min(70, len * 0.18);
+        cx = (a.x + b.x) / 2 - (dy / len) * off;
+        cy = (a.y + b.y) / 2 + (dx / len) * off;
         knots = [a, b];
       } else {
         var anchorEl = fromEl || toEl;
         if (anchorEl) {
-          // One on-board endpoint: the thread hangs from above it and
-          // ties to its top edge. Several document edges on one card fan
-          // out along that edge instead of overlapping.
+          // One on-board endpoint: the thread hangs from a point above
+          // it and ties to its top edge's midpoint; several document
+          // edges on one card start from staggered points above it.
           var tieKey = keyOfElement(anchorEl);
           var tie = offboardTies[tieKey] || 0;
           offboardTies[tieKey] = tie + 1;
@@ -674,12 +688,13 @@
   // case-file placard to three lines, an object card and a stub to their
   // index-card size). When a clamp actually cuts text, that must be
   // visible, not silent: the element gets `.is-clamped` (a fade on its
-  // last line + a zoom-in cursor) and a quiet "⋯" mark in its corner, and
-  // a click opens the read-only expand dialog. The affordance appears
-  // ONLY when the text measurably overflows — a short placard stays crisp
-  // and inert. Measured on the SERVER-RENDERED text (the DOM always holds
-  // the full string; the clamp only hides it), so it re-runs after every
-  // fragment swap, on load (web fonts change wrapping), and on resize.
+  // last line) and a quiet "⋯" mark in its corner. A placard opens the
+  // read-only expand dialog from anywhere on its face; a card's mark is a
+  // button that opens it (SI-358 (1)), since a card's click selects it.
+  // The mark appears ONLY when the text measurably overflows.
+  // Measured on the SERVER-RENDERED text (the DOM always holds the full
+  // string; the clamp only hides it), so it re-runs after every fragment
+  // swap, on load (web fonts change wrapping), and on resize.
   // The mark lives in the element's parent (never inside the clamped box,
   // where it would perturb -webkit-line-clamp or leak into the full text
   // the dialog reads back).
@@ -698,9 +713,19 @@
       }
     }
     if (on && !mark) {
-      mark = document.createElement("span");
+      // A card's mark is the control that reads its full text, keyed so a
+      // swap restores focus to it; a placard opens from its face.
+      var placard = parent.classList.contains("placard");
+      mark = document.createElement(placard ? "span" : "button");
       mark.className = "clamp-more";
-      mark.setAttribute("aria-hidden", "true");
+      if (placard) {
+        mark.setAttribute("aria-hidden", "true");
+      } else {
+        mark.type = "button";
+        mark.setAttribute("aria-label", "Read the full text");
+        mark.setAttribute("aria-haspopup", "dialog");
+        mark.setAttribute("data-testid", "clamp-more-" + (parent.getAttribute("data-id") || parent.getAttribute("data-stub")));
+      }
       parent.appendChild(mark);
     } else if (!on && mark) {
       mark.remove();
@@ -882,27 +907,6 @@
     var headline = placard.querySelector(".placard-text");
     var body = buildExpandDialog(header, false, false);
     body.textContent = headline ? headline.textContent : "";
-  }
-
-  // A single click opens the dialog, but a card is also double-click-to-
-  // edit in authoring: the open is deferred a beat and CANCELLED by the
-  // dblclick handler, so the second click never lands on an expand dialog
-  // and editing wins. A drag (past the slop) is a drag — its click tail is
-  // guarded out below.
-  var EXPAND_DELAY = 250;
-  var expandTimer = null;
-  function scheduleExpand(el) {
-    if (expandTimer) clearTimeout(expandTimer);
-    expandTimer = setTimeout(function () {
-      expandTimer = null;
-      openExpandDialog(el);
-    }, EXPAND_DELAY);
-  }
-  function cancelExpand() {
-    if (expandTimer) {
-      clearTimeout(expandTimer);
-      expandTimer = null;
-    }
   }
 
   // -- derivation drawer: open, position, close — NOTHING else --------------
@@ -1881,13 +1885,9 @@
     openCardEditor(card);
   }
 
-  // openCardEditor's domain gate lives INSIDE the one shared entry, so
-  // mouse and keyboard paths refuse identically — before any text is
-  // invested (review fix I-1).
-
-  // openCardEditor is the ONE inline-editor entry, shared by the mouse
-  // (double-click) and the keyboard (Enter on a focused card) — complete
-  // keyboard access without a second edit path (design §5.2).
+  // openCardEditor is the ONE inline-editor entry, the mouse's double click
+  // and the keyboard's (__BOARDV2API__.editCard), with the domain gate inside
+  // so every path refuses alike before any text is invested (review fix I-1).
   function openCardEditor(card) {
     if (!authoring || editing) return;
     if (!domainWrites) {
@@ -1896,7 +1896,6 @@
     }
     var textEl = card.querySelector(".card-text");
     if (!textEl) return;
-    cancelExpand(); // editing a card wins over the click-to-expand it shares
     editing = true;
     var original = textEl.textContent;
     var editor = document.createElement("textarea");
@@ -2127,11 +2126,11 @@
 
   // -- the supply toolbox (import/pin) ----------------------------------------
   //
-  // The wall's box of pins (owner directive): a quiet tab at the
-  // screen's lower-left; one click opens the tray — a search picker over
-  // the corpus index, server-rendered rows — and choosing a row pins the
-  // artifact to the wall. Escape, the tab, or any outside click closes
-  // it without residue.
+  // The wall's box of pins (owner directive): the toolbar's "Pin an
+  // artifact" button (aria-controls the tray; spec/wall-canvas-v2 ac-3)
+  // opens the tray — a search picker over the corpus index, server-
+  // rendered rows — and choosing a row pins the artifact to the wall.
+  // Escape, the button, or any outside click closes it without residue.
 
   var pinFetchSeq = 0;
 
@@ -2160,9 +2159,13 @@
       });
   }
 
+  function pinTrayButton() {
+    return document.querySelector('[aria-controls="pin-tray"]');
+  }
+
   function openPinTray() {
     var tray = pinTray();
-    var tab = document.getElementById("pin-toolbox-tab");
+    var tab = pinTrayButton();
     if (!tray || !tray.hidden) return;
     tray.hidden = false;
     if (tab) tab.setAttribute("aria-expanded", "true");
@@ -2176,7 +2179,7 @@
 
   function closePinTray() {
     var tray = pinTray();
-    var tab = document.getElementById("pin-toolbox-tab");
+    var tab = pinTrayButton();
     if (!tray || tray.hidden) return;
     tray.hidden = true;
     if (tab) tab.setAttribute("aria-expanded", "false");
@@ -2402,6 +2405,91 @@
       });
   }
 
+  // -- the toolbar's entries (spec/wall-canvas-v2 ac-3; SI-350 (5)) ----------
+  //
+  // The in-chip and in-card affordances (owner UAT round 6, item 3 + the
+  // retype directive) live on the contextual toolbar (walltoolbar.js),
+  // reached through __BOARDV2API__: the same paths and confirmations.
+
+  // removeElement routes a delete per tier: a scratch thread dies at once
+  // (hidden as its delete posts — no stale ghost; a refusal reconciles it
+  // back); a spec-layer edge mirrors creation (gate-bearing types confirm
+  // first); a paper takes the trash drop's own routing.
+  function removeElement(el) {
+    if (!el.classList.contains("yarn-chip")) {
+      var kind = "card";
+      if (el.classList.contains("sticky")) kind = "sticky";
+      else if (el.classList.contains("refcard")) kind = "refcard";
+      else if (el.classList.contains("stubcard")) kind = "stub";
+      trashDrop({ kind: kind, el: el });
+      return;
+    }
+    if (el.getAttribute("data-layer") === "annotation") {
+      el.style.visibility = "hidden";
+      mutate("annotation-delete", { id: el.getAttribute("data-annotation-id") });
+      return;
+    }
+    var stored = chipStoredLink(el, el.getAttribute("data-to"));
+    var type = el.getAttribute("data-edge-type");
+    if (state.gate.indexOf(type) >= 0) {
+      pending = { remove: true, from: el.getAttribute("data-from"), to: el.getAttribute("data-to"), type: type, storedRef: stored.ref, storedNote: stored.note };
+      openConfirm("Remove " + type, state.removals[type] || "", false);
+    } else {
+      mutateOps([removeLinkOp(el.getAttribute("data-from"), type, stored.ref, stored.note)]);
+    }
+  }
+
+  // chipPicker frames the picker over a chip's own pair.
+  function chipPicker(chip, extra) {
+    var fromEl = endpointElement(chip.getAttribute("data-from"));
+    var toEl = endpointElement(chip.getAttribute("data-to"));
+    extra.from = chip.getAttribute("data-from");
+    extra.fromKind = fromEl ? kindOfElement(fromEl) : "unknown";
+    extra.to = chip.getAttribute("data-to");
+    extra.toKind = toEl ? kindOfElement(toEl) : "unknown";
+    openPicker(extra);
+  }
+
+  // retypeChip reopens the context-sensitive picker over the chip's pair,
+  // offering the OTHER legal types (in-place retype, owner directive).
+  function retypeChip(chip) {
+    var stored = chipStoredLink(chip, chip.getAttribute("data-to"));
+    chipPicker(chip, { retype: chip.getAttribute("data-edge-type"), storedRef: stored.ref, storedNote: stored.note });
+  }
+
+  // graduateElement graduates a sticky or a scratch thread. A proto-
+  // sticky's kind is its type, so there is no menu — one confirmation
+  // carrying the FULL impact preview (F-06/F-08), the server-derived slug
+  // validated BEFORE the durable mutation. Any other sticky takes the
+  // object menu at the toolbar's button; a thread, the picker over its pair.
+  function graduateElement(el, anchorEl) {
+    if (el.classList.contains("yarn-chip")) {
+      chipPicker(el, { annotationId: el.getAttribute("data-annotation-id") });
+      return;
+    }
+    var type = el.getAttribute("data-annotation-type");
+    if (type !== "story" && type !== "spike") {
+      openGraduateMenu(anchorEl || el, el.getAttribute("data-id"));
+      return;
+    }
+    var plan = stubGraduationPlan(el);
+    if (plan.error) {
+      pending = null;
+      openConfirm("Not yet a stub", plan.error, false);
+      document.getElementById("edge-confirm-ok").hidden = true;
+      return;
+    }
+    pending = { stubGraduate: plan };
+    openConfirm(
+      "Graduate into stub “" + plan.slug + "”",
+      "One typed operation (add-stub) declares slug " + plan.slug + " in this spec's stubs registry, " +
+        (plan.spike ? "resolving open questions " : "covering acceptance criteria ") + plan.targets.join(", ") +
+        ". Its yarn graduates with it. Instantiating it later cuts branch design/" + plan.slug +
+        " carrying spec/" + plan.slug + " at .verdi/specs/active/" + plan.slug + "/spec.md.",
+      false
+    );
+  }
+
   // -- graduate menus ---------------------------------------------------------
 
   var pendingSticky = null;
@@ -2467,9 +2555,9 @@
       return;
     }
 
-    // The supply toolbox: the tab toggles the tray; a result row pins;
+    // The supply toolbox: its button toggles the tray; a result row pins;
     // any click outside closes the tray without residue.
-    if (t.closest("#pin-toolbox-tab")) {
+    if (t.closest('[aria-controls="pin-tray"]')) {
       var trayEl = pinTray();
       if (trayEl && trayEl.hidden) openPinTray();
       else closePinTray();
@@ -2506,24 +2594,12 @@
       return;
     }
 
-    // Click-to-expand: a clamped placard / card text / stub title opens
-    // its read-only dialog. Only truncated text carries `.is-clamped`, so
-    // a short one is inert. A reference card is excluded above (its own
-    // click is the peek, which already shows the whole artifact).
-    var clampEl = t.closest(".is-clamped[data-expandable]");
-    if (!clampEl && !t.closest("button, textarea, input, .review-sticky")) {
-      // A draggable paper captures the pointer on press, so the click's
-      // target is the paper itself, not the clamped text child underneath
-      // it (a placard, uncaptured, resolves directly above). Recover the
-      // paper's own clamped text so a click anywhere on a truncated card
-      // or stub still expands it.
-      var paper = t.closest(".objcard, .stubcard, .sticky");
-      if (paper) clampEl = paper.querySelector(".is-clamped[data-expandable]");
-    }
-    // The drag-tail guard: a completed drag's click fires on the dragged
-    // paper (dragGhost) — its clamped child must not be read as an expand.
-    if (clampEl && !(dragGhost && dragGhost.contains(clampEl))) {
-      scheduleExpand(clampEl);
+    // A clamped card's ⋯ control reads its full text (SI-358 (1)); it is
+    // an inner control, so wallselect.js never selects on it.
+    var more = t.closest("button.clamp-more");
+    if (more) {
+      var clamped = more.parentNode.querySelector(".is-clamped[data-expandable]");
+      if (clamped) openExpandDialog(clamped);
       return;
     }
 
@@ -2725,64 +2801,6 @@
         return;
     }
 
-    // Deletion affordances (owner UAT round 6, item 3): scratch records
-    // die immediately (mutable stream only); a spec-layer edge mirrors
-    // creation — gate-bearing types restate their removal consequence
-    // and confirm first, others remove on the spot.
-    var del = t.closest(".delete-btn");
-    if (del) {
-      var what = del.getAttribute("data-delete");
-      if (what === "sticky") {
-        // Immediate acknowledgment (same as the trash drop): the sticky
-        // hides the moment its delete is posted — no stale ghost to
-        // double-delete; a refusal reconciles it back via the refetch.
-        var deadSticky = del.closest(".sticky");
-        deadSticky.style.visibility = "hidden";
-        mutate("annotation-delete", { id: deadSticky.getAttribute("data-id") });
-      } else if (what === "thread") {
-        var deadChip = del.closest(".yarn-chip");
-        deadChip.style.visibility = "hidden";
-        mutate("annotation-delete", { id: deadChip.getAttribute("data-annotation-id") });
-      } else {
-        var edgeChip = del.closest(".yarn-chip");
-        var stored = chipStoredLink(edgeChip, edgeChip.getAttribute("data-to"));
-        var edge = {
-          from: edgeChip.getAttribute("data-from"),
-          to: edgeChip.getAttribute("data-to"),
-          type: edgeChip.getAttribute("data-edge-type"),
-          storedRef: stored.ref,
-          storedNote: stored.note,
-        };
-        if (state.gate.indexOf(edge.type) >= 0) {
-          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type, storedRef: edge.storedRef, storedNote: edge.storedNote };
-          openConfirm("Remove " + edge.type, state.removals[edge.type] || "", false);
-        } else {
-          mutateOps([removeLinkOp(edge.from, edge.type, edge.storedRef, edge.storedNote)]);
-        }
-      }
-      return;
-    }
-
-    // In-place retype (owner directive): the chip's type label reopens
-    // the context-sensitive picker over the same pair.
-    var retypeBtn = t.closest("[data-retype]");
-    if (retypeBtn) {
-      var retypeChip = retypeBtn.closest(".yarn-chip");
-      var retypeStored = chipStoredLink(retypeChip, retypeChip.getAttribute("data-to"));
-      var rFrom = endpointElement(retypeChip.getAttribute("data-from"));
-      var rTo = endpointElement(retypeChip.getAttribute("data-to"));
-      openPicker({
-        from: retypeChip.getAttribute("data-from"),
-        fromKind: rFrom ? kindOfElement(rFrom) : "unknown",
-        to: retypeChip.getAttribute("data-to"),
-        toKind: rTo ? kindOfElement(rTo) : "unknown",
-        retype: retypeChip.getAttribute("data-edge-type"),
-        storedRef: retypeStored.ref,
-        storedNote: retypeStored.note,
-      });
-      return;
-    }
-
     // Instantiate (sealed accepted feature wall): consequence-labeled
     // before it fires — a branch cut is not a hover-and-hope click.
     var inst = t.closest("[data-instantiate]");
@@ -2798,49 +2816,6 @@
           "The serving checkout never moves — nothing on this wall changes until that branch merges.",
         false
       );
-      return;
-    }
-
-    var grad = t.closest(".graduate-btn");
-    if (grad) {
-      if (grad.getAttribute("data-graduate") === "stub") {
-        // The proto-sticky's graduation: the kind is already the
-        // sticky's type, so there is no menu — one confirmation carrying
-        // the FULL impact preview (F-06/F-08): the server-derived slug is
-        // validated against the server's own grammar BEFORE the durable
-        // mutation, and the exact resulting refs/paths/bindings are
-        // spoken first.
-        var protoEl = grad.closest(".sticky");
-        var plan = stubGraduationPlan(protoEl);
-        if (plan.error) {
-          pending = null;
-          openConfirm("Not yet a stub", plan.error, false);
-          document.getElementById("edge-confirm-ok").hidden = true;
-          return;
-        }
-        pending = { stubGraduate: plan };
-        openConfirm(
-          "Graduate into stub “" + plan.slug + "”",
-          "One typed operation (add-stub) declares slug " + plan.slug + " in this spec's stubs registry, " +
-            (plan.spike ? "resolving open questions " : "covering acceptance criteria ") + plan.targets.join(", ") +
-            ". Its yarn graduates with it. Instantiating it later cuts branch design/" + plan.slug +
-            " carrying spec/" + plan.slug + " at .verdi/specs/active/" + plan.slug + "/spec.md.",
-          false
-        );
-      } else if (grad.getAttribute("data-graduate") === "sticky") {
-        openGraduateMenu(grad, grad.closest(".sticky").getAttribute("data-id"));
-      } else {
-        var chip = grad.closest(".yarn-chip");
-        var fromEl = endpointElement(chip.getAttribute("data-from"));
-        var toEl = endpointElement(chip.getAttribute("data-to"));
-        openPicker({
-          from: chip.getAttribute("data-from"),
-          fromKind: fromEl ? kindOfElement(fromEl) : "unknown",
-          to: chip.getAttribute("data-to"),
-          toKind: toEl ? kindOfElement(toEl) : "unknown",
-          annotationId: chip.getAttribute("data-annotation-id"),
-        });
-      }
       return;
     }
 
@@ -2910,19 +2885,15 @@
   }
 
   function onKeyDown(e) {
-    if (e.key === "Enter" && e.target && e.target.classList && e.target.classList.contains("objcard")) {
-      openCardEditor(e.target);
-      e.preventDefault();
-      return;
-    }
     if (e.key === "Escape") {
       pending = null;
-      cancelExpand();
-      hideAllDialogs();
-      closeRefPeek();
-      closeExpandDialog();
-      closeBadgeDrawer();
-      closePinTray();
+      // Innermost first, one layer per press (ac-6); the selection is wallkeys.js's.
+      var bd = document.getElementById("modal-backdrop");
+      if (bd && !bd.hidden) hideAllDialogs();
+      else if (document.getElementById("expand-dialog")) closeExpandDialog();
+      else if (document.getElementById("ref-peek")) closeRefPeek();
+      else if (openDrawer) closeBadgeDrawer();
+      else closePinTray();
     }
   }
 
@@ -2950,7 +2921,7 @@
 
   // The ASD transport's hooks (boardspecasd.js): the region swap, the
   // interaction-hold contract, and the status line — one owner each, no
-  // duplicated machinery.
+  // duplicated machinery. The toolbar's entries (walltoolbar.js) follow.
   window.__BOARDV2API__ = {
     applyFragment: applyFragment,
     interactionLive: interactionLive,
@@ -2958,6 +2929,11 @@
     resumeHeldRefresh: resumeHeldRefresh,
     setStatus: setStatus,
     setDirty: function (dirty) { state.git.dirty = dirty; },
+    addSticky: startStickyEditor,
+    editCard: openCardEditor,
+    remove: removeElement,
+    retype: retypeChip,
+    graduate: graduateElement,
     openNotice: function (title, message) {
       openConfirm(title, message, false);
       var ok = document.getElementById("edge-confirm-ok");

@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -80,12 +81,97 @@ func TestObserver_SeesPlumbing(t *testing.T) {
 	}
 }
 
+// TestObserver_BatchProcessObservedOnceAtStart pins the fourth exec site,
+// the read session's batch process (startCatFileBatch), against the
+// VERDI_GITLOG sink (ledger SI-359 (1), (3)). With a writable log, two
+// rounds of a ref read and a blob read in one session record one
+// `rev-parse --verify HEAD` (the replay runs no git) and one `cat-file
+// --batch` (observed at its start, never per object name), and the
+// observer sees the same two calls. With a log that cannot be opened, the
+// batch start is refused before git runs, and every read in the session —
+// which then takes the exec path — returns an error naming VERDI_GITLOG,
+// with no git process started and no call observed.
+func TestObserver_BatchProcessObservedOnceAtStart(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		logPath  func(t *testing.T) string
+		wantFail bool
+	}{
+		{"a writable log", func(t *testing.T) string { return filepath.Join(t.TempDir(), "git.jsonl") }, false},
+		{"a log that cannot be opened", func(t *testing.T) string { return t.TempDir() }, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := gitLogRepo(t)
+			logPath := tt.logPath(t)
+			t.Setenv(GitLogEnv, logPath)
+			started := ""
+			if tt.wantFail {
+				started = fakeGitOnPath(t)
+			}
+			obs := &recordingObserver{}
+			ctx, release := WithReadSession(WithObserver(context.Background(), obs), repo.Dir)
+			defer release()
+
+			var errs []error
+			for range 2 {
+				if _, err := RevParse(ctx, repo.Dir, "HEAD"); err != nil {
+					errs = append(errs, err)
+				}
+				data, err := Show(ctx, repo.Dir, "HEAD", "a.txt")
+				if err != nil {
+					errs = append(errs, err)
+				} else if string(data) != "a\n" {
+					t.Fatalf("Show = %q, want %q", data, "a\n")
+				}
+			}
+
+			if tt.wantFail {
+				if len(errs) != 4 {
+					t.Fatalf("%d of 4 reads failed (%v), want every read refused", len(errs), errs)
+				}
+				for _, err := range errs {
+					if !strings.Contains(err.Error(), GitLogEnv) {
+						t.Errorf("err = %v, want it to name %s", err, GitLogEnv)
+					}
+				}
+				if b, err := startCatFileBatch(WithObserver(context.Background(), obs), repo.Dir); err == nil || b != nil || !strings.Contains(err.Error(), GitLogEnv) {
+					t.Errorf("startCatFileBatch = %v, %v; want no process and an error naming %s", b, err, GitLogEnv)
+				}
+				if n := gitStarts(t, started); n != 0 {
+					t.Errorf("git started %d time(s), want none before a failed record", n)
+				}
+				if len(obs.calls) != 0 {
+					t.Errorf("the observer saw %v, want no call that never ran", obs.calls)
+				}
+				return
+			}
+			if len(errs) != 0 {
+				t.Fatalf("reads failed: %v", errs)
+			}
+			argvs := [][]string{{"rev-parse", "--verify", "HEAD"}, {"cat-file", "--batch"}}
+			var want []GitLogRecord
+			var wantObserved [][]string
+			for _, argv := range argvs {
+				want = append(want, GitLogRecord{Args: argv, Dir: repo.Dir, PID: os.Getpid()})
+				wantObserved = append(wantObserved, append([]string{repo.Dir}, argv...))
+			}
+			if got := readGitLog(t, logPath); !reflect.DeepEqual(got, want) {
+				t.Fatalf("logged %+v, want %+v", got, want)
+			}
+			if !reflect.DeepEqual(obs.calls, wantObserved) {
+				t.Fatalf("observed %v, want %v", obs.calls, wantObserved)
+			}
+		})
+	}
+}
+
 // TestObserverCoversEveryExecSite is the structural guard the review
 // required: it parses every non-test .go file in this package and asserts
 // that the number of exec.Command/exec.CommandContext call sites equals
-// the number of observe( call sites, so a fourth exec site cannot land
-// unobserved without failing this test by construction (today: 3 and 3 —
-// run in exec.go, ConfigValue in configvalue.go, runStdin in plumbing.go).
+// the number of observe( call sites, so a fifth exec site cannot land
+// unobserved without failing this test by construction (today: 4 and 4 —
+// execGit in exec.go, ConfigValue in configvalue.go, runStdin in
+// plumbing.go, and startCatFileBatch in readsession.go).
 //
 // It also holds every exec site to returning observe's error before git
 // runs (execSiteFindings; R5c1 review R5C1R-4): a VERDI_GITLOG record that

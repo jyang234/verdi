@@ -91,7 +91,10 @@ func BuildContext(ctx context.Context, root string) Context {
 	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
 		lctx.DefaultBranch = branch.Name
 
-		if base, err := gitx.MergeBase(ctx, root, "HEAD", branch.Ref); err == nil {
+		// Rev, not Ref, for the read: a request that pinned its accepted
+		// HEAD reads the one commit it resolved (ledger SI-356); unpinned,
+		// Rev is Ref.
+		if base, err := gitx.MergeBase(ctx, root, "HEAD", branch.Rev()); err == nil {
 			lctx.DiffBase = base
 		}
 	}

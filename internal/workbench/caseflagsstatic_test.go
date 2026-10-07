@@ -7,6 +7,7 @@ package workbench
 // prover).
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,37 +158,27 @@ func TestSizeSmell_NothingConsumesTheBadge(t *testing.T) {
 // TestSizeSmell_NoClientViewportFeedsBadgeState is ac-3's static
 // obligation: the badge and its drawer content are produced entirely
 // server-side, and no client script measures or injects a viewport
-// dimension into badge state. Witnessed two ways: (a) in
-// assets/boardspec.js, no source line that reads a viewport dimension
-// (window.innerHeight and equivalents — legitimate for menu positioning
-// and drag edge-scroll) also touches badge/stamp/drawer vocabulary; and
-// (b) in badgerender.go, the data-badge-record attribute — the drawer's
-// one content source — is written from the serialized derivation record
-// alone (badgeRecordJSON over the compute's badgeView), so no drawer
-// field can originate outside the record.
+// dimension into badge state. Witnessed two ways: (a) in every client
+// asset the server embeds (boardspec.js and every asset added since —
+// spec/wall-canvas-v2 co-1 ships new behaviour in new assets, so a guard
+// reading boardspec.js alone would stop seeing it), no source line that
+// reads a viewport dimension (window.innerHeight and equivalents —
+// legitimate for menu positioning and drag edge-scroll) also touches
+// badge/stamp/drawer vocabulary; and (b) in badgerender.go, the
+// data-badge-record attribute — the drawer's one content source — is
+// written from the serialized derivation record alone (badgeRecordJSON
+// over the compute's badgeView), so no drawer field can originate outside
+// the record.
 func TestSizeSmell_NoClientViewportFeedsBadgeState(t *testing.T) {
-	js, err := os.ReadFile(filepath.Join("assets", "boardspec.js"))
+	assets, err := workbenchAssets(embeddedAssets)
 	if err != nil {
-		t.Fatalf("reading boardspec.js: %v", err)
+		t.Fatal(err)
 	}
-	viewportTokens := []string{"innerHeight", "innerWidth", "outerHeight", "outerWidth", "visualViewport", "screen.height", "screen.width"}
-	badgeTokens := []string{"badge", "stamp", "smell", "drawer", "derivation"}
-	for i, line := range strings.Split(string(js), "\n") {
-		lower := strings.ToLower(line)
-		hasViewport := false
-		for _, v := range viewportTokens {
-			if strings.Contains(line, v) {
-				hasViewport = true
-			}
-		}
-		if !hasViewport {
-			continue
-		}
-		for _, b := range badgeTokens {
-			if strings.Contains(lower, b) {
-				t.Errorf("boardspec.js:%d reads a viewport dimension AND touches badge state (%q):\n%s", i+1, b, line)
-			}
-		}
+	if len(assets) == 0 {
+		t.Fatal("no client asset was enumerated: the witness would be vacuous")
+	}
+	for _, v := range viewportBadgeLines(assets) {
+		t.Errorf("%s reads a viewport dimension AND touches badge state (%q):\n%s", v.at, v.token, v.line)
 	}
 
 	render, err := os.ReadFile("badgerender.go")
@@ -201,4 +192,73 @@ func TestSizeSmell_NoClientViewportFeedsBadgeState(t *testing.T) {
 	if !strings.Contains(src, `data-badge-record="`+"` + esc(badgeRecordJSON(bd)) + `") {
 		t.Error("badgerender.go's data-badge-record is not fed by badgeRecordJSON(bd) — a drawer field could originate outside the derivation record")
 	}
+}
+
+// TestViewportBadgeLines: the viewport/badge witness reports a violating
+// line in ANY asset it is handed — an asset added after this guard was
+// written included — with its path and line, and stays quiet on clean
+// sources and on a viewport read that touches no badge vocabulary.
+func TestViewportBadgeLines(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		assets []workbenchAsset
+		want   []string
+	}{
+		{"clean", []workbenchAsset{
+			{name: "boardspec.js", data: []byte("const h = window.innerHeight; // menu placement\nbadge.hidden = false;\n")},
+		}, nil},
+		{"a new asset feeding a drawer from the viewport", []workbenchAsset{
+			{name: "boardspec.js", data: []byte("const ok = 1;\n")},
+			{name: "wallminimap.js", data: []byte("let a = 1;\ndrawer.style.top = window.innerHeight + 'px';\n")},
+		}, []string{"wallminimap.js:2"}},
+		{"a nested asset", []workbenchAsset{
+			{name: "wall/keys.js", data: []byte("stamp.y = visualViewport.height;\n")},
+		}, []string{"wall/keys.js:1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, v := range viewportBadgeLines(tc.assets) {
+				got = append(got, v.at)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("viewportBadgeLines = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// viewportBadgeLine is one source line that reads a viewport dimension
+// and touches badge vocabulary: where (path:line), the badge token it
+// matched, and the line itself.
+type viewportBadgeLine struct {
+	at, token, line string
+}
+
+// viewportBadgeLines is spec/case-file-flags ac-3's client witness over
+// every asset handed to it: each line reading a viewport dimension that
+// also touches badge/stamp/drawer vocabulary, once per matched token.
+func viewportBadgeLines(assets []workbenchAsset) []viewportBadgeLine {
+	viewportTokens := []string{"innerHeight", "innerWidth", "outerHeight", "outerWidth", "visualViewport", "screen.height", "screen.width"}
+	badgeTokens := []string{"badge", "stamp", "smell", "drawer", "derivation"}
+	var out []viewportBadgeLine
+	for _, a := range assets {
+		for i, line := range strings.Split(string(a.data), "\n") {
+			hasViewport := false
+			for _, v := range viewportTokens {
+				if strings.Contains(line, v) {
+					hasViewport = true
+				}
+			}
+			if !hasViewport {
+				continue
+			}
+			lower := strings.ToLower(line)
+			for _, b := range badgeTokens {
+				if strings.Contains(lower, b) {
+					out = append(out, viewportBadgeLine{at: fmt.Sprintf("%s:%d", a.name, i+1), token: b, line: line})
+				}
+			}
+		}
+	}
+	return out
 }

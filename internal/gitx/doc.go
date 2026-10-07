@@ -15,11 +15,21 @@
 //
 // Every function execs the system git binary and wraps a non-zero exit with
 // the command and its stderr, so failures are legible without a debugger.
+// The one exception is a read session (WithReadSession): within one
+// request it answers Show's and BlobAt's reads from one batch process and
+// replays each identical ref-read argv (and a full id's whole-tree
+// listing, and the directory's prefix) after its first run, on their
+// happy paths only — every other answer, every error included, is still
+// the exec's own.
 //
 // Every exec passes one observe point first (observer.go): a gitx.Observer
 // attached to the call's context sees the call, and when the test-only
 // VERDI_GITLOG environment variable names a file, the call's record is
 // appended to it (gitlog.go, GitLogEnv). VERDI_GITLOG is a test hook the
 // product never sets; it lets a test record the built binary's whole git
-// command log (spec/gitx-recorder-seam dc-2).
+// command log (spec/gitx-recorder-seam dc-2). The log holds one record per
+// git execution (ledger SI-359 (1), (3)), so a read session's batch
+// process is recorded once, when it starts, and a replayed read, which
+// runs no git, records nothing; an observer implementing SessionObserver
+// is told of each replay and each batched name instead.
 package gitx

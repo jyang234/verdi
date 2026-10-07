@@ -231,7 +231,9 @@ func TestDocumentSnapshot_ChromeMovesWithTheBody(t *testing.T) {
 // TestDocumentSnapshot_AddsNoResolution (Wave 6 §5.3): the poll's one
 // projection reads the checkout's Git state for the identity card's
 // branch, which resolves no accepted ref and runs no specstate: its
-// counted reads equal the shared loader's alone.
+// counted reads equal the shared loader's alone, run in the same one
+// projection — one read session and one accepted-HEAD resolution
+// (openProjection; ledger SI-356).
 func TestDocumentSnapshot_AddsNoResolution(t *testing.T) {
 	_, repo, name := newAcceptedWallFixture(t)
 	s := &boardSpecServer{root: repo.Dir}
@@ -245,7 +247,10 @@ func TestDocumentSnapshot_AddsNoResolution(t *testing.T) {
 	}
 	specPath := store.ActiveSpecRelPath(name)
 	alone := &gitCounts{acceptedRef: git.acceptedRef(), specPath: specPath}
-	if _, err := specdocload.Load(gitx.WithObserver(t.Context(), alone), req); err != nil {
+	loadCtx, release := s.openProjection(gitx.WithObserver(t.Context(), alone))
+	_, err = specdocload.Load(loadCtx, req)
+	release()
+	if err != nil {
 		t.Fatal(err)
 	}
 	poll := &gitCounts{acceptedRef: git.acceptedRef(), specPath: specPath}
@@ -290,9 +295,10 @@ func (r *argvRecorder) runs() [][]string {
 
 // TestDocumentSnapshot_ReadsTheBranchAlone (SI-343 (3), review F5A-2): a
 // poll and a download read the checkout's branch and nothing else of its
-// state — one exec beyond the shared loader's own, and never a status
-// scan, which can rewrite the served checkout's index (Wave 6 §5.3: a
-// conditional refresh does no mutation).
+// state — one exec beyond the shared loader's own, run in the same one
+// projection (openProjection), and never a status scan, which can rewrite
+// the served checkout's index (Wave 6 §5.3: a conditional refresh does no
+// mutation).
 func TestDocumentSnapshot_ReadsTheBranchAlone(t *testing.T) {
 	_, repo, name := newAcceptedWallFixture(t)
 	s := &boardSpecServer{root: repo.Dir}
@@ -301,7 +307,10 @@ func TestDocumentSnapshot_ReadsTheBranchAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	alone := &argvRecorder{}
-	if _, err := specdocload.Load(gitx.WithObserver(t.Context(), alone), req); err != nil {
+	loadCtx, release := s.openProjection(gitx.WithObserver(t.Context(), alone))
+	_, err := specdocload.Load(loadCtx, req)
+	release()
+	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()

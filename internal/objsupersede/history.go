@@ -67,7 +67,13 @@ type historyCache struct {
 func NewHistory(ctx context.Context, root string) History {
 	h := History{root: root, cache: &historyCache{firsts: map[string]Fact{}, walks: map[string]walkList{}}}
 	h.branch, h.ok = specstate.ResolveDefaultBranch(ctx, root)
-	if h.ok {
+	switch {
+	case !h.ok:
+	case h.branch.Commit != "":
+		// The request pinned its accepted HEAD (specstate.
+		// WithAcceptedHead): its commit is this pin (ledger SI-356).
+		h.head = h.branch.Commit
+	default:
 		head, err := gitx.RevParse(ctx, root, h.branch.Ref+"^{commit}")
 		if err != nil {
 			h.unread = err.Error()

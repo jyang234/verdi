@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, EDGE, boardPath } from "./fixtures";
-import { addSticky, drawYarn, expectAutosaved } from "./helpers";
+import { addSticky, drawYarn, expectAutosaved, toolbarAction } from "./helpers";
 
 // Obligation authoring (spec/obligation-artifact ac-3): a sticky graduates
 // into an evidence-obligation artifact by being dropped on a STORY
@@ -98,10 +98,9 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
     // shared store.
     await page.keyboard.press("Escape");
     await expect(page.getByTestId(`sticky-${secondId}`)).toBeVisible();
-    await page
-      .getByTestId(`sticky-${secondId}`)
-      .locator('[data-delete="sticky"]')
-      .click();
+    // Delete is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)).
+    await toolbarAction(page, page.getByTestId(`sticky-${secondId}`), "Delete");
     await expectAutosaved(page);
   });
 
@@ -131,11 +130,9 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId(`sticky-${stickyId}`)).toBeVisible();
 
-    // Tidy the wall (scratch dies without ceremony).
-    await page
-      .getByTestId(`sticky-${stickyId}`)
-      .locator('[data-delete="sticky"]')
-      .click();
+    // Tidy the wall (scratch dies without ceremony, through the toolbar's
+    // Delete for the selected sticky).
+    await toolbarAction(page, page.getByTestId(`sticky-${stickyId}`), "Delete");
     await expectAutosaved(page);
     await expect(page.getByTestId(`sticky-${stickyId}`)).toHaveCount(0);
   });

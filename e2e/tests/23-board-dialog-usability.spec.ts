@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
-import { addSticky, drawYarn, edgeTypePicker } from "./helpers";
+import { addSticky, drawYarn, edgeTypePicker, toolbarAction } from "./helpers";
 
 // Owner UAT (round 6, item 1): "difficult to understand what it's even
 // trying to say, and the user can't close out of it easily." Every board
@@ -51,12 +51,14 @@ test.describe("board dialogs: always escapable, always legible", () => {
     const sticky = await addSticky(page, "question: does the notice localize?");
     const menu = page.locator("#graduate-menu");
 
-    await sticky.getByRole("button", { name: "Graduate" }).click();
+    // Graduate is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)); the menu is the same.
+    await toolbarAction(page, sticky, "Graduate");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Cancel" }).click();
     await expect(menu).toBeHidden();
 
-    await sticky.getByRole("button", { name: "Graduate" }).click();
+    await toolbarAction(page, sticky, "Graduate");
     await expect(menu).toBeVisible();
     await page.locator("#modal-backdrop").click({ position: { x: 8, y: 8 } });
     await expect(menu).toBeHidden();
@@ -104,7 +106,8 @@ test.describe("board dialogs: always escapable, always legible", () => {
     );
     await expect(thread).toHaveCount(1);
 
-    await thread.getByRole("button", { name: "Graduate" }).click();
+    // The thread's Graduate is the toolbar's too (SI-350 (5)).
+    await toolbarAction(page, thread, "Graduate to a typed edge");
     await expect(picker).toBeVisible();
     await expect(picker.getByTestId("picker-no-typed-edge")).toBeVisible();
     await expect(picker.getByRole("menuitem")).toHaveCount(0);

@@ -49,6 +49,9 @@ func Classification() []Classified {
 		// implementations live outside gitx, where reachability follows
 		// them like any other code.
 		ro("(internal/gitx.Observer).Observe"),
+		// Its optional half: told what a read session answers without a
+		// process (ledger SI-356); implementations live outside gitx.
+		ro("(internal/gitx.SessionObserver).ObserveSession"),
 		ro("(internal/gitx.Reachability).String"),
 		mut("internal/gitx.AddAll"), // add -A
 		mut("internal/gitx.AddPaths"),
@@ -122,6 +125,7 @@ func Classification() []Classified {
 		ro("internal/gitx.ValidateFullOID"),
 		ro("internal/gitx.Version"),
 		ro("internal/gitx.WithObserver"),
+		ro("internal/gitx.WithReadSession"), // scopes one request's reads; writes nothing
 		mut("internal/gitx.WorktreeAdd"),
 		mut("internal/gitx.WorktreeAddDetached"),
 		ro("internal/gitx.WorktreeChangedPaths"),

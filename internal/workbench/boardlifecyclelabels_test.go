@@ -154,6 +154,9 @@ func TestBoard_UnprovenLifecycle_ReadOnlyWithoutAcceptanceClaims(t *testing.T) {
 	bodyMustLack(t, body,
 		`id="add-sticky-btn"`, `id="commit-push-btn"`, `data-testid="asd-forms"`,
 		`data-testid="create-panel"`, `class="delete-btn"`, `class="graduate-btn"`, `data-retype`,
+		// The toolbar's projected actions and the add slots (spec/wall-canvas-v2
+		// ac-3, ac-5) are editing affordances too.
+		`data-can-`, `wall-slot`,
 	)
 
 	// Mutation boundary: the scratch tier and the domain surface both refuse.

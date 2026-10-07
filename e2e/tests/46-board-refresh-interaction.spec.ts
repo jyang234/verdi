@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, expectAutosaved } from "./helpers";
+import { addSticky, expectAutosaved, toolbarAction } from "./helpers";
 
 // Owner bug report (2026-07-19): "UI a little jerky — when interacting and
 // moving stickies around the refresh would delay and then the screen would
@@ -294,7 +294,9 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     // clickable — that stale window is where the owner's "no annotation …"
     // popups came from (a second delete racing the first, witnessed
     // against the unfixed build; the store itself never lost the record).
-    await sticky.locator('.delete-btn[data-delete="sticky"]').click();
+    // The × is the contextual toolbar's Delete for the selected sticky
+    // now (spec/wall-canvas-v2 ac-3; SI-350 (5)), over the same path.
+    await toolbarAction(page, sticky, "Delete");
     await expect(sticky).toBeHidden({ timeout: 1_500 });
 
     await releaseFragment();

@@ -97,12 +97,9 @@ func isRung3Story(fm *artifact.SpecFrontmatter) bool {
 // conflict record path is never read (SI-306 (4a)); and a record that
 // fails strict decode is never credited. A superseded conflict is credited
 // to every spec its challenges links name as a whole spec. An operational
-// read failure is an error.
-func (p Projector) scanConflicts(ctx context.Context, root, rev string, corpus *successorCorpus) error {
-	paths, err := p.git.LsTree(ctx, root, rev, conflictsDir())
-	if err != nil {
-		return fmt.Errorf("specstate: scanning default-branch conflicts: %w", err)
-	}
+// read failure is an error. paths is the plain listing of conflictsDir at
+// rev (scanSuccessors lists it).
+func (p Projector) scanConflicts(ctx context.Context, root, rev string, paths []string, corpus *successorCorpus) error {
 	sort.Strings(paths)
 	for _, cp := range paths {
 		if isGitQuoted(cp) {

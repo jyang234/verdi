@@ -248,7 +248,12 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await expect(dialog).toHaveCount(0);
   });
 
-  test("a card double-click still edits; a single click expands", async ({
+  // AMENDED (spec/wall-canvas-v2 ac-2; SI-350 (4)): a single click on a
+  // card SELECTS it and no longer opens the expand dialog; Enter or a
+  // double click edits it, and the editor reads the whole text back. The
+  // clamp stays visible (fade and ⋯) — truncation is never silent — and
+  // the placards above keep their click-to-expand unchanged.
+  test("a card double-click still edits; a single click selects", async ({
     page,
   }) => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
@@ -257,8 +262,8 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
       "authoring",
     );
 
-    // Double-click still opens the inline editor (the click-to-expand must
-    // not eat the dblclick) — no expand dialog appears.
+    // Double-click still opens the inline editor (the selection must not
+    // eat the dblclick) — no expand dialog appears.
     const card = page.getByTestId(`card-${SHOWCASE.AC_IDS[0]}`);
     await card.dblclick();
     const editor = page.getByRole("textbox", { name: "Card text" });
@@ -268,7 +273,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await editor.blur();
 
     // Make this card's text long enough to clamp, then a single click on
-    // the text opens the expand dialog (not the editor).
+    // the text selects the card: no expand dialog, no editor.
     await card.dblclick();
     const editor2 = page.getByRole("textbox", { name: "Card text" });
     const longText =
@@ -279,13 +284,69 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
 
     const cardText = card.locator(".card-text");
     await expect(cardText).toHaveClass(/is-clamped/);
+    await expect(card.locator(".clamp-more")).toHaveCount(1);
+    // The double clicks above left the card selected (SI-358 (5)); clear it
+    // through the asset's seam so the single click below is a selection,
+    // not the repeated click that clears.
+    await page.evaluate(() => {
+      (window as unknown as { __WALLSELECT__: { clear: () => void } }).__WALLSELECT__.clear();
+    });
+    await expect(card).not.toHaveAttribute("data-selected", /./);
     await cardText.click();
+    await expect(card).toHaveAttribute("data-selected", "true");
+    await expect(
+      page.getByTestId("wall-status").locator(".wall-status-id"),
+    ).toHaveText(SHOWCASE.AC_IDS[0]);
+    // A generous beat past the old expand delay: no dialog, no editor.
+    await page.waitForTimeout(400);
+    await expect(page.getByTestId("expand-dialog")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Card text" })).toHaveCount(0);
+    // The full text is in the DOM (the clamp only hides it). The ⋯ mark is
+    // a button that reads it in the expand dialog (SI-358 (1)) — an inner
+    // control, so it neither selects nor clears: the card stays selected.
+    await expect(cardText).toHaveText(longText);
+    const more = card.locator("button.clamp-more");
+    await expect(more).toHaveAttribute("aria-haspopup", "dialog");
+    await more.click();
     const dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId("expand-text")).toHaveText(longText);
     await expect(dialog.locator(".expand-kind")).toContainText(SHOWCASE.AC_IDS[0]);
+    // Past the repeated-click window: the ⋯ click neither selected nor
+    // cleared, so the card is still selected.
+    await page.waitForTimeout(400);
+    await expect(card).toHaveAttribute("data-selected", "true");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+    // The ⋯ button carries a stable key, so a region swap restores focus
+    // to it (Wave 6 §5.1, retain focus). The swap is forced by a scratch
+    // write the wall accepts: a comment sticky, removed again afterwards.
+    await more.focus();
+    await expect(more).toBeFocused();
+    const probeText = "focus probe across a swap [33]";
+    const made = await page.request.post(boardPath(SHOWCASE.DESIGN_SPEC) + "/api/sticky", {
+      data: { text: probeText, type: "comment" },
+    });
+    expect(made.status(), await made.text()).toBe(200);
+    const probe = page.locator('[data-testid^="sticky-"]').filter({ hasText: probeText });
+    await expect(probe).toHaveCount(1, { timeout: 8_000 });
+    await expect(card.locator("button.clamp-more")).toBeFocused();
+    await expect(card.locator("button.clamp-more")).toHaveAttribute("data-testid", `clamp-more-${SHOWCASE.AC_IDS[0]}`);
+    const probeID = (await probe.getAttribute("data-id"))!;
+    const gone = await page.request.post(boardPath(SHOWCASE.DESIGN_SPEC) + "/api/annotation-delete", {
+      data: { ids: [probeID] },
+    });
+    expect(gone.status(), await gone.text()).toBe(200);
+    await expect(probe).toHaveCount(0, { timeout: 8_000 });
+    // A double click on the selected card edits it and keeps it selected
+    // (ac-5; SI-358 (5)); the editor reads the whole text back.
+    await card.dblclick();
+    const editor3 = page.getByRole("textbox", { name: "Card text" });
+    await expect(editor3).toHaveValue(longText);
+    await expect(card).toHaveAttribute("data-selected", "true");
+    await page.waitForTimeout(400);
+    await expect(card).toHaveAttribute("data-selected", "true");
+    await editor3.blur();
   });
 
   test("a drag is still a drag, not an expand", async ({ page }) => {
@@ -307,9 +368,10 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await expectAutosaved(page);
 
     // The card moved (a drag), and the drag's click tail did NOT open the
-    // expand dialog.
+    // expand dialog — nor select the card (spec/wall-canvas-v2 ac-2).
     await page.waitForTimeout(400);
     await expect(page.getByTestId("expand-dialog")).toHaveCount(0);
+    await expect(card).not.toHaveAttribute("data-selected", /./);
     const after = await card.boundingBox();
     expect(Math.abs(after!.x - before!.x) + Math.abs(after!.y - before!.y)).toBeGreaterThan(
       40,

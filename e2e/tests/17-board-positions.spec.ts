@@ -12,6 +12,14 @@ import { addSticky, expectAutosaved } from "./helpers";
 // acceptance contract did not cover dragging).
 
 async function dragBy(page: Page, el: Locator, dx: number, dy: number) {
+  // The v2 canvas is bounded to the viewport and scrolls inside itself
+  // (spec/wall-canvas-v2; 89-wall-canvas), and a new sticky is appended
+  // to the bottom of its lane, so on a long run it can land below the
+  // canvas's fold. Raw mouse events never auto-scroll the way locator
+  // actions do: a press at a clipped element's box lands on whatever is
+  // drawn there instead. Bring the element into view first, as grabPoint
+  // (helpers.ts) does.
+  await el.scrollIntoViewIfNeeded();
   const box = await el.boundingBox();
   expect(box).not.toBeNull();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);

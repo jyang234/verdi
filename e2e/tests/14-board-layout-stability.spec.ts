@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, expectAutosaved } from "./helpers";
+import { addSticky, expectAutosaved, toolbarAction } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6, exit
 // criterion 4: "layout stability (adding a new object never moves another
@@ -42,7 +42,9 @@ test.describe("V1-P6: layout stability at the UI layer", () => {
     // free slot.
     const stickyText = "constraint: decline notices localize per region";
     const sticky = await addSticky(page, stickyText);
-    await sticky.getByRole("button", { name: "Graduate" }).click();
+    // Graduate is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)).
+    await toolbarAction(page, sticky, "Graduate");
     await page.getByRole("menuitem", { name: "Constraint" }).click();
     // Wave 6 Task 2: confirm the graduation impact preview (F-08).
     await page.locator("#edge-confirm-ok").click();

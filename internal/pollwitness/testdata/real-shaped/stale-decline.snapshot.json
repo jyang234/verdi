@@ -1,0 +1,776 @@
+{
+  "TargetRef": "spec/stale-decline",
+  "TargetTitle": "Stale decline handling (fixture)",
+  "TargetClass": "feature",
+  "Branch": "feature/stale-decline-retry-audit",
+  "Head": "13fed27d7b363195d44dd8be89db2bff23bf0ae8",
+  "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+  "RequestDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "Areas": [
+    {
+      "ID": "shape-proposal",
+      "Label": "Define the work",
+      "State": "unproven"
+    },
+    {
+      "ID": "show-success",
+      "Label": "Define success",
+      "State": "proven"
+    },
+    {
+      "ID": "check-context",
+      "Label": "Check constraints",
+      "State": "unproven"
+    },
+    {
+      "ID": "request-review",
+      "Label": "Get approval",
+      "State": "violated-with-witness"
+    }
+  ],
+  "CurrentFocus": "shape-proposal",
+  "Attention": [
+    {
+      "ID": "shape/question/oq-1",
+      "Area": "shape-proposal",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Declared open question remains unresolved",
+      "Guidance": "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it.",
+      "Object": "oq-1",
+      "Witnesses": [
+        "oq-1"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/provenance",
+      "Area": "shape-proposal",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Design provenance posture for 5 declared objects",
+      "Guidance": "Make further spec edits through the wall's typed operations, so the design-provenance chain records each one; a gap or an unavailable context it already records stays disclosed.",
+      "Object": "",
+      "Witnesses": [
+        "ac-1",
+        "ac-2",
+        "ac-3",
+        "ac-4",
+        "design-provenance sidecar is absent",
+        "oq-1"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "review/blocker/obligation-countersign-unproven/close/attestation/countersign",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "governance",
+      "Summary": "obligation attestation/countersign is proven for transition close",
+      "Guidance": "obligation attestation/countersign is proven for transition close",
+      "Object": "",
+      "Witnesses": [
+        "obligation attestation/countersign for transition close (accepted-pending-build -\u003e closed) is not proven by this projection; obligation gates are not yet journey contributors"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/obligation-fold-green-unproven/close/behavioral/fold-green",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "mechanical",
+      "Summary": "obligation behavioral/fold-green is proven for transition close",
+      "Guidance": "obligation behavioral/fold-green is proven for transition close",
+      "Object": "",
+      "Witnesses": [
+        "obligation behavioral/fold-green for transition close (accepted-pending-build -\u003e closed) is not proven by this projection; obligation gates are not yet journey contributors"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/principal-resolution-unproven/close",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "governance",
+      "Summary": "a governance profile is adopted and the required principals resolve as authenticated",
+      "Guidance": "a governance profile is adopted and the required principals resolve as authenticated",
+      "Object": "",
+      "Witnesses": [
+        "no governance profile is adopted at the evaluated revision; authenticated principal resolution is unproven (governance-principal kernel present, no adopted profile artifact)"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "context/verdict",
+      "Area": "check-context",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Policy-conflict verdict",
+      "Guidance": "Run the context-conflict verb with this spec's context request, then resolve what it reports.",
+      "Object": "",
+      "Witnesses": [
+        "no context request supplied for this derivation"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "context",
+          "conflict",
+          "--request",
+          "\u003cpath\u003e"
+        ]
+      }
+    },
+    {
+      "ID": "review/action",
+      "Area": "request-review",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Lifecycle and safe-action posture can advance review",
+      "Guidance": "Establish the facts the witnesses name, so verdi journey can offer a safe review action.",
+      "Object": "",
+      "Witnesses": [
+        "conflict rows and exemption bounds were not evaluated by this projection: no policy-conflict report was supplied",
+        "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
+        "obligation attestation/countersign for transition close is unproven",
+        "obligation behavioral/fold-green for transition close is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "success/contributor/behavioral",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor behavioral",
+      "Guidance": "Produce the behavioral evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind behavioral is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/contributor/runtime",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor runtime",
+      "Guidance": "Produce the runtime evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind runtime is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/contributor/static",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor static",
+      "Guidance": "Produce the static evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind static is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/coverage/ac-4",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "No stub covers acceptance criterion ac-4",
+      "Guidance": "Plan the delivery: graduate a story sticky into a stub claiming ac-4.",
+      "Object": "ac-4",
+      "Witnesses": [
+        "declared stub coverage count for ac-4 is 0"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "review/role/close/attestation/countersign",
+      "Area": "request-review",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "1 principal role required for review",
+      "Guidance": "Before close, a principal entitled to give attestation/countersign must provide it; verdi journey shows the requirement.",
+      "Object": "",
+      "Witnesses": [
+        "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
+        "principal requirement close/attestation/countersign is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/outcome-floor/ac-3",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "judgmental",
+      "Summary": "land a passing outcome record for ac-3",
+      "Guidance": "land a passing outcome record for ac-3",
+      "Object": "ac-3",
+      "Witnesses": [
+        "AC ac-3: outcome floor unsatisfied; no passing outcome record and no attestation declared"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/outcome-floor/ac-4",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "judgmental",
+      "Summary": "land a passing outcome record for ac-4",
+      "Guidance": "land a passing outcome record for ac-4",
+      "Object": "ac-4",
+      "Witnesses": [
+        "AC ac-4: outcome floor unsatisfied; no passing outcome record and no attestation declared"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/stub-unreconciled/borrower-update-mobile",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "mechanical",
+      "Summary": "reconcile stub borrower-update-mobile: instantiate a story that claims it, or withdraw it with a note",
+      "Guidance": "reconcile stub borrower-update-mobile: instantiate a story that claims it, or withdraw it with a note",
+      "Object": "",
+      "Witnesses": [
+        "stub borrower-update-mobile: unreconciled (no realized-by coverage, no withdrawal note)"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    }
+  ],
+  "AllConcerns": [
+    {
+      "ID": "shape/board",
+      "Area": "shape-proposal",
+      "State": "proven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Scratch board enumeration posture",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [
+        "scratch board enumerated"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/mutation",
+      "Area": "shape-proposal",
+      "State": "proven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Draft mutation residue posture",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [
+        "no draft mutation residue"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/outcome",
+      "Area": "shape-proposal",
+      "State": "proven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Intended outcome is present",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/problem",
+      "Area": "shape-proposal",
+      "State": "proven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Problem statement is present",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/provenance",
+      "Area": "shape-proposal",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Design provenance posture for 5 declared objects",
+      "Guidance": "Make further spec edits through the wall's typed operations, so the design-provenance chain records each one; a gap or an unavailable context it already records stays disclosed.",
+      "Object": "",
+      "Witnesses": [
+        "ac-1",
+        "ac-2",
+        "ac-3",
+        "ac-4",
+        "design-provenance sidecar is absent",
+        "oq-1"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "shape/question/oq-1",
+      "Area": "shape-proposal",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Declared open question remains unresolved",
+      "Guidance": "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it.",
+      "Object": "oq-1",
+      "Witnesses": [
+        "oq-1"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/contributor/behavioral",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor behavioral",
+      "Guidance": "Produce the behavioral evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind behavioral is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/contributor/runtime",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor runtime",
+      "Guidance": "Produce the runtime evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind runtime is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/contributor/static",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Journey evidence contributor static",
+      "Guidance": "Produce the static evidence the acceptance criteria on the wall declare; this row stays unproven while no evidence source for it is wired to readiness.",
+      "Object": "",
+      "Witnesses": [
+        "evidence kind static is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/coverage/ac-4",
+      "Area": "show-success",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "No stub covers acceptance criterion ac-4",
+      "Guidance": "Plan the delivery: graduate a story sticky into a stub claiming ac-4.",
+      "Object": "ac-4",
+      "Witnesses": [
+        "declared stub coverage count for ac-4 is 0"
+      ],
+      "Destination": {
+        "BoardPath": "/b/feature%2Fstale-decline-retry-audit/board/spec/stale-decline",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "success/criteria",
+      "Area": "show-success",
+      "State": "proven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Acceptance criteria are declared",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [
+        "ac-1",
+        "ac-2",
+        "ac-3",
+        "ac-4"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "context/verdict",
+      "Area": "check-context",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Policy-conflict verdict",
+      "Guidance": "Run the context-conflict verb with this spec's context request, then resolve what it reports.",
+      "Object": "",
+      "Witnesses": [
+        "no context request supplied for this derivation"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "context",
+          "conflict",
+          "--request",
+          "\u003cpath\u003e"
+        ]
+      }
+    },
+    {
+      "ID": "review/action",
+      "Area": "request-review",
+      "State": "unproven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Lifecycle and safe-action posture can advance review",
+      "Guidance": "Establish the facts the witnesses name, so verdi journey can offer a safe review action.",
+      "Object": "",
+      "Witnesses": [
+        "conflict rows and exemption bounds were not evaluated by this projection: no policy-conflict report was supplied",
+        "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
+        "obligation attestation/countersign for transition close is unproven",
+        "obligation behavioral/fold-green for transition close is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/obligation-countersign-unproven/close/attestation/countersign",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "governance",
+      "Summary": "obligation attestation/countersign is proven for transition close",
+      "Guidance": "obligation attestation/countersign is proven for transition close",
+      "Object": "",
+      "Witnesses": [
+        "obligation attestation/countersign for transition close (accepted-pending-build -\u003e closed) is not proven by this projection; obligation gates are not yet journey contributors"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/obligation-fold-green-unproven/close/behavioral/fold-green",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "mechanical",
+      "Summary": "obligation behavioral/fold-green is proven for transition close",
+      "Guidance": "obligation behavioral/fold-green is proven for transition close",
+      "Object": "",
+      "Witnesses": [
+        "obligation behavioral/fold-green for transition close (accepted-pending-build -\u003e closed) is not proven by this projection; obligation gates are not yet journey contributors"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/outcome-floor/ac-3",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "judgmental",
+      "Summary": "land a passing outcome record for ac-3",
+      "Guidance": "land a passing outcome record for ac-3",
+      "Object": "ac-3",
+      "Witnesses": [
+        "AC ac-3: outcome floor unsatisfied; no passing outcome record and no attestation declared"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/outcome-floor/ac-4",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "judgmental",
+      "Summary": "land a passing outcome record for ac-4",
+      "Guidance": "land a passing outcome record for ac-4",
+      "Object": "ac-4",
+      "Witnesses": [
+        "AC ac-4: outcome floor unsatisfied; no passing outcome record and no attestation declared"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/principal-resolution-unproven/close",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "governance",
+      "Summary": "a governance profile is adopted and the required principals resolve as authenticated",
+      "Guidance": "a governance profile is adopted and the required principals resolve as authenticated",
+      "Object": "",
+      "Witnesses": [
+        "no governance profile is adopted at the evaluated revision; authenticated principal resolution is unproven (governance-principal kernel present, no adopted profile artifact)"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/blocker/stub-unreconciled/borrower-update-mobile",
+      "Area": "request-review",
+      "State": "violated-with-witness",
+      "Blocking": false,
+      "Timing": "eventual",
+      "WorkClass": "mechanical",
+      "Summary": "reconcile stub borrower-update-mobile: instantiate a story that claims it, or withdraw it with a note",
+      "Guidance": "reconcile stub borrower-update-mobile: instantiate a story that claims it, or withdraw it with a note",
+      "Object": "",
+      "Witnesses": [
+        "stub borrower-update-mobile: unreconciled (no realized-by coverage, no withdrawal note)"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    },
+    {
+      "ID": "review/eventual-derivation",
+      "Area": "request-review",
+      "State": "proven",
+      "Blocking": true,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "Eventual closure blockers derived from every declared source",
+      "Guidance": "",
+      "Object": "",
+      "Witnesses": [],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": []
+      }
+    },
+    {
+      "ID": "review/role/close/attestation/countersign",
+      "Area": "request-review",
+      "State": "unproven",
+      "Blocking": false,
+      "Timing": "current",
+      "WorkClass": "",
+      "Summary": "1 principal role required for review",
+      "Guidance": "Before close, a principal entitled to give attestation/countersign must provide it; verdi journey shows the requirement.",
+      "Object": "",
+      "Witnesses": [
+        "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
+        "principal requirement close/attestation/countersign is unproven"
+      ],
+      "Destination": {
+        "BoardPath": "",
+        "CLI": [
+          "verdi",
+          "journey",
+          "spec/stale-decline"
+        ]
+      }
+    }
+  ],
+  "StaleNotice": "Derived at HEAD 13fed27d7b363195d44dd8be89db2bff23bf0ae8 for this request."
+}

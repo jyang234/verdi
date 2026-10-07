@@ -127,7 +127,15 @@ func (g Gatherer) Gather(ctx context.Context, in GatherInput) (Snapshot, error) 
 	var defaultHead string
 	var defaultKnown bool
 	if db, ok := g.resolveDefaultBranch(ctx, in.Root); ok {
-		if dh, derr := g.git.RevParse(ctx, in.Root, db.Ref); derr == nil {
+		// A request that pinned its accepted HEAD (specstate.
+		// WithAcceptedHead) already holds the id `rev-parse --verify
+		// <Ref>` printed: the fact reuses it rather than resolving the ref
+		// again (Wave 6 §5.3; ledger SI-356).
+		dh, derr := db.Tip, error(nil)
+		if dh == "" {
+			dh, derr = g.git.RevParse(ctx, in.Root, db.Ref)
+		}
+		if derr == nil {
 			f.DefaultBranch = DefaultBranchFact{Known: true, Name: db.Name, Ref: db.Ref, Head: dh}
 			defaultHead, defaultKnown = dh, true
 		} else {

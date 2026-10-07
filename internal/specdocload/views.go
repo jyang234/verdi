@@ -162,7 +162,14 @@ const unresolvedHead = "unresolved"
 // deepening a clone in place (`git fetch --unshallow`) is a new key and
 // the stale "shallow history" views are never served again.
 type defaultHistory struct {
-	head     string // a full commit id, or unresolvedHead
+	head string // a full commit id, or unresolvedHead
+	// tree is the commit whose records the default-branch views read: the
+	// pinned accepted HEAD's peeled commit in a request that pinned one
+	// (specstate.WithAcceptedHead), the commit every other reader of the
+	// accepted tree in that projection lists, so the tree is enumerated
+	// once even when the default ref names an annotated tag (review
+	// P2R-3); head otherwise. Never part of the key: both name one tree.
+	tree     string
 	resolved bool
 	shallow  bool // shallow, or unknowable (treated as shallow: unproven)
 	// branch is the default branch the head was resolved from (zero when
@@ -192,8 +199,13 @@ func resolveDefaultHistory(ctx context.Context, root string) defaultHistory {
 	h := defaultHistory{head: unresolvedHead}
 	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
 		h.branch = branch
-		if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
-			h.head, h.resolved = sha, true
+		// A request that pinned its accepted HEAD (specstate.
+		// WithAcceptedHead) already holds the id `rev-parse --verify
+		// <Ref>` printed (Wave 6 §5.3; ledger SI-356).
+		if branch.Tip != "" {
+			h.head, h.tree, h.resolved = branch.Tip, branch.Commit, true
+		} else if sha, err := gitx.RevParse(ctx, root, branch.Ref); err == nil {
+			h.head, h.tree, h.resolved = sha, sha, true
 		}
 	}
 	if shallow, err := gitx.IsShallow(ctx, root); err != nil || shallow {
@@ -310,7 +322,7 @@ func BoardIndexes(ctx context.Context, root string) (BoardViews, error) {
 		}
 		return BoardViews{Tree: tree}, nil
 	}
-	def, err := commitViews(ctx, root, h.head, h.key())
+	def, err := commitViews(ctx, root, h.tree, h.key())
 	if err != nil {
 		return BoardViews{}, err
 	}

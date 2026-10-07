@@ -126,8 +126,12 @@ func TestBoardSpec_WrongBranchDraft_RefusesDomainSurface(t *testing.T) {
 	if strings.Contains(html, `id="asd-forms"`) {
 		t.Error("the wrong-branch wall still renders the typed-operation forms panel")
 	}
-	if strings.Contains(html, `data-retype`) || strings.Contains(html, `data-delete="edge"`) {
+	if strings.Contains(html, `data-retype`) || strings.Contains(html, `data-delete="edge"`) ||
+		strings.Contains(html, `data-can-retype`) || strings.Contains(html, `data-can-delete="edge"`) {
 		t.Error("the wrong-branch wall still renders spec-edge removal/retype affordances")
+	}
+	if strings.Contains(html, `wall-slot`) {
+		t.Error("the wrong-branch wall still renders add-in-place slots (a typed write it refuses)")
 	}
 
 	// The namesake-branch fixture keeps the full surface (control).

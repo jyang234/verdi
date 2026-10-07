@@ -122,11 +122,13 @@ const (
 	// RefCardHeight is the squat reference-card footprint
 	// (style.css .refcard: 12.5rem × 4.5rem).
 	RefCardHeight = 72
-	// StubCardHeight is the stub card's footprint (style.css .stubcard:
-	// 12.5rem × 7.5rem) — squatter than an object card (a stub is a
-	// typeset claim about a future story, not this spec's own object),
-	// taller than a reference (it carries its attribution chips).
-	StubCardHeight = 120
+	// StubCardHeight is the stub card's footprint height: the object
+	// card's own (spec/wall-canvas-v2 ac-1, SI-350 (3) — stub cards take
+	// the design's card footprint, the same as object cards). The
+	// .stubcard rule in style.css is brought to it by the wall-canvas
+	// presentation lane; until then the rendered stub sits inside the
+	// reserved footprint, never over a neighbour.
+	StubCardHeight = CardHeight
 
 	// ZoneOriginY is the first row's y origin — exported alongside the
 	// column bands so the sticky landing policy can start an empty lane

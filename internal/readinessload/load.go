@@ -11,9 +11,11 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -104,7 +106,7 @@ func (l Loader) Load(ctx context.Context, ref string) (readinesspilot.Snapshot, 
 type loader struct {
 	readFile            func(string) ([]byte, error)
 	gatherFacts         func(context.Context, *store.Config, string) (journey.Facts, error)
-	projectJourney      func(context.Context, *store.Config, string, journey.Extras) (journey.Record, error)
+	projectJourney      func(context.Context, *store.Config, journey.Facts, journey.Extras) (journey.Record, error)
 	newConflictProvider func(context.Context, string, policyconflict.Request, JudgeMode, ActorsResolver) (policyconflict.VerdictProvider, error)
 	readAnnotations     func(string) ([]*artifact.Annotation, error)
 }
@@ -191,6 +193,21 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: opening store: %w", err)
 	}
+
+	// Every git read below — this load's facts, its journey, its
+	// implementers' lifecycle — shares one read session (ledger SI-352,
+	// lane P1 (c)): object reads go through one batch process, and an
+	// identical ref-read argv runs once per load and is replayed after
+	// that. The load resolves the accepted HEAD once, to a commit id every
+	// consumer reads at — the repository facts, specstate, the journey
+	// (ledger SI-356; Wave 6 §5.3) — so no read names the accepted ref
+	// again. A caller that composes this load into its own projection
+	// (the Document page's poll, the wall's refresh) opened both already,
+	// and the load joins them. Both end with the request; nothing they
+	// read outlives it (co-2).
+	ctx, release := gitx.WithReadSession(ctx, root)
+	defer release()
+	ctx = specstate.WithAcceptedHead(ctx, root)
 
 	projector := journey.NewProjector()
 	gatherFacts := l.gatherFacts
@@ -385,11 +402,14 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	if conflictUnavailable == "" {
 		conflictPtr = &report
 	}
+	// The journey is projected over the facts gathered above, never a
+	// second gather (ledger SI-352, lane P1 (a)): one load, one set of
+	// repository and lifecycle facts, and no cross-request reuse (co-2).
 	projectJourney := l.projectJourney
 	if projectJourney == nil {
-		projectJourney = projector.ProjectWith
+		projectJourney = projector.ProjectFacts
 	}
-	record, err := projectJourney(ctx, cfg, ref, journey.Extras{Conflict: conflictPtr})
+	record, err := projectJourney(ctx, cfg, facts, journey.Extras{Conflict: conflictPtr})
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: projecting journey: %w", err)
 	}

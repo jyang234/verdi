@@ -44,6 +44,16 @@ func (p Projector) ProjectWith(ctx context.Context, cfg *store.Config, arg strin
 	if err != nil {
 		return Record{}, err
 	}
+	return p.ProjectFacts(ctx, cfg, facts, extras)
+}
+
+// ProjectFacts derives the complete journey Record over facts this
+// Projector's GatherFacts already gathered: ProjectWith without its
+// gather. A caller that needs the facts itself before projecting (the
+// readiness loader, ledger SI-352) gathers them once and passes them here
+// within the same request, instead of the projection gathering them a
+// second time; the facts never outlive that request.
+func (p Projector) ProjectFacts(ctx context.Context, cfg *store.Config, facts Facts, extras Extras) (Record, error) {
 	profile, profileErr := p.profiles.Load(ctx, cfg.Root)
 	profileAdopted := profileErr == nil
 	if profileErr != nil && !errors.Is(profileErr, policyauthority.ErrNotAdopted) {

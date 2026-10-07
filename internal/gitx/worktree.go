@@ -41,8 +41,15 @@ var ErrBranchCheckedOut = errors.New("gitx: branch is already checked out in thi
 // untracked, unignored work is clean. Ignored files stay out of scope
 // (--untracked-files=all still respects .gitignore), which is exactly
 // what "untracked-and-unignored" above promises.
+//
+// --no-optional-locks keeps the query a read (BL-105; ledger SI-343 (3),
+// SI-352): a plain `git status` refreshes a stale index and writes it back,
+// so every poll that asks whether the tree is dirty would rewrite the
+// served checkout's .git/index, race the person's own git add or commit for
+// index.lock, and bump the index stamp a cache guard reads. The answer is
+// the same either way; only the write goes.
 func StatusDirty(ctx context.Context, dir string) (bool, error) {
-	out, err := run(ctx, dir, "status", "--porcelain", "--untracked-files=all")
+	out, err := run(ctx, dir, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return false, err
 	}

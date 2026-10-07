@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // memoGit is a content-addressed fake gitReader for the corpus-memo tests.
@@ -133,6 +135,17 @@ func (g *memoGit) LsTree(ctx context.Context, dir, rev, prefix string) ([]string
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// LsTreeEntries is not modeled: the corpus scan then takes its two plain
+// listings, which LsTree answers and counts.
+func (g *memoGit) LsTreeEntries(ctx context.Context, dir, rev string) ([]gitx.TreeEntry, error) {
+	return nil, errors.New("memoGit: LsTreeEntries is not modeled")
+}
+
+// RepoPrefix is not modeled either, with the same effect.
+func (g *memoGit) RepoPrefix(ctx context.Context, dir string) (string, error) {
+	return "", errors.New("memoGit: RepoPrefix is not modeled")
 }
 
 func (g *memoGit) RevParse(ctx context.Context, dir, rev string) (string, error) {

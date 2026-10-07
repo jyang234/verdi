@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
-import { addSticky, drawYarn, expectAutosaved } from "./helpers";
+import { addSticky, drawYarn, expectAutosaved, toolbarAction } from "./helpers";
 
 // The scoping canvas (spec/scoping-canvas ac-2/ac-3/ac-4/ac-5, dc-1/
 // dc-5/dc-6): story and spike proto-stickies are the stub authoring
@@ -42,9 +42,11 @@ async function drawAttribution(
   return stickyId!;
 }
 
-// Graduate a proto-sticky through the register ceremony's confirm.
+// Graduate a proto-sticky through the register ceremony's confirm. The
+// Graduate is the contextual toolbar's action for the selected sticky
+// (spec/wall-canvas-v2 ac-3; SI-350 (5)); the ceremony is the same.
 async function graduateProto(page: Page, sticky: import("@playwright/test").Locator) {
-  await sticky.locator('[data-graduate="stub"]').click();
+  await toolbarAction(page, sticky, "Graduate");
   await expect(confirmDialog(page)).toBeVisible();
   // Wave 6 Task 2: the confirm IS the graduation impact preview (F-08) —
   // the exact resulting slug, bindings, and downstream refs/paths, spoken
@@ -165,7 +167,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
   }) => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const sticky = await addSticky(page, "orphan claim", "story");
-    await sticky.locator('[data-graduate="stub"]').click();
+    await toolbarAction(page, sticky, "Graduate");
 
     // Wave 6 Task 2: the refusal now comes BEFORE any durable act — the
     // graduation plan is validated against the wall's own facts at the
@@ -181,8 +183,9 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     const stickyId = await sticky.getAttribute("data-id");
     await expect(page.getByTestId(`sticky-${stickyId}`)).toBeVisible();
 
-    // Tidy the wall for the next journey (scratch dies without ceremony).
-    await sticky.locator('[data-delete="sticky"]').click();
+    // Tidy the wall for the next journey (scratch dies without ceremony,
+    // through the toolbar's Delete for the selected sticky).
+    await toolbarAction(page, sticky, "Delete");
     await expectAutosaved(page);
     await expect(page.getByTestId(`sticky-${stickyId}`)).toHaveCount(0);
   });
@@ -265,12 +268,9 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
       ).toHaveCount(0);
     }
 
-    // Tidy the wall.
+    // Tidy the wall (the toolbar's Delete for each selected sticky).
     for (const id of [storyId, spikeId]) {
-      await page
-        .getByTestId(`sticky-${id}`)
-        .locator('[data-delete="sticky"]')
-        .click();
+      await toolbarAction(page, page.getByTestId(`sticky-${id}`), "Delete");
       await expectAutosaved(page);
     }
   });

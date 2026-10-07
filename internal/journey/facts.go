@@ -186,8 +186,23 @@ func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name st
 
 	var unavailable []string
 
+	// Both production adapters start from the same implementing-story
+	// discovery; when both are in place it runs once for this gather and
+	// feeds both (ledger SI-352, lane P1 (c)), instead of resolving every
+	// implementer once per source. Any other StubReconciler or
+	// FeatureFolder runs its own, as before.
+	reconcile := func() (evidence.StubReconciliation, error) { return p.stubs.Reconcile(ctx, root, commit, spec, mdl) }
+	foldFeature := func() (evidence.FeatureResult, error) { return p.folder.Fold(ctx, root, commit, spec, mdl) }
+	if r, ok := p.stubs.(discoveredReconciler); ok {
+		if f, ok := p.folder.(discoveredFolder); ok {
+			found := discoverImplementers(ctx, root, commit, spec)
+			reconcile = func() (evidence.StubReconciliation, error) { return r.reconcileDiscovered(spec, mdl, found) }
+			foldFeature = func() (evidence.FeatureResult, error) { return f.foldDiscovered(ctx, root, commit, spec, mdl, found) }
+		}
+	}
+
 	var stubsOut *evidence.StubReconciliation
-	stubs, err := p.stubs.Reconcile(ctx, root, commit, spec, mdl)
+	stubs, err := reconcile()
 	if err != nil {
 		unavailable = append(unavailable, fmt.Sprintf("stub reconciliation for %s could not be computed: %v", name, err))
 	} else {
@@ -195,7 +210,7 @@ func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name st
 	}
 
 	var foldOut *evidence.FeatureResult
-	fold, err := p.folder.Fold(ctx, root, commit, spec, mdl)
+	fold, err := foldFeature()
 	if err != nil {
 		unavailable = append(unavailable, fmt.Sprintf("the outcome-floor fold for %s could not be computed: %v", name, err))
 	} else {
@@ -336,7 +351,7 @@ func (p Projector) resolveDirectSpecRef(ctx context.Context, root, name string) 
 	}
 	for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
 		zoneRelPath := store.SpecRelPath(zone, name)
-		shown, serr := p.git.Show(ctx, root, branch.Ref, zoneRelPath)
+		shown, serr := p.git.Show(ctx, root, branch.Rev(), zoneRelPath)
 		if serr == nil {
 			return zoneRelPath, shown, false, nil
 		}

@@ -23,7 +23,8 @@ import (
 // the destination path's presence are each their own fact a caller must
 // see.
 func WorktreeChangedPaths(ctx context.Context, dir string) ([]string, error) {
-	out, err := run(ctx, dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	// --no-optional-locks: a read never rewrites the index (BL-105).
+	out, err := run(ctx, dir, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, fmt.Errorf("gitx: WorktreeChangedPaths(%s): %w", dir, err)
 	}

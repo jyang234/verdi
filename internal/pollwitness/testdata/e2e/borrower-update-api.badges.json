@@ -1,0 +1,45 @@
+{
+  "ByObject": {
+    "ac-1": [
+      {
+        "source": "fold:empty-slot",
+        "label": "2 empty slots",
+        "target": "ac-1",
+        "inputs": [
+          {
+            "name": "derived-tree",
+            "path": ".verdi/data/derived/spec--borrower-update-api",
+            "revision": "absent"
+          },
+          {
+            "name": "spec",
+            "path": ".verdi/specs/active/borrower-update-api/spec.md",
+            "revision": "sha256:a67faf96bde056636fd992e21d82eb55eddd97a3bdca90c85943f1ac291d2613"
+          }
+        ],
+        "records": [
+          "behavioral: no current record",
+          "static: no current record"
+        ]
+      }
+    ]
+  },
+  "CaseFile": null,
+  "Disclosures": [
+    "disclosed-unproven [gate:pending-supersession]: no forge is configured to enumerate open MRs"
+  ],
+  "EvidenceSlots": {
+    "ac-1": [
+      {
+        "Kind": "static",
+        "Empty": true,
+        "Records": 0
+      },
+      {
+        "Kind": "behavioral",
+        "Empty": true,
+        "Records": 0
+      }
+    ]
+  }
+}

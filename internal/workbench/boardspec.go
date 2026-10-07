@@ -273,6 +273,12 @@ type boardGitState struct {
 	// correction round 1, finding 1 — closure reopen). Unexported: a
 	// server-side authority fact, never part of the wire model.
 	defaultRef string
+
+	// acceptedTip is the id defaultRef resolved to when the request pinned
+	// its accepted HEAD (specstate.WithAcceptedHead), so the posture's
+	// accepted HEAD is that one resolution, not another (ledger SI-356);
+	// empty otherwise. Unexported, like defaultRef.
+	acceptedTip string
 }
 
 // acceptedRef is the rev accepted-head facts resolve against — the
@@ -541,7 +547,12 @@ func effectiveMode(underReview bool, st specstate.Result, git *boardGitState) bo
 // loadASD is the wall page projection: loadASDView plus the wall's
 // uncommitted-changes summary (spec/wall-changes ac-1). The page, the
 // snapshot, and the mutation response's fresh snapshot all come from
-// exactly this one composed projection, so their revision tokens agree.
+// exactly this one composed projection, so their revision tokens agree —
+// except that the page and the snapshot also compose the readiness marks
+// (composeWall), and on a wall that loads readiness their token covers it
+// where a mutation's does not, so the poll after a mutation there answers
+// once with the composed facts. A wall whose marks are fixed for the
+// instance carries them here, so all three agree there (SI-364 (3)).
 // The summary is computed fresh per request (co-1) from git and the
 // working tree's own spec.md bytes loadBoard already read — never a second
 // file read, never persisted.
@@ -560,7 +571,8 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 
 // loadASDView is the ASD projection without the changes summary: one
 // loadBoard plus the ASD rendered facts (posture header, shell,
-// capabilities view, client mutation facts), and the working tree's
+// capabilities view, client mutation facts, and the readiness marks fixed
+// for this server instance, if any — SI-364 (3)), and the working tree's
 // spec.md bytes loadBoard read. The fragment, which carries no git state
 // of its own, renders from this and never pays for the summary.
 func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, []byte, error) {
@@ -573,6 +585,7 @@ func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardP
 		return nil, nil, nil, nil, err
 	}
 	asd.reviewNotice = reviewNotice
+	asd.Marks = s.instanceMarks()
 	return proj, git, asd, extras.raw, nil
 }
 
@@ -710,10 +723,12 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	}
 	def := ""
 	defRef := ""
+	defTip := ""
 	notice := ""
 	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
 		def = resolved.Name
 		defRef = resolved.Ref
+		defTip = resolved.Tip
 	} else {
 		notice = unresolvedDefaultBranchNotice
 	}
@@ -725,20 +740,27 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	if err != nil {
 		return nil, "", err
 	}
-	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef}, notice, nil
+	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef, acceptedTip: defTip}, notice, nil
 }
 
 // ErrBoardNotFound distinguishes 404 from operational failures.
 var ErrBoardNotFound = fmt.Errorf("workbench: no such spec board")
 
-// boardSpecPageHandler answers GET /board/spec/{name}: the full page.
+// boardSpecPageHandler answers GET /board/spec/{name}: the full page. It
+// composes the wall as its snapshot route does (SI-360 (2)) — the
+// readiness marks as render data, in one read session at one accepted
+// HEAD — so the revision it embeds is the token the client's first
+// conditional refresh sends, which the poll answers 304 while nothing
+// moved.
 func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, asd, err := s.loadASD(r.Context(), r.PathValue("name"))
+		ctx, release := s.openProjection(r.Context())
+		defer release()
+		wall, err := s.composeWall(ctx, r.PathValue("name"), true)
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -747,8 +769,8 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
-		proj.DocumentHref = r.URL.EscapedPath() + "/document"
-		out, err := renderBoardSpecPage(r.Context(), proj, git, asd)
+		wall.proj.DocumentHref = r.URL.EscapedPath() + "/document"
+		out, err := renderBoardSpecPage(ctx, wall.proj, wall.git, wall.asd)
 		if err != nil {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
@@ -784,8 +806,10 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 
 // boardSpecSnapshotHandler answers GET /board/spec/{name}/snapshot: the
 // conditional projection route (SI-165, SI-167). The response is one
-// complete rendered projection plus its machine facts; the ETag carries
-// the deterministic revision token and an unchanged If-None-Match answers
+// complete rendered projection plus its machine facts — the wall's
+// composed refresh, readiness marks included (SI-360 (2)); the ETag
+// carries the deterministic revision token, which is also the body's
+// revision the client sends next, and an unchanged If-None-Match answers
 // 304 with no body, so a poll can leave the page — and its unsaved state
 // — completely untouched. GET only; no polling result ever writes.
 func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
@@ -794,7 +818,8 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		snap, err := s.loadSnapshot(r.Context(), r.PathValue("name"))
+		refresh, err := s.projectWallRefresh(r.Context(), r.PathValue("name"), true)
+		snap := refresh.snap
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return

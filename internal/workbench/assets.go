@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -108,6 +108,48 @@ func readinessJSHandler() http.HandlerFunc {
 // (spec/workbench-redesign co-1; TestTopBarAsset_ServedWithinBudget).
 func topBarJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/topbar.js")
+}
+
+// wallSelectJSHandler serves the wall's selection script
+// (spec/wall-canvas-v2 ac-1, ac-2, co-2): selecting a card or a thread,
+// the emphasis and the recede, the yarn overlay above the cards, the
+// status pill, and arrival on `#obj-<id>` — a new asset for the new
+// behaviour (co-1: boardspec.js does not grow), dependency-free, and
+// structurally capped at 64 KiB uncompressed
+// (TestWallSelectAsset_ServedWithinBudget).
+func wallSelectJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/wallselect.js")
+}
+
+// wallToolbarJSHandler serves the wall's contextual toolbar script
+// (spec/wall-canvas-v2 ac-3, ac-4, ac-5, co-2): the toolbar built on the
+// selection, drag-to-thread's target highlight and picker placement, the
+// add-in-place slots, and the card editor's Enter and Escape — a new
+// asset for the new behaviour (co-1: boardspec.js does not grow),
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (TestWallToolbarAsset_ServedWithinBudget).
+func wallToolbarJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/walltoolbar.js")
+}
+
+// wallKeysJSHandler serves the wall's keyboard script (spec/wall-canvas-v2
+// ac-6): the arrows that move the selection and reveal the card, Enter on
+// a focused card, Delete through the existing confirmation and the stub
+// refusal, and the Escape that clears the selection last — a new asset for
+// the new behaviour (co-1: boardspec.js does not grow), dependency-free,
+// and structurally capped at 64 KiB uncompressed
+// (TestWallKeysAssets_ServedWithinBudget).
+func wallKeysJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/wallkeys.js")
+}
+
+// wallMinimapJSHandler serves the wall's minimap script (spec/wall-canvas-v2
+// ac-6): every card and the canvas's viewport drawn into the status row's
+// host, and the viewport moved by dragging the frame — a new asset for the
+// new behaviour (co-1), dependency-free, and structurally capped at 64 KiB
+// uncompressed (TestWallKeysAssets_ServedWithinBudget).
+func wallMinimapJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/wallminimap.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {

@@ -223,10 +223,38 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // moved, which R-RR2-7 forbids. Re-pinned once by spec/chrome-and-tokens-v2
 // (lane F1b): the posture row left renderBoardRegion for the top bar's
 // posture group — the region's one change since BASE, on every wall alike
-// — and every other byte of the story render is as it was.
+// — and every other byte of the story render is as it was. Re-pinned a
+// second time by spec/wall-canvas-v2 (lane F2a, SI-358 (4)): the canvas is
+// wrapped in the wall frame, `<div class="wall-frame" data-testid=
+// "wall-frame">` before `<div id="board-canvas"` and `<div class=
+// "wall-status-row" data-testid="wall-status-row"></div></div>` after its
+// close — the status pill's reserved row, on every wall alike — and every
+// other byte of the story render is as it was (the region diff is those
+// two insertions and nothing else). Re-pinned a third time by
+// spec/wall-canvas-v2 (lane F2b, SI-350 (5)): every yarn chip is the
+// button that selects its thread (`role="button" tabindex="0"` after its
+// class) and names its toolbar actions as data-can-* attributes instead
+// of carrying inner buttons, every sticky names its own the same way, and
+// the status row hosts the toolbar
+// (`<div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar"
+// aria-label="Wall actions"></div>`) — on every wall alike; these
+// read-only story walls render no add slot (the domain is not live) and
+// every other byte of the story render is as it was. Re-pinned a fourth
+// time by spec/wall-canvas-v2 (lane F2b's fix pass, Wave 6 §5.1): every
+// yarn chip carries its stable key, ` data-testid="yarn-chip-<layer>-
+// <type>-<from>-<to>[-<annotation id>]"`, after its identity attributes
+// and before its data-can-* ones, so a region swap restores the focus to
+// the chip that had it — on every wall alike (one chip on each of these
+// walls); the story renders with the keys stripped are byte-identical to
+// the third pin's, so every other byte of the story render is as it was.
+// Re-pinned a fifth time by spec/wall-canvas-v2 (lane F2c, ac-6, SI-358
+// (4)): the status row hosts the minimap after the toolbar (`<div class=
+// "wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div>`
+// before the row's close) — on every wall alike, the one insertion since
+// the fourth pin — and every other byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "049270cb26925ef88ba9aeb8755edaf3056945079e569ac74f47fb0c7f2768c8"
-	slotStoryWallDigestBase = "56914144e7f1ef6cb15dc3a827fc62ee90b1f5e7b5ee22ea5741738257b5e0e4"
+	storyWallDigestBase     = "b12483cbea13f583d616c4fbb2a5205425d480fdabea37c7d89366aa2f24292e"
+	slotStoryWallDigestBase = "55a1f662f7e91d98acf453f87fb0c98c2cadb929d815ecf1e02761b53c587657"
 )
 
 func renderDigest(body string) string {

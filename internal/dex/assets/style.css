@@ -4946,3 +4946,985 @@ body:not(.board-page) > footer.site-foot,
   .document-contents-list a { gap: 0.35rem; }
 }
 /* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == The wall canvas's cards and selection (spec/wall-canvas-v2 ac-1, ac-2,
+   co-2; ledger SI-350 (3), (4), (8), (14), SI-340 (11); lane F2a) ========
+   The cards at the redesign handoff's footprint: object and stub cards
+   200 × 140 (boardlayout's CardHeight and StubCardHeight — the shared
+   .stubcard rule above still says 7.5rem = 120 px, which this block brings
+   to 140; the docs-site golden pins that rule's bytes, so the note lives
+   here), the reference card 200 × 72, the sticky 200 × at least 112, none
+   rotated. The stub's slug moves inside the card as its first line (the
+   same `.stub-tab` span, restyled) and the stub's pin anchors its coverage
+   yarn; the sticky gains its footer line. Then the selection model: the
+   selected card and the cards its threads reach are emphasized and
+   everything else recedes; the selection's threads are traced again in an
+   overlay layer above the cards; and the status pill names the selection.
+   Served by the workbench and stripped from the docs site's copy
+   (SI-322): every rule here overrides a shared rule above rather than
+   editing it; tokens only (SI-326) — the stub's pushpin keeps its gradient
+   highlights, shadows keep their rgba. The three card lines the handoff
+   draws at 80 % ink (the stub's slug and meta line, the sticky's footer)
+   are at full ink here: the reduced-opacity label failed WCAG AA on the
+   note and kraft papers before (the .sticky-type precedent), and the size
+   and tracking already set them apart. After the lane's review (SI-358):
+   the recede desaturates and flattens a card instead of fading it, so its
+   text keeps AA contrast; a focused card never recedes; the rings hold
+   under hover; a clamped card's ⋯ mark is a button that reads its full
+   text; and the status pill sits in the wall frame's row below the
+   canvas, in normal flow, where it covers nothing. */
+
+/* ---- the canvas in the stacked layout (Wave 6 §5.2: usable at 320 px
+   and at 200 % zoom) — below 60rem the shared rules stack the layout into
+   a column but leave its align-items at flex-start, so the v2 canvas,
+   whose children are all absolutely positioned, shrank to its own border;
+   it takes the column's full width (the legacy v1 board keeps its own) ---- */
+@media (max-width: 60rem) {
+  .board-layout > .wall-frame { align-self: stretch; }
+}
+
+/* ---- the wall frame: the canvas, then the status pill's reserved row
+   below it in normal flow (SI-358 (4)). Before the asset measures, the
+   canvas keeps its content-sized height; measured, it is bounded to what
+   the viewport alone leaves below the row and a margin (never less than
+   one card), scrolling inside, so the frame fits the viewport wherever it
+   sits on the page, the row is in view whenever the frame fills the
+   viewport, and the pill covers nothing at any width or zoom. The bound
+   (the measured mark and --wall-canvas-height) is hosted on
+   #boardv2-region, which a swap never replaces, so a swapped-in canvas
+   is bounded the moment it is inserted and the swap's restored scroll
+   offsets are not clamped away (Wave 6 §5.1) ---- */
+.board-layout > .wall-frame {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wall-frame > .boardv2-canvas { flex: none; }
+[data-wall-measured] .wall-frame > .boardv2-canvas {
+  min-height: 0 !important;
+  height: var(--wall-canvas-height);
+}
+/* a chip's label is never selectable text: a press on a chip that buries
+   a pin (boardspec.js's provisional yarn gesture) must not start a text
+   selection, whose autoscroll would move the now vertically scrolling
+   canvas under the hand */
+.boardv2-canvas .yarn-chip {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* the row hosts the contextual toolbar at its left (wall-canvas-v2 ac-3,
+   lane F2b: the toolbar retired the pin toolbox's fixed tab, so the row
+   no longer keeps a band free for it) and the status pill at its right;
+   the two wrap onto separate lines where the frame is too narrow for
+   both, the pill on the lower one. Where the asset finds the frame too
+   narrow for the pill to read beside the toolbar ("stacked") the pill
+   takes the whole line. Where the viewport is too short for even the
+   floor canvas and a wrapped row to fit together (a short window at
+   200 % zoom), the row leads the canvas instead: the toolbar and the
+   pill stay in view with the canvas's top */
+.wall-status-row {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 0 0;
+}
+/* the pill leads (the handoff's bottom-left), the toolbar follows at the
+   right; stacked, the pill takes the first line whole and the toolbar
+   the lines below — so the pill never reaches the viewport's lower
+   right, where the authoring wall's trash target rises during a drag */
+.wall-status-row .wall-status { order: 1; }
+.wall-status-row .wall-toolbar { order: 2; }
+[data-wall-row="stacked"] .wall-status-row .wall-status { flex: 1 1 100%; }
+[data-wall-row="leading"] .wall-status-row {
+  order: -1;
+  padding: 4px 0 8px;
+}
+
+/* ---- every paper's shadow is composed from two custom properties: the
+   ring the selection sets and the resting or lifted shadow. A hover rule,
+   whatever its specificity, changes only the shadow, so the selected and
+   linked rings hold while the pointer is on the card (SI-358 (5)) ---- */
+.boardv2-canvas .objcard,
+.boardv2-canvas .stubcard,
+.boardv2-canvas .refcard,
+.boardv2-canvas .sticky {
+  --wall-ring: 0 0 0 0 transparent;
+  --wall-shadow: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
+  box-shadow: var(--wall-ring), var(--wall-shadow);
+  transition: opacity 0.18s, box-shadow 0.18s, transform 0.18s, filter 0.18s;
+}
+.boardv2-canvas .sticky { --wall-shadow: 0 3px 7px rgba(0, 0, 0, 0.18); }
+.mode-authoring .boardv2-canvas .objcard:hover,
+.mode-authoring .boardv2-canvas .stubcard:hover,
+.mode-authoring .boardv2-canvas .refcard:hover,
+.mode-authoring .boardv2-canvas .sticky:hover {
+  --wall-shadow: var(--shadow-lift);
+  box-shadow: var(--wall-ring), var(--wall-shadow);
+}
+
+/* ---- object cards: the handoff's footprint and header lockup ---- */
+.boardv2-canvas .objcard {
+  width: 200px;
+  height: 140px;
+  padding: 11px 14px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+/* a superseded object's card keeps growing for its §6 lines (SI-278) */
+.boardv2-canvas .objcard:has(.objsupersede-lines) { height: auto; min-height: 140px; }
+.boardv2-canvas .objcard .card-kind,
+.boardv2-canvas .refcard .card-kind,
+.boardv2-canvas .stubcard .card-kind {
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.boardv2-canvas .objcard .card-text { margin: 6px 0 0; }
+/* the open question drops its ? watermark */
+.boardv2-canvas .objcard--open-question::after { content: none; }
+/* a card's clamped text no longer expands on click (a click selects it;
+   a double click edits), so it keeps the card's own cursor; its ⋯ mark is
+   the button that reads the full text (SI-358 (1)), in every mode, so it
+   takes the pointer the shared mark refused and dresses as the quiet
+   control it is */
+.boardv2-canvas .objcard .is-clamped,
+.boardv2-canvas .stubcard .is-clamped,
+.boardv2-canvas .sticky .is-clamped { cursor: inherit; }
+.boardv2-canvas button.clamp-more {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.boardv2-canvas button.clamp-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+/* the sticky's footer line leaves the mark its corner */
+.boardv2-canvas .sticky .sticky-foot { padding-right: 18px; }
+
+/* ---- stub cards: the footprint, the slug inside, the pin, the meta line ---- */
+.boardv2-canvas .stubcard {
+  width: 200px;
+  height: 140px;
+  padding: 11px 14px 12px;
+  gap: 0;
+  border-radius: 6px;
+  color: var(--stub-ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+/* the slug: no longer a protruding tab — the card's first line, in the
+   machine's mono, inside the paper */
+.boardv2-canvas .stub-tab {
+  position: static;
+  display: block;
+  max-width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+}
+.boardv2-canvas .stubcard .card-kind-id { font-weight: 700; }
+.boardv2-canvas .stub-title {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.3;
+  color: inherit;
+}
+.boardv2-canvas .stub-meta {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the stub's pushpin: seated on the top edge like a card's handle, but an
+   anchor only — the coverage yarn ties to it and no thread starts here
+   (dc-3; SI-350 (8)) — so it takes no pointer and offers no cursor. Its
+   centre sits exactly on the card's top edge, where layoutYarn ties the
+   thread: the handoff's -8px is against the padding box, one border
+   inside that edge */
+.boardv2-canvas .stub-pushpin {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%, #dd9482, var(--yarn) 55%, #6f2418 100%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* ---- the readiness mark (spec/wall-canvas-v2 ac-1, dc-1; ledger SI-350
+   (1)–(2), SI-360 (4), SI-362 (2), SI-365 (5); lane M-ui) ----
+   A card a Focus next concern names wears the handoff's mark: a 10 px
+   pending dot ringed in the card's paper at its top-right corner, and a
+   chip whose word ("no stub" / "unresolved") carries the meaning — never
+   the colour alone (Wave 6 §5.2). The chip sits on the card's head line,
+   after the kind lockup (SI-365 (5)(c), the fallback (2) allows): the
+   foot register cannot hold it beside the coverage chip and keep one
+   prose line on the densest real cards. dc-1 keeps the coverage chip and
+   its full text. The chip takes the pointer, so its title (the concerns
+   naming the card) is a hover away. The dot and the chip are the
+   server's markup in the region, so each composed refresh re-draws them;
+   a mutation response's region carries none (SI-362 (2)). Tokens only
+   (SI-326): the chip's tint is mixed toward the card's paper, which
+   keeps --st-pending at AA on it in both schemes. */
+.boardv2-canvas .readiness-dot {
+  position: absolute;
+  top: 8px;
+  right: -5px;
+  z-index: 3;
+  box-sizing: content-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--card);
+  border-radius: 50%;
+  background: var(--st-pending);
+  pointer-events: none;
+}
+.boardv2-canvas .readiness-mark {
+  display: flex;
+  min-width: 0;
+}
+.boardv2-canvas .readiness-chip {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 0.06rem 0.45rem;
+  border: 1px solid var(--st-pending);
+  border-radius: 999px;
+  color: var(--st-pending);
+  background: color-mix(in srgb, var(--st-pending-tint) 60%, var(--card));
+}
+
+/* ---- the object card's register (spec/wall-canvas-v2 ac-1, dc-1;
+   ledger SI-365 (1), (5)) ----
+   The card is a grid of three tracks: the head line, the prose, and the
+   foot register — obligation rows, then the coverage or claims chip, then
+   the badge row — in flow, so no receipt can overlap another or the
+   prose. The prose takes the middle track in whole lines (round() on the
+   track's height; --card-line is the card's own 14 px × 1.4), so a denser
+   card loses prose lines and a card denser than any today may show none
+   (a disclosed residual, SI-365 (5)(d)). The receipts are tight — 1.15
+   line-height, 1–2 px gaps — because the footprint holds three obligation
+   rows, a chip and a badge row above one prose line only so. The head
+   line's margin is dropped: grid margins do not collapse, and the prose's
+   own 6 px keeps the gap. The docs site's .obligation pill (its padding,
+   border, tint and 0.78rem type) cascades onto the wall's rows and nearly
+   doubles them; it is reset here, in the canvas scope only (SI-365 (4),
+   (5)(a)). The ⋯ cue sits in the prose's track, on its last line's tail,
+   never on the register. The yarn handle and the dot stay absolute to
+   the card, as before. */
+.boardv2-canvas .objcard {
+  --card-line: 19.6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  column-gap: 6px;
+}
+.boardv2-canvas .objcard > .card-kind {
+  grid-row: 1;
+  grid-column: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.boardv2-canvas .objcard > .readiness-mark {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: start;
+}
+/* the two canvas classes outrank the shared per-receipt clamps
+   (.objcard:has(…):has(…) .card-text): the clamp here is the four lines
+   an empty card holds, and the track's height does the rest */
+.board-canvas.boardv2-canvas .objcard > .card-text {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 6px 0 0;
+  max-height: round(down, calc(100% - 6px), var(--card-line));
+  -webkit-line-clamp: 4;
+}
+.boardv2-canvas .objcard > .clamp-more {
+  grid-row: 2 / 3; /* both lines named: an absolute item's auto end line is the padding edge */
+  grid-column: 1 / 3;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 6px - round(down, calc(100% - 6px), var(--card-line)));
+}
+/* the inline editor takes the prose's track and paints over the
+   register while it is open (the prose is hidden meanwhile) */
+.boardv2-canvas .objcard > .card-editor {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  align-self: start;
+  position: relative;
+  z-index: 1;
+  margin: 6px 0 0;
+}
+.boardv2-canvas .objcard > .card-obligations {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  position: static;
+  margin-top: 2px;
+  gap: 1px;
+}
+.boardv2-canvas .objcard .obligation {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+  line-height: 1.15;
+}
+.boardv2-canvas .objcard .obligation-kind,
+.boardv2-canvas .objcard .obligation-title,
+.boardv2-canvas .objcard .obligation-badge,
+.boardv2-canvas .objcard .slot-chip { line-height: 1.15; }
+.boardv2-canvas .objcard > .coverage-chip,
+.boardv2-canvas .objcard > .oq-claims {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  position: static;
+  justify-self: start;
+  max-width: 100%;
+  margin-top: 2px;
+  line-height: 1.15;
+}
+.boardv2-canvas .objcard > .card-badges {
+  grid-row: 5;
+  grid-column: 1 / -1;
+  position: static;
+  margin: 2px 0 0;
+  gap: 1px 0.18rem;
+}
+.boardv2-canvas .objcard .badge-chip { line-height: 1.15; }
+/* a superseded decision's §6 lines follow the register (SI-278); the
+   card grows for them as before */
+.boardv2-canvas .objcard > .objsupersede-lines {
+  grid-row: 6;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+/* ---- the stub card's register (SI-365 (5)(e)) ----
+   The same grid: the slug line, the head line with the mark, the title in
+   whole lines, the meta line, then the foot — badges, story links, the
+   Correct stub button, the instantiated notice, Instantiate — in flow and
+   inside the card. The story links take the receipts' mono register
+   (one line each, ellipsized), because at the paper's 14 px they wrapped
+   and pushed Instantiate out of the card. */
+.boardv2-canvas .stubcard {
+  --card-line: 18.2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  column-gap: 6px;
+}
+.boardv2-canvas .stubcard > .stub-tab {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  line-height: 1.15;
+}
+.boardv2-canvas .stubcard > .card-kind {
+  grid-row: 2;
+  grid-column: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.boardv2-canvas .stubcard > .readiness-mark {
+  grid-row: 2;
+  grid-column: 2;
+  align-self: start;
+}
+.boardv2-canvas .stubcard > .stub-title {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 4px 0 0;
+  max-height: round(down, calc(100% - 4px), var(--card-line));
+  -webkit-line-clamp: 4;
+}
+.boardv2-canvas .stubcard > .clamp-more {
+  grid-row: 3 / 4;
+  grid-column: 1 / 3;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 4px - round(down, calc(100% - 4px), var(--card-line)));
+}
+/* a dense stub whose title track is empty (SI-365 (6)) has no room above
+   the title's bottom edge for the cue: anchored to that edge, it cannot
+   fit there and falls back to the card's foot corner, right of
+   Instantiate, inside the padding — never on the head line. A stub whose
+   title has a line keeps the cue on that line, as the rule above places
+   it. Browsers without anchor positioning keep the rule above. */
+@supports (anchor-name: --a) {
+  .boardv2-canvas .stubcard > .stub-title { anchor-name: --stub-prose; }
+  .boardv2-canvas .stubcard > .clamp-more {
+    grid-row: 3 / auto; /* the auto end line is the padding edge */
+    bottom: anchor(--stub-prose bottom);
+    position-try-fallbacks: --stub-foot;
+  }
+  @position-try --stub-foot { inset: auto 0 0 auto; }
+}
+.boardv2-canvas .stubcard > .stub-meta {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+.boardv2-canvas .stubcard > .card-badges,
+.boardv2-canvas .stubcard > .stub-story-link,
+.boardv2-canvas .stubcard > .asd-stub-correct,
+.boardv2-canvas .stubcard > .stub-instantiated-notice,
+.boardv2-canvas .stubcard > .stub-instantiate {
+  grid-column: 1 / -1;
+  justify-self: start;
+  max-width: 100%;
+  margin: 1px 0 0;
+}
+.boardv2-canvas .stubcard > .card-badges { margin-top: 2px; gap: 1px 0.18rem; }
+.boardv2-canvas .stubcard .badge-chip { line-height: 1.15; }
+.boardv2-canvas .stubcard > .stub-story-link,
+.boardv2-canvas .stubcard > .stub-instantiated-notice {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.boardv2-canvas .stubcard > .stub-instantiated-notice { margin: 1px 0 0; }
+.boardv2-canvas .stubcard > .stub-instantiate {
+  margin-top: 2px;
+  line-height: 1.15;
+}
+
+/* ---- reference cards ---- */
+.boardv2-canvas .refcard {
+  width: 200px;
+  height: 72px;
+  padding: 9px 13px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: zoom-in;
+}
+.boardv2-canvas .refcard.refcard--object { height: auto; min-height: 72px; }
+.boardv2-canvas .refcard .card-ref { margin-top: 5px; font-size: 12.5px; }
+
+/* ---- stickies: the footprint and the footer line ---- */
+.boardv2-canvas .sticky {
+  width: 200px;
+  min-height: 112px;
+  padding: 10px 12px 14px;
+  gap: 5px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.boardv2-canvas .sticky-foot {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* the folded corner shows the wall behind it, in each room's own colour */
+.boardv2-canvas .sticky::after {
+  border-width: 0 0 14px 14px;
+  border-color: transparent transparent var(--wall) color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.mode-review .boardv2-canvas .sticky::after { border-bottom-color: var(--wall-review); }
+.mode-readonly .boardv2-canvas .sticky::after { border-bottom-color: var(--wall-sealed); }
+
+/* ---- the selection: emphasis and recede (ac-2) ---- */
+/* while anything is selected, every paper and chip the selection does
+   not reach recedes, and so does the base yarn layer: the selection's
+   threads are drawn again above (the overlay below). A receded paper is
+   desaturated and flattened, never faded (SI-358 (2)): a grayscale filter
+   keeps every text's luminance, so AA contrast holds in light and dark,
+   while the colour and the shadow leave it. A focused paper never
+   recedes (SI-358 (3)): its focus ring stays at full strength. */
+.boardv2-canvas[data-selection] .objcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .stubcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .refcard:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within),
+.boardv2-canvas[data-selection] .sticky:not([data-selected]):not([data-linked]):not(:focus-visible):not(:focus-within) {
+  filter: grayscale(1);
+  box-shadow: none;
+}
+.boardv2-canvas[data-selection] .yarn-chip:not([data-hot]):not(:focus-within) {
+  filter: grayscale(1);
+  box-shadow: none;
+}
+.boardv2-canvas[data-selection] .yarn-svg { opacity: 0.25; }
+/* the cards a thread reaches: a ring in the thread's colour */
+.boardv2-canvas [data-linked] {
+  z-index: 7;
+  --wall-ring: 0 0 0 2px var(--yarn);
+  --wall-shadow: 0 6px 14px rgba(20, 26, 18, 0.22);
+}
+.boardv2-canvas [data-linked="implements"] { --wall-ring: 0 0 0 2px var(--yarn-implements); }
+.boardv2-canvas [data-linked="resolves"] { --wall-ring: 0 0 0 2px var(--yarn-resolves); }
+.boardv2-canvas [data-linked="depends-on"] { --wall-ring: 0 0 0 2px var(--yarn-depends-on); }
+.boardv2-canvas [data-linked="exempts"] { --wall-ring: 0 0 0 2px var(--yarn-exempts); }
+.boardv2-canvas [data-linked="supersedes"] { --wall-ring: 0 0 0 2px var(--yarn-supersedes); }
+.boardv2-canvas [data-linked="relates"] { --wall-ring: 0 0 0 2px var(--yarn-relates); }
+/* the scoping threads wear the inks their receipts wear */
+.boardv2-canvas [data-linked="covers"][data-linked-layer="scoping"] { --wall-ring: 0 0 0 2px var(--st-evidenced); }
+.boardv2-canvas [data-linked="resolves"][data-linked-layer="scoping"] { --wall-ring: 0 0 0 2px var(--st-waived); }
+/* the selected card: the ink ring, lifted; its pin swells with a halo */
+.boardv2-canvas .objcard[data-selected],
+.boardv2-canvas .stubcard[data-selected],
+.boardv2-canvas .refcard[data-selected],
+.boardv2-canvas .sticky[data-selected] {
+  z-index: 7;
+  --wall-ring: 0 0 0 3px var(--ink);
+  --wall-shadow: 0 10px 22px rgba(20, 26, 18, 0.28);
+}
+.boardv2-canvas [data-selected] > .yarn-handle {
+  transform: scale(1.3);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 0 0 5px color-mix(in srgb, var(--yarn) 30%, transparent);
+}
+/* the selection's chips ride above the overlay; the selected thread's
+   chip wears its own ring */
+.boardv2-canvas .yarn-chip[data-hot] { z-index: 8; }
+.boardv2-canvas .yarn-chip[data-selected] { box-shadow: 0 0 0 2px currentColor, 0 4px 10px rgba(20, 26, 18, 0.2); }
+
+/* ---- the overlay layer: the selection's threads above the cards (ac-1) ---- */
+.yarn-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+/* a halo in the wall's colour under a heavier stroke in the thread's own
+   (the shared type rules above colour it); the dashes carry over */
+.yarn-overlay .yarn-overlay-halo { fill: none; stroke: var(--wall); stroke-width: 8; opacity: 0.9; }
+.mode-review .yarn-overlay .yarn-overlay-halo { stroke: var(--wall-review); }
+.mode-readonly .yarn-overlay .yarn-overlay-halo { stroke: var(--wall-sealed); }
+.yarn-overlay .yarn-thread { stroke-width: 3; opacity: 1; }
+.yarn-overlay .yarn-knot { opacity: 1; }
+
+/* ---- the status pill (ac-2; SI-350 (14); SI-358 (4)) ---- */
+/* the pill is drawn in the frame's reserved row while something is
+   selected, outside the canvas's scroll area, so it covers no paper,
+   label or control. Its words are announced by the live region below,
+   rendered once in the page outside the swapped region; the pill itself
+   is hidden from assistive technology so nothing is said twice */
+.wall-status-row .wall-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  letter-spacing: 0.03em;
+  box-shadow: 0 4px 12px rgba(20, 26, 18, 0.25);
+  pointer-events: none;
+}
+.wall-status-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.wall-status-id { flex: none; font-weight: 700; }
+/* the summary is never clipped (ac-2: the pill names the card AND its
+   threads): it wraps within the pill, onto a line below the id when the
+   two cannot share one, breaking a long ref where it must */
+.wall-status-summary {
+  flex: 1 1 12ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boardv2-canvas .objcard,
+  .boardv2-canvas .stubcard,
+  .boardv2-canvas .refcard,
+  .boardv2-canvas .sticky,
+  .boardv2-canvas [data-selected] > .yarn-handle { transition: none; }
+}
+
+/* == The contextual toolbar, drag-to-thread, and the add-in-place slots
+   (spec/wall-canvas-v2 ac-3, ac-4, ac-5; ledger SI-350 (5), (8), (9),
+   (10), (13), (15), (16); lane F2b) ===========================================
+   The toolbar sits in the wall frame's row below the canvas, beside the
+   status pill (not floating over the cork as the handoff drew it: the row
+   is where SI-358 (4) put the pill so it covers nothing, and the toolbar
+   follows it there). The handoff's chrome otherwise: --card paper, 1px
+   --rule, radius 8, mono 12 at .03em, buttons padded 8 × 12 with --panel
+   on hover, 1 × 20 dividers, the kind lockup in the kind's ink, Delete in
+   --st-violated. Tokens only (SI-326); the toolbar's pushpin glyph keeps
+   the pin's gradient like every pushpin. */
+.wall-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 6px 20px rgba(20, 26, 18, 0.18);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+/* until the asset fills it the host takes no room */
+.wall-toolbar:empty { display: none; }
+/* where the row leads the canvas (a viewport too short for the floor
+   canvas and a wrapped row together — a short window at 200 % zoom,
+   wallselect.js ROW_FIT_HEIGHT) the toolbar keeps to one line and scrolls
+   across, so the canvas keeps what little height the viewport has; every
+   action stays reachable, by scroll or by Tab */
+[data-wall-row="leading"] .wall-status-row .wall-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.wall-toolbar-btn,
+.wall-toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wall-toolbar-btn:hover,
+.wall-toolbar-link:hover,
+.wall-toolbar-btn[aria-expanded="true"] { background: var(--panel); }
+.wall-toolbar-btn:focus-visible,
+.wall-toolbar-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wall-toolbar-btn kbd { font: inherit; opacity: 0.6; }
+.wall-toolbar-btn--delete { color: var(--st-violated); }
+.wall-toolbar-btn--delete:hover { background: var(--st-violated-tint); }
+.wall-toolbar-divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--rule);
+}
+.wall-toolbar-lockup {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 12px 0 6px;
+  margin-right: 6px;
+  border-right: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.wall-toolbar-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wall-toolbar-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+.wall-toolbar-lockup[data-object-kind="acceptance-criterion"] .wall-toolbar-kind { color: var(--st-evidenced); }
+.wall-toolbar-lockup[data-object-kind="constraint"] .wall-toolbar-kind { color: var(--st-violated); }
+.wall-toolbar-lockup[data-object-kind="decision"] .wall-toolbar-kind { color: var(--authored); }
+.wall-toolbar-lockup[data-object-kind="open-question"] .wall-toolbar-kind { color: var(--st-waived); }
+.wall-toolbar-lockup[data-object-kind="stub"] .wall-toolbar-kind { color: var(--stub-ink); }
+.wall-toolbar-lockup[data-object-kind="reference"] .wall-toolbar-kind { color: var(--frozen); }
+.wall-toolbar-lockup[data-object-kind="sticky"] .wall-toolbar-kind { color: var(--st-nosignal); }
+/* a thread's lockup: the swatch in its type's ink (dashed where the yarn is) */
+.wall-toolbar-swatch {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid var(--yarn);
+}
+.wall-toolbar-swatch[data-edge-type="implements"] { border-top-color: var(--yarn-implements); }
+.wall-toolbar-swatch[data-edge-type="resolves"] { border-top-color: var(--yarn-resolves); }
+.wall-toolbar-swatch[data-edge-type="depends-on"] { border-top-color: var(--yarn-depends-on); }
+.wall-toolbar-swatch[data-edge-type="exempts"] { border-top-color: var(--yarn-exempts); }
+.wall-toolbar-swatch[data-edge-type="supersedes"] { border-top-color: var(--yarn-supersedes); border-top-style: dashed; }
+.wall-toolbar-swatch[data-edge-type="relates"] { border-top-color: var(--yarn-relates); border-top-style: dashed; }
+.wall-toolbar-lockup[data-edge-type="implements"] .wall-toolbar-kind { color: var(--yarn-implements); }
+.wall-toolbar-lockup[data-edge-type="resolves"] .wall-toolbar-kind { color: var(--yarn-resolves); }
+.wall-toolbar-lockup[data-edge-type="depends-on"] .wall-toolbar-kind { color: var(--yarn-depends-on); }
+.wall-toolbar-lockup[data-edge-type="exempts"] .wall-toolbar-kind { color: var(--yarn-exempts); }
+.wall-toolbar-lockup[data-edge-type="supersedes"] .wall-toolbar-kind { color: var(--yarn-supersedes); }
+.wall-toolbar-lockup[data-edge-type="relates"] .wall-toolbar-kind { color: var(--yarn-relates); }
+.wall-toolbar-pair,
+.wall-toolbar-count,
+.wall-toolbar-hint {
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--muted-solid);
+  white-space: nowrap;
+}
+/* the hint wraps rather than widen the row (320 px: Wave 6 §5.2) */
+.wall-toolbar-hint { flex: 1 1 8rem; min-width: 0; font-size: 10.5px; white-space: normal; }
+.wall-toolbar-pair { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* the thread hint's pin and the Pin button's pin: pushpin glyphs */
+.wall-toolbar-pushpin {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%, #dd9482, var(--yarn) 55%, #6f2418 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+/* the yarn key's swatches, five in a row */
+.wall-toolbar-key {
+  display: inline-flex;
+  gap: 2px;
+}
+.wall-toolbar-key i {
+  width: 6px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--yarn-implements);
+}
+.wall-toolbar-key i:nth-child(2) { background: var(--yarn-resolves); }
+.wall-toolbar-key i:nth-child(3) { background: var(--yarn-depends-on); }
+.wall-toolbar-key i:nth-child(4) { background: var(--yarn-exempts); }
+.wall-toolbar-key i:nth-child(5) { background: var(--yarn-supersedes); }
+/* the existing yarn key, revealed by the toolbar's action (SI-350 (9)):
+   the rail's own section, scrolled into view and focused, wears a ring
+   while it has focus */
+.yarn-key[data-revealed] {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* ---- a thread chip is the button that selects its thread (ac-2; SI-350 (5)) ---- */
+.boardv2-canvas .yarn-chip { cursor: pointer; }
+.boardv2-canvas .yarn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- drag-to-thread (ac-4): the paper under the pointer lights while a
+   pin is dragged (the handoff's drag preview) ---- */
+.boardv2-canvas [data-drop-target] {
+  z-index: 7;
+  --wall-ring: 0 0 0 3px var(--yarn);
+}
+/* the type picker opens at the drop point (or at the chip for a retype),
+   clamped inside the viewport by the asset; elsewhere it keeps the shared
+   dialog's centred place */
+#edge-picker[data-at-point] { transform: none; }
+
+/* ---- the pin toolbox lost its fixed tab: the tray the toolbar's button
+   opens sits centred over the viewport's foot, where the toolbar's row
+   usually is ---- */
+.pin-toolbox {
+  left: 50%;
+  bottom: 1.1rem;
+  width: 0;
+}
+.pin-tray {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ---- the add-in-place slots (ac-5; SI-350 (15)): a dashed box at the
+   foot of each object column; open, it grows into the kind line, the
+   serif textarea and the key hint ---- */
+.boardv2-canvas .wall-slot {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 200px;
+  min-height: 44px;
+  border: 1px dashed color-mix(in srgb, var(--muted-solid) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+}
+.boardv2-canvas .wall-slot-open {
+  display: block;
+  width: 100%;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.boardv2-canvas .wall-slot-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:focus-within { border-color: var(--st-evidenced); }
+.boardv2-canvas .wall-slot[data-slot-kind="acceptance-criterion"]:hover .wall-slot-open { color: var(--st-evidenced); }
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:focus-within { border-color: var(--st-violated); }
+.boardv2-canvas .wall-slot[data-slot-kind="constraint"]:hover .wall-slot-open { color: var(--st-violated); }
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:focus-within { border-color: var(--authored); }
+.boardv2-canvas .wall-slot[data-slot-kind="decision"]:hover .wall-slot-open { color: var(--authored); }
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:hover,
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:focus-within { border-color: var(--st-waived); }
+.boardv2-canvas .wall-slot[data-slot-kind="open-question"]:hover .wall-slot-open { color: var(--st-waived); }
+.boardv2-canvas .wall-slot[data-open] {
+  z-index: 9;
+  min-height: 130px;
+  border: 1px solid var(--accent);
+  background: var(--card);
+  box-shadow: var(--shadow-lift);
+}
+.boardv2-canvas .wall-slot[data-open] .wall-slot-open { display: none; }
+.wall-slot-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+.wall-slot-line,
+.wall-slot-hint {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+}
+.wall-slot-line { text-transform: uppercase; letter-spacing: 0.06em; }
+.wall-slot-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 58px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 13.5px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+/* == The keyboard and the minimap (spec/wall-canvas-v2 ac-6; ledger
+   SI-358 (4), SI-361 (3); lane F2c) =============================================
+   The minimap sits at the status row's right end, after the toolbar, not
+   over the cork's corner as the handoff drew it: the row is where SI-358
+   (4) put the pill so it covers nothing, and the minimap follows it
+   there. The handoff's chrome otherwise: 165 × 77, --card at 92 %, 1px
+   --rule, radius 4; cards as blocks in the kind colour at 55 %, the
+   stub, reference and sticky blocks in their paper colours; the viewport
+   frame 1.5px --ink over a faint fill. Tokens only (SI-326): the
+   handoff's grey fill is mixed from --muted-solid. The frame moves with
+   the scroll at once, with no transition. Where the row leads the canvas
+   (a short zoomed viewport, wallselect.js ROW_FIT_HEIGHT) the minimap
+   keeps to the toolbar's line, so the canvas keeps what height there is.
+   The arrows focus the card they select, so every card kind shows the
+   focus ring the object card already had (Wave 6 §5.2: visible focus). */
+.wall-minimap {
+  position: relative;
+  order: 3;
+  flex: none;
+  box-sizing: border-box;
+  width: 165px;
+  height: 77px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wall-minimap[data-dragging] { cursor: grabbing; }
+[data-wall-row="leading"] .wall-minimap {
+  width: 94px;
+  height: 44px;
+}
+.wall-minimap-card {
+  position: absolute;
+  border-radius: 1px;
+  background: var(--muted-solid);
+  opacity: 0.55;
+}
+.wall-minimap-card[data-kind="acceptance-criterion"] { background: var(--st-evidenced); }
+.wall-minimap-card[data-kind="constraint"] { background: var(--st-violated); }
+.wall-minimap-card[data-kind="decision"] { background: var(--authored); }
+.wall-minimap-card[data-kind="open-question"] { background: var(--st-waived); }
+.wall-minimap-card[data-kind="stub"] {
+  background: var(--stub-paper);
+  box-shadow: inset 0 0 0 1px var(--stub-edge);
+  opacity: 1;
+}
+.wall-minimap-card[data-kind="reference"] { background: var(--frozen-tint); opacity: 1; }
+.wall-minimap-card[data-kind="sticky"] { background: var(--note-unknown-bg); opacity: 1; }
+.wall-minimap-card[data-sticky-type="comment"] { background: var(--note-comment-bg); }
+.wall-minimap-card[data-sticky-type="question"] { background: var(--note-question-bg); }
+.wall-minimap-card[data-sticky-type="decision-needed"] { background: var(--note-decision-bg); }
+.wall-minimap-card[data-sticky-type="agent-task"] { background: var(--note-agent-bg); }
+.wall-minimap-card[data-sticky-type="story"] { background: var(--note-story-bg); }
+.wall-minimap-card[data-sticky-type="spike"] { background: var(--note-spike-bg); }
+.wall-minimap-view {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  background: color-mix(in srgb, var(--muted-solid) 12%, transparent);
+  pointer-events: none;
+}
+.boardv2-canvas .stubcard:focus-visible,
+.boardv2-canvas .refcard:focus-visible,
+.boardv2-canvas .sticky:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* verdi:workbench-only:end */

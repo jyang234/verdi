@@ -188,8 +188,9 @@ func resolveBranchPosture(ctx context.Context, root string, git *boardGitState, 
 // projector reads accepted bytes at; keying on the display NAME would
 // ride a possibly-stale local shadow while acceptance moves on the
 // remote-tracking ref — Codex correction round 1, finding 1, closure
-// reopen). It is the page's one accepted-HEAD resolution (Wave 6 §5.3).
-// A nil rd reads through gitx.
+// reopen). It is the page's one accepted-HEAD resolution (Wave 6 §5.3) —
+// or, in a request that pinned its accepted HEAD, that pin's id, read
+// again by nothing. A nil rd reads through gitx.
 func resolvePostureHeads(ctx context.Context, root string, git *boardGitState, rd postureReader) postureHeads {
 	if rd == nil {
 		rd = gitPostureReader{}
@@ -202,6 +203,12 @@ func resolvePostureHeads(ctx context.Context, root string, git *boardGitState, r
 	}
 	if git.DefaultBranch == "" {
 		h.acceptedWhy = defaultBranchUnresolved
+		return h
+	}
+	if git.acceptedTip != "" {
+		// The request pinned its accepted HEAD: the posture states that
+		// one resolution (ledger SI-356).
+		h.accepted = git.acceptedTip
 		return h
 	}
 	ref := git.acceptedRef()

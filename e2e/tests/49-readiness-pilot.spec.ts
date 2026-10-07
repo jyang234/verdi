@@ -1,6 +1,6 @@
 import { test, expect, request, type Page } from "@playwright/test";
 import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
-import { addSticky, expectAutosaved } from "./helpers";
+import { addSticky, expectAutosaved, toolbarAction } from "./helpers";
 
 // The readiness page (GET /readiness) in the design's layout
 // (spec/readiness-page-v2; SI-339): orientation first ("where am I?"),
@@ -774,10 +774,9 @@ test("an edit through the existing board leaves the open cockpit tab unchanged w
     // did. Each step swallows its own error so a cleanup failure cannot
     // mask the assertion that brought us here; on the happy path the
     // bodyRestored check below still catches a cleanup that did not land.
-    await probe
-      .getByRole("button", { name: "Delete sticky" })
-      .click()
-      .catch(() => {});
+    // Delete is the contextual toolbar's action for the selected sticky
+    // (spec/wall-canvas-v2 ac-3; SI-350 (5)).
+    await toolbarAction(popup, probe, "Delete").catch(() => {});
     await expectAutosaved(popup).catch(() => {});
     await popup.close().catch(() => {});
   }
