@@ -634,7 +634,7 @@ func TestEventualFeatureName(t *testing.T) {
 	}
 }
 
-// --- sanitizeConflictID / sanitizeStubSlug / dedupeConflictIDs -----------
+// --- sanitizeConflictID / SanitizeStubSlug / dedupeConflictIDs -----------
 
 func TestSanitizeConflictID(t *testing.T) {
 	tests := []struct {
@@ -683,12 +683,12 @@ func TestSanitizeStubSlug(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeStubSlug(tt.raw)
+			got := SanitizeStubSlug(tt.raw)
 			if got != tt.want {
-				t.Fatalf("sanitizeStubSlug(%q) = %q, want %q", tt.raw, got, tt.want)
+				t.Fatalf("SanitizeStubSlug(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 			if !blockerIDRe.MatchString("stub-unreconciled/" + got) {
-				t.Fatalf("sanitizeStubSlug(%q) = %q does not compose into a valid blocker id", tt.raw, got)
+				t.Fatalf("SanitizeStubSlug(%q) = %q does not compose into a valid blocker id", tt.raw, got)
 			}
 		})
 	}

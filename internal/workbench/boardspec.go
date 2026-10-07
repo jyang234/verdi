@@ -547,7 +547,11 @@ func effectiveMode(underReview bool, st specstate.Result, git *boardGitState) bo
 // loadASD is the wall page projection: loadASDView plus the wall's
 // uncommitted-changes summary (spec/wall-changes ac-1). The page, the
 // snapshot, and the mutation response's fresh snapshot all come from
-// exactly this one composed projection, so their revision tokens agree.
+// exactly this one composed projection, so their revision tokens agree —
+// except that the page and the snapshot also compose the readiness marks
+// (composeWall), and on a wall that loads readiness their token covers it
+// where a mutation's does not, so the poll after a mutation there answers
+// once with the composed facts.
 // The summary is computed fresh per request (co-1) from git and the
 // working tree's own spec.md bytes loadBoard already read — never a second
 // file read, never persisted.
@@ -739,14 +743,21 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 // ErrBoardNotFound distinguishes 404 from operational failures.
 var ErrBoardNotFound = fmt.Errorf("workbench: no such spec board")
 
-// boardSpecPageHandler answers GET /board/spec/{name}: the full page.
+// boardSpecPageHandler answers GET /board/spec/{name}: the full page. It
+// composes the wall as its snapshot route does (SI-360 (2)) — the
+// readiness marks as render data, in one read session at one accepted
+// HEAD — so the revision it embeds is the token the client's first
+// conditional refresh sends, which the poll answers 304 while nothing
+// moved.
 func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, asd, err := s.loadASD(r.Context(), r.PathValue("name"))
+		ctx, release := s.openProjection(r.Context())
+		defer release()
+		wall, err := s.composeWall(ctx, r.PathValue("name"), true)
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -755,8 +766,8 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
 		}
-		proj.DocumentHref = r.URL.EscapedPath() + "/document"
-		out, err := renderBoardSpecPage(r.Context(), proj, git, asd)
+		wall.proj.DocumentHref = r.URL.EscapedPath() + "/document"
+		out, err := renderBoardSpecPage(ctx, wall.proj, wall.git, wall.asd)
 		if err != nil {
 			renderError(r.Context(), w, s.root, http.StatusInternalServerError, err)
 			return
@@ -792,8 +803,10 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 
 // boardSpecSnapshotHandler answers GET /board/spec/{name}/snapshot: the
 // conditional projection route (SI-165, SI-167). The response is one
-// complete rendered projection plus its machine facts; the ETag carries
-// the deterministic revision token and an unchanged If-None-Match answers
+// complete rendered projection plus its machine facts — the wall's
+// composed refresh, readiness marks included (SI-360 (2)); the ETag
+// carries the deterministic revision token, which is also the body's
+// revision the client sends next, and an unchanged If-None-Match answers
 // 304 with no body, so a poll can leave the page — and its unsaved state
 // — completely untouched. GET only; no polling result ever writes.
 func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
@@ -802,7 +815,7 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		refresh, err := s.projectWallRefresh(r.Context(), r.PathValue("name"), false)
+		refresh, err := s.projectWallRefresh(r.Context(), r.PathValue("name"), true)
 		snap := refresh.snap
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
@@ -812,7 +825,7 @@ func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		etag := `"` + refresh.revision + `"`
+		etag := `"` + snap.Revision + `"`
 		w.Header().Set("ETag", etag)
 		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
 			w.WriteHeader(http.StatusNotModified)

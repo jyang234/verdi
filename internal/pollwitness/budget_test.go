@@ -7,12 +7,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/gitx/readcensus"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // budgetPath is one projection the structural witness counts. open
@@ -22,41 +26,76 @@ import (
 // and returns the validator a conditional refresh sends next.
 type budgetPath struct {
 	name string
-	open func(root string) projectFunc
+	open func(t *testing.T, root string) projectFunc
 }
 
 type projectFunc func(t *testing.T, ctx context.Context, spec, etag string) string
 
+// branchWallBranch is the local branch the /b/ wall poll serves: cut at
+// the serving checkout's HEAD, so it carries the same walls, and checked
+// out in its own managed worktree, so it is not the serving root's branch.
+const branchWallBranch = "wall-poll-b"
+
 // budgetPaths are the paths lane P2 makes hold Wave 6 §5.3 (ledger
-// SI-356): the wall's plain poll, the Document page's poll (which composes
-// the readiness load in production, BL-158), and the readiness load alone.
-// The wall composed with the readiness load is the workbench's own seam,
-// witnessed in that package (TestProjectWallRefresh_ComposedBudget).
+// SI-356), as the marks lane serves them (SI-360): the wall's poll, which
+// composes the readiness load with the wall's snapshot on a wall served
+// from the serving root; the poll of a /b/ wall whose branch is not the
+// serving root's, which loads no readiness (BL-165 (4)); the Document
+// page's poll (which composes the readiness load in production, BL-158);
+// and the readiness load alone. The workbench package witnesses the
+// composition seam itself (TestProjectWallRefresh_ComposedBudget).
 func budgetPaths() []budgetPath {
-	poll := func(route string) func(string) projectFunc {
-		return func(root string) projectFunc {
-			h := workbench.NewHandlerWith(root, workbench.Deps{ReadinessLoader: newLoader(root)})
+	poll := func(prefix, route string, loads func(t *testing.T, n int)) func(*testing.T, string) projectFunc {
+		return func(_ *testing.T, root string) projectFunc {
+			loader := &countingLoader{inner: newLoader(root)}
+			h := workbench.NewHandlerWith(root, workbench.Deps{ReadinessLoader: loader})
 			return func(t *testing.T, ctx context.Context, spec, etag string) string {
 				t.Helper()
-				req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/board/spec/"+spec+route, nil)
+				target := prefix + "/board/spec/" + spec + route
+				req := httptest.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 				want := http.StatusOK
 				if etag != "" {
 					req.Header.Set("If-None-Match", etag)
 					want = http.StatusNotModified
 				}
+				before := loader.count()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, req)
 				if rec.Code != want {
-					t.Fatalf("GET %s = %d, want %d\n%s", route, rec.Code, want, rec.Body.String())
+					t.Fatalf("GET %s = %d, want %d\n%s", target, rec.Code, want, rec.Body.String())
+				}
+				if loads != nil {
+					loads(t, loader.count()-before)
 				}
 				return rec.Header().Get("ETag")
 			}
 		}
 	}
+	composes := func(t *testing.T, n int) {
+		t.Helper()
+		if n != 1 {
+			t.Errorf("the serving root's wall poll loaded readiness %d times, want once (SI-360 (2))", n)
+		}
+	}
+	loadsNone := func(t *testing.T, n int) {
+		t.Helper()
+		if n != 0 {
+			t.Errorf("the /b/ wall's poll loaded readiness %d times, want none (SI-360 (3))", n)
+		}
+	}
+	branchWall := poll("/b/"+branchWallBranch, "/snapshot", loadsNone)
 	return []budgetPath{
-		{name: "wall-poll", open: poll("/snapshot")},
-		{name: "document-poll", open: poll("/document/snapshot")},
-		{name: "readiness-load", open: func(root string) projectFunc {
+		{name: "wall-poll", open: poll("", "/snapshot", composes)},
+		{name: "branch-wall-poll", open: func(t *testing.T, root string) projectFunc {
+			t.Helper()
+			git(t, root, nil, "branch", branchWallBranch, "HEAD")
+			if _, err := wtmanager.EnsureWorktree(context.Background(), root, branchWallBranch); err != nil {
+				t.Fatalf("cutting the /b/ wall's worktree: %v", err)
+			}
+			return branchWall(t, root)
+		}},
+		{name: "document-poll", open: poll("", "/document/snapshot", nil)},
+		{name: "readiness-load", open: func(_ *testing.T, root string) projectFunc {
 			loader := newLoader(root)
 			return func(t *testing.T, ctx context.Context, spec, _ string) string {
 				t.Helper()
@@ -67,6 +106,26 @@ func budgetPaths() []budgetPath {
 			}
 		}},
 	}
+}
+
+// countingLoader is the production loader, counting its loads.
+type countingLoader struct {
+	inner readinessload.Loader
+	mu    sync.Mutex
+	n     int
+}
+
+func (c *countingLoader) Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error) {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+	return c.inner.Load(ctx, ref)
+}
+
+func (c *countingLoader) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
 }
 
 // acceptedOf names root's accepted HEAD for a census: the ref specstate
@@ -128,7 +187,7 @@ func TestPollWitness_ProjectionBudget(t *testing.T) {
 			t.Run(fx.name+"/"+path.name, func(t *testing.T) {
 				repo := fx.build(t)
 				acc, explicit := acceptedOf(t, repo.Dir)
-				project := path.open(repo.Dir)
+				project := path.open(t, repo.Dir)
 				for _, spec := range fx.specs {
 					first := &readcensus.Census{}
 					etag := project(t, gitx.WithObserver(context.Background(), first), spec, "")
@@ -158,7 +217,7 @@ func TestPollWitness_AnnotatedTagHeadBudget(t *testing.T) {
 			if len(acc.IDs) != 2 || acc.IDs[0] == acc.IDs[1] {
 				t.Fatalf("origin/main does not name a tag object: %q", acc.IDs)
 			}
-			project := path.open(repo.Dir)
+			project := path.open(t, repo.Dir)
 			// stale-decline is accepted on origin/main, so its projection
 			// reads the corpus as well as the views: two readers of the tree.
 			for _, spec := range []string{"stale-decline", realShapedStory, realShapedFeature} {
@@ -184,7 +243,7 @@ func TestPollWitness_EachRefreshResolvesItsOwnHead(t *testing.T) {
 		t.Run(path.name, func(t *testing.T) {
 			repo := buildRealShapedStore(t)
 			before, _ := acceptedOf(t, repo.Dir)
-			project := path.open(repo.Dir)
+			project := path.open(t, repo.Dir)
 			first := &readcensus.Census{}
 			project(t, gitx.WithObserver(context.Background(), first), realShapedStory, "")
 			checkBudget(t, "the first poll", first.Budget(before), 1)
