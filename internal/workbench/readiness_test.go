@@ -450,7 +450,7 @@ func TestReadinessRender_StepLineRule(t *testing.T) {
 			if kind != tt.reason {
 				t.Fatalf("readinessStepReason kind = %q, want %q", kind, tt.reason)
 			}
-			if got := readinessStepLine(readinessStepCounts(tt.snap, tt.snap.Areas[tt.area].ID), reason); got != tt.line {
+			if got := readinessStepLine(readinessPageWords(), readinessStepCounts(tt.snap, tt.snap.Areas[tt.area].ID), reason); got != tt.line {
 				t.Fatalf("readinessStepLine = %q, want %q", got, tt.line)
 			}
 		})
