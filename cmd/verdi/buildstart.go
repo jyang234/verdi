@@ -258,7 +258,7 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 	// that already exists — exit 2, operational, naming the branch and
 	// "already exists" (TestBuildCommandsFromATCRunway_Refusals) — which
 	// git's own checkout -b gave the local case before this check.
-	if collision, cerr := buildBranchCollision(ctx, root, branch, base); cerr != nil {
+	if collision, cerr := branchbase.Collision(ctx, root, branch, base); cerr != nil {
 		fmt.Fprintln(stderr, "build start:", cerr)
 		return 2
 	} else if collision != "" {
@@ -369,33 +369,6 @@ func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resol
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: %s)\n", branch, spec.ID,
 		deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 	return 0
-}
-
-// buildBranchCollision returns the ref under which branch already exists —
-// the local branch, or a remote-tracking branch of the remote base resolves
-// from (origin, for an origin/<default> base) — or "" when it exists under
-// neither (ledger SI-333). A base that is a local branch or the disclosed
-// HEAD fallback resolves from no remote, so only the local branch is asked.
-func buildBranchCollision(ctx context.Context, root, branch string, base branchbase.Resolution) (string, error) {
-	local, err := gitx.HasLocalBranch(ctx, root, branch)
-	if err != nil {
-		return "", err
-	}
-	if local {
-		return "refs/heads/" + branch, nil
-	}
-	remote, ok := strings.CutSuffix(base.Ref, "/"+base.BranchName)
-	if base.Kind != branchbase.ResolvedDefault || base.BranchName == "" || !ok || remote == "" {
-		return "", nil
-	}
-	tracking, err := gitx.HasRemoteTrackingBranch(ctx, root, remote, branch)
-	if err != nil {
-		return "", err
-	}
-	if tracking {
-		return "refs/remotes/" + remote + "/" + branch, nil
-	}
-	return "", nil
 }
 
 type buildObligationDebt struct {
