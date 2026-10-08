@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js
+//go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js assets/wallnewstory.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -175,4 +175,14 @@ func embeddedJSHandler(name string) http.HandlerFunc {
 // (TestIndexAsset_ServedWithinBudget).
 func indexJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/index.js")
+}
+
+// wallNewStoryJSHandler serves the wall's opener for the index's call to
+// action (spec/index-v2 ac-4; SI-366 (11)): on `?new-story=<ac>` it opens
+// the existing create dialog through its button and checks the named
+// criterion — a small asset for the new behaviour (co-1: boardspec.js
+// does not grow), dependency-free, and structurally capped at 2 KiB
+// (TestWallNewStoryAsset_ServedWithinBudget).
+func wallNewStoryJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/wallnewstory.js")
 }
