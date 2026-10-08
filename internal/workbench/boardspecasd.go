@@ -798,6 +798,12 @@ type asdSnapshot struct {
 	// mutation's fresh projection on a serving-root wall carries none, so
 	// the pill stays as the last poll left it (SI-362 (2)).
 	Pill *wallPill `json:"pill,omitempty"`
+	// Uncommitted is the Commit and push fragment (SI-368 (8);
+	// wallUncommittedFragment) rendered from Git's changes summary, on the
+	// authoring wall only. It needs no readiness load, so every snapshot
+	// of that wall carries it, a mutation's fresh one included, and the
+	// revision covers it.
+	Uncommitted string `json:"uncommitted,omitempty"`
 
 	// bar is the top bar's facts the region and Posture render from.
 	// Not on the wire: the revision hashes it explicitly, so the accepted
@@ -943,6 +949,7 @@ func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSn
 		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
 		Marks:       asd.Marks,
 		Pill:        asd.Pill,
+		Uncommitted: wallUncommittedFragment(p, git),
 		bar:         bar,
 		readiness:   asd.readinessRevision,
 	}
@@ -952,11 +959,12 @@ func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSn
 
 // snapshotRevision digests every rendered fact of one snapshot (the
 // revision field itself excluded), the top bar's facts explicitly (SI-323
-// (3)), and, on a refresh that loaded readiness, that readiness and the
-// marks derived from it (SI-360 (2)) — omitted otherwise, so a snapshot
-// that loaded none keeps the token it always had. Deterministic: the
-// render is a pure function of store state, and the machine fields are
-// exact copies of it.
+// (3)), the Commit and push fragment where the wall has one (SI-368 (8)),
+// and, on a refresh that loaded readiness, that readiness and the marks
+// derived from it (SI-360 (2)) — omitted otherwise, so a snapshot that
+// loaded none keeps the token it always had. Deterministic: the render is
+// a pure function of store state, and the machine fields are exact copies
+// of it.
 func snapshotRevision(snap *asdSnapshot) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
@@ -968,8 +976,9 @@ func snapshotRevision(snap *asdSnapshot) string {
 		BaseSpecB64 string          `json:"base_spec_b64"`
 		Git         *boardGitState  `json:"git"`
 		Expected    asdExpectedWire `json:"expected"`
+		Uncommitted string          `json:"uncommitted,omitempty"`
 		Readiness   string          `json:"readiness,omitempty"`
-	}{snap.HTML, snap.Posture, snap.bar, snap.BaseDigest, snap.BaseSpecB64, snap.Git, snap.Expected, snap.readiness})
+	}{snap.HTML, snap.Posture, snap.bar, snap.BaseDigest, snap.BaseSpecB64, snap.Git, snap.Expected, snap.Uncommitted, snap.readiness})
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
