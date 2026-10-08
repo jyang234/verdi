@@ -252,9 +252,22 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // "wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div>`
 // before the row's close) — on every wall alike, the one insertion since
 // the fourth pin — and every other byte of the story render is as it was.
+// Re-pinned a sixth time by spec/wall-strip-and-drawer-v2 (lane F3a, ac-1,
+// dc-1; SI-368 (13), (19)): the case-file placards lockup (`<header
+// class="board-placards case-file">`, its "case file" tab and the class
+// tag at its head) becomes the one-line strip (`<header class="case-strip
+// case-file" data-testid="case-strip">`): each half gains its "full case
+// file" control (`<button type="button" class="placard-more" aria-label=
+// "Read the full problem" aria-haspopup="dialog">full case file</button>`,
+// and the outcome's), and the class tag moves after the halves into
+// `<div class="case-strip-chips" data-testid="case-strip-chips">` — on
+// every wall alike; the renders of both walls with the case-file header
+// removed are byte-identical to the fifth pin's (witnessed by diffing
+// the old and new renders at da7f6262 and this commit), so every other
+// byte of the story render is as it was.
 const (
-	storyWallDigestBase     = "b12483cbea13f583d616c4fbb2a5205425d480fdabea37c7d89366aa2f24292e"
-	slotStoryWallDigestBase = "55a1f662f7e91d98acf453f87fb0c98c2cadb929d815ecf1e02761b53c587657"
+	storyWallDigestBase     = "209b00d40ae4076df912c090b439c20657abeb228542b9eeb6a6751a027504b9"
+	slotStoryWallDigestBase = "27f69c3df0b2e638de7205f9c9916fdc4ba2251b3441e1b42b36c71343febde2"
 )
 
 func renderDigest(body string) string {

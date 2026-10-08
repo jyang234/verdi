@@ -39,11 +39,13 @@ func writeBadgeChips(b *strings.Builder, ownerID string, badges []badgeView) {
 	b.WriteString(`</div>`)
 }
 
-// writeCaseTopline writes the case-file lockup's top-right lockup: the
+// writeCaseTopline writes the strip's class tag and badge chips: the
 // class tag alone when the spec wears no spec-level badge (byte-stable
-// with the pre-badge markup), or the stamp row — every case-file badge as
-// a stamp, then the class tag beside them (dc-4: "stamps on the case-file
-// lockup beside the class tag") — when it does.
+// with the pre-badge markup), or the chip row — every case-file badge as
+// a chip, then the class tag beside them (spec/wall-strip-and-drawer-v2
+// dc-1: the strip's chips replace the superseded case-file stamps; the
+// case-stamp class and the case-file-badges test id stay as the hooks
+// derivation-drawer's evidence locates the opener by) — when it does.
 func writeCaseTopline(b *strings.Builder, p *BoardProjection) {
 	if len(p.CaseFileBadges) == 0 {
 		writeCaseClassTag(b, p)
@@ -72,6 +74,19 @@ func writeCaseTopline(b *strings.Builder, p *BoardProjection) {
 func writeCaseDisclosures(b *strings.Builder, p *BoardProjection) {
 	for _, d := range p.CaseFileDisclosures {
 		b.WriteString(`<p class="board-notice case-disclosure" data-testid="case-file-disclosure" role="status">` + stdhtml.EscapeString(d) + `</p>`)
+	}
+}
+
+// writeCaseDisclosureChips writes the same disclosed-unproven lines as
+// chips in the strip (spec/wall-strip-and-drawer-v2 ac-1, ac-2: "a
+// disclosed-unproven value is drawn in the disclosure style, distinct
+// from a flag, never dressed as a verdict"): the disclosure class, never
+// the case-stamp class, the seam-rendered string verbatim as the chip's
+// text and its tooltip, under the test id the line carried. A
+// disclosure-free wall writes nothing.
+func writeCaseDisclosureChips(b *strings.Builder, p *BoardProjection) {
+	for _, d := range p.CaseFileDisclosures {
+		b.WriteString(`<span class="case-chip case-chip--disclosed case-disclosure" data-testid="case-file-disclosure" role="status" title="` + stdhtml.EscapeString(d) + `">` + stdhtml.EscapeString(d) + `</span>`)
 	}
 }
 

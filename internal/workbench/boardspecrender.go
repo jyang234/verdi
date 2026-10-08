@@ -383,39 +383,14 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// the initial viewport (adjudication 1's "beneath/alongside").
 	b.WriteString(`<div class="asd-main">`)
 
-	// The case file (element taxonomy row 1): the spec's problem and
-	// outcome as ONE header lockup — the folder a murder board opens
-	// with. Problem wears the violated accent, outcome the evidenced
-	// one, and the arrow between them is the whole story's arc: the
-	// wall below exists to get from the left card to the right one.
-	// A spec carrying neither attribute (grandfathered v0 artifacts)
-	// gets no header at all — never an empty folder tab.
+	// The case file (element taxonomy row 1) as the one-line strip
+	// (spec/wall-strip-and-drawer-v2 ac-1; casestriprender.go): the
+	// spec's problem and outcome, one line each, the arrow between them
+	// the whole story's arc, with the class tag and the chips beside
+	// them. A spec carrying neither attribute (grandfathered v0
+	// artifacts) gets no strip at all — never an empty one.
 	if hasCaseFile {
-		b.WriteString(`<header class="board-placards case-file">`)
-		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
-		// The class tag, wearing the spec-level badge stamps beside it when
-		// any were computed (spec/badge-computes dc-4) — badgerender.go.
-		writeCaseTopline(&b, p)
-		if p.Problem != "" {
-			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p class="placard-text">` + esc(p.Problem) + `</p>`)
-			writePlacardFull(&b, "problem", p.ProblemBodyHTML)
-			b.WriteString(`</div>`)
-		}
-		if p.Problem != "" && p.Outcome != "" {
-			b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
-		}
-		if p.Outcome != "" {
-			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p class="placard-text">` + esc(p.Outcome) + `</p>`)
-			writePlacardFull(&b, "outcome", p.OutcomeBodyHTML)
-			b.WriteString(`</div>`)
-		}
-		// The case file's disclosed-unproven lines (spec/case-file-flags
-		// dc-4): spec-level ladder state that could not be proven renders
-		// as a disclosure line on this lockup — the board's notice
-		// vocabulary, in the folder where the stamp would hang — never a
-		// stamp and never silence.
-		writeCaseDisclosures(&b, p)
-		b.WriteString(`</header>`)
+		writeCaseStrip(&b, p, asd, domainLive)
 	}
 
 	b.WriteString(`<div class="board-layout">`)

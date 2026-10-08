@@ -340,7 +340,7 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	for _, want := range []string{`board-placards case-file`, `case-arrow`, `placard--problem`, `placard--outcome`} {
+	for _, want := range []string{`case-strip case-file`, `case-arrow`, `placard--problem`, `placard--outcome`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("case-file header missing %q", want)
 		}
@@ -349,8 +349,8 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	// A spec carrying neither attribute (grandfathered v0 artifacts) gets
 	// no folder header at all — never an empty tab.
 	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
-	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-tab") {
-		t.Error("a spec with no problem/outcome still renders the case-file tab")
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-strip") {
+		t.Error("a spec with no problem/outcome still renders the case-file strip")
 	}
 
 	proj := &BoardProjection{
