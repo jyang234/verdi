@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // absModuleRoot resolves testModuleRoot absolutely: provisionStore fetches
@@ -81,6 +83,19 @@ func TestProvisionSharedStore_AfterMainRunsOnMainBeforeBranches(t *testing.T) {
 	}
 	if head, _ := gitOutput(ctx, store.storeRoot, "symbolic-ref", "refs/remotes/origin/HEAD"); head != "refs/remotes/origin/main" {
 		t.Errorf("origin/HEAD = %q, want refs/remotes/origin/main (the shared store proves its default branch)", head)
+	}
+	// The wall-strip-and-drawer walls are wired in: each namesake branch is
+	// cut and its worktree pre-cut, while the serving checkout stays clean.
+	for _, w := range wallStripWalls() {
+		if _, err := gitOutput(ctx, store.storeRoot, "rev-parse", "--verify", "refs/heads/"+w.branch()); err != nil {
+			t.Errorf("wall-strip wall %s: branch %s is not cut: %v", w.name, w.branch(), err)
+		}
+		if _, err := os.Stat(wtmanager.WorktreePath(store.storeRoot, w.branch())); err != nil {
+			t.Errorf("wall-strip wall %s: worktree is not pre-cut: %v", w.name, err)
+		}
+	}
+	if porcelain, err := gitOutput(ctx, store.storeRoot, "status", "--porcelain"); err != nil || porcelain != "" {
+		t.Errorf("serving checkout status = %q (%v), want clean", porcelain, err)
 	}
 	// BL-148: the store and its bare origin run no detached background gc
 	// that could outlive provisioning (this test's TempDir cleanup flaked
