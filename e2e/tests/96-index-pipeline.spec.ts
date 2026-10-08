@@ -5,6 +5,8 @@ import {
   INDEX_COLUMNS,
   EMPTY_INDEX_FIXTURE_URL,
   INDEX_DATES_FIXTURE_URL,
+  FORGE_OUTAGE_URL,
+  FORGE_OUTAGE_RESET_URL,
   dirEntryTestId,
   dirGroupTestId,
   draftBoardHref,
@@ -37,9 +39,10 @@ import {
 // test ids, data attributes and text — never a screenshot (recording
 // stays off).
 //
-// Out of this file's scope, by lane: the filters, the forge-unavailable
-// chip, the other-records strip and the archived fold (F7b), and the
-// New story call to action, the list view and the keyboard (F7c).
+// The filters, the forge-unavailable chip, the other-records strip and the
+// archived fold are this file's third and fourth tests (ac-3, ac-5; lane
+// F7b). Out of this file's scope, by lane: the New story call to action,
+// the list view and the keyboard (F7c).
 
 // READONLY_SPEC's and DIR_CLOSED_AWAITING_ARCHIVE's `story:` tracker
 // refs, the matrix and verdict addresses (SI-366 (20)).
@@ -59,6 +62,16 @@ function card(page: Page, name: string): Locator {
 }
 function column(page: Page, group: string): Locator {
   return page.getByTestId(dirGroupTestId(group));
+}
+
+// openArchived opens the shelf's collapsed archived fold (ac-5; SI-366 (8))
+// so its cards can be seen; a page whose shelf has no archived entry has
+// no fold to open.
+async function openArchived(page: Page): Promise<void> {
+  const summary = column(page, SHELF).locator("details.dir-archived > summary");
+  if ((await summary.count()) > 0) {
+    await summary.click();
+  }
 }
 
 // isolatedBase asks the control server for an isolated store's base URL.
@@ -104,6 +117,7 @@ async function expectIn(page: Page, group: string, name: string): Promise<void> 
 test("index › Four columns, every spec once, counts and empty states", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/Workbench/);
+  await openArchived(page);
 
   // (a) the four columns, in order, with their headings, counts and no
   // empty state beside cards.
@@ -161,6 +175,7 @@ test("index › Four columns, every spec once, counts and empty states", async (
 
 test("index › Each card's facts, links, and test ids", async ({ page }) => {
   await page.goto("/");
+  await openArchived(page);
 
   // The default-branch feature with stories: its title links its corpus
   // page (the card's first link), then the ref, the badge, every working
@@ -337,4 +352,279 @@ test("index › Each card's facts, links, and test ids", async ({ page }) => {
   }
   await expect(page.locator(".dir-inreview")).toHaveCount(0);
   await expect(page.getByTestId("mr-status-unavailable")).toHaveCount(0);
+});
+
+// The filter pills, in the row's order (ac-3; SI-366 (6)).
+const FILTERS = ["everything", "quiet", "in-review", "disclosed"] as const;
+
+function pill(page: Page, id: (typeof FILTERS)[number]): Locator {
+  return page.getByTestId(`dir-filter-${id}`);
+}
+
+// Shared-store assertions in the two tests below are by membership and
+// by counts relative to the cards actually rendered: other lanes add
+// design branches to the shared store, so no exact shared-store count or
+// card list is pinned. Exact lists belong to the isolated stores.
+
+test("index › On the shelf, the other-records strip, and the kept directory notices", async ({ page, browser }) => {
+  await page.goto("/");
+
+  // (a) On the shelf: the terminal specs still in the active zone are
+  // cards in the column's body; every archive-zone spec sits in the
+  // collapsed archived fold at the column's foot, its count equal to the
+  // cards it holds, and the column's own count includes them (SI-366
+  // (8)). Opening the fold shows the archived card; the shelf is the
+  // last column (ac-1), so archived specs never lead the page.
+  const shelf = column(page, SHELF);
+  const fold = shelf.locator("details.dir-archived");
+  await expect(fold).toHaveCount(1);
+  await expect(fold).not.toHaveAttribute("open", /.*/);
+  expect(await shelf.evaluate((el) => el.lastElementChild?.classList.contains("dir-archived"))).toBe(true);
+  for (const name of [SHOWCASE.DIR_TERMINAL_SPEC, EDGE.DIR_CLOSED_AWAITING_ARCHIVE]) {
+    await expect(shelf.locator("> .dir-cards").getByTestId(dirEntryTestId(name))).toBeVisible();
+    await expect(fold.getByTestId(dirEntryTestId(name))).toHaveCount(0);
+  }
+  for (const name of SHOWCASE.INDEX_ARCHIVED_SPECS) {
+    await expect(card(page, name)).toHaveCount(1);
+    await expect(fold.getByTestId(dirEntryTestId(name))).toHaveCount(1);
+    await expect(card(page, name)).toBeHidden();
+  }
+  const folded = await fold.locator(".dir-entry").count();
+  const inBody = await shelf.locator("> .dir-cards > .dir-entry").count();
+  expect(folded).toBeGreaterThan(0);
+  await expect(fold.locator("summary .count")).toHaveText(String(folded));
+  await expect(shelf.locator("h2 .count")).toHaveText(String(inBody + folded));
+  await fold.locator("summary").click();
+  await expect(fold).toHaveAttribute("open", "");
+  await expect(card(page, SHOWCASE.DIR_ARCHIVED_SPEC)).toBeVisible();
+  await expect(card(page, SHOWCASE.DIR_ARCHIVED_SPEC).locator("a.dir-board")).toHaveCount(0);
+
+  // (b) The other-records strip, below the columns: the other kinds, the
+  // services and the boards, each a collapsed fold under its kept class,
+  // its summary carrying the count of what it lists, its listing hidden
+  // until opened.
+  const strip = page.locator(".home-strip");
+  await expect(strip).toBeVisible();
+  expect(
+    await page.evaluate(() => {
+      const columns = document.querySelector(".dir-columns");
+      const s = document.querySelector(".home-strip");
+      return Boolean(columns && s && columns.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+  ).toBe(true);
+  for (const cls of ["home-kinds", "home-services", "home-boards"]) {
+    const section = strip.locator(`details.${cls}`);
+    await expect(section).toHaveCount(1);
+    await expect(section).toBeVisible();
+    await expect(section).not.toHaveAttribute("open", /.*/);
+    const items = await section.locator("li").count();
+    expect(items, `${cls} lists something`).toBeGreaterThan(0);
+    await expect(section.locator("summary .count")).toHaveText(String(items));
+    await expect(section.locator("li").first()).toBeHidden();
+  }
+  expect(await strip.locator('details.home-kinds a[href^="/a/adr/"]').count()).toBeGreaterThan(0);
+  await expect(strip.locator("details.home-services")).toContainText("svcfix");
+  await expect(strip.locator('details.home-boards a[href="/board/STORY-1482"]')).toHaveCount(1);
+
+  // ...each expandable to its full listing WITHOUT JavaScript, as is the
+  // archived fold; and before any script runs every card is shown.
+  const noJS = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const quiet = await noJS.newPage();
+    await quiet.goto("/");
+    expect(await quiet.locator(".dir-entry").count()).toBeGreaterThan(0);
+    await expect(quiet.locator(".dir-entry[hidden]")).toHaveCount(0);
+    for (const cls of ["home-kinds", "home-services", "home-boards"]) {
+      const section = quiet.locator(`details.${cls}`);
+      await expect(section).not.toHaveAttribute("open", /.*/);
+      await expect(section.locator("li").first()).toBeHidden();
+      await section.locator("summary").click();
+      await expect(section).toHaveAttribute("open", "");
+      await expect(section.locator("li").first()).toBeVisible();
+      await expect(section.locator("li")).toHaveCount(await strip.locator(`details.${cls} li`).count());
+    }
+    await expect(quiet.locator('details.home-boards a[href="/board/STORY-1482"]')).toBeVisible();
+    const quietFold = quiet.locator("details.dir-archived");
+    await expect(quietFold.getByTestId(dirEntryTestId(SHOWCASE.DIR_ARCHIVED_SPEC))).toBeHidden();
+    await quietFold.locator("summary").click();
+    await expect(quietFold.getByTestId(dirEntryTestId(SHOWCASE.DIR_ARCHIVED_SPEC))).toBeVisible();
+  } finally {
+    await noJS.close();
+  }
+
+  // (c) The Disclosures toggle (SI-366 (5)): the bar's one Disclosures
+  // link, carrying the disclosures count as its carrier and showing it,
+  // leading to /disclosures — and, separately, the "disclosed" filter
+  // pill over the cards' own disclosures, whose count is the disclosed
+  // cards and which hides every other card.
+  const disclosures = page.getByTestId("topbar").locator("a.home-disclosures");
+  await expect(disclosures).toBeVisible();
+  await expect(disclosures).toHaveAttribute("href", "/disclosures");
+  await expect(page.getByRole("link", { name: "Disclosures" })).toHaveCount(1);
+  await expect(disclosures).toHaveAttribute("data-disclosures-count", /^\d+$/);
+  const count = (await disclosures.getAttribute("data-disclosures-count")) ?? "";
+  await expect(disclosures.locator(".count")).toHaveText(count);
+  await expect(page.locator("p.home-disclosures")).toHaveCount(0);
+  const disclosed = pill(page, "disclosed");
+  await expect(disclosed).toHaveAttribute("aria-pressed", "false");
+  const disclosedCards = page.locator('.dir-entry[data-disclosed="true"]');
+  expect(await disclosedCards.count()).toBeGreaterThan(0);
+  await expect(disclosed.locator(".count")).toHaveText(String(await disclosedCards.count()));
+  await disclosed.click();
+  await expect(disclosed).toHaveAttribute("aria-pressed", "true");
+  await expect(card(page, EDGE.DIR_EMPTY_BRANCH)).toBeVisible();
+  await expect(card(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE)).toBeVisible();
+  await expect(card(page, SHOWCASE.DIR_LOCAL_DRAFT)).toBeHidden();
+  await expect(card(page, SHOWCASE.READONLY_SPEC)).toBeHidden();
+  await pill(page, "everything").click();
+  await expect(card(page, SHOWCASE.DIR_LOCAL_DRAFT)).toBeVisible();
+
+  // (d) The disclosed entry for a branch with no draft spec stays: on the
+  // desk, naming its branch, disclosed, with no link at all.
+  const notice = card(page, EDGE.DIR_EMPTY_BRANCH);
+  await expectIn(page, DESK, EDGE.DIR_EMPTY_BRANCH);
+  await expect(notice.locator(".dir-disclosed")).toBeVisible();
+  await expect(notice.locator(".dir-disclosed")).toContainText(`design/${EDGE.DIR_EMPTY_BRANCH}`);
+  await expect(notice.locator("a")).toHaveCount(0);
+  await expect(notice).toHaveAttribute("data-disclosed", "true");
+
+  // (e) The notice page for a deleted branch stays: a board address whose
+  // design branch resolves to no ref renders the disclosed 404 notice
+  // naming the branch, with a working way back to the directory (37
+  // proves the same page after a real mid-session deletion).
+  const gone = await page.goto(draftBoardHref(EDGE.DIR_VANISHED_BRANCH));
+  expect(gone?.status()).toBe(404);
+  const stale = page.getByTestId("stale-entry-notice");
+  await expect(stale).toBeVisible();
+  await expect(stale).toContainText(`design/${EDGE.DIR_VANISHED_BRANCH}`);
+  await page.getByTestId("back-to-directory").click();
+  await expect(column(page, DESK)).toBeVisible();
+  await expect(card(page, EDGE.DIR_VANISHED_BRANCH)).toHaveCount(0);
+
+  // ...and the Disclosures link leads where it says.
+  await disclosures.click();
+  await expect(page).toHaveURL(/\/disclosures$/);
+});
+
+// LAST in this file (SI-366 (16)): the forge outage is one-way until the
+// harness's reset route is POSTed, which this test does before it ends.
+test("index › Filters, and review status disclosed when the forge is unreachable", async ({ page }) => {
+  await page.goto("/");
+
+  // The filter row: four pills in order, everything pressed first with
+  // every card counted and shown.
+  const filters = page.getByTestId("dir-filters");
+  await expect(filters).toBeVisible();
+  expect(await filters.locator(".dir-filter").evaluateAll((els) => els.map((el) => el.getAttribute("data-filter")))).toEqual(
+    [...FILTERS],
+  );
+  const total = await page.locator(".dir-entry").count();
+  expect(total).toBeGreaterThan(0);
+  await expect(pill(page, "everything")).toHaveAttribute("aria-pressed", "true");
+  await expect(pill(page, "everything").locator(".count")).toHaveText(String(total));
+  await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
+  const columnCounts = await page.locator(".dir-group h2 .count").allTextContents();
+
+  // applyFilter presses one pill and asserts what ac-3 asks of it: every
+  // card the filter's own attribute selects stays shown, every other card
+  // is hidden, the pill's count is the selected cards, only that pill is
+  // pressed, and the column counts stay the totals (SI-366 (19)).
+  async function applyFilter(id: (typeof FILTERS)[number], attr: string): Promise<void> {
+    await pill(page, id).click();
+    for (const other of FILTERS) {
+      await expect(pill(page, other)).toHaveAttribute("aria-pressed", String(other === id));
+    }
+    await expect(page.locator(`.dir-entry[${attr}][hidden]`)).toHaveCount(0);
+    await expect(page.locator(`.dir-entry:not([${attr}]):not([hidden])`)).toHaveCount(0);
+    await expect(pill(page, id).locator(".count")).toHaveText(String(await page.locator(`.dir-entry[${attr}]`).count()));
+    expect(await page.locator(".dir-group h2 .count").allTextContents()).toEqual(columnCounts);
+  }
+  // Quiet drafts: the shared store's drafts all read quiet (one fixed
+  // commit date against the wall clock), a default-branch spec never.
+  await applyFilter("quiet", 'data-quiet="true"');
+  await expect(card(page, SHOWCASE.DIR_LOCAL_DRAFT)).toBeVisible();
+  await expect(card(page, SHOWCASE.READONLY_SPEC)).toBeHidden();
+  // Drafts in review: the branch with the open pull request.
+  await applyFilter("in-review", 'data-review="open"');
+  await expect(card(page, SHOWCASE.DIR_INREVIEW_SPEC)).toBeVisible();
+  await expect(card(page, SHOWCASE.DIR_LOCAL_DRAFT)).toBeHidden();
+  await expect(card(page, SHOWCASE.READONLY_SPEC)).toBeHidden();
+  // Disclosed entries: the no-draft branch and the compatibility-noted
+  // closed feature; a proven card is hidden.
+  await applyFilter("disclosed", 'data-disclosed="true"');
+  await expect(card(page, EDGE.DIR_EMPTY_BRANCH)).toBeVisible();
+  await expect(card(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE)).toBeVisible();
+  await expect(card(page, SHOWCASE.READONLY_SPEC)).toBeHidden();
+  // Everything again: nothing hidden.
+  await applyFilter("everything", "data-testid");
+  await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
+
+  // The isolated dated store (exact): quiet selects exactly the quiet
+  // cards, and with no forge configured the in-review pill says so —
+  // never a zero — and no card carries a review chip.
+  const dated = await isolatedBase(page, INDEX_DATES_FIXTURE_URL);
+  await page.goto(dated);
+  const quietNames = Object.entries(SHOWCASE.INDEX_DATED_AGES)
+    .filter(([, age]) => age.startsWith("quiet"))
+    .map(([name]) => dirEntryTestId(name))
+    .sort();
+  expect(quietNames.length).toBeGreaterThan(0);
+  await expect(pill(page, "quiet").locator(".count")).toHaveText(String(quietNames.length));
+  await pill(page, "quiet").click();
+  expect(
+    await page.locator(".dir-entry:not([hidden])").evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")).sort()),
+  ).toEqual(quietNames);
+  await expect(pill(page, "in-review")).toHaveText("in review · no forge configured");
+  await expect(pill(page, "in-review")).toBeDisabled();
+  await expect(pill(page, "in-review")).not.toHaveText(/\d/);
+  await expect(page.locator(".dir-inreview, .dir-review-unavailable")).toHaveCount(0);
+  await expect(page.getByTestId("mr-status-unavailable")).toHaveCount(0);
+
+  // The forge unreachable (SI-366 (4)): the notice stays; every
+  // design-branch card's chip says review status is unavailable, in a
+  // class no in-review pin counts; a default-branch card, with no branch
+  // to be in review, carries no chip; the in-review pill says unavailable
+  // with no number; and every card stays in its column, the column
+  // counts unchanged.
+  const outage = await page.request.post(FORGE_OUTAGE_URL);
+  expect(outage.ok()).toBe(true);
+  try {
+    await page.goto("/");
+    await expect(page.getByTestId("mr-status-unavailable")).toBeVisible();
+    await expect(page.getByTestId("mr-status-unavailable")).toContainText("MR status unavailable");
+    await expect(page.locator(".dir-inreview")).toHaveCount(0);
+    for (const name of [SHOWCASE.DESIGN_SPEC, SHOWCASE.DIR_LOCAL_DRAFT, SHOWCASE.DIR_REMOTE_DRAFT, EDGE.DIR_EMPTY_BRANCH]) {
+      await expectIn(page, DESK, name);
+      await expect(card(page, name).locator(".dir-review-unavailable")).toHaveText("review status unavailable");
+      await expect(card(page, name)).toHaveAttribute("data-review", "unavailable");
+    }
+    await expect(page.locator('.dir-entry:not([data-source="default"]):not(:has(.dir-review-unavailable))')).toHaveCount(0);
+    for (const [name, group] of [
+      [SHOWCASE.READONLY_SPEC, ACCEPTED],
+      [SHOWCASE.NO_CASEFILE_SPEC, ACTIVE],
+      [SHOWCASE.DIR_TERMINAL_SPEC, SHELF],
+      [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, SHELF],
+    ] as const) {
+      await expectIn(page, group, name);
+      await expect(card(page, name).locator(".dir-review-unavailable")).toHaveCount(0);
+      await expect(card(page, name)).toHaveAttribute("data-review", "not-open");
+    }
+    await expect(column(page, SHELF).locator("details.dir-archived").getByTestId(dirEntryTestId(SHOWCASE.DIR_ARCHIVED_SPEC))).toHaveCount(1);
+    await expect(pill(page, "in-review")).toHaveText("in review · unavailable");
+    await expect(pill(page, "in-review")).toBeDisabled();
+    await expect(pill(page, "in-review")).not.toHaveText(/\d/);
+    await expect(pill(page, "everything").locator(".count")).toHaveText(String(await page.locator(".dir-entry").count()));
+    expect(await page.locator(".dir-group h2 .count").allTextContents()).toEqual(columnCounts);
+    await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
+  } finally {
+    const reset = await page.request.post(FORGE_OUTAGE_RESET_URL);
+    expect(reset.ok()).toBe(true);
+  }
+
+  // After the reset the forge answers again: the chip and the count are
+  // back, so the file leaves the store as it found it.
+  await page.goto("/");
+  await expect(page.getByTestId("mr-status-unavailable")).toHaveCount(0);
+  await expect(card(page, SHOWCASE.DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText("in review");
+  await expect(pill(page, "in-review").locator(".count")).toHaveText(String(await page.locator('.dir-entry[data-review="open"]').count()));
 });

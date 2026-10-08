@@ -84,8 +84,10 @@
 // |   INDEX_DATED_DESK_COMPONENT, INDEX_DATED_LANDED,                  |          | |
 // |   INDEX_DATED_EDITED, INDEX_DATED_AGES, INDEX_DATED_COLUMNS         |          | |
 // | INDEX_COMMITTED_SPECS                                              | SHOWCASE | index-v2 completeness (SI-366 (22)(c)): every committed corpus spec once, in its column |
+// | INDEX_ARCHIVED_SPECS                                               | SHOWCASE | index-v2 On the shelf (ac-5; SI-366 (8)): the committed archive-zone specs, folded at the shelf's foot |
 // | DIR_EMPTY_BRANCH                                                   | EDGE     | degenerate branch: no draft spec at all |
 // | DIR_DOOMED_DRAFT                                                   | EDGE     | mid-session branch deletion (stress/race path) |
+// | DIR_VANISHED_BRANCH                                                | EDGE     | a design branch that never existed: the deleted-branch notice page, reached by address alone (96) |
 // | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | mid-lifecycle shape: closed, still in specs/active/ (the On the shelf column's active-zone terminal card) |
 // | DIAGRAM_PROPOSAL, DIAGRAM_PROPOSAL_BODY, DIAGRAM_BASE_BODY,        | SHOWCASE | diagram-editor happy path: drafting, structural ops, byte preservation, verification rail, peek/reset |
 // |   DIAGRAM_DERIVED, DIAGRAM_DERIVED_BODY, DIAGRAM_RAIL_TIER,        |          | |
@@ -554,6 +556,12 @@ export const SHOWCASE = {
     "refi-rate-check-2024": "terminal",
   } as Readonly<Record<string, string>>,
 
+  // The committed archive-zone specs (examples/showcase's specs/archive,
+  // carried verbatim): every one folds into the shelf's archived
+  // <details>, never a card in the column's body (ac-5; SI-366 (8)).
+  // BINDING: mirrors the committed archive zone; change them together.
+  INDEX_ARCHIVED_SPECS: ["loan-refi-2023", "refi-rate-check-2024"] as readonly string[],
+
   // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the drafting/structural-ops/rail/
   // peek-reset happy paths (37-board-diagram-editor)
@@ -764,6 +772,12 @@ export const EDGE = {
 
   DIR_EMPTY_BRANCH: "uncharted-idea", // no draft spec → disclosed notice entry
   DIR_DOOMED_DRAFT: "doomed-draft", // deleted mid-session via CONTROL_URL
+  // A design branch no one ever cut: its board address resolves to no
+  // ref, so the branch-gone notice page (branchboard.go's dispatch →
+  // notfound.go's renderStaleEntryNotice) renders for it exactly as for a
+  // branch deleted after the directory rendered — the shape 96 asserts
+  // without deleting a provisioned branch (37 keeps the real deletion).
+  DIR_VANISHED_BRANCH: "never-cut-draft",
 
   // -------------------------------------------------------------------------
   // Home status glance (spec/home-status-glance) — the "closed awaiting
@@ -1004,6 +1018,13 @@ export const SPEC_IMPORT_FIXTURE_URL = `${CONTROL_URL}/spec-import-fixture`;
 // exact). Each answers its base URL as plain text.
 export const EMPTY_INDEX_FIXTURE_URL = `${CONTROL_URL}/empty-glance-fixture`;
 export const INDEX_DATES_FIXTURE_URL = `${CONTROL_URL}/index-dates-fixture`;
+
+// The control server's forge outage switch and its reset (cmd/e2eharness/
+// control.go; SI-366 (16)): POST the first to make the open-MR feed answer
+// 503 until the second is POSTed. A suite that downs the forge resets it
+// before it ends, so the next file reads the forge as provisioned.
+export const FORGE_OUTAGE_URL = `${CONTROL_URL}/outage`;
+export const FORGE_OUTAGE_RESET_URL = `${CONTROL_URL}/outage/reset`;
 
 const specImportInputRoot = path.resolve(__dirname, "..", "..", "internal", "specimport", "testdata");
 

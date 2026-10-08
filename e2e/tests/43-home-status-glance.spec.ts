@@ -83,7 +83,10 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
     .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
   expect(rendered).toEqual(groups.map((g) => dirGroupTestId(g)));
 
-  // (b) every fixture spec appears exactly once, under its column.
+  // (b) every fixture spec appears exactly once, under its column. The
+  // archive-zone entry sits in the shelf's collapsed archived fold
+  // (spec/index-v2 ac-5; SI-366 (8)): open it so the entry can be seen.
+  await group(page, "terminal").locator("details.dir-archived > summary").click();
   for (const name of [SHOWCASE.DESIGN_SPEC, SHOWCASE.DIR_LOCAL_DRAFT, SHOWCASE.DIR_REMOTE_DRAFT]) {
     await expect(entry(page, name)).toHaveCount(1);
     await expect(group(page, "drafts-in-progress").getByTestId(dirEntryTestId(name))).toBeVisible();
@@ -205,8 +208,11 @@ test("every pre-existing directory section and link survives unchanged alongside
 
   // The archive-zone entry — once absent from the glance — is a card on
   // the shelf, in the SAME columns as everything else (dc-12's zone rule:
-  // archived specs never lead; the no-loss bar: still listed).
+  // archived specs never lead; the no-loss bar: still listed), folded in
+  // the shelf's collapsed archived list (spec/index-v2 ac-5; SI-366 (8)),
+  // which is opened here so the card can be seen.
   await expect(entry(page, ARCHIVED_SPEC)).toHaveCount(1);
+  await group(page, "terminal").locator("details.dir-archived > summary").click();
   await expect(group(page, "terminal").getByTestId(dirEntryTestId(ARCHIVED_SPEC))).toBeVisible();
   await expect(entry(page, ARCHIVED_SPEC).locator(".badge-closed")).toHaveText("closed");
 
