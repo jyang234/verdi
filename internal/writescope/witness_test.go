@@ -47,6 +47,16 @@ const (
 // The subtests are the falsifiers run on these same facts: each mutation
 // of the registry, the awaiting-fix list, or the classification must turn
 // the witness red.
+//
+// It is the registry's guard and ac-1's producer, and the producer
+// abstains (ledger SI-367 (1), in SI-354 (3)'s form). Every check and
+// falsifier above runs and is asserted, and any violation fails the test,
+// so a verb that reaches a mutating function with no declaration still
+// turns it red. Then, while registryOpenGaps names a gap, it ends with
+// t.Skip naming each, which the go-test producer reads as abstain
+// (cmd/verdi/testproducer.go's verdictForOutcome), never pass: ac-1 is
+// proven for the module's current code and the pinned evasion corpus and
+// disclosed-as-unproven beyond them (ledger SI-321) until BL-136 lands.
 func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 	start := time.Now()
 	facts := analyzeModule(t, filepath.Join("..", ".."))
@@ -86,6 +96,10 @@ func TestRegistry_CoversEveryMutatingVerb(t *testing.T) {
 				t.Fatalf("the witness stayed green under %q (findings:\n%s\n); want a finding mentioning %q", m.name, got, m.want)
 			}
 		})
+	}
+
+	if open := registryOpenGaps(); len(open) > 0 {
+		t.Skipf("ac-1 abstains while its disclosed gaps are open (ledger SI-367 (1)); every check and falsifier ran and was asserted, and none of the gaps is a pass: %s", strings.Join(open, "; "))
 	}
 }
 
