@@ -247,23 +247,16 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 	}
 
 	// The top bar (spec/chrome-and-tokens-v2 ac-1; SI-323 (5)): its nav
-	// keeps the index link and the Wall and Document switch; its controls
-	// slot carries Commit & push in authoring mode — the page's one write
-	// to the record, moved from the rail with its id unchanged (dc-3) —
-	// and the autosave status and live region; the last action result is
-	// the bar's trailing row, outside the swapped region.
+	// keeps the index link; its controls slot is the wall's
+	// (writeWallControls, wallbarrender.go) — the Wall and Document
+	// switch, the readiness pill, Commit & push with its changes fragment
+	// in authoring mode (the page's one write to the record, its id
+	// unchanged, dc-3), the sealed wall's actions, the ⋯ button, and the
+	// autosave status and live region; the last action result is the
+	// bar's trailing row, outside the swapped region.
 	nav := `<a href="/">index</a>`
-	controls := ""
-	if p.DocumentHref != "" {
-		// The Wall and Document switch, in the controls slot (dc-3), with
-		// the same two labels the Document page's switch carries.
-		controls += `<nav class="topbar-tabs" aria-label="Wall or Document"><span class="current" aria-current="page">Wall</span><a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a></nav>`
-	}
-	if p.Mode == modeAuthoring {
-		controls += `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
-	}
-	controls += `<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
-		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`
+	var controls strings.Builder
+	writeWallControls(&controls, p, asd.Pill, snap.Uncommitted)
 	data := struct {
 		Name      string
 		Title     string
@@ -280,13 +273,15 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 		Mode:  string(p.Mode),
 		TopBar: renderTopBar(&snap.bar, topBarOptions{
 			Heading:  true,
-			Nav:      template.HTML(nav),      //nolint:gosec // the index link
-			Controls: template.HTML(controls), //nolint:gosec // fixed control markup and the escaped document href
+			Nav:      template.HTML(nav),               //nolint:gosec // the index link
+			Controls: template.HTML(controls.String()), //nolint:gosec // the wall's own rendered controls, every value escaped
 			Tail:     `<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>`,
 			Refresh:  true,
 		}),
-		Region:    template.HTML(region),
-		Dialogs:   template.HTML(renderBoardDialogs(p)),
+		Region: template.HTML(region),
+		// The page-level dialogs, and the authoring wall's branch menu at
+		// the body level beside them (SI-368 (7)).
+		Dialogs:   template.HTML(renderBoardDialogs(p) + renderBranchMenu(p, git)),
 		StateJSON: template.JS(stateJSON),
 		Bar:       snap.bar,
 	}
@@ -812,14 +807,14 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div>`)
 	b.WriteString(`</div>`) // wall-frame
 
-	// The side rail, top-down by consequence: the commit affordance (the
-	// page's one write to the record), then the scratch tools, then the
+	// The side rail, top-down by consequence: the scratch tools, then the
 	// reading aids (yarn key), then the learning aid (the four-move
-	// guide) — quiet last, discoverable, never front-loaded.
+	// guide) — quiet last, discoverable, never front-loaded. The git
+	// affordance (the indicator, the branch switcher) is the top bar's
+	// now (spec/wall-strip-and-drawer-v2 ac-3, ac-4; wallbarrender.go).
 	b.WriteString(`<aside class="board-side">`)
 	switch p.Mode {
 	case modeAuthoring:
-		writeGitPanel(&b, git)
 		b.WriteString(`<section class="scratch-panel"><h2>Scratch</h2>` +
 			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
@@ -859,10 +854,12 @@ func writeCreatePanel(b *strings.Builder, p *BoardProjection) {
 	}
 	esc := stdhtml.EscapeString
 	storyWord := p.words.word("story")
+	// The action itself is the top bar's primary action (spec/wall-strip-
+	// and-drawer-v2 ac-6; writeSealedActions); the rail keeps the note
+	// that speaks its consequence.
 	b.WriteString(`<section class="scratch-panel create-panel" data-testid="create-panel">`)
 	b.WriteString(`<h2>New ` + esc(storyWord) + `</h2>`)
 	b.WriteString(`<p class="ritual-note">` + esc(model.Capitalize(p.words.indefinite("story"))+" this wall's stubs did not plan. The form asks exactly what the "+storyWord+" template needs, cuts a design branch, and never moves this checkout.") + `</p>`)
-	b.WriteString(`<button type="button" id="create-spec-btn" class="create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
 	b.WriteString(`</section>`)
 }
 
@@ -900,10 +897,11 @@ func writeRevisePanel(b *strings.Builder, p *BoardProjection, offered bool) {
 	}
 	esc := stdhtml.EscapeString
 	featureWord := p.words.word("feature")
+	// The action itself is the top bar's (spec/wall-strip-and-drawer-v2
+	// ac-6; writeSealedActions); the rail keeps the note.
 	b.WriteString(`<section class="scratch-panel revise-panel" data-testid="revise-panel">`)
 	b.WriteString(`<h2>` + esc("Revise this "+featureWord) + `</h2>`)
 	b.WriteString(`<p class="ritual-note">` + esc("Supersession is the only forward path after acceptance: a superseding "+featureWord+" carries everything here verbatim, links back with a supersedes edge, and cuts its own design branch. This checkout never moves.") + `</p>`)
-	b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; ` + esc("Revise this "+featureWord) + `</button>`)
 	b.WriteString(`</section>`)
 }
 
@@ -1415,27 +1413,6 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 		writeReviewSticky(b, rs)
 	}
 	b.WriteString(`</section>`)
-}
-
-// writeGitPanel renders the board-owned git affordance (05 §Workbench:
-// the persistent uncommitted-changes indicator and the branch switcher
-// behind the guard). The commit/push button is the top bar's
-// (renderBoardSpecPage; spec/chrome-and-tokens-v2 dc-3).
-func writeGitPanel(b *strings.Builder, git *boardGitState) {
-	esc := stdhtml.EscapeString
-	b.WriteString(`<section class="git-panel" id="asd-git"><h2>Working tree</h2>`)
-	b.WriteString(`<span class="uncommitted" data-testid="uncommitted-indicator"`)
-	if !git.Dirty {
-		b.WriteString(` hidden`)
-	}
-	b.WriteString(`>uncommitted changes</span>`)
-	b.WriteString(`<div class="branch-row"><span class="branch-label">branch</span>`)
-	b.WriteString(`<button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu">` + esc(git.Branch) + `</button></div>`)
-	b.WriteString(`<div role="menu" class="branch-menu" id="branch-menu" hidden aria-label="Switch branch">`)
-	for _, br := range git.Branches {
-		b.WriteString(`<button type="button" role="menuitem" data-branch="` + esc(br) + `">` + esc(br) + `</button>`)
-	}
-	b.WriteString(`</div></section>`)
 }
 
 // renderBoardDialogs renders the page-level dialogs. Only authoring mode

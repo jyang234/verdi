@@ -112,14 +112,23 @@ func expectPostureGroup(t *testing.T, html string, f *barFacts) {
 		absent(`data-detached="true"`, "Detached (false)")
 	}
 
-	// The branch text, a control of its own, in its three states.
+	// The branch text, a control of its own, in its three states — and on
+	// the authoring wall (every posture group this helper sees for a spec
+	// is the wall's, with its Refresh) a proven name is the branch
+	// switcher (spec/wall-strip-and-drawer-v2 ac-4; SI-368 (7)).
+	switcher := f.Spec != nil && f.Spec.Unproven == "" && f.Spec.Mode == string(modeAuthoring)
 	switch {
 	case p.Branch.Unproven != "":
 		once(`<span class="topbar-branch" data-testid="topbar-branch" data-state="unproven" title="`+esc(p.Branch.Unproven)+`">unproven<span class="topbar-sr">: `+esc(p.Branch.Unproven)+`</span></span>`, "branch text (unproven)")
+		absent(`data-testid="branch-switcher"`, "branch switcher (unproven)")
 	case p.Detached:
 		once(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven" data-detached="true">detached HEAD</span>`, "branch text (detached)")
+		absent(`data-testid="branch-switcher"`, "branch switcher (detached)")
+	case switcher:
+		once(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven"><button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu" aria-controls="branch-menu" aria-expanded="false">`+esc(p.Branch.Text)+`</button></span>`, "branch switcher (authoring wall)")
 	default:
 		once(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven">`+esc(p.Branch.Text)+`</span>`, "branch text")
+		absent(`data-testid="branch-switcher"`, "branch switcher (not the authoring wall)")
 	}
 
 	// The spec's facts: the mode chip, its disclosure, the status badge,

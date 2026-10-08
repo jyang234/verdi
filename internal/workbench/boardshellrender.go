@@ -77,7 +77,10 @@ func writeASDPosture(b *strings.Builder, f *barFacts, refresh bool) {
 			b.WriteString(`<span class="badge badge-` + esc(spec.StatusBadge) + ` board-status-badge" data-testid="board-status-badge">` + esc(spec.StatusBadgeLabel) + `</span>`)
 		}
 	}
-	writeTopBarBranch(b, p)
+	// On the authoring wall the branch text is the switcher (spec/wall-
+	// strip-and-drawer-v2 ac-4; SI-368 (7)): the wall alone (refresh), on
+	// a proven spec in its authoring room.
+	writeTopBarBranch(b, p, refresh && spec != nil && spec.Mode == string(modeAuthoring))
 	b.WriteString(`<details class="readiness-tech asd-posture-tech topbar-posture" data-testid="asd-posture-tech"><summary class="topbar-posture-summary" data-testid="topbar-posture">`)
 	if spec != nil {
 		// What the displayed bytes ARE (design §4.2): the plain word is
@@ -125,14 +128,19 @@ func writeASDPosture(b *strings.Builder, f *barFacts, refresh bool) {
 
 // writeTopBarBranch writes the bar's branch text — a control of its own
 // beside the posture text — in its three states: the branch's name, a
-// detached HEAD said so, or unproven with the reason.
-func writeTopBarBranch(b *strings.Builder, p *barPosture) {
+// detached HEAD said so, or unproven with the reason. With switcher, a
+// proven branch name is the authoring wall's branch switcher (SI-368
+// (7)): the button the wall's script opens the body-level #branch-menu
+// from, under the test id the branch-switch guard's evidence locates.
+func writeTopBarBranch(b *strings.Builder, p *barPosture, switcher bool) {
 	esc := stdhtml.EscapeString
 	switch {
 	case p.Branch.Unproven != "":
 		b.WriteString(`<span class="topbar-branch" data-testid="topbar-branch" data-state="unproven" title="` + esc(p.Branch.Unproven) + `">` + unprovenWord + `<span class="topbar-sr">: ` + esc(p.Branch.Unproven) + `</span></span>`)
 	case p.Detached:
 		b.WriteString(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven" data-detached="true">detached HEAD</span>`)
+	case switcher:
+		b.WriteString(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven"><button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu" aria-controls="branch-menu" aria-expanded="false">` + esc(p.Branch.Text) + `</button></span>`)
 	default:
 		b.WriteString(`<span class="topbar-branch" data-testid="topbar-branch" data-state="proven">` + esc(p.Branch.Text) + `</span>`)
 	}
