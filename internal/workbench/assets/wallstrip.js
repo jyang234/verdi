@@ -314,13 +314,28 @@
     if (d.open) d.open = false;
   });
 
+  // The focus leaving the popover closes it (it opened on focus, so a Tab
+  // passing through the count never leaves it standing open).
+  document.addEventListener("focusout", function (e) {
+    var d = commitDetails();
+    if (!d || !d.open) return;
+    var to = e.relatedTarget;
+    if (to instanceof Element && d.contains(to)) return;
+    setTimeout(function () {
+      if (d.isConnected && d.open && !d.contains(document.activeElement)) d.open = false;
+    }, 0);
+  });
+
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
     var d = commitDetails();
     if (!d || !d.open) return;
     e.preventDefault();
     d.open = false;
-    focusQuietly(d.querySelector("summary"));
+    // The focus returns to the count only when it was in the popover or
+    // nowhere; a focus elsewhere (a card) is never taken from it.
+    var active = document.activeElement;
+    if (!active || active === document.body || d.contains(active)) focusQuietly(d.querySelector("summary"));
   });
 
   // -- the branch menu's placement under the bar's switcher (SI-368 (7)) --------
@@ -357,6 +372,37 @@
       if (menu.hidden || !(t instanceof Element)) return;
       if (t.closest("#branch-menu") || t.closest('[data-testid="branch-switcher"]')) return;
       menu.hidden = true;
+    });
+    // The keyboard's way in: the menu sits at the body level, so Tab from
+    // the switcher enters its first item, Shift+Tab from the first and Tab
+    // from the last return to the switcher (the last closes the menu), and
+    // the focus leaving both closes it.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab" || menu.hidden) return;
+      var sw = switcher();
+      var items = menu.querySelectorAll('[role="menuitem"]');
+      var t = e.target;
+      if (!items.length || !sw) return;
+      if (t === sw && !e.shiftKey) {
+        e.preventDefault();
+        items[0].focus();
+      } else if (t === items[0] && e.shiftKey) {
+        e.preventDefault();
+        sw.focus();
+      } else if (t === items[items.length - 1] && !e.shiftKey) {
+        e.preventDefault();
+        menu.hidden = true;
+        sw.focus();
+      }
+    });
+    document.addEventListener("focusout", function (e) {
+      if (menu.hidden) return;
+      var to = e.relatedTarget;
+      if (to instanceof Element && (menu.contains(to) || to.closest('[data-testid="branch-switcher"]'))) return;
+      setTimeout(function () {
+        var a = document.activeElement;
+        if (!menu.hidden && a && a !== document.body && !menu.contains(a) && !a.closest('[data-testid="branch-switcher"]')) menu.hidden = true;
+      }, 0);
     });
   }
 })();
