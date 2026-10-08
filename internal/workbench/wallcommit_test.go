@@ -120,7 +120,7 @@ func TestWallUncommitted_UnreadableIsNeverACount(t *testing.T) {
 	} {
 		for _, dirty := range []bool{false, true} {
 			fragment := renderWallUncommitted(deriveWallUncommitted(commitGit(dirty, changes)))
-			if !strings.Contains(fragment, `data-testid="wall-commit-count">unreadable</summary>`) {
+			if !strings.Contains(fragment, `data-testid="wall-commit-count" title="unreadable">unreadable</summary>`) {
 				t.Errorf("%s (dirty=%v): the count does not read unreadable:\n%s", name, dirty, fragment)
 			}
 			if m := commitCountRe.FindString(fragment); m != "" {
@@ -155,7 +155,7 @@ func TestWallUncommitted_RenderStructure(t *testing.T) {
 	for _, want := range []string{
 		`<div class="wall-commit" data-testid="wall-commit" data-changes="mixed">`,
 		`<span class="uncommitted" data-testid="uncommitted-indicator">uncommitted changes</span>`,
-		`<summary class="wall-commit-count" data-testid="wall-commit-count">5 changes</summary>`,
+		`<summary class="wall-commit-count" data-testid="wall-commit-count" title="5 changes">5<span class="wall-commit-count-word"> changes</span></summary>`,
 		`<section class="wall-commit-typed" data-testid="wall-commit-typed">`,
 		`<li data-target="ac-3" data-change="added"><span class="wall-commit-target">ac-3</span> <span class="wall-commit-badge" data-badge="added">added</span></li>`,
 		`<li data-target="link/depends-on/spec/base" data-change="relationship-added"><span class="wall-commit-target">link/depends-on/spec/base</span> <span class="wall-commit-badge" data-badge="added">added</span></li>`,
@@ -178,7 +178,7 @@ func TestWallUncommitted_RenderStructure(t *testing.T) {
 	}
 
 	clean := renderWallUncommitted(deriveWallUncommitted(commitGit(false, &wallChanges{Typed: []designprovenance.Change{}, Unclassified: []wallUnclassifiedChange{}})))
-	for _, want := range []string{`data-changes="none"`, `data-testid="uncommitted-indicator" hidden>`, `>0 changes</summary>`, `data-testid="wall-commit-none"`} {
+	for _, want := range []string{`data-changes="none"`, `data-testid="uncommitted-indicator" hidden>`, `title="0 changes">0<span class="wall-commit-count-word"> changes</span></summary>`, `data-testid="wall-commit-none"`} {
 		if !strings.Contains(clean, want) {
 			t.Errorf("clean fragment lacks %s:\n%s", want, clean)
 		}
@@ -301,7 +301,7 @@ func TestWallSnapshot_CarriesTheUncommittedFragment(t *testing.T) {
 			if !strings.Contains(fragment, `data-changes="`+state+`"`) {
 				t.Errorf("fragment state is not %q:\n%s", state, fragment)
 			}
-			if !strings.Contains(fragment, `data-testid="wall-commit-count">`+count+`</summary>`) {
+			if !strings.Contains(fragment, `data-testid="wall-commit-count" title="`+count+`">`) {
 				t.Errorf("fragment count is not %q:\n%s", count, fragment)
 			}
 			set := tc.wantDirty || typed > 0 || uncl > 0
@@ -422,7 +422,7 @@ func TestWallUncommitted_UnclassifiedCap(t *testing.T) {
 				t.Errorf("fragment lacks %s:\n%s", more, fragment)
 			}
 			count := asdCountLabel(tc.n+1, "change", "changes")
-			if !strings.Contains(fragment, `data-testid="wall-commit-count">`+count+`</summary>`) {
+			if !strings.Contains(fragment, `data-testid="wall-commit-count" title="`+count+`">`) {
 				t.Errorf("the count does not read %q over every change:\n%s", count, fragment)
 			}
 		})

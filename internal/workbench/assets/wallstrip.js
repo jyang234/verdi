@@ -231,11 +231,12 @@
   }
 
   // pillWords mirrors the server's readinessPillWords (wallbarrender.go):
-  // the same words for the same facts.
+  // the same words for the same facts — a lead the bar may fold away on a
+  // narrow row, and the rest.
   function pillWords(pill) {
-    if (pill.unavailable) return { text: "readiness unavailable", state: "unavailable" };
-    if (!pill.step) return { text: "Ready", state: "ready" };
-    return { text: "Step " + pill.step + " · " + (pill.unresolved || 0) + " to resolve", state: "step" };
+    if (pill.unavailable) return { lead: "readiness ", rest: "unavailable", state: "unavailable" };
+    if (!pill.step) return { lead: "", rest: "Ready", state: "ready" };
+    return { lead: "Step " + pill.step + " \u00b7 ", rest: (pill.unresolved || 0) + " to resolve", state: "step" };
   }
 
   function applyPill(pill) {
@@ -243,15 +244,17 @@
     if (!el || !pill) return;
     var w = pillWords(pill);
     el.setAttribute("data-state", w.state);
-    el.textContent = w.text;
+    el.textContent = "";
+    if (w.lead) el.appendChild(node("span", "readiness-pill-lead", w.lead));
+    el.appendChild(document.createTextNode(w.rest));
     if (w.state === "unavailable") {
-      el.setAttribute("title", pill.unavailable);
+      el.setAttribute("title", w.lead + w.rest + ": " + pill.unavailable);
       el.removeAttribute("data-step");
       el.removeAttribute("data-unresolved");
       el.appendChild(node("span", "topbar-sr", ": " + pill.unavailable));
       return;
     }
-    el.removeAttribute("title");
+    el.setAttribute("title", w.lead + w.rest);
     el.setAttribute("data-step", String(pill.step || 0));
     el.setAttribute("data-unresolved", String(pill.unresolved || 0));
   }

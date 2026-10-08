@@ -110,6 +110,23 @@ func (u wallUncommitted) countLabel() string {
 	return asdCountLabel(len(u.Typed)+len(u.Unclassified), "change", "changes")
 }
 
+// writeCountLabel writes the count as the popover's summary text: the
+// number, then its word in its own span (the bar folds the word away
+// from the eye on a narrow row; it stays for the ear), or the one word
+// "unreadable".
+func (u wallUncommitted) writeCountLabel(b *strings.Builder) {
+	if u.Unreadable != "" {
+		b.WriteString(uncommittedUnreadable)
+		return
+	}
+	n := len(u.Typed) + len(u.Unclassified)
+	word := " changes"
+	if n == 1 {
+		word = " change"
+	}
+	b.WriteString(strconv.Itoa(n) + `<span class="wall-commit-count-word">` + word + `</span>`)
+}
+
 // uncommittedBadgeWord is the popover's word for a typed change's kind
 // (SI-368 (25)(a)): added and relationship added read "added", replaced
 // reads "edited", and removed, reordered and relationship removed read
@@ -164,7 +181,9 @@ func renderWallUncommitted(u wallUncommitted) string {
 	}
 	b.WriteString(`>uncommitted changes</span>`)
 	b.WriteString(`<details class="wall-commit-popover" data-testid="wall-commit-popover">`)
-	b.WriteString(`<summary class="wall-commit-count" data-testid="wall-commit-count">` + esc(u.countLabel()) + `</summary>`)
+	b.WriteString(`<summary class="wall-commit-count" data-testid="wall-commit-count" title="` + esc(u.countLabel()) + `">`)
+	u.writeCountLabel(&b)
+	b.WriteString(`</summary>`)
 	b.WriteString(`<div class="wall-commit-changes" data-testid="wall-commit-changes">`)
 	if u.Branch != "" {
 		b.WriteString(`<p class="wall-commit-eyebrow">uncommitted on ` + esc(u.Branch) + `</p>`)

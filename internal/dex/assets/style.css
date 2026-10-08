@@ -6173,6 +6173,47 @@ body:not(.board-page) > footer.site-foot,
 .readiness-pill:hover,
 .readiness-pill:focus-visible { filter: brightness(0.96); }
 .readiness-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the empty autosave status takes no room in the row (it shows while a
+   write is in flight) */
+.topbar-controls > #autosave-status:empty { display: none; }
+/* a narrow row (the handoff's 1440 bar carried no posture summary, no
+   Refresh and no index link; this one does): the pill folds its lead
+   away — the words stay in its tooltip and for the ear — and the
+   controls draw in their padding, so the row stays one row */
+@container topbar (max-width: 1640px) {
+  .readiness-pill { padding: 6px 8px; gap: 0; }
+  .readiness-pill::before { display: none; }
+  .wall-commit-popover > summary .wall-commit-count-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .readiness-pill .readiness-pill-lead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .topbar-controls .topbar-tabs a,
+  .topbar-controls .topbar-tabs .current { padding: 6px 7px; }
+  .topbar-controls { gap: 6px 6px; }
+  .topbar-controls .wall-commit-wrap #commit-push-btn { padding-left: 10px; padding-right: 10px; }
+  .topbar-controls .wall-commit-wrap #commit-push-btn .wall-commit-push {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .wall-commit-popover > summary { padding: 0 6px; }
+  .wall-more-btn { padding: 7px 5px; }
+}
 /* Commit & push and its divided suffix, the count, which is the popover's
    summary; the indicator is a dot at the wrap's corner, its words for
    the ear */

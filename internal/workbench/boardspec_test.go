@@ -420,7 +420,7 @@ func TestBoardSpecPage_Authoring(t *testing.T) {
 		`data-testid="ref-card-adr-0001-outbox-events"`,
 		`data-testid="yarn-handle-dc-2"`,
 		`data-testid="uncommitted-indicator" hidden`,
-		`Commit &amp; push`,
+		`id="commit-push-btn"`,
 		`Add sticky`,
 	} {
 		if !strings.Contains(body, want) {
@@ -1293,7 +1293,7 @@ func TestBoardSpec_ReviewMode(t *testing.T) {
 		t.Errorf("review stickies = %d, want 3 (never dropped)", got)
 	}
 	// A mirror, not an editing surface.
-	for _, absent := range []string{"Commit &amp; push", "Add sticky", "yarn-handle", "graduate-btn", "data-can-", "wall-slot"} {
+	for _, absent := range []string{`id="commit-push-btn"`, "Add sticky", "yarn-handle", "graduate-btn", "data-can-", "wall-slot"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("review mode still renders %q", absent)
 		}

@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -24,11 +25,11 @@ func TestReadinessPill_Words(t *testing.T) {
 		wantInside []string
 		wantAbsent []string
 	}{
-		{name: "a step with its count", pill: &wallPill{Step: 1, Unresolved: 3}, wantText: "Step 1 \u00b7 3 to resolve", wantState: "step", wantInside: []string{`data-step="1"`, `data-unresolved="3"`}, wantAbsent: []string{"title=", "topbar-sr"}},
+		{name: "a step with its count", pill: &wallPill{Step: 1, Unresolved: 3}, wantText: "Step 1 \u00b7 3 to resolve", wantState: "step", wantInside: []string{`data-step="1"`, `data-unresolved="3"`, "title=\"Step 1 \u00b7 3 to resolve\"", "<span class=\"readiness-pill-lead\">Step 1 \u00b7 </span>3 to resolve</a>"}, wantAbsent: []string{"topbar-sr"}},
 		{name: "one to resolve", pill: &wallPill{Step: 4, Unresolved: 1}, wantText: "Step 4 \u00b7 1 to resolve", wantState: "step"},
-		{name: "every step proven", pill: &wallPill{}, wantText: "Ready", wantState: "ready", wantInside: []string{`data-step="0"`}},
-		{name: "unreadable", pill: &wallPill{Unavailable: `this wall serves <another> branch`}, wantText: "readiness unavailable", wantState: "unavailable", wantInside: []string{`title="this wall serves &lt;another&gt; branch"`, `<span class="topbar-sr">: this wall serves &lt;another&gt; branch</span>`}, wantAbsent: []string{"data-step", "<another>"}},
-		{name: "no facts composed", pill: nil, wantText: "Readiness", wantState: "unloaded", wantAbsent: []string{"data-step", "title="}},
+		{name: "every step proven", pill: &wallPill{}, wantText: "Ready", wantState: "ready", wantInside: []string{`data-step="0"`, `title="Ready">Ready</a>`}, wantAbsent: []string{"readiness-pill-lead"}},
+		{name: "unreadable", pill: &wallPill{Unavailable: `this wall serves <another> branch`}, wantText: "readiness unavailable", wantState: "unavailable", wantInside: []string{`title="readiness unavailable: this wall serves &lt;another&gt; branch"`, `<span class="readiness-pill-lead">readiness </span>unavailable<span class="topbar-sr">: this wall serves &lt;another&gt; branch</span>`}, wantAbsent: []string{"data-step", "<another>"}},
+		{name: "no facts composed", pill: nil, wantText: "Readiness", wantState: "unloaded", wantInside: []string{`title="Readiness">Readiness</a>`}, wantAbsent: []string{"data-step", "readiness-pill-lead"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var b strings.Builder
@@ -38,8 +39,10 @@ func TestReadinessPill_Words(t *testing.T) {
 			if !strings.HasPrefix(got, head) {
 				t.Errorf("pill = %s, want it to open %s", got, head)
 			}
-			if !strings.Contains(got, `>`+tc.wantText+`<`) {
-				t.Errorf("pill = %s, want the words %q", got, tc.wantText)
+			// The words, read as text: the lead and the rest together.
+			text := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(got[strings.Index(got, `">`)+2:], "")
+			if !strings.HasPrefix(text, tc.wantText) {
+				t.Errorf("pill reads %q, want the words %q", text, tc.wantText)
 			}
 			for _, want := range tc.wantInside {
 				if !strings.Contains(got, want) {
@@ -77,9 +80,9 @@ func TestWallBar_AuthoringControls(t *testing.T) {
 	controls := bar[strings.Index(bar, `data-testid="topbar-controls"`):]
 	for _, want := range []string{
 		`<a class="readiness-pill" data-testid="readiness-pill" data-drawer-tab="readiness"`,
-		`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button><div class="wall-commit" data-testid="wall-commit" data-changes="`,
+		`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit<span class="wall-commit-push"> &amp; push</span></button><div class="wall-commit" data-testid="wall-commit" data-changes="`,
 		`data-testid="uncommitted-indicator"`,
-		`<details class="wall-commit-popover" data-testid="wall-commit-popover"><summary class="wall-commit-count" data-testid="wall-commit-count">`,
+		`<details class="wall-commit-popover" data-testid="wall-commit-popover"><summary class="wall-commit-count" data-testid="wall-commit-count" title="`,
 		`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-expanded="false" aria-label="More">&#8943;</button>`,
 	} {
 		if !strings.Contains(controls, want) {

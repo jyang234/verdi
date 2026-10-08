@@ -27,41 +27,52 @@ const (
 )
 
 // readinessPillWords is the pill's text for its facts (SI-368 (2),
-// (24)(b)): the current step and that step's own unresolved count; "Ready"
+// (24)(b)), in two parts — a lead the bar may fold away where its row is
+// narrow (the step, or the word "readiness"), and the rest, which always
+// shows: the current step and that step's own unresolved count; "Ready"
 // when every step is proven; the disclosure when the wall's readiness
 // cannot be read; or the plain name when this view composed no facts, so
-// the control is never missing from the bar. The second value is the
+// the control is never missing from the bar. The third value is the
 // pill's data-state.
-func readinessPillWords(pill *wallPill) (string, string) {
+func readinessPillWords(pill *wallPill) (string, string, string) {
 	switch {
 	case pill == nil:
-		return "Readiness", pillStateUnloaded
+		return "", "Readiness", pillStateUnloaded
 	case pill.Unavailable != "":
-		return "readiness unavailable", pillStateUnavailable
+		return "readiness ", "unavailable", pillStateUnavailable
 	case pill.Step == 0:
-		return "Ready", pillStateReady
+		return "", "Ready", pillStateReady
 	}
-	return "Step " + strconv.Itoa(pill.Step) + " · " + strconv.Itoa(pill.Unresolved) + " to resolve", pillStateStep
+	return "Step " + strconv.Itoa(pill.Step) + " · ", strconv.Itoa(pill.Unresolved) + " to resolve", pillStateStep
 }
 
 // writeReadinessPill writes the bar's readiness pill: a link to the
 // readiness page for this spec (SI-368 (15): the no-JavaScript path),
 // carrying the data-drawer-tab hook the drawer lane enhances into the
-// Readiness tab's opener, its facts as data attributes, and, when the
-// readiness cannot be read, the reason as its tooltip and its
-// screen-reader text.
+// Readiness tab's opener, its facts as data attributes, its full words as
+// its tooltip (the bar folds the lead away on a narrow row), and, when
+// the readiness cannot be read, the reason as the tooltip and the
+// screen-reader text instead.
 func writeReadinessPill(b *strings.Builder, spec string, pill *wallPill) {
 	esc := stdhtml.EscapeString
-	words, state := readinessPillWords(pill)
+	lead, rest, state := readinessPillWords(pill)
 	b.WriteString(`<a class="readiness-pill" data-testid="readiness-pill" data-drawer-tab="readiness" data-state="` + state + `" href="/readiness?spec=` + esc(url.QueryEscape(spec)) + `"`)
 	if pill != nil && pill.Unavailable == "" {
 		b.WriteString(` data-step="` + strconv.Itoa(pill.Step) + `" data-unresolved="` + strconv.Itoa(pill.Unresolved) + `"`)
 	}
+	title := lead + rest
 	if pill != nil && pill.Unavailable != "" {
-		b.WriteString(` title="` + esc(pill.Unavailable) + `">` + words + `<span class="topbar-sr">: ` + esc(pill.Unavailable) + `</span></a>`)
-		return
+		title += ": " + pill.Unavailable
 	}
-	b.WriteString(`>` + words + `</a>`)
+	b.WriteString(` title="` + esc(title) + `">`)
+	if lead != "" {
+		b.WriteString(`<span class="readiness-pill-lead">` + esc(lead) + `</span>`)
+	}
+	b.WriteString(esc(rest))
+	if pill != nil && pill.Unavailable != "" {
+		b.WriteString(`<span class="topbar-sr">: ` + esc(pill.Unavailable) + `</span>`)
+	}
+	b.WriteString(`</a>`)
 }
 
 // reviseOffered is the sealed accepted feature wall's one Revise decision
@@ -91,7 +102,10 @@ func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, u
 	writeReadinessPill(b, p.Spec, pill)
 	switch p.Mode {
 	case modeAuthoring:
-		b.WriteString(`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>` + uncommitted + `</div>`)
+		// The button's words are "Commit & push" in full (its accessible
+		// name, which the dialog's evidence locates it by); on a narrow row
+		// the bar folds " & push" away from the eye.
+		b.WriteString(`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit<span class="wall-commit-push"> &amp; push</span></button>` + uncommitted + `</div>`)
 	case modeReadOnly:
 		writeSealedActions(b, p)
 	}
