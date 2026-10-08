@@ -265,7 +265,7 @@ const proposalDiagram = "---\n" +
 	"  audit --> notify\n"
 
 func gitInitAndCommit(ctx context.Context, dir string) error {
-	if err := runGit(ctx, dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, dir, false); err != nil {
 		return err
 	}
 	if err := runGit(ctx, dir, nil, "add", "-A"); err != nil {

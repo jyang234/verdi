@@ -129,7 +129,7 @@ func provisionEmptyStore(ctx context.Context) (string, error) {
 	// git init on main + the single manifest commit — the same
 	// deterministic-env, no-verify posture every other scratch store here
 	// uses (git.go).
-	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, root, false); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {
@@ -141,7 +141,7 @@ func provisionEmptyStore(ctx context.Context) (string, error) {
 
 	// A bare local origin whose HEAD names main, so gitx.DefaultBranch
 	// resolves "main" and refindex's default-branch walk runs for real.
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {

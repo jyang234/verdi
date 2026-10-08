@@ -1105,7 +1105,7 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	// A bare local origin makes "Commit & push" a real round-trip with no
 	// network.
 	originDir := filepath.Join(scratch, "origin.git")
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", fmt.Errorf("git init --bare: %w", err)
 	}
 	if err := runGit(ctx, storeRoot, nil, "remote", "add", "origin", originDir); err != nil {

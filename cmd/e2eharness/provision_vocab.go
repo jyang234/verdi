@@ -324,7 +324,7 @@ func provisionVocabStore(ctx context.Context, moduleRoot string) (string, error)
 		}
 	}
 
-	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, root, false); err != nil {
 		return "", err
 	}
 	// Repo-LOCAL identity (provision_board.go's exact precedent): the
@@ -348,7 +348,7 @@ func provisionVocabStore(ctx context.Context, moduleRoot string) (string, error)
 	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "vocab-rename store: manifest, model.yaml, one accepted feature"); err != nil {
 		return "", err
 	}
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {

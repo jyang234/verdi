@@ -82,6 +82,11 @@ func TestProvisionSharedStore_AfterMainRunsOnMainBeforeBranches(t *testing.T) {
 	if head, _ := gitOutput(ctx, store.storeRoot, "symbolic-ref", "refs/remotes/origin/HEAD"); head != "refs/remotes/origin/main" {
 		t.Errorf("origin/HEAD = %q, want refs/remotes/origin/main (the shared store proves its default branch)", head)
 	}
+	// BL-148: the store and its bare origin run no detached background gc
+	// that could outlive provisioning (this test's TempDir cleanup flaked
+	// on exactly that in CI).
+	requireNoBackgroundMaintenance(t, store.storeRoot)
+	requireNoBackgroundMaintenance(t, filepath.Join(scratch, "origin.git"))
 }
 
 // TestProvisionSharedStore_Negative_AfterMainError: a failing afterMain
