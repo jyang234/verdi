@@ -3,10 +3,13 @@ package workbench
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -168,34 +171,108 @@ func TestRenderHome_OneComputationPerRender(t *testing.T) {
 	})
 }
 
-// corpusBuildRe matches a reference to index.Build in Go source.
-var corpusBuildRe = regexp.MustCompile(`\bindex\.Build\b`)
+// corpusBuildAllowlist is every reference to index.Build this package's
+// production files may carry, by "<file>:<function>" with its count: the
+// home page's one seam (HomeDeps.resolve, the production default for
+// HomeDeps.Corpus) and the other handlers' own per-request builds, none of
+// which renderHome reaches.
+func corpusBuildAllowlist() map[string]int {
+	return map[string]int{
+		"directory.go:HomeDeps.resolve":                     1,
+		"corpus.go:corpusHandler":                           1,
+		"boardpeek.go:peekFragment":                         1,
+		"boardpin.go:boardSpecServer.actionPin":             1,
+		"boardpin.go:boardSpecServer.boardPinSearchHandler": 1,
+		"boardspec.go:boardSpecServer.loadBoard":            1,
+	}
+}
 
-// TestRenderHome_CorpusBuiltOnlyThroughTheSeam: the home page's files
-// reference index.Build in exactly one place — HomeDeps.resolve's
-// production default for HomeDeps.Corpus — so the seam the call-count
-// test watches is the only way a render can build the corpus (a direct
-// second call would bypass it).
-func TestRenderHome_CorpusBuiltOnlyThroughTheSeam(t *testing.T) {
-	sites := 0
-	for _, file := range []string{"index.go", "directory.go", "glance.go", "indexcards.go", "indexcardsread.go"} {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
+// corpusBuildSites counts every reference to internal/index's Build in
+// this package's production (non-test) files, by "<file>:<function>" —
+// "<file>:<package level>" outside any function. It reads the AST, so a
+// comment never counts, and it follows the file's own import name.
+func corpusBuildSites(t *testing.T) map[string]int {
+	t.Helper()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	sites := map[string]int{}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
 		}
-		for _, line := range strings.Split(string(src), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
-			}
-			if corpusBuildRe.MatchString(line) {
-				sites++
-				if file != "directory.go" {
-					t.Errorf("%s references index.Build outside HomeDeps.resolve: %q", file, strings.TrimSpace(line))
+		f, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", file, err)
+		}
+		local := ""
+		for _, imp := range f.Imports {
+			if path, _ := strconv.Unquote(imp.Path.Value); path == "github.com/jyang234/verdi/internal/index" {
+				local = "index"
+				if imp.Name != nil {
+					local = imp.Name.Name
 				}
 			}
 		}
+		switch local {
+		case "":
+			continue
+		case ".", "_":
+			t.Fatalf("%s imports internal/index as %q, which this guard cannot follow", file, local)
+		}
+		for _, decl := range f.Decls {
+			scope := "package level"
+			if fd, ok := decl.(*ast.FuncDecl); ok {
+				scope = funcDeclName(fd)
+			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Build" {
+					if id, ok := sel.X.(*ast.Ident); ok && id.Name == local {
+						sites[file+":"+scope]++
+					}
+				}
+				return true
+			})
+		}
 	}
-	if sites != 1 {
-		t.Fatalf("index.Build references in the home page's files = %d, want exactly 1 (HomeDeps.resolve)", sites)
+	return sites
+}
+
+// funcDeclName is fd's name, prefixed with its receiver's type for a
+// method ("boardSpecServer.loadBoard").
+func funcDeclName(fd *ast.FuncDecl) string {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return fd.Name.Name
+	}
+	typ := fd.Recv.List[0].Type
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+	if id, ok := typ.(*ast.Ident); ok {
+		return id.Name + "." + fd.Name.Name
+	}
+	return fd.Name.Name
+}
+
+// TestRenderHome_CorpusBuiltOnlyThroughTheSeam: across every production
+// file of this package, index.Build is referenced exactly where the
+// allowlist says — the home page's one seam (HomeDeps.resolve) and the
+// other handlers' own builds — so the seam the call-count test watches is
+// the only way a render can build the corpus. Any new reference anywhere,
+// such as a second build reached from the cards through a helper in
+// another file, fails here; so does an allowlisted site that is gone.
+func TestRenderHome_CorpusBuiltOnlyThroughTheSeam(t *testing.T) {
+	got, want := corpusBuildSites(t), corpusBuildAllowlist()
+	for site, n := range got {
+		if want[site] != n {
+			t.Errorf("index.Build referenced %d time(s) in %s, allowlisted %d: a new corpus build bypasses HomeDeps.Corpus", n, site, want[site])
+		}
+	}
+	for site, n := range want {
+		if got[site] == 0 {
+			t.Errorf("allowlisted index.Build site %s (%d) is gone: remove it from the allowlist", site, n)
+		}
 	}
 }
