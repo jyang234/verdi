@@ -145,6 +145,33 @@ const (
 // be kept in sync.
 const policyNotAdoptedDetail = "project has not adopted policy authority"
 
+// policyGuide is the policy setup guide's facts: its variant, and the
+// refusal it quotes — the code and the bare detail, verbatim.
+type policyGuide struct {
+	Kind   policyGuideKind
+	Code   string
+	Detail string
+}
+
+// policyGuideFor selects the policy setup guide from the capabilities
+// consultation alone (SI-368 (3): the guide is capabilities, not
+// readiness), so it needs no readiness load: no guide while the design
+// application service is unwired or capabilities were derived; the
+// not-adopted variant only when a policy-forbidden refusal carries
+// draftmutation's own not-adopted discriminant; the no-design-assistance
+// variant for every other policy-forbidden refusal; and none for any other
+// failure. The wall shell's context/policy rows key off the same value.
+func policyGuideFor(designWired bool, caps *DesignCapabilitiesView, failure *DesignFailure) policyGuide {
+	if !designWired || caps != nil || failure == nil || failure.Code != "policy-forbidden" {
+		return policyGuide{}
+	}
+	kind := policyGuideNoDesignAssistance
+	if strings.Contains(failure.Detail, policyNotAdoptedDetail) {
+		kind = policyGuideNotAdopted
+	}
+	return policyGuide{Kind: kind, Code: failure.Code, Detail: failure.Detail}
+}
+
 // policyEditingClause scopes a policy-forbidden concern row's editing claim
 // to the board's mode. Ordinary human editing never requires policy, but
 // only an authoring board accepts browser writes at all: a review or
@@ -212,8 +239,7 @@ type asdACFact struct {
 func deriveASDShell(in asdShellInput) asdShell {
 	var all []asdConcern
 	add := func(c asdConcern) { all = append(all, c) }
-	policySetupGuide := policyGuideNone
-	policyCode, policyDetail := "", ""
+	guide := policyGuideFor(in.DesignWired, in.Caps, in.CapsFailure)
 
 	// -- shape-proposal: Define the work --------------------------------
 	if in.ProblemPresent {
@@ -343,7 +369,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 				Summary:   "Typed draft writes are refused here for humans and agents alike (" + in.Caps.RefusalPrecondition + ").",
 				Witnesses: []string{in.Caps.RefusalDetail}})
 		}
-	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden" && strings.Contains(in.CapsFailure.Detail, policyNotAdoptedDetail):
+	case guide.Kind == policyGuideNotAdopted:
 		// The ONE refusal that means genuine non-adoption (draftmutation's
 		// own discriminant, never the code alone) — in the SERVING CHECKOUT:
 		// the source resolves .verdi/policy on this checkout's filesystem,
@@ -351,18 +377,16 @@ func deriveASDShell(in asdShellInput) asdShell {
 		// The row states the checkout fact and sends the reader to inspect
 		// the accepted snapshot before any initial setup; it infers no cause
 		// for the gap (branch age, deletion, or otherwise).
-		policySetupGuide, policyCode, policyDetail = policyGuideNotAdopted, in.CapsFailure.Code, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
 			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
 			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted, run verdi policy adopt --starter from the project root; human editing does not require one.",
 			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
 			Dest:      "#" + policySetupGuideID})
-	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":
+	case guide.Kind == policyGuideNoDesignAssistance:
 		// Policy authority resolved, but it grants no design assistance
 		// (ResolvePolicyGrant's missing-design_assistance refusal). The
 		// adopted policy is neither absent nor unaccepted: the refusal's own
 		// detail is carried verbatim, never rewritten as non-adoption.
-		policySetupGuide, policyCode, policyDetail = policyGuideNoDesignAssistance, in.CapsFailure.Code, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
 			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); " + policyEditingClause(in.Mode, "browser editing proceeds under that policy's sealed digest."),
 			Guidance:  "Design assistance needs a design_assistance payload in the project's effective policy, proposed and reviewed through the project's own process; human editing does not require one. The policy guide below names the read-only checks.",
@@ -422,9 +446,9 @@ func deriveASDShell(in asdShellInput) asdShell {
 	}
 
 	shell := assembleASDShell(all)
-	shell.PolicySetupGuide = policySetupGuide
-	shell.PolicyCode = policyCode
-	shell.PolicyDetail = policyDetail
+	shell.PolicySetupGuide = guide.Kind
+	shell.PolicyCode = guide.Code
+	shell.PolicyDetail = guide.Detail
 	return shell
 }
 

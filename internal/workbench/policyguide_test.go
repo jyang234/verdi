@@ -594,3 +594,40 @@ func TestPolicyGuide_NamesTheAdoptVerb(t *testing.T) {
 		t.Fatalf("read-only check blocks = %d, want 4 (adopt is a pointer, not a here-doc)", n)
 	}
 }
+
+// TestPolicyGuideFor (SI-368 (3); F3 survey §2 (d)): the policy setup
+// guide's variant is a function of the capabilities consultation alone —
+// none when the design service is unwired or capabilities were derived,
+// not-adopted only for draftmutation's own not-adopted discriminant,
+// no-design-assistance for every other policy-forbidden refusal, and
+// none for any other failure — quoting the refusal's code and bare
+// detail; and the wall shell's guide is that function's.
+func TestPolicyGuideFor(t *testing.T) {
+	notAdopted := &DesignFailure{Code: "policy-forbidden", Detail: "the " + policyNotAdoptedDetail + " for this checkout"}
+	noDA := &DesignFailure{Code: "policy-forbidden", Detail: "the sealed effective policy carries no design_assistance payload"}
+	other := &DesignFailure{Code: "operational", Detail: "capabilities unavailable"}
+	for _, tc := range []struct {
+		name    string
+		wired   bool
+		caps    *DesignCapabilitiesView
+		failure *DesignFailure
+		want    policyGuide
+	}{
+		{"unwired", false, nil, notAdopted, policyGuide{}},
+		{"capabilities derived", true, &DesignCapabilitiesView{PolicyMode: "assist"}, nil, policyGuide{}},
+		{"not adopted", true, nil, notAdopted, policyGuide{Kind: policyGuideNotAdopted, Code: notAdopted.Code, Detail: notAdopted.Detail}},
+		{"no design assistance", true, nil, noDA, policyGuide{Kind: policyGuideNoDesignAssistance, Code: noDA.Code, Detail: noDA.Detail}},
+		{"another failure", true, nil, other, policyGuide{}},
+		{"no consultation at all", true, nil, nil, policyGuide{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := policyGuideFor(tc.wired, tc.caps, tc.failure); got != tc.want {
+				t.Fatalf("policyGuideFor = %+v, want %+v", got, tc.want)
+			}
+			shell := deriveASDShell(asdShellInput{DesignWired: tc.wired, Caps: tc.caps, CapsFailure: tc.failure, Mode: string(modeAuthoring), Branch: "design/x"})
+			if got := (policyGuide{Kind: shell.PolicySetupGuide, Code: shell.PolicyCode, Detail: shell.PolicyDetail}); got != tc.want {
+				t.Fatalf("the shell's guide = %+v, want the function's %+v", got, tc.want)
+			}
+		})
+	}
+}
