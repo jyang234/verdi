@@ -138,6 +138,14 @@ test("index › Four columns, every spec once, counts and empty states", async (
     await expectIn(page, SHELF, name);
   }
 
+  // (c2) completeness (SI-366 (22)(c)): every committed default-branch
+  // spec — every class, both zones — appears exactly once, in the column
+  // its status puts it in; a render that dropped a class of cards would
+  // keep the counts honest and still fail here.
+  for (const [name, group] of Object.entries(SHOWCASE.INDEX_COMMITTED_SPECS)) {
+    await expectIn(page, group, name);
+  }
+
   // (d) the empty state, on the isolated real store with zero specs:
   // every column renders its heading, a zero count and its explicit
   // empty state, and not one card, through the real pipeline.
@@ -208,6 +216,11 @@ test("index › Each card's facts, links, and test ids", async ({ page }) => {
   await expect(archived.locator(".dir-age")).toHaveText(AGE);
   await expect(archived.locator(".badge-src")).toHaveText("default branch");
   await expect(archived.locator(".dir-move")).toHaveCount(0);
+  // Its ref is shown whether or not its board is servable, and a proven
+  // archived spec carries no disclosure (SI-366 (22)(c)).
+  await expect(archived.locator(".dir-ref")).toHaveText(`spec/${SHOWCASE.DIR_ARCHIVED_SPEC}`);
+  await expect(archived.locator(".dir-disclosed, .dir-unproven")).toHaveCount(0);
+  await expect(archived).toHaveAttribute("data-disclosed", "false");
 
   // The superseded component still in the active zone: see successor,
   // linked to the spec whose supersedes edge names it, through the one
@@ -288,6 +301,14 @@ test("index › Each card's facts, links, and test ids", async ({ page }) => {
   const dated = await isolatedBase(page, INDEX_DATES_FIXTURE_URL);
   await page.goto(dated);
   await expectColumns(page);
+  // Every column's exact card list, in document order (SI-366 (22)(c)):
+  // 4 / 0 / 2 / 0 — nothing dropped, nothing invented, nothing moved.
+  for (const [group, names] of Object.entries(SHOWCASE.INDEX_DATED_COLUMNS)) {
+    const rendered = await column(page, group)
+      .locator(".dir-entry")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(rendered, `${group}'s cards`).toEqual(names.map((name) => dirEntryTestId(name)));
+  }
   for (const [name, age] of Object.entries(SHOWCASE.INDEX_DATED_AGES)) {
     const c = card(page, name);
     await expect(c).toHaveCount(1);

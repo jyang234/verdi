@@ -33,31 +33,37 @@ type columnCopy struct {
 }
 
 // columnCopyFor is g's copy, through mdl's display vocabulary for every
-// class, state or verb word it speaks. An unknown group fails closed to
-// no copy at all, never an invented heading.
+// class, state or verb word it speaks, and true for every entry the
+// column holds (SI-366 (22)(a)): the desk holds design-branch drafts AND
+// default-branch specs whose authored status is draft, so its where and
+// move lines name both. An unknown group fails closed to no copy at all,
+// never an invented heading.
 func columnCopyFor(g refindex.StatusGroup, mdl *model.Model) columnCopy {
 	words := classWords{m: mdl}
 	switch g {
 	case refindex.StatusGroupDraftsInProgress:
+		draft := mdl.DisplayState("", "draft")
 		return columnCopy{
 			heading: "On the desk",
-			where:   "design branches",
-			move:    "Drafts you can still write into. A " + words.verb("merge") + " moves one right.",
+			where:   "any branch · " + draft,
+			move:    "A " + draft + " you can still write into. A " + words.verb("merge") + " of its branch, or an authored status on the default branch, moves one right.",
 			empty:   "Nothing on the desk.",
 		}
 	case refindex.StatusGroupAcceptedPendingBuild:
+		accepted := mdl.DisplayState("", "accepted-pending-build")
 		return columnCopy{
 			heading: "Accepted",
-			where:   "default branch · pending build",
+			where:   "default branch · " + accepted,
 			move:    "Filed on the default branch. Evidence lands as " + words.plural("story") + " are built.",
-			empty:   "Nothing accepted, pending build.",
+			empty:   "Nothing " + accepted + " yet.",
 		}
 	case refindex.StatusGroupActiveComponents:
+		active := mdl.DisplayState("", "active")
 		return columnCopy{
 			heading: "Active components",
-			where:   "default branch · active",
+			where:   "default branch · " + active,
 			move:    "Components whose obligations are being checked.",
-			empty:   "No active components.",
+			empty:   "No " + active + " components.",
 		}
 	case refindex.StatusGroupTerminal:
 		return columnCopy{

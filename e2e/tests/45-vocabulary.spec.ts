@@ -55,6 +55,23 @@ test.describe("vocabulary surfaces (spec/vocabulary-surfaces)", () => {
       page.getByText("accepted-pending-build", { exact: true }),
     ).toHaveCount(0);
 
+    // The columns' own copy follows the renamed words too (spec/index-v2;
+    // SI-366 (22)(a)): the Accepted column's where line speaks the
+    // renamed state, its move line the renamed story plural, and the
+    // desk's move line the renamed merge verb — while the headings keep
+    // their StatusGroup identity words.
+    const accepted = page.getByTestId("dir-group-accepted-pending-build");
+    await expect(accepted.locator("h2")).toContainText("Accepted");
+    await expect(accepted.locator(".dir-group-where")).toHaveText(
+      "default branch · Ready to build",
+    );
+    await expect(accepted.locator(".dir-group-move")).toHaveText(
+      "Filed on the default branch. Evidence lands as Workstreams are built.",
+    );
+    const desk = page.getByTestId("dir-group-drafts-in-progress");
+    await expect(desk.locator(".dir-group-where")).toHaveText("any branch · draft");
+    await expect(desk.locator(".dir-group-move")).toContainText("A Sign off of its branch");
+
     // The served board: the case-file class tag reads the renamed class
     // word while its testid and CSS modifier keep the bare id, and the
     // board's address itself is the unrenamed spec ref.

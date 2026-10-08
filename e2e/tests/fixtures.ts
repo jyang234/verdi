@@ -82,7 +82,8 @@
 // |   NO_CASEFILE_SPEC_TITLE                                           |          | |
 // | INDEX_DATED_DRAFT_13, INDEX_DATED_DRAFT_14, INDEX_DATED_DRAFT_15,  | SHOWCASE | index-v2 ages and quiet marks (SI-366 (13)) on the isolated dated store (cmd/e2eharness/indexdates.go) |
 // |   INDEX_DATED_DESK_COMPONENT, INDEX_DATED_LANDED,                  |          | |
-// |   INDEX_DATED_EDITED, INDEX_DATED_AGES                             |          | |
+// |   INDEX_DATED_EDITED, INDEX_DATED_AGES, INDEX_DATED_COLUMNS         |          | |
+// | INDEX_COMMITTED_SPECS                                              | SHOWCASE | index-v2 completeness (SI-366 (22)(c)): every committed corpus spec once, in its column |
 // | DIR_EMPTY_BRANCH                                                   | EDGE     | degenerate branch: no draft spec at all |
 // | DIR_DOOMED_DRAFT                                                   | EDGE     | mid-session branch deletion (stress/race path) |
 // | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | mid-lifecycle shape: closed, still in specs/active/ (the On the shelf column's active-zone terminal card) |
@@ -511,6 +512,47 @@ export const SHOWCASE = {
     "dated-landed": "50 d ago",
     "dated-edited": "25 d ago",
   } as Readonly<Record<string, string>>,
+  // The dated store's exact per-column card lists, in document order
+  // (refindex sorts every entry by ref): the desk holds the default-branch
+  // draft component and the three drafts, Active components the two
+  // landed components, and the other two columns are empty (SI-366
+  // (22)(c)).
+  INDEX_DATED_COLUMNS: {
+    "drafts-in-progress": ["dated-desk-component", "dated-draft-13", "dated-draft-14", "dated-draft-15"],
+    "accepted-pending-build": [],
+    "active-components": ["dated-edited", "dated-landed"],
+    "terminal": [],
+  } as Readonly<Record<string, readonly string[]>>,
+
+  // Every committed default-branch spec (examples/showcase's specs/active
+  // and specs/archive, which the harness store carries verbatim) and the
+  // column its status puts it in (workbench-directory dc-2; specstate's
+  // projection for a feature or story: a landed spec reads
+  // accepted-pending-build, an explicit legacy terminal status or a landed
+  // successor's validated supersession reads superseded or closed; a
+  // component reads its authored status). 96 asserts each appears exactly
+  // once in that column, so a render that drops a class of cards cannot
+  // pass (SI-366 (22)(c)). The harness-provisioned default-branch specs
+  // (DIR_CLOSED_AWAITING_ARCHIVE, STATUSLESS_SEALED_SPEC, the FL_* family)
+  // are asserted by their own suites. BINDING: mirrors the committed
+  // corpus; change them together.
+  INDEX_COMMITTED_SPECS: {
+    "borrower-update-api": "accepted-pending-build",
+    "borrower-update-mobile": "accepted-pending-build",
+    "borrower-update-mobile-spike": "accepted-pending-build",
+    "escrow-autopay": "accepted-pending-build",
+    "escrow-notify-v2": "accepted-pending-build",
+    "loan-workflow-v2": "accepted-pending-build",
+    "rate-lock-v2": "accepted-pending-build",
+    "stale-decline": "accepted-pending-build",
+    "store-layout-notes": "active-components",
+    "escrow-notify": "terminal",
+    "legacy-cache-policy": "terminal",
+    "loan-workflow": "terminal",
+    "rate-lock": "terminal",
+    "loan-refi-2023": "terminal",
+    "refi-rate-check-2024": "terminal",
+  } as Readonly<Record<string, string>>,
 
   // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the drafting/structural-ops/rail/
@@ -735,8 +777,9 @@ export const EDGE = {
   // examples/showcase corpus): parent workbench-legibility dc-4's own
   // "closed awaiting archive" example, distinct from the archive-zone
   // ARCHIVED_SPEC (loan-refi-2023) the directory-home suite already
-  // covers. The glance shows this one in settling; the archive-zone twin
-  // is excluded entirely (dc-2/ADJ-32 f1).
+  // covers. The index shows this one as an On the shelf card with its
+  // compatibility disclosure; the archive-zone twin is a shelf card too,
+  // with no board link (spec/index-v2; parent dc-12).
   DIR_CLOSED_AWAITING_ARCHIVE: "rate-table-sunset",
 
   // -------------------------------------------------------------------------

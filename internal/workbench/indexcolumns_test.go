@@ -52,8 +52,8 @@ func TestWriteDirectorySection_FourColumns(t *testing.T) {
 		emptyOrCards string
 	}
 	wants := []want{
-		{refindex.StatusGroupDraftsInProgress, "On the desk", "2", "design branches", "Drafts you can still write into. A merge moves one right.", `<ul class="dir-cards">`},
-		{refindex.StatusGroupAcceptedPendingBuild, "Accepted", "0", "default branch · pending build", "Filed on the default branch. Evidence lands as stories are built.", `<p class="empty dir-empty">Nothing accepted, pending build.</p>`},
+		{refindex.StatusGroupDraftsInProgress, "On the desk", "2", "any branch · draft", "A draft you can still write into. A merge of its branch, or an authored status on the default branch, moves one right.", `<ul class="dir-cards">`},
+		{refindex.StatusGroupAcceptedPendingBuild, "Accepted", "0", "default branch · accepted-pending-build", "Filed on the default branch. Evidence lands as stories are built.", `<p class="empty dir-empty">Nothing accepted-pending-build yet.</p>`},
 		{refindex.StatusGroupActiveComponents, "Active components", "0", "default branch · active", "Components whose obligations are being checked.", `<p class="empty dir-empty">No active components.</p>`},
 		{refindex.StatusGroupTerminal, "On the shelf", "1", "default branch · terminal", "Superseded or closed. Read-only; kept for the record.", `<ul class="dir-cards">`},
 	}
@@ -110,31 +110,33 @@ func TestWriteDirectorySection_EveryColumnEmpty(t *testing.T) {
 }
 
 // TestColumnCopyFor_Vocabulary: the column copy that speaks a class, state
-// or verb word routes it through the model's display vocabulary
-// (spec/vocabulary-surfaces), so a renaming store reads its own words.
+// or verb word — in its where line, its move line and its empty state —
+// routes through the model's display vocabulary (spec/vocabulary-surfaces;
+// SI-366 (22)(a)), so a renaming store reads its own words everywhere.
 func TestColumnCopyFor_Vocabulary(t *testing.T) {
 	renamed := &model.Model{Vocabulary: model.Vocabulary{
 		Classes: map[string]string{"story": "workstream"},
-		States:  map[string]string{"superseded": "retired", "closed": "done"},
+		States:  map[string]string{"draft": "sketch", "accepted-pending-build": "ready", "active": "live", "superseded": "retired", "closed": "done"},
 		Verbs:   map[string]string{"merge": "land"},
 	}}
 	tests := []struct {
 		group refindex.StatusGroup
 		mdl   *model.Model
-		want  string
+		want  columnCopy
 	}{
-		{refindex.StatusGroupDraftsInProgress, nil, "Drafts you can still write into. A merge moves one right."},
-		{refindex.StatusGroupDraftsInProgress, renamed, "Drafts you can still write into. A land moves one right."},
-		{refindex.StatusGroupAcceptedPendingBuild, nil, "Filed on the default branch. Evidence lands as stories are built."},
-		{refindex.StatusGroupAcceptedPendingBuild, renamed, "Filed on the default branch. Evidence lands as workstreams are built."},
-		{refindex.StatusGroupActiveComponents, renamed, "Components whose obligations are being checked."},
-		{refindex.StatusGroupTerminal, nil, "Superseded or closed. Read-only; kept for the record."},
-		{refindex.StatusGroupTerminal, renamed, "Retired or done. Read-only; kept for the record."},
+		{refindex.StatusGroupDraftsInProgress, nil, columnCopy{"On the desk", "any branch · draft", "A draft you can still write into. A merge of its branch, or an authored status on the default branch, moves one right.", "Nothing on the desk."}},
+		{refindex.StatusGroupDraftsInProgress, renamed, columnCopy{"On the desk", "any branch · sketch", "A sketch you can still write into. A land of its branch, or an authored status on the default branch, moves one right.", "Nothing on the desk."}},
+		{refindex.StatusGroupAcceptedPendingBuild, nil, columnCopy{"Accepted", "default branch · accepted-pending-build", "Filed on the default branch. Evidence lands as stories are built.", "Nothing accepted-pending-build yet."}},
+		{refindex.StatusGroupAcceptedPendingBuild, renamed, columnCopy{"Accepted", "default branch · ready", "Filed on the default branch. Evidence lands as workstreams are built.", "Nothing ready yet."}},
+		{refindex.StatusGroupActiveComponents, nil, columnCopy{"Active components", "default branch · active", "Components whose obligations are being checked.", "No active components."}},
+		{refindex.StatusGroupActiveComponents, renamed, columnCopy{"Active components", "default branch · live", "Components whose obligations are being checked.", "No live components."}},
+		{refindex.StatusGroupTerminal, nil, columnCopy{"On the shelf", "default branch · terminal", "Superseded or closed. Read-only; kept for the record.", "Nothing on the shelf."}},
+		{refindex.StatusGroupTerminal, renamed, columnCopy{"On the shelf", "default branch · terminal", "Retired or done. Read-only; kept for the record.", "Nothing on the shelf."}},
 	}
 	for _, tt := range tests {
-		t.Run(string(tt.group)+"/"+tt.want, func(t *testing.T) {
-			if got := columnCopyFor(tt.group, tt.mdl).move; got != tt.want {
-				t.Fatalf("move line = %q, want %q", got, tt.want)
+		t.Run(string(tt.group)+"/"+tt.want.where, func(t *testing.T) {
+			if got := columnCopyFor(tt.group, tt.mdl); got != tt.want {
+				t.Fatalf("columnCopyFor = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
