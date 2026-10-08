@@ -97,7 +97,7 @@ async function expectColumns(page: Page): Promise<void> {
     await expect(col).toBeVisible();
     await expect(col.locator("h2")).toContainText(heading);
     const cards = await col.locator(".dir-entry").count();
-    await expect(col.locator(".count")).toHaveText(String(cards));
+    await expect(col.locator("h2 .count")).toHaveText(String(cards));
     if (cards === 0) {
       await expect(col.locator(".dir-empty")).toBeVisible();
       await expect(col.locator(".dir-empty")).not.toHaveText("");
@@ -167,7 +167,7 @@ test("index › Four columns, every spec once, counts and empty states", async (
   await page.goto(empty);
   await expectColumns(page);
   for (const [group] of INDEX_COLUMNS) {
-    await expect(column(page, group).locator(".count")).toHaveText("0");
+    await expect(column(page, group).locator("h2 .count")).toHaveText("0");
     await expect(column(page, group).locator(".dir-empty")).toBeVisible();
   }
   await expect(page.locator(".dir-entry")).toHaveCount(0);
