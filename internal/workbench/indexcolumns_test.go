@@ -2,6 +2,9 @@ package workbench
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -426,6 +429,120 @@ func TestWriteDirectoryColumn_DeskNamesUnprovenEntries(t *testing.T) {
 			// counted and each disclosed on its own card.
 			if n := countUnproven(homeCards(root, tt.entries, cardContext{now: datesNow})); n != strings.Count(desk, `<span class="badge badge-unproven">`) {
 				t.Errorf("countUnproven = %d, but the desk draws %d unproven badges", n, strings.Count(desk, `<span class="badge badge-unproven">`))
+			}
+		})
+	}
+}
+
+// writeAcceptedFeature plants an accepted feature spec in root's active
+// zone declaring ac-1 and ac-2, with stubs listing the given criteria —
+// what the call to action's coverage reads from the working tree.
+func writeAcceptedFeature(t *testing.T, root, name string, stubbed []string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "---\nid: spec/" + name + "\nkind: spec\nclass: feature\ntitle: \"Title of " + name + "\"\nstatus: accepted-pending-build\nowners: [platform-team]\n" +
+		"acceptance_criteria:\n  - { id: ac-1, text: \"one\", evidence: [static] }\n  - { id: ac-2, text: \"two\", evidence: [static] }\n"
+	if len(stubbed) > 0 {
+		spec += "stubs:\n  - { slug: " + name + "-stub, acceptance_criteria: [" + strings.Join(stubbed, ", ") + "] }\n"
+	}
+	spec += "frozen: { at: 2026-07-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }\n---\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWriteDirectoryEntry_CallToAction is ac-4's card witness (SI-366
+// (10), (11)): an accepted feature with an unclaimed criterion carries the
+// call to action beside its move — the unclaimed count, the first
+// unclaimed criterion in declared order, the model's class word, and the
+// link into its wall with the criterion as the query the wall's opener
+// honours; a feature every criterion of which a stub or a story claims
+// carries none; one whose coverage could not be read carries the
+// disclosed unproven form with its reason, never a zero; and a card that
+// is not an accepted feature carries nothing.
+func TestWriteDirectoryEntry_CallToAction(t *testing.T) {
+	root := t.TempDir()
+	writeAcceptedFeature(t, root, "half-claimed", []string{"ac-1"})
+	writeAcceptedFeature(t, root, "all-claimed", []string{"ac-1", "ac-2"})
+	writeAcceptedFeature(t, root, "story-claimed", []string{"ac-2"})
+	writeActiveSpec(t, root, "live-component", "component", "active", "")
+	accepted := func(name string) refindex.Entry {
+		return refindex.Entry{Ref: "spec/" + name, Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupAcceptedPendingBuild, SpecStatus: "accepted-pending-build", Zone: refindex.ZoneActive, Date: daysBeforeNow(3)}
+	}
+	built := corpusRead{links: fakeBacklinks{"spec/story-claimed#ac-1": {{From: "spec/the-story", Type: "implemented-by"}}}}
+	renamed := &model.Model{Vocabulary: model.Vocabulary{Classes: map[string]string{"story": "ticket"}}}
+
+	tests := []struct {
+		name    string
+		e       refindex.Entry
+		corpus  corpusRead
+		mdl     *model.Model
+		want    []string
+		wantNot []string
+	}{
+		{
+			name:   "one unclaimed criterion: the link, after the move, naming it",
+			e:      accepted("half-claimed"),
+			corpus: built,
+			want: []string{
+				`<div class="dir-move">&rarr; sealed wall</div><div class="dir-cta"><a class="dir-cta-link" data-testid="dir-cta" data-cta-ac="ac-2" data-cta-unclaimed="1" href="/board/spec/half-claimed?new-story=ac-2">1 AC unclaimed · ac-2 · New story</a></div>`,
+			},
+			wantNot: []string{"dir-cta-unproven", "coverage unproven"},
+		},
+		{
+			name:    "every criterion claimed by a stub: no call to action, no unproven mark",
+			e:       accepted("all-claimed"),
+			corpus:  built,
+			want:    []string{`<div class="dir-move">&rarr; sealed wall</div></li>`},
+			wantNot: []string{"dir-cta", "new-story", "coverage unproven"},
+		},
+		{
+			name:    "a stub claims one and a story the other: none",
+			e:       accepted("story-claimed"),
+			corpus:  built,
+			wantNot: []string{"dir-cta", "new-story"},
+		},
+		{
+			name:   "a renaming store: the model's class word",
+			e:      accepted("half-claimed"),
+			corpus: built,
+			mdl:    renamed,
+			want:   []string{`href="/board/spec/half-claimed?new-story=ac-2">1 AC unclaimed · ac-2 · New ticket</a>`},
+		},
+		{
+			name:   "the corpus unbuilt: coverage unproven with its reason, never a count",
+			e:      accepted("half-claimed"),
+			corpus: corpusRead{err: errors.New("boom")},
+			want: []string{
+				`<div class="dir-cta"><span class="dir-cta-unproven dir-unproven" data-testid="dir-cta-unproven" title="the corpus index could not be built: boom">coverage unproven</span></div>`,
+			},
+			wantNot: []string{"dir-cta-link", "AC unclaimed", "new-story"},
+		},
+		{
+			name:    "not an accepted feature: nothing",
+			e:       refindex.Entry{Ref: "spec/live-component", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupActiveComponents, SpecStatus: "active", Zone: refindex.ZoneActive, Date: daysBeforeNow(3)},
+			corpus:  built,
+			wantNot: []string{"dir-cta", "new-story", "coverage unproven"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cc := cardContext{corpus: tt.corpus, now: datesNow, words: classWords{m: tt.mdl}}
+			var buf bytes.Buffer
+			writeDirectorySection(&buf, homeCards(root, []refindex.Entry{tt.e}, cc), nil, "", false, tt.mdl, datesNow)
+			block := entryBlock(t, buf.String(), strings.TrimPrefix(tt.e.Ref, "spec/"))
+			for _, w := range tt.want {
+				if !strings.Contains(block, w) {
+					t.Errorf("card missing %s\ngot: %s", w, block)
+				}
+			}
+			for _, w := range tt.wantNot {
+				if strings.Contains(block, w) {
+					t.Errorf("card must not carry %s\ngot: %s", w, block)
+				}
 			}
 		})
 	}

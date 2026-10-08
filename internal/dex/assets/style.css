@@ -6306,3 +6306,29 @@ body:not(.board-page) > footer.site-foot,
 }
 .topbar-cli-hint code { font-size: inherit; overflow-wrap: anywhere; }
 /* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* ---------- the index's call to action, list view and keyboard
+   (spec/index-v2 ac-4, ac-6; SI-366 (7), (10), (11), (14), (23)(c);
+   handoff README "Screen 2 — Index") ----------
+   The call to action sits beside an accepted feature's move: a mono
+   pending-tinted link into the wall, or the dashed unproven mark when
+   coverage could not be read. Tokens only; meaning never by colour alone
+   (Wave 6 §5.2): the link's words say what is unclaimed. */
+.dir-cta {
+  margin-top: 0.1875rem;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+}
+.dir-cta-link {
+  display: inline-block;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  font-weight: 700;
+  text-decoration: none;
+}
+.dir-cta-link::after { content: " \203A"; }
+.dir-cta-link:hover { text-decoration: underline; }
+.dir-cta-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* verdi:workbench-only:end */

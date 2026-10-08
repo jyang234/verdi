@@ -470,10 +470,45 @@ func writeDefaultEntry(buf *bytes.Buffer, c cardFacts, mdl *model.Model) {
 	}
 
 	writeCardMove(buf, c.move)
+	writeCardCTA(buf, c.cta)
 	// An unproven default-branch entry's disclosure rides beside the full
 	// identity render, in the shared disclosure vocabulary — never a
 	// replacement for it (fix round 2, finding 1).
 	writeCardDisclosure(buf, e)
+}
+
+// writeCardCTA renders the call to action beside an accepted feature's
+// move (spec/index-v2 ac-4; SI-366 (2), (10), (11)): the link into the
+// feature's wall that opens the existing create dialog with the first
+// uncovered criterion claimed (/board/spec/<feature>?new-story=<ac>, the
+// contract the wall's opener asset honours), carrying the unclaimed count
+// and the criterion as attributes; or, when coverage could not be read,
+// the disclosed unproven form naming why — never a zero count. Nothing
+// for a card whose every criterion is claimed, or that is not an accepted
+// feature. The text itself is the card facts' (ctaFrom), the class word
+// already through the model's vocabulary.
+func writeCardCTA(buf *bytes.Buffer, cta *callToAction) {
+	if cta == nil {
+		return
+	}
+	buf.WriteString(`<div class="dir-cta">`)
+	if cta.unproven != "" {
+		buf.WriteString(`<span class="dir-cta-unproven dir-unproven" data-testid="dir-cta-unproven" title="`)
+		buf.WriteString(stdhtml.EscapeString(cta.unproven))
+		buf.WriteString(`">`)
+		buf.WriteString(stdhtml.EscapeString(cta.text))
+		buf.WriteString(`</span></div>`)
+		return
+	}
+	buf.WriteString(`<a class="dir-cta-link" data-testid="dir-cta" data-cta-ac="`)
+	buf.WriteString(stdhtml.EscapeString(cta.criterion))
+	buf.WriteString(`" data-cta-unclaimed="`)
+	buf.WriteString(strconv.Itoa(cta.unclaimed))
+	buf.WriteString(`" href="`)
+	buf.WriteString(stdhtml.EscapeString(cta.href))
+	buf.WriteString(`">`)
+	buf.WriteString(stdhtml.EscapeString(cta.text))
+	buf.WriteString(`</a></div>`)
 }
 
 // defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here),
