@@ -371,3 +371,62 @@ func TestWriteDirectoryColumn_ArchivedFold(t *testing.T) {
 		t.Errorf("the fold must follow the move line directly when no active-zone card precedes it; got: %s", only)
 	}
 }
+
+// TestWriteDirectoryColumn_DeskNamesUnprovenEntries (BL-184; SI-366
+// (22)(a)): the desk's copy must be true for an unproven default entry
+// too, so when the column holds one its where line names the unproven
+// status beside the draft word and a note says why such entries wait
+// there — each through the display vocabulary — and without one the
+// copy is unchanged. No other column ever carries the note.
+func TestWriteDirectoryColumn_DeskNamesUnprovenEntries(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "murky-scope", "feature", "draft", "jira:X-9")
+	writeActiveSpec(t, root, "murkier-scope", "feature", "draft", "")
+	d := disclosure.New("refindex:unproven-spec-state", "spec/murky-scope", "specstate: no default branch could be resolved for the store")
+	unproven := refindex.Entry{Ref: "spec/murky-scope", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "unproven", Disclosed: &d, Zone: refindex.ZoneActive, Date: daysBeforeNow(2)}
+	second := unproven
+	second.Ref = "spec/murkier-scope"
+	draft := refindex.Entry{Ref: "spec/local-draft", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Title: "Local draft", Date: daysBeforeNow(3)}
+	renamed := &model.Model{Vocabulary: model.Vocabulary{States: map[string]string{"draft": "sketch", "unproven": "unread"}}}
+
+	tests := []struct {
+		name      string
+		entries   []refindex.Entry
+		mdl       *model.Model
+		wantWhere string
+		wantNote  string
+	}{
+		{"no unproven entry: the copy is unchanged", []refindex.Entry{draft}, nil, "any branch · draft", ""},
+		{"one unproven default entry beside a draft", []refindex.Entry{draft, unproven}, nil, "any branch · draft or unproven", "One entry has an unproven status: the store could not prove its state, so it waits here, and its card says why."},
+		{"two unproven entries", []refindex.Entry{unproven, second}, nil, "any branch · draft or unproven", "2 entries have an unproven status: the store could not prove their states, so they wait here, and each card says why."},
+		{"a renaming store speaks its own words", []refindex.Entry{draft, unproven}, renamed, "any branch · sketch or unread", "One entry has an unread status: the store could not prove its state, so it waits here, and its card says why."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writeDirectorySection(&buf, homeCards(root, tt.entries, cardContext{now: datesNow}), nil, "", false, tt.mdl, datesNow)
+			body := buf.String()
+			desk := columnBlock(t, body, refindex.StatusGroupDraftsInProgress)
+			if !strings.Contains(desk, `<span class="dir-group-where">`+tt.wantWhere+`</span>`) {
+				t.Errorf("desk where line: want %q in %s", tt.wantWhere, desk)
+			}
+			note := `<p class="dir-group-note" data-testid="dir-group-unproven">` + tt.wantNote + `</p>`
+			switch {
+			case tt.wantNote == "" && strings.Contains(desk, "dir-group-note"):
+				t.Errorf("desk must carry no note without an unproven entry; got: %s", desk)
+			case tt.wantNote != "" && !strings.Contains(desk, note):
+				t.Errorf("desk missing its note %s; got: %s", note, desk)
+			}
+			for _, g := range statusGroupOrder[1:] {
+				if strings.Contains(columnBlock(t, body, g), "dir-group-note") {
+					t.Errorf("column %s must never carry the desk's unproven note", g)
+				}
+			}
+			// The unproven entries themselves still sit on the desk, each
+			// counted and each disclosed on its own card.
+			if n := countUnproven(homeCards(root, tt.entries, cardContext{now: datesNow})); n != strings.Count(desk, `<span class="badge badge-unproven">`) {
+				t.Errorf("countUnproven = %d, but the desk draws %d unproven badges", n, strings.Count(desk, `<span class="badge badge-unproven">`))
+			}
+		})
+	}
+}

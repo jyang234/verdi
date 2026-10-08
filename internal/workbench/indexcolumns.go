@@ -85,6 +85,7 @@ func columnCopyFor(g refindex.StatusGroup, mdl *model.Model) columnCopy {
 // only archived entries shows the fold, not an empty state.
 func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []cardFacts, mdl *model.Model, now time.Time) {
 	c := columnCopyFor(g, mdl)
+	whereSuffix, note := deskUnprovenCopy(g, countUnproven(cards), mdl)
 	buf.WriteString(`<section class="dir-group dir-group--`)
 	buf.WriteString(string(g))
 	buf.WriteString(`" data-testid="dir-group-`)
@@ -94,10 +95,15 @@ func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []car
 	buf.WriteString(` <span class="count">`)
 	buf.WriteString(strconv.Itoa(len(cards)))
 	buf.WriteString(`</span></h2><span class="dir-group-where">`)
-	buf.WriteString(stdhtml.EscapeString(c.where))
+	buf.WriteString(stdhtml.EscapeString(c.where + whereSuffix))
 	buf.WriteString(`</span></header><p class="dir-group-move">`)
 	buf.WriteString(stdhtml.EscapeString(c.move))
 	buf.WriteString(`</p>`)
+	if note != "" {
+		buf.WriteString(`<p class="dir-group-note" data-testid="dir-group-unproven">`)
+		buf.WriteString(stdhtml.EscapeString(note))
+		buf.WriteString(`</p>`)
+	}
 	if len(cards) == 0 {
 		buf.WriteString(`<p class="empty dir-empty">`)
 		buf.WriteString(stdhtml.EscapeString(c.empty))
@@ -116,6 +122,39 @@ func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []car
 		buf.WriteString(`</details>`)
 	}
 	buf.WriteString(`</section>`)
+}
+
+// countUnproven counts the cards whose status the index could not prove
+// (refindex projects such an entry onto the desk with an unproven status
+// and its disclosure).
+func countUnproven(cards []cardFacts) int {
+	n := 0
+	for _, c := range cards {
+		if c.entry.SpecStatus == entryStatusUnproven {
+			n++
+		}
+	}
+	return n
+}
+
+// deskUnprovenCopy is the desk column's extra copy when it holds n entries
+// whose status is unproven (BL-184; SI-366 (22)(a): the column's copy must
+// be true for every entry it holds, and "any branch · draft" is not true
+// of an entry the store could not prove): the where line's qualifier, and
+// the note naming them, each through the display vocabulary. Nothing for
+// any other column, or for n == 0.
+func deskUnprovenCopy(g refindex.StatusGroup, n int, mdl *model.Model) (whereSuffix, note string) {
+	if g != refindex.StatusGroupDraftsInProgress || n == 0 {
+		return "", ""
+	}
+	unproven := mdl.DisplayState("", entryStatusUnproven)
+	whereSuffix = " or " + unproven
+	if n == 1 {
+		note = "One entry has " + model.Indefinite(unproven) + " status: the store could not prove its state, so it waits here, and its card says why."
+	} else {
+		note = strconv.Itoa(n) + " entries have " + model.Indefinite(unproven) + " status: the store could not prove their states, so they wait here, and each card says why."
+	}
+	return whereSuffix, note
 }
 
 // splitArchived divides a column's cards into the ones drawn in its body
