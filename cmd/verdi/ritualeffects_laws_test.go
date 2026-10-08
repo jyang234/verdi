@@ -218,14 +218,19 @@ func containsAll(s string, words []string) bool {
 }
 
 // TestRitualEffectsGaps is the abstain decision's table (ledger SI-354
-// (3)): the producer abstains while any run lacked the command log, or
-// while a refusal stood in for a completion, naming each gap once, and may
-// pass only when no gap is open.
+// (3), SI-367 (4)): the producer abstains while any run lacked the command
+// log, or while a refusal stood in for a completion, naming each gap once,
+// and, whatever the runs show, while a path the table does not drive or
+// the witness does not judge stays open (the three undriven gaps, named
+// here one by one, so dropping any from undrivenGaps fails this table).
 func TestRitualEffectsGaps(t *testing.T) {
 	logged := ritualwitness.Result{Log: ritualwitness.CommandLog{OK: true}}
 	unlogged := ritualwitness.Result{}
 	closeStandIn := standingInForCompletion(refuses(1, "gate"), closeCompletionGap)
 	execStandIn := standingInForCompletion(refuses(2, "binding"), executionCompletionGap)
+	undriven := func(gaps ...string) []string {
+		return append(gaps, sealedOriginOnlyGap, closeNonUnwindingGap, worktreeOwnRefsGap)
+	}
 	type run struct {
 		want ritualRun
 		res  ritualwitness.Result
@@ -235,13 +240,13 @@ func TestRitualEffectsGaps(t *testing.T) {
 		runs []run
 		want []string
 	}{
-		{"no run at all", nil, []string{noCommandLogGap}},
-		{"every run logged, every completion proven", []run{{completes(), logged}, {refuses(2, "staged"), logged}}, nil},
-		{"one run without the log", []run{{completes(), logged}, {completes(), unlogged}}, []string{noCommandLogGap}},
-		{"no run with the log", []run{{completes(), unlogged}, {refuses(2, "x"), unlogged}}, []string{noCommandLogGap}},
-		{"close's completion stood in for, logged", []run{{completes(), logged}, {closeStandIn, logged}}, []string{closeCompletionGap}},
+		{"no run at all", nil, undriven(noCommandLogGap)},
+		{"every run logged, every completion proven: the undriven paths stay open", []run{{completes(), logged}, {refuses(2, "staged"), logged}}, undriven()},
+		{"one run without the log", []run{{completes(), logged}, {completes(), unlogged}}, undriven(noCommandLogGap)},
+		{"no run with the log", []run{{completes(), unlogged}, {refuses(2, "x"), unlogged}}, undriven(noCommandLogGap)},
+		{"close's completion stood in for, logged", []run{{completes(), logged}, {closeStandIn, logged}}, undriven(closeCompletionGap)},
 		{"every gap, each named once", []run{{execStandIn, unlogged}, {closeStandIn, unlogged}, {execStandIn, unlogged}, {completes(), unlogged}},
-			[]string{noCommandLogGap, closeCompletionGap, executionCompletionGap}},
+			undriven(noCommandLogGap, closeCompletionGap, executionCompletionGap)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,14 +261,44 @@ func TestRitualEffectsGaps(t *testing.T) {
 	}
 }
 
+// TestUndrivenGaps_EachNamedAndCited pins the gaps no run can close (ledger
+// SI-367 (4)): each is open even when every run was logged and every
+// completion proven, and each cites the authority that discloses it.
+func TestUndrivenGaps_EachNamedAndCited(t *testing.T) {
+	var g ritualEffectsGaps
+	g.record(completes(), ritualwitness.Result{Log: ritualwitness.CommandLog{OK: true}})
+	open := g.open()
+	tests := []struct {
+		name, gap, cite string
+	}{
+		{"the sealed origin-only /b/ refusal", sealedOriginOnlyGap, "ledger SI-341 (4)"},
+		{"close's non-unwinding failure paths", closeNonUnwindingGap, "ledger SI-341 (4)"},
+		{"worktree-own refs in an added worktree", worktreeOwnRefsGap, "backlog BL-171"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !slices.Contains(open, tt.gap) {
+				t.Errorf("open gaps %q do not name %q", open, tt.gap)
+			}
+			if !strings.Contains(tt.gap, tt.cite) {
+				t.Errorf("gap %q does not cite %s", tt.gap, tt.cite)
+			}
+		})
+	}
+	if len(undrivenGaps()) != len(tests) {
+		t.Errorf("undrivenGaps() = %q, want exactly the %d pinned here", undrivenGaps(), len(tests))
+	}
+}
+
 // TestRitualEffectsTable_StandInsNameEachGap feeds every expectation of
 // the producer's own table, per case and state, into the abstain decision
-// with a command log on every run, so only the completion gaps can stay
-// open (ledger SI-354 (3)). Exactly two are open, close's and the
-// execution rituals', and each is marked on exactly the rows that stand in
-// for it: close's four paths in the clean-index state, where close is
-// declared to complete, and the execution rituals' three verbs in both
-// states. A row that lost its mark, or a mark on another row, fails here.
+// with a command log on every run, so only the completion gaps and the
+// undriven ones can stay open (ledger SI-354 (3), SI-367 (4)). Exactly two
+// completion gaps are open, close's and the execution rituals', and each
+// is marked on exactly the rows that stand in for it: close's four paths
+// in the clean-index state, where close is declared to complete, and the
+// execution rituals' three verbs in both states. A row that lost its mark,
+// or a mark on another row, fails here.
 func TestRitualEffectsTable_StandInsNameEachGap(t *testing.T) {
 	table := ritualEffectsTable(t, "/nonexistent/verdi")
 	var g ritualEffectsGaps
@@ -279,7 +314,7 @@ func TestRitualEffectsTable_StandInsNameEachGap(t *testing.T) {
 			}
 		}
 	}
-	if got, want := g.open(), []string{closeCompletionGap, executionCompletionGap}; !slices.Equal(got, want) {
+	if got, want := g.open(), []string{closeCompletionGap, executionCompletionGap, sealedOriginOnlyGap, closeNonUnwindingGap, worktreeOwnRefsGap}; !slices.Equal(got, want) {
 		t.Fatalf("open gaps = %q, want exactly %q", got, want)
 	}
 	wantMarked := map[string][]string{
