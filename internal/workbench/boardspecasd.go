@@ -599,11 +599,17 @@ type asdView struct {
 	// mutation's fresh projection).
 	Marks *wallMarks
 
+	// Pill is the readiness pill's facts (spec/wall-strip-and-drawer-v2
+	// ac-4; ledger SI-368 (2)), from the readiness the composed refresh
+	// already loaded, or the marks' fixed reason where the marks are fixed
+	// (SI-364 (3)); nil when this render composed none (SI-362 (2)).
+	Pill *wallPill
+
 	// readinessRevision digests what this view's projection read beyond
 	// the wall itself — the readiness it loaded, or the load's failure,
-	// and the marks derived from it — so the snapshot's revision covers it
-	// (Wave 6 §5.1; SI-360 (2)); "" when the projection loaded no
-	// readiness.
+	// and the marks and pill derived from it — so the snapshot's revision
+	// covers it (Wave 6 §5.1; SI-360 (2)); "" when the projection loaded
+	// no readiness.
 	readinessRevision string
 }
 
@@ -787,6 +793,11 @@ type asdSnapshot struct {
 	// projection composed them: the snapshot route and the page do, a
 	// mutation's fresh projection does not.
 	Marks *wallMarks `json:"marks,omitempty"`
+	// Pill is the readiness pill's facts (SI-368 (2)), when the projection
+	// composed them, or the instance's fixed reason (SI-364 (3)); a
+	// mutation's fresh projection on a serving-root wall carries none, so
+	// the pill stays as the last poll left it (SI-362 (2)).
+	Pill *wallPill `json:"pill,omitempty"`
 
 	// bar is the top bar's facts the region and Posture render from.
 	// Not on the wire: the revision hashes it explicitly, so the accepted
@@ -831,8 +842,9 @@ type wallRefresh struct {
 
 // readinessRevision digests what a composed refresh read beyond the
 // wall's own projection: the readiness it loaded, or the load's failure,
-// and the marks derived from it (Wave 6 §5.1; SI-360 (2)).
-func readinessRevision(readiness *readinesspilot.Snapshot, readinessErr error, marks *wallMarks) (string, error) {
+// and the marks and pill derived from it (Wave 6 §5.1; SI-360 (2);
+// SI-368 (2)).
+func readinessRevision(readiness *readinesspilot.Snapshot, readinessErr error, marks *wallMarks, pill *wallPill) (string, error) {
 	failure := ""
 	if readinessErr != nil {
 		failure = readinessErr.Error()
@@ -841,7 +853,8 @@ func readinessRevision(readiness *readinesspilot.Snapshot, readinessErr error, m
 		Readiness        *readinesspilot.Snapshot
 		ReadinessFailure string
 		Marks            *wallMarks
-	}{readiness, failure, marks})
+		Pill             *wallPill
+	}{readiness, failure, marks, pill})
 }
 
 // projectWallRefresh is the wall's one application projection per
@@ -869,7 +882,8 @@ func (s *boardSpecServer) projectWallRefresh(ctx context.Context, name string, c
 // session and pinned accepted HEAD — and, when composeReadiness is set,
 // composes its readiness marks (SI-360): on a wall served from the
 // serving root, the spec's readiness loaded in that session and the marks
-// derived from it, which the snapshot's revision then covers. On a wall
+// and the pill (SI-368 (2)) derived from that one load, which the
+// snapshot's revision then covers. On a wall
 // whose marks are fixed for this server instance (instanceMarks: a /b/
 // wall whose branch is not the serving root's, or no loader wired) the
 // load already carries them and nothing more is loaded; the snapshot's
@@ -889,9 +903,10 @@ func (s *boardSpecServer) composeWall(ctx context.Context, name string, composeR
 	} else {
 		out.readiness = &readiness
 	}
-	marks := deriveWallMarks(wallMarksInputFor(name, proj, asd, out.readiness, out.readinessErr))
-	asd.Marks = &marks
-	if asd.readinessRevision, err = readinessRevision(out.readiness, out.readinessErr, asd.Marks); err != nil {
+	in := wallMarksInputFor(name, proj, asd, out.readiness, out.readinessErr)
+	marks, pill := deriveWallMarks(in), deriveWallPill(in)
+	asd.Marks, asd.Pill = &marks, &pill
+	if asd.readinessRevision, err = readinessRevision(out.readiness, out.readinessErr, asd.Marks, asd.Pill); err != nil {
 		return wallRefresh{}, fmt.Errorf("workbench: the composed refresh's revision: %w", err)
 	}
 	return out, nil
@@ -927,6 +942,7 @@ func newASDSnapshot(p *BoardProjection, git *boardGitState, asd *asdView) *asdSn
 		Git:         git,
 		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
 		Marks:       asd.Marks,
+		Pill:        asd.Pill,
 		bar:         bar,
 		readiness:   asd.readinessRevision,
 	}

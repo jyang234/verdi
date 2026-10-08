@@ -471,6 +471,7 @@ func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 	// (1)): its one notice says why, and no card carries a mark.
 	marks := unavailableMarks(marksSealed(ref))
 	v.Marks = &marks
+	v.Pill = fixedPill(v.Marks)
 	v.Shell = deriveASDShell(asdShellInput{
 		ProblemPresent: proj.Problem != "",
 		OutcomePresent: proj.Outcome != "",

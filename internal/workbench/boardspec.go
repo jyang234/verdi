@@ -571,10 +571,11 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 
 // loadASDView is the ASD projection without the changes summary: one
 // loadBoard plus the ASD rendered facts (posture header, shell,
-// capabilities view, client mutation facts, and the readiness marks fixed
-// for this server instance, if any — SI-364 (3)), and the working tree's
-// spec.md bytes loadBoard read. The fragment, which carries no git state
-// of its own, renders from this and never pays for the summary.
+// capabilities view, client mutation facts, and the readiness marks and
+// pill fixed for this server instance, if any — SI-364 (3)), and the
+// working tree's spec.md bytes loadBoard read. The fragment, which
+// carries no git state of its own, renders from this and never pays for
+// the summary.
 func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, []byte, error) {
 	proj, git, reviewNotice, extras, err := s.loadBoard(ctx, name)
 	if err != nil {
@@ -586,6 +587,7 @@ func (s *boardSpecServer) loadASDView(ctx context.Context, name string) (*BoardP
 	}
 	asd.reviewNotice = reviewNotice
 	asd.Marks = s.instanceMarks()
+	asd.Pill = fixedPill(asd.Marks)
 	return proj, git, asd, extras.raw, nil
 }
 
