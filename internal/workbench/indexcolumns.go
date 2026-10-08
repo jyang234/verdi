@@ -79,7 +79,10 @@ func columnCopyFor(g refindex.StatusGroup, mdl *model.Model) columnCopy {
 // writeDirectoryColumn draws one column: its section keeps the dir-group
 // test id every pinned surface addresses (dc-12), and holds the heading
 // with its count, the where and move lines, then either the cards or the
-// empty state — never both, never neither.
+// empty state — never both, never neither. On the shelf, the archive-zone
+// entries fold into a collapsed <details> at the column's foot (ac-5;
+// SI-366 (8)): the count above still includes them, and a column holding
+// only archived entries shows the fold, not an empty state.
 func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []cardFacts, mdl *model.Model, now time.Time) {
 	c := columnCopyFor(g, mdl)
 	buf.WriteString(`<section class="dir-group dir-group--`)
@@ -101,9 +104,43 @@ func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []car
 		buf.WriteString(`</p></section>`)
 		return
 	}
+	shown, archived := splitArchived(g, cards)
+	if len(shown) > 0 {
+		writeCardList(buf, shown, mdl, now)
+	}
+	if len(archived) > 0 {
+		buf.WriteString(`<details class="dir-archived" data-testid="dir-archived"><summary>archived <span class="count">`)
+		buf.WriteString(strconv.Itoa(len(archived)))
+		buf.WriteString(`</span></summary>`)
+		writeCardList(buf, archived, mdl, now)
+		buf.WriteString(`</details>`)
+	}
+	buf.WriteString(`</section>`)
+}
+
+// splitArchived divides a column's cards into the ones drawn in its body
+// and the ones folded at its foot. Only the shelf folds, and only its
+// archive-zone entries (SI-366 (8)): an archive-zone entry in any other
+// group stays a card in its status column.
+func splitArchived(g refindex.StatusGroup, cards []cardFacts) (shown, archived []cardFacts) {
+	if g != refindex.StatusGroupTerminal {
+		return cards, nil
+	}
+	for _, c := range cards {
+		if c.entry.Zone == refindex.ZoneArchive {
+			archived = append(archived, c)
+		} else {
+			shown = append(shown, c)
+		}
+	}
+	return shown, archived
+}
+
+// writeCardList draws one list of cards.
+func writeCardList(buf *bytes.Buffer, cards []cardFacts, mdl *model.Model, now time.Time) {
 	buf.WriteString(`<ul class="dir-cards">`)
 	for _, card := range cards {
 		writeDirectoryEntry(buf, card, mdl, now)
 	}
-	buf.WriteString(`</ul></section>`)
+	buf.WriteString(`</ul>`)
 }

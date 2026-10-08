@@ -127,19 +127,17 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	// pass over the cards above, every entry exactly once.
 	writeDirectorySection(&body, cards, indexErr, mrNotice, home.OpenMRs != nil, home.Model, now)
 
-	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
-	// conflict) — a surviving affordance of the old home page, still read
-	// from the serving working tree (they have no per-branch story).
-	if corpus.err != nil {
-		body.WriteString(`<p class="notice">Could not read the corpus for this store: `)
-		body.WriteString(stdhtml.EscapeString(corpus.err.Error()))
-		body.WriteString(`</p>`)
-	} else {
-		writeOtherKindsSection(&body, ix)
-	}
-
+	// The other-records strip below the columns (spec/index-v2 ac-5): the
+	// non-spec corpus kinds — a surviving affordance of the old home page,
+	// still read from the serving working tree (they have no per-branch
+	// story) — the discovered services, and the grandfathered v0 boards,
+	// each a collapsed <details> carrying its count, so the strip never
+	// leads and every listing opens without JavaScript.
+	body.WriteString(`<section class="home-strip" aria-labelledby="home-strip-heading"><h2 id="home-strip-heading">Other records</h2>`)
+	writeOtherKindsSection(&body, ix, corpus.err)
 	writeServicesSection(&body, root)
 	writeBoardsSection(&body, root)
+	body.WriteString(`</section>`)
 
 	return renderPage(ctx, root, pageData{
 		Title:    "Workbench",
@@ -162,13 +160,48 @@ func disclosuresCarrier(ctx context.Context, root string, extras []disclosure.Di
 	return ` data-disclosures-count="` + strconv.Itoa(n) + `"`
 }
 
+// writeStripSummary opens one strip section as a collapsed <details>
+// (ac-5: expandable without JavaScript) whose summary names it and
+// carries its count — or, when the count could not be read, a disclosed
+// unproven mark naming why, never a zero standing in for an unread
+// listing. class is the section's kept class (home-kinds, home-services,
+// home-boards), the test id the same.
+func writeStripSummary(buf *bytes.Buffer, class, name string, count int, unproven string) {
+	buf.WriteString(`<details class="`)
+	buf.WriteString(class)
+	buf.WriteString(`" data-testid="`)
+	buf.WriteString(class)
+	buf.WriteString(`"><summary>`)
+	buf.WriteString(stdhtml.EscapeString(name))
+	if unproven != "" {
+		buf.WriteString(` <span class="dir-unproven" title="`)
+		buf.WriteString(stdhtml.EscapeString(unproven))
+		buf.WriteString(`">count unproven</span>`)
+	} else {
+		buf.WriteString(` <span class="count">`)
+		buf.WriteString(strconv.Itoa(count))
+		buf.WriteString(`</span>`)
+	}
+	buf.WriteString(`</summary>`)
+}
+
 // writeOtherKindsSection groups every non-spec, non-external committed-zone
 // kind (adr, diagram, attestation, waiver, conflict) with a count, linking
-// each artifact to its corpus page. External refs (discovered services) are
-// their own section below and carry no corpus page.
-func writeOtherKindsSection(buf *bytes.Buffer, ix *index.Index) {
+// each artifact to its corpus page, folded under one summary carrying the
+// total. External refs (discovered services) are their own section below
+// and carry no corpus page. corpusErr is why the corpus could not be read,
+// when it could not: the fold then carries the notice and no count.
+func writeOtherKindsSection(buf *bytes.Buffer, ix *index.Index, corpusErr error) {
+	if corpusErr != nil {
+		writeStripSummary(buf, "home-kinds", "Other artifacts", 0, corpusErr.Error())
+		buf.WriteString(`<p class="notice">Could not read the corpus for this store: `)
+		buf.WriteString(stdhtml.EscapeString(corpusErr.Error()))
+		buf.WriteString(`</p></details>`)
+		return
+	}
 	byKind := map[string][]*index.Entry{}
 	var kinds []string
+	total := 0
 	for _, e := range ix.All() {
 		if e.Kind == "spec" || e.Kind == "external" {
 			continue
@@ -177,21 +210,22 @@ func writeOtherKindsSection(buf *bytes.Buffer, ix *index.Index) {
 			kinds = append(kinds, e.Kind)
 		}
 		byKind[e.Kind] = append(byKind[e.Kind], e)
+		total++
 	}
 	sort.Strings(kinds)
 
-	buf.WriteString(`<section class="home-kinds"><h2>Other artifacts</h2>`)
+	writeStripSummary(buf, "home-kinds", "Other artifacts", total, "")
 	if len(kinds) == 0 {
-		buf.WriteString(`<p class="empty">No other artifacts.</p></section>`)
+		buf.WriteString(`<p class="empty">No other artifacts.</p></details>`)
 		return
 	}
 	for _, k := range kinds {
 		entries := byKind[k]
 		buf.WriteString(`<h3>`)
 		buf.WriteString(stdhtml.EscapeString(k))
-		buf.WriteString(` <span class="count">(`)
+		buf.WriteString(` <span class="count">`)
 		buf.WriteString(strconv.Itoa(len(entries)))
-		buf.WriteString(`)</span></h3><ul>`)
+		buf.WriteString(`</span></h3><ul>`)
 		for _, e := range entries {
 			buf.WriteString(`<li>`)
 			writeRefLink(buf, e.Ref) // corpus.go: links kind/name refs to /a/kind/name
@@ -203,7 +237,7 @@ func writeOtherKindsSection(buf *bytes.Buffer, ix *index.Index) {
 		}
 		buf.WriteString(`</ul>`)
 	}
-	buf.WriteString(`</section>`)
+	buf.WriteString(`</details>`)
 }
 
 // writeServicesSection lists the store's discovered services (05 §MCP
@@ -211,16 +245,17 @@ func writeOtherKindsSection(buf *bytes.Buffer, ix *index.Index) {
 // have no dedicated workbench page in v0, so each is named (with its
 // obligation count) rather than linked.
 func writeServicesSection(buf *bytes.Buffer, root string) {
-	buf.WriteString(`<section class="home-services"><h2>Services</h2>`)
 	services, err := store.DiscoverServices(root)
 	if err != nil {
+		writeStripSummary(buf, "home-services", "Services", 0, err.Error())
 		buf.WriteString(`<p class="notice">Could not discover services: `)
 		buf.WriteString(stdhtml.EscapeString(err.Error()))
-		buf.WriteString(`</p></section>`)
+		buf.WriteString(`</p></details>`)
 		return
 	}
+	writeStripSummary(buf, "home-services", "Services", len(services), "")
 	if len(services) == 0 {
-		buf.WriteString(`<p class="empty">No services discovered.</p></section>`)
+		buf.WriteString(`<p class="empty">No services discovered.</p></details>`)
 		return
 	}
 	buf.WriteString("<ul>")
@@ -236,23 +271,24 @@ func writeServicesSection(buf *bytes.Buffer, root string) {
 		}
 		buf.WriteString(`</li>`)
 	}
-	buf.WriteString(`</ul></section>`)
+	buf.WriteString(`</ul></details>`)
 }
 
 // writeBoardsSection enumerates data/mutable/boards/*.json under the store
 // root and links each to its /board/<key> page. When none exist it says so
 // honestly rather than rendering an empty list.
 func writeBoardsSection(buf *bytes.Buffer, root string) {
-	buf.WriteString(`<section class="home-boards"><h2>Boards</h2>`)
 	entries, err := os.ReadDir(boardio.BoardsDir(root))
 	if err != nil {
 		if os.IsNotExist(err) {
-			buf.WriteString(`<p class="empty">No boards yet.</p></section>`)
+			writeStripSummary(buf, "home-boards", "Boards", 0, "")
+			buf.WriteString(`<p class="empty">No boards yet.</p></details>`)
 			return
 		}
+		writeStripSummary(buf, "home-boards", "Boards", 0, err.Error())
 		buf.WriteString(`<p class="notice">Could not read boards: `)
 		buf.WriteString(stdhtml.EscapeString(err.Error()))
-		buf.WriteString(`</p></section>`)
+		buf.WriteString(`</p></details>`)
 		return
 	}
 
@@ -268,8 +304,9 @@ func writeBoardsSection(buf *bytes.Buffer, root string) {
 	}
 	sort.Strings(keys)
 
+	writeStripSummary(buf, "home-boards", "Boards", len(keys), "")
 	if len(keys) == 0 {
-		buf.WriteString(`<p class="empty">No boards yet.</p></section>`)
+		buf.WriteString(`<p class="empty">No boards yet.</p></details>`)
 		return
 	}
 	buf.WriteString("<ul>")
@@ -280,5 +317,5 @@ func writeBoardsSection(buf *bytes.Buffer, root string) {
 		buf.WriteString(stdhtml.EscapeString(key))
 		buf.WriteString(`</a></li>`)
 	}
-	buf.WriteString(`</ul></section>`)
+	buf.WriteString(`</ul></details>`)
 }

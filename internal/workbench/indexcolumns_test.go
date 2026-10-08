@@ -311,3 +311,63 @@ func TestWriteDirectoryEntry_SuccessorUnlinkedWithoutBacklink(t *testing.T) {
 		t.Fatalf("unlinked successor move missing; got: %s", block)
 	}
 }
+
+// TestWriteDirectoryColumn_ArchivedFold is ac-5's shelf witness (SI-366
+// (8)): on the shelf, the archive-zone entries fold into a collapsed
+// <details> at the column's foot, after the active-zone cards, with the
+// column's count still including them; an archive-zone entry in any other
+// group stays a card in its status column; and a shelf holding only
+// archived entries shows the fold, never an empty state beside it.
+func TestWriteDirectoryColumn_ArchivedFold(t *testing.T) {
+	entries := []refindex.Entry{
+		{Ref: "spec/old-way", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupTerminal, SpecStatus: "superseded", Zone: refindex.ZoneActive, Date: daysBeforeNow(300)},
+		{Ref: "spec/settled-work", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupTerminal, SpecStatus: "closed", Zone: refindex.ZoneArchive, Date: daysBeforeNow(900)},
+		{Ref: "spec/wrapped-up", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupTerminal, SpecStatus: "closed", Zone: refindex.ZoneActive, Date: daysBeforeNow(10)},
+		{Ref: "spec/shelved-early", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupAcceptedPendingBuild, SpecStatus: "accepted-pending-build", Zone: refindex.ZoneArchive, Date: daysBeforeNow(5)},
+	}
+	var buf bytes.Buffer
+	writeDirectorySection(&buf, homeCards(t.TempDir(), entries, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	body := buf.String()
+
+	shelf := columnBlock(t, body, refindex.StatusGroupTerminal)
+	if !strings.Contains(shelf, `<h2>On the shelf <span class="count">3</span></h2>`) {
+		t.Errorf("the shelf's count must include its folded entries; got: %s", shelf)
+	}
+	fold := strings.Index(shelf, `<details class="dir-archived" data-testid="dir-archived"><summary>archived <span class="count">1</span></summary><ul class="dir-cards">`)
+	if fold < 0 {
+		t.Fatalf("the shelf has no collapsed archived fold with its count; got: %s", shelf)
+	}
+	if !strings.HasSuffix(shelf, `</ul></details></section>`) {
+		t.Errorf("the fold must be the column's last child; got: %s", shelf)
+	}
+	for _, active := range []string{"old-way", "wrapped-up"} {
+		i := strings.Index(shelf, `data-testid="dir-entry-`+active+`"`)
+		if i < 0 || i > fold {
+			t.Errorf("active-zone entry %s must be a card before the fold (at %d, fold at %d)", active, i, fold)
+		}
+	}
+	if i := strings.Index(shelf, `data-testid="dir-entry-settled-work"`); i < fold {
+		t.Errorf("the archived entry must sit inside the fold (at %d, fold at %d)", i, fold)
+	}
+	if strings.Contains(shelf, "dir-empty") {
+		t.Errorf("a shelf with cards draws no empty state; got: %s", shelf)
+	}
+
+	// The archive-zone entry in another group stays a card in its column.
+	accepted := columnBlock(t, body, refindex.StatusGroupAcceptedPendingBuild)
+	if strings.Contains(accepted, "dir-archived") || !strings.Contains(accepted, `<ul class="dir-cards"><li class="dir-entry" data-testid="dir-entry-shelved-early"`) {
+		t.Errorf("an archive-zone entry outside the shelf must stay a card, never fold; got: %s", accepted)
+	}
+
+	// A shelf holding only archived entries: the fold, no empty state, no
+	// body list.
+	buf.Reset()
+	writeDirectorySection(&buf, homeCards(t.TempDir(), entries[1:2], cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	only := columnBlock(t, buf.String(), refindex.StatusGroupTerminal)
+	if strings.Contains(only, "dir-empty") || strings.Count(only, `<ul class="dir-cards">`) != 1 || !strings.Contains(only, `<span class="count">1</span></h2>`) {
+		t.Errorf("a shelf holding only archived entries must show the fold alone with a count of 1; got: %s", only)
+	}
+	if !strings.Contains(only, `</p><details class="dir-archived"`) {
+		t.Errorf("the fold must follow the move line directly when no active-zone card precedes it; got: %s", only)
+	}
+}
