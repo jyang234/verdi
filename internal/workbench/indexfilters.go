@@ -76,6 +76,7 @@ func writeFilterRow(buf *bytes.Buffer, cards []cardFacts, mrConfigured, mrUnavai
 	case mrUnavailable:
 		writeFilterPillDisabled(buf, filterInReview, "in review · unavailable", "the forge could not be consulted this render, so no review state is known for any branch")
 	default:
+		// vocab:identity — non-vocabulary homograph: the forge's merge request, never the `merge` lifecycle transition word
 		writeFilterPill(buf, filterInReview, "in review", n.inReview, false, "the forge lists an open merge request from the branch")
 	}
 	writeFilterPill(buf, filterDisclosed, "disclosed", n.disclosed, false, "the card states an unproven fact")
