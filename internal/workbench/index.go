@@ -85,18 +85,9 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	body.WriteString(stdhtml.EscapeString(root))
 	body.WriteString(`</code></p>`)
 
-	// The disclosures view (spec/disclosures-panel): one landing-page
-	// pointer so the checkout's "what is verdi not proving right now"
-	// surface is discoverable, not tribal knowledge. The pointer also
-	// carries the disclosures count, non-visible, for the top bar's
-	// Disclosures toggle (spec/index-coverage ac-3; SI-295).
-	body.WriteString(`<p class="home-disclosures"` + disclosuresCarrier(ctx, root, extras) + `><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
-
-	// The mechanical spec importer (spec-import-contract: "The page is
-	// discoverable from home before new statements are requested"): one
-	// pointer ahead of the directory's columns, so an existing spec can
-	// be brought in before anyone is asked to write statements.
-	body.WriteString(`<p class="home-import"><a href="` + routeSpecImportPage + `" data-testid="home-import-link">Import existing spec</a> &mdash; bring an existing Markdown or native spec onto a new design branch as it is: previewed and mapped mechanically, nothing invented, nothing created until you confirm.</p>`)
+	// The disclosures pointer (spec/disclosures-panel) and the import
+	// link (spec-import-contract) are the bar's controls now (ac-5; SI-366
+	// (5), (17); indexbar.go), ahead of the directory's columns.
 
 	// The whole-store directory (spec/directory-home ac-1): the ref-index
 	// seam consumed once, the render's one clock reading, the corpus index
@@ -140,25 +131,19 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	body.WriteString(`</section>`)
 
 	return renderPage(ctx, root, pageData{
-		Title:    "Workbench",
-		Surface:  true, // the one page whose wordmark wears WORKBENCH (handoff "Global chrome")
-		BodyHTML: template.HTML(body.String()),
+		Title:       "Workbench",
+		Surface:     true, // the one page whose wordmark wears WORKBENCH (handoff "Global chrome")
+		BodyHTML:    template.HTML(body.String()),
+		ExtraHTML:   indexScriptTag,
+		BarControls: indexBarControls(ctx, root, extras, classWords{m: home.Model}),
 	})
 }
 
-// disclosuresCarrier returns the index's non-visible disclosures carrier
-// attribute (spec/index-coverage ac-3; SI-295): data-disclosures-count
-// with the number of entries /disclosures shows — the same enumeration,
-// the same extras, one call per render — or, when the enumeration fails,
-// data-disclosures-unproven with the reason and no count, never a false
-// "0" and never a silent omission.
-func disclosuresCarrier(ctx context.Context, root string, extras []disclosure.Disclosure) string {
-	n, err := countDisclosures(ctx, root, extras...)
-	if err != nil {
-		return ` data-disclosures-unproven="` + stdhtml.EscapeString(err.Error()) + `"`
-	}
-	return ` data-disclosures-count="` + strconv.Itoa(n) + `"`
-}
+// indexScriptTag loads the index's own script, /assets/index.js (the
+// filter row; spec/workbench-redesign co-1: new behaviour ships in a new
+// asset within 64 KiB), deferred, so the page — every card shown, every
+// fold a native <details> — is complete before the script enhances it.
+const indexScriptTag = template.HTML(`<script src="/assets/index.js" defer></script>`)
 
 // writeStripSummary opens one strip section as a collapsed <details>
 // (ac-5: expandable without JavaScript) whose summary names it and

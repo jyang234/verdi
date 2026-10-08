@@ -224,6 +224,10 @@ func writeDirectorySection(buf *bytes.Buffer, cards []cardFacts, indexErr error,
 		byGroup[c.entry.StatusGroup] = append(byGroup[c.entry.StatusGroup], c)
 	}
 
+	// The filter row (ac-3; indexfilters.go) sits above the columns and
+	// only exists over a computed population.
+	writeFilterRow(buf, cards, mrConfigured, mrNotice != "")
+
 	buf.WriteString(`<div class="dir-columns">`)
 	for _, g := range statusGroupOrder {
 		writeDirectoryColumn(buf, g, byGroup[g], mdl, now)
@@ -314,10 +318,16 @@ func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
 	writeSourceChip(buf, c.entry.Source)
 	buf.WriteString(` `)
 	writeAgeChip(buf, c.age)
-	if c.review == reviewOpen {
+	switch c.review {
+	case reviewOpen:
 		// dc-4: chipped from the forge port's open-MR listing — the
 		// disclosed second source, never part of the index computation.
 		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
+	case reviewUnavailable:
+		// SI-366 (4): the forge could not be consulted this render, so
+		// whether this branch is in review is unknown — said on the card
+		// itself, in a class the in-review pins never count.
+		buf.WriteString(` <span class="dir-unproven dir-review-unavailable" title="the forge could not be consulted this render, so whether this branch is in review is unknown">review status unavailable</span>`)
 	}
 	buf.WriteString(`</div>`)
 }

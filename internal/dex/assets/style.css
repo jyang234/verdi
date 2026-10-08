@@ -6105,3 +6105,202 @@ body:not(.board-page) > footer.site-foot,
 .dir-move a { color: inherit; }
 .dir-cards .dir-disclosed { display: block; font-size: 0.75rem; overflow-wrap: anywhere; }
 /* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* ---------- the index's filters, folds, strip and bar (spec/index-v2
+   ac-3, ac-5; SI-366 (4), (5), (6), (8), (17); handoff README "Screen 2
+   — Index") ----------
+   The filter row above the columns: four mono pills, the pressed one in
+   ink, a disabled one dashed and pending-coloured because its answer is
+   unknown. A card a filter does not select carries the hidden attribute,
+   which must beat the card's own flex display above. On the shelf, the
+   archived fold is a native <details> at the column's foot; below the
+   columns, the other-records strip is three collapsed <details> under
+   one small heading. The bar's index controls — the view toggle, the
+   Disclosures link with its count, the import link and New feature with
+   its CLI hint — wrap with the bar's controls slot below 640 px, so every
+   control stays visible at 320 px. Tokens only; meaning never by colour
+   alone (Wave 6 §5.2): every pill, chip and fold says its state in words. */
+.dir-cards .dir-entry[hidden] { display: none; }
+.dir-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0 0 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+}
+.dir-filters-label {
+  font-size: 0.59375rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.dir-filter {
+  font: inherit;
+  padding: 0.1875rem 0.5625rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.dir-filter .count { margin-left: 0.125rem; color: var(--muted-solid); }
+.dir-filter:hover:not([disabled]) { border-color: var(--accent); }
+.dir-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dir-filter[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.dir-filter[aria-pressed="true"] .count { color: inherit; opacity: 0.8; }
+.dir-filter[disabled] {
+  cursor: not-allowed;
+  border-style: dashed;
+  border-color: var(--st-pending);
+  background: none;
+  color: var(--st-pending);
+}
+.dir-review-unavailable { white-space: normal; }
+.dir-group-note {
+  margin: 0;
+  padding: 0.375rem 0.75rem 0;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+  color: var(--st-pending);
+}
+.dir-group .dir-archived {
+  margin: 0 0.5rem 0.5rem;
+  border-top: 1px dashed var(--rule);
+}
+.dir-archived > summary {
+  padding: 0.5rem 0.1875rem 0.25rem;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+}
+.dir-archived > summary:hover { color: var(--ink); }
+.dir-archived > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dir-archived > summary .count { color: var(--muted-solid); }
+.dir-group .dir-archived > .dir-cards { padding: 0.25rem 0 0; }
+.home-strip { margin: 0 0 1.6rem; }
+.home-strip > h2 {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.home-strip > details,
+.home-strip > details.home-kinds,
+.home-strip > details.home-services,
+.home-strip > details.home-boards {
+  margin: 0 0 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.home-strip > details > summary {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.home-strip > details > summary:hover { color: var(--accent-strong); }
+.home-strip > details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.home-strip > details > summary .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted-solid);
+}
+.home-strip > details[open] > summary { border-bottom: 1px solid var(--rule); }
+.home-strip > details > h3,
+.home-strip > details > ul,
+.home-strip > details > p { margin-left: 0.75rem; margin-right: 0.75rem; }
+.home-strip > details > h3 { margin-top: 0.75rem; }
+.home-strip > details > h3 .count { font-family: var(--mono); font-size: 0.6875rem; font-weight: 400; color: var(--muted-solid); }
+.home-strip > details > p { padding: 0.5rem 0; }
+.home-strip > details > ul { margin-bottom: 0.5rem; }
+.home-strip > details > ul > li:last-child { border-bottom: 0; }
+.topbar-view {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--rule);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+}
+.topbar-view > * {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--muted-solid);
+  font: inherit;
+  white-space: nowrap;
+}
+.topbar-view > .topbar-view-current {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+.topbar-view > button[disabled] { cursor: not-allowed; }
+.topbar-controls .home-disclosures {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px dashed var(--st-pending);
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar-controls .home-disclosures:hover { color: var(--accent-strong); }
+.topbar-controls .home-disclosures .count { font-weight: 700; color: var(--st-pending); }
+.topbar-controls .topbar-import {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+.topbar-new-feature {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.topbar-controls .home-new-feature {
+  display: inline-block;
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar-cli-hint {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--muted-solid);
+  white-space: nowrap;
+}
+.topbar-cli-hint code { font-size: inherit; }
+/* verdi:workbench-only:end */

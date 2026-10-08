@@ -155,11 +155,16 @@ func TestWriteDirectorySection_DateCarriers(t *testing.T) {
 // (13)) — the one visible mark the dates make on a card.
 var ageChipRe = regexp.MustCompile(`<span class="dir-age[^"]*"(?: title="[^"]*")?>[^<]*</span>`)
 
+// filterCountRe matches the quiet and disclosed pills' counts, which the
+// dates decide (spec/index-v2 ac-3; indexfilters.go).
+var filterCountRe = regexp.MustCompile(`(data-testid="dir-filter-(?:quiet|disclosed)"[^>]*>[a-z ]+<span class="count">)[0-9]+`)
+
 // TestWriteDirectorySection_DateCarriersAddNothingVisible: the carriers,
-// the age chip and the disclosed flag are the ONLY differences dates make
-// to the directory's markup — no other text, class, or element changes
-// (SI-297's carrier; spec/index-v2 ac-2's age, read from it and from
-// nothing else).
+// the age chip, the disclosed flag and the two filter counts over them
+// (quiet and disclosed; spec/index-v2 ac-3) are the ONLY differences
+// dates make to the directory's markup — no other text, class, or
+// element changes (SI-297's carrier; spec/index-v2 ac-2's age, read from
+// it and from nothing else).
 func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	dated := directoryFixtureEntries()
 	for i := range dated {
@@ -184,6 +189,7 @@ func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	strip := func(s string) string {
 		s = dateCarrierRe.ReplaceAllString(s, "")
 		s = ageChipRe.ReplaceAllString(s, "")
+		s = filterCountRe.ReplaceAllString(s, `${1}n`)
 		return strings.ReplaceAll(s, ` data-disclosed="true"`, ` data-disclosed="false"`)
 	}
 	stripped, strippedUndated := strip(withDates.String()), strip(withoutDates.String())

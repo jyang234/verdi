@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js
+//go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -166,4 +166,13 @@ func embeddedJSHandler(name string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(data) // response body write; post-header error is unactionable
 	}
+}
+
+// indexJSHandler serves the index's one JS file (spec/index-v2 ac-3): the
+// filter row over the server-rendered cards — a new asset for the new
+// behaviour (spec/workbench-redesign co-1), dependency-free, and
+// structurally capped at 64 KiB uncompressed
+// (TestIndexAsset_ServedWithinBudget).
+func indexJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/index.js")
 }
