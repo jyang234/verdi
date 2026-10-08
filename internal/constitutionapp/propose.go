@@ -192,7 +192,9 @@ type ProposeResult struct {
 // the checkout (a caller's own --request document, another in-progress
 // edit) nor an entry the caller had already staged can be swept into this
 // commit (UAT-036). A new proposal branch is cut from the resolved default
-// branch's commit (proposalBase), never from the caller's HEAD. It never
+// branch's commit (proposalBase), never from the caller's HEAD, and never
+// beside a remote-tracking branch of the same name on the remote that base
+// resolves from (proposalCollision, ledger SI-367 (3)). It never
 // merges, approves, or writes anything outside that one path — merge/
 // approval stay the normal Git pull-request boundary (design §7.1).
 //
@@ -288,8 +290,11 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		if typedBase != nil {
 			return nil, typedBase
 		}
+		if typedCollision := proposalCollision(ctx, root, req.Branch, base); typedCollision != nil {
+			return nil, typedCollision
+		}
 		effects.beginCheckout()
-		if err := s.Git.CheckoutNewBranchFrom(ctx, root, req.Branch, base); err != nil {
+		if err := s.Git.CheckoutNewBranchFrom(ctx, root, req.Branch, base.Commit); err != nil {
 			effects.checkoutRefused()
 			return nil, effects.failure(ctx, s, root, operational("io-failure", "creating proposal branch", err))
 		}
@@ -380,23 +385,45 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, Commit: commit}, nil
 }
 
-// proposalBase returns the commit a new proposal branch is cut from: the
-// resolved default branch's (spec/ritual-effect-witness ac-4, UAT-023; the
+// proposalBase returns the base a new proposal branch is cut from: the
+// resolved default branch (spec/ritual-effect-witness ac-4, UAT-023; the
 // owner's decision of 2026-09-30), resolved through internal/branchbase
-// exactly as design start's base is (dc-7/I-130). It is the commit, not the
-// ref's name, so the checkout sets no upstream to the default branch. A
+// exactly as design start's base is (dc-7/I-130). The cut is at its
+// Commit, not the ref's name, so the checkout sets no upstream to the
+// default branch. A
 // repository with no origin remote has no default branch to resolve and
 // keeps branchbase's disclosed HEAD fallback, which the result's identity
 // discloses (accepted_known false); a repository whose origin is configured
 // but whose default branch cannot be resolved is refused before any
 // mutation.
-func proposalBase(ctx context.Context, root string) (string, *Error) {
+func proposalBase(ctx context.Context, root string) (branchbase.Resolution, *Error) {
 	res, err := branchbase.Resolve(ctx, root)
 	if err != nil {
-		return "", operational("io-failure", "resolving the proposal branch's base", err)
+		return branchbase.Resolution{}, operational("io-failure", "resolving the proposal branch's base", err)
 	}
 	if res.Kind == branchbase.Unresolvable {
-		return "", operational("accepted-identity-unavailable", "the accepted default branch is unresolved, so a new proposal branch has no base to cut from", nil)
+		return branchbase.Resolution{}, operational("accepted-identity-unavailable", "the accepted default branch is unresolved, so a new proposal branch has no base to cut from", nil)
 	}
-	return res.Commit, nil
+	return res, nil
+}
+
+// proposalCollision refuses, before any mutation, a new proposal branch
+// whose name already exists where it would be cut from: by branchbase's
+// one collision rule, the rule build start refuses on (UAT-031; ledger
+// SI-333, SI-367 (3)), a local branch or a remote-tracking branch of the
+// remote base resolves from. Propose asks it only when no local branch of
+// that name exists (an existing one is the amend path, under the
+// stale-head precondition), so what it refuses there is a branch on that
+// remote, which a second cut would diverge from at the next push. The
+// refusal is build start's class: operational (exit 2), naming the branch
+// and the ref it already exists as.
+func proposalCollision(ctx context.Context, root, branch string, base branchbase.Resolution) *Error {
+	collision, err := branchbase.Collision(ctx, root, branch, base)
+	if err != nil {
+		return operational("io-failure", "checking whether the proposal branch already exists", err)
+	}
+	if collision != "" {
+		return operational("branch-exists", fmt.Sprintf("branch %q already exists as %s; a new proposal branch is cut once, never beside an existing one (UAT-031)", branch, collision), nil)
+	}
+	return nil
 }

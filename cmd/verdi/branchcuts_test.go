@@ -38,7 +38,8 @@ func divergeHead(t *testing.T, fx *ritualwitness.Fixture) string {
 // new branch gets no upstream (ledger SI-333 (1)). Build start also
 // refuses, with nothing created, moved, or configured, a feature/<name>
 // that already exists locally or on the remote it cuts from (UAT-031,
-// ledger SI-333).
+// ledger SI-333), and constitution propose refuses the same way a new
+// proposal branch that exists only on that remote (ledger SI-367 (3)).
 func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	ctx := context.Background()
@@ -114,30 +115,56 @@ func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 	// branch that already exists (exit 2, naming the branch and "already
 	// exists"), a feature/<name> that already exists as a local branch or
 	// as a remote-tracking branch of the remote its base resolves from
-	// (origin, for origin/main).
+	// (origin, for origin/main). Constitution propose refuses a new
+	// proposal branch on that remote by the same rule and with the same
+	// class of refusal (ledger SI-367 (3)); a local one is its amend path.
+	pushOnly := func(branch string) func(t *testing.T, fx *ritualwitness.Fixture) {
+		return func(t *testing.T, fx *ritualwitness.Fixture) {
+			gitTestOutput(t, fx.Dir, "branch", branch, "elsewhere")
+			gitTestOutput(t, fx.Dir, "push", "-q", "origin", branch)
+			gitTestOutput(t, fx.Dir, "branch", "-D", "-q", branch)
+		}
+	}
 	collisions := []struct {
-		name string
-		seed func(t *testing.T, fx *ritualwitness.Fixture)
+		name   string
+		ritual string
+		base   map[string]string
+		args   func(t *testing.T) []string
+		seed   func(t *testing.T, fx *ritualwitness.Fixture)
+		want   []string // the refusal's own words, each in its output
 	}{
-		{"build start refuses a name that exists as a local branch", func(t *testing.T, fx *ritualwitness.Fixture) {
-			gitTestOutput(t, fx.Dir, "branch", "feature/widget-story", "elsewhere")
-		}},
-		{"build start refuses a name that exists on the remote it cuts from", func(t *testing.T, fx *ritualwitness.Fixture) {
-			gitTestOutput(t, fx.Dir, "branch", "feature/widget-story", "elsewhere")
-			gitTestOutput(t, fx.Dir, "push", "-q", "origin", "feature/widget-story")
-			gitTestOutput(t, fx.Dir, "branch", "-D", "-q", "feature/widget-story")
-		}},
+		{name: "build start refuses a name that exists as a local branch", ritual: "build_start", base: buildStartStoreFiles(),
+			args: func(*testing.T) []string { return []string{"build", "start", "spec/widget-story"} },
+			seed: func(t *testing.T, fx *ritualwitness.Fixture) {
+				gitTestOutput(t, fx.Dir, "branch", "feature/widget-story", "elsewhere")
+			},
+			want: []string{"build start: feature/widget-story already exists as"}},
+		{name: "build start refuses a name that exists on the remote it cuts from", ritual: "build_start", base: buildStartStoreFiles(),
+			args: func(*testing.T) []string { return []string{"build", "start", "spec/widget-story"} },
+			seed: pushOnly("feature/widget-story"),
+			want: []string{"build start: feature/widget-story already exists as refs/remotes/origin/feature/widget-story"}},
+		{name: "constitution propose refuses a new branch that exists on the remote it cuts from", ritual: "constitution_propose", base: constitution,
+			args: func(t *testing.T) []string {
+				return []string{"context", "constitution", "propose", "--request", constitutionProposeRequest(t, constitution, "policy/r4-cut")}
+			},
+			seed: pushOnly("policy/r4-cut"),
+			want: []string{`"classification":"operational","code":"branch-exists"`, "already exists as refs/remotes/origin/policy/r4-cut"}},
 	}
 	for _, tt := range collisions {
 		t.Run(tt.name, func(t *testing.T) {
-			fx := ritualwitness.BuildWith(t, ctx, ritualwitness.SeedClean, buildStartStoreFiles())
+			fx := ritualwitness.BuildWith(t, ctx, ritualwitness.SeedClean, tt.base)
 			divergeHead(t, fx)
 			tt.seed(t, fx)
-			d := ritualwitness.Binary{Path: bin, Args: []string{"build", "start", "spec/widget-story"}}
-			res := ritualwitness.RunOn(t, ctx, fx, d, ritualDeclaration(t, "build_start"))
+			d := ritualwitness.Binary{Path: bin, Args: tt.args(t)}
+			res := ritualwitness.RunOn(t, ctx, fx, d, ritualDeclaration(t, tt.ritual))
 			logVerdicts(t, res)
-			if res.Exit != 2 || res.Err == nil || !strings.Contains(res.Err.Error(), "build start: feature/widget-story already exists as") {
-				t.Fatalf("build start = exit %d, %v; want the exit-2 refusal naming feature/widget-story as already existing", res.Exit, res.Err)
+			if res.Exit != 2 || res.Err == nil {
+				t.Fatalf("%s = exit %d, %v; want the exit-2 refusal naming the branch as already existing", tt.ritual, res.Exit, res.Err)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(res.Err.Error(), w) {
+					t.Fatalf("%s's refusal %v; want it to say %q", tt.ritual, res.Err, w)
+				}
 			}
 			for _, c := range []struct {
 				what          string
@@ -152,11 +179,11 @@ func TestBranchCuts_FromResolvedDefaultBranch(t *testing.T) {
 				{"linked worktrees", res.Before.Worktrees, res.After.Worktrees},
 			} {
 				if !reflect.DeepEqual(c.before, c.after) {
-					t.Errorf("the refused build start changed %s:\nbefore %+v\nafter  %+v", c.what, c.before, c.after)
+					t.Errorf("the refused %s changed %s:\nbefore %+v\nafter  %+v", tt.ritual, c.what, c.before, c.after)
 				}
 			}
 			if created := createdCommits(res); len(created) != 0 {
-				t.Errorf("the refused build start created commits %v", created)
+				t.Errorf("the refused %s created commits %v", tt.ritual, created)
 			}
 		})
 	}
