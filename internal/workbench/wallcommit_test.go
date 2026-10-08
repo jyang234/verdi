@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -119,7 +120,7 @@ func TestWallUncommitted_UnreadableIsNeverACount(t *testing.T) {
 	} {
 		for _, dirty := range []bool{false, true} {
 			fragment := renderWallUncommitted(deriveWallUncommitted(commitGit(dirty, changes)))
-			if !strings.Contains(fragment, `data-testid="wall-commit-count">unreadable</span>`) {
+			if !strings.Contains(fragment, `data-testid="wall-commit-count">unreadable</summary>`) {
 				t.Errorf("%s (dirty=%v): the count does not read unreadable:\n%s", name, dirty, fragment)
 			}
 			if m := commitCountRe.FindString(fragment); m != "" {
@@ -154,11 +155,11 @@ func TestWallUncommitted_RenderStructure(t *testing.T) {
 	for _, want := range []string{
 		`<div class="wall-commit" data-testid="wall-commit" data-changes="mixed">`,
 		`<span class="uncommitted" data-testid="uncommitted-indicator">uncommitted changes</span>`,
-		`<span class="wall-commit-count" data-testid="wall-commit-count">5 changes</span>`,
+		`<summary class="wall-commit-count" data-testid="wall-commit-count">5 changes</summary>`,
 		`<section class="wall-commit-typed" data-testid="wall-commit-typed">`,
-		`<li data-target="ac-3" data-change="added"><span class="wall-commit-target">ac-3</span> <span class="wall-commit-badge">added</span></li>`,
-		`<li data-target="link/depends-on/spec/base" data-change="relationship-added"><span class="wall-commit-target">link/depends-on/spec/base</span> <span class="wall-commit-badge">relationship added</span></li>`,
-		`<li data-target="problem" data-change="replaced"><span class="wall-commit-target">problem</span> <span class="wall-commit-badge">replaced</span></li>`,
+		`<li data-target="ac-3" data-change="added"><span class="wall-commit-target">ac-3</span> <span class="wall-commit-badge" data-badge="added">added</span></li>`,
+		`<li data-target="link/depends-on/spec/base" data-change="relationship-added"><span class="wall-commit-target">link/depends-on/spec/base</span> <span class="wall-commit-badge" data-badge="added">added</span></li>`,
+		`<li data-target="problem" data-change="replaced"><span class="wall-commit-target">problem</span> <span class="wall-commit-badge" data-badge="edited">edited</span></li>`,
 		`<section class="wall-commit-unclassified" data-testid="wall-commit-unclassified">`,
 		`<li data-path=".verdi/specs/active/wall/spec.md" data-reason="prose-or-body-text"><span class="wall-commit-path">.verdi/specs/active/wall/spec.md</span> <span class="wall-commit-reason">prose or body text</span></li>`,
 		`data-path="docs/&lt;odd&gt; &amp; &#34;name&#34;.md"`,
@@ -177,7 +178,7 @@ func TestWallUncommitted_RenderStructure(t *testing.T) {
 	}
 
 	clean := renderWallUncommitted(deriveWallUncommitted(commitGit(false, &wallChanges{Typed: []designprovenance.Change{}, Unclassified: []wallUnclassifiedChange{}})))
-	for _, want := range []string{`data-changes="none"`, `data-testid="uncommitted-indicator" hidden>`, `>0 changes</span>`, `data-testid="wall-commit-none"`} {
+	for _, want := range []string{`data-changes="none"`, `data-testid="uncommitted-indicator" hidden>`, `>0 changes</summary>`, `data-testid="wall-commit-none"`} {
 		if !strings.Contains(clean, want) {
 			t.Errorf("clean fragment lacks %s:\n%s", want, clean)
 		}
@@ -300,7 +301,7 @@ func TestWallSnapshot_CarriesTheUncommittedFragment(t *testing.T) {
 			if !strings.Contains(fragment, `data-changes="`+state+`"`) {
 				t.Errorf("fragment state is not %q:\n%s", state, fragment)
 			}
-			if !strings.Contains(fragment, `data-testid="wall-commit-count">`+count+`</span>`) {
+			if !strings.Contains(fragment, `data-testid="wall-commit-count">`+count+`</summary>`) {
 				t.Errorf("fragment count is not %q:\n%s", count, fragment)
 			}
 			set := tc.wantDirty || typed > 0 || uncl > 0
@@ -344,5 +345,86 @@ func TestMutationResponse_CarriesTheUncommittedFragment(t *testing.T) {
 	}
 	if !strings.Contains(out.Projection.Uncommitted, `<li data-target="ac-1" data-change="replaced">`) {
 		t.Errorf("the mutation's fragment does not list the typed change it made:\n%s", out.Projection.Uncommitted)
+	}
+}
+
+// TestWallUncommitted_BadgeWords is SI-368 (25)(a): a typed change's
+// semantic kind maps onto ac-3's three badge words — added and
+// relationship added read "added", replaced reads "edited", removed,
+// reordered and relationship removed read "changed" — while the raw kind
+// stays in data-change. A kind the provenance record does not declare is
+// rendered as its own plain words, never folded into one of the three.
+func TestWallUncommitted_BadgeWords(t *testing.T) {
+	for _, tc := range []struct {
+		kind designprovenance.ChangeKind
+		want string
+	}{
+		{designprovenance.ChangeAdded, "added"},
+		{designprovenance.ChangeRelationshipAdded, "added"},
+		{designprovenance.ChangeReplaced, "edited"},
+		{designprovenance.ChangeRemoved, "changed"},
+		{designprovenance.ChangeReordered, "changed"},
+		{designprovenance.ChangeRelationshipRemoved, "changed"},
+		{designprovenance.ChangeKind("frob-nicated"), "frob nicated"},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			if got := uncommittedBadgeWord(tc.kind); got != tc.want {
+				t.Fatalf("uncommittedBadgeWord(%q) = %q, want %q", tc.kind, got, tc.want)
+			}
+			fragment := renderWallUncommitted(deriveWallUncommitted(commitGit(true, &wallChanges{
+				Typed:        []designprovenance.Change{commitChange("ac-1", tc.kind)},
+				Unclassified: []wallUnclassifiedChange{},
+			})))
+			want := `<li data-target="ac-1" data-change="` + string(tc.kind) + `"><span class="wall-commit-target">ac-1</span> <span class="wall-commit-badge" data-badge="` + tc.want + `">` + tc.want + `</span></li>`
+			if !strings.Contains(fragment, want) {
+				t.Errorf("fragment lacks %s:\n%s", want, fragment)
+			}
+		})
+	}
+}
+
+// TestWallUncommitted_UnclassifiedCap is SI-368 (25)(e): the popover lists
+// at most uncommittedUnclassifiedCap unclassified entries, then "+n more";
+// a list at the cap carries no "+0 more"; and the count still counts every
+// change, listed or not, so the cap never understates what is uncommitted.
+func TestWallUncommitted_UnclassifiedCap(t *testing.T) {
+	entries := func(n int) []wallUnclassifiedChange {
+		out := make([]wallUnclassifiedChange, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, entry("notes/"+strconv.Itoa(i)+".md", wallReasonUntracked))
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		n          int
+		wantListed int
+		wantMore   string
+	}{
+		{n: 1, wantListed: 1},
+		{n: uncommittedUnclassifiedCap, wantListed: uncommittedUnclassifiedCap},
+		{n: uncommittedUnclassifiedCap + 1, wantListed: uncommittedUnclassifiedCap, wantMore: "+1 more"},
+		{n: uncommittedUnclassifiedCap + 5, wantListed: uncommittedUnclassifiedCap, wantMore: "+5 more"},
+	} {
+		t.Run(strconv.Itoa(tc.n), func(t *testing.T) {
+			fragment := renderWallUncommitted(deriveWallUncommitted(commitGit(true, &wallChanges{
+				Typed:        []designprovenance.Change{commitChange("ac-1", designprovenance.ChangeReplaced)},
+				Unclassified: entries(tc.n),
+			})))
+			if got := strings.Count(fragment, `<li data-path="`); got != tc.wantListed {
+				t.Errorf("listed %d unclassified entries, want %d:\n%s", got, tc.wantListed, fragment)
+			}
+			more := `<li class="wall-commit-more" data-testid="wall-commit-more">` + tc.wantMore + `</li>`
+			if tc.wantMore == "" {
+				if strings.Contains(fragment, "wall-commit-more") {
+					t.Errorf("a list within the cap carries a more line:\n%s", fragment)
+				}
+			} else if !strings.Contains(fragment, more) {
+				t.Errorf("fragment lacks %s:\n%s", more, fragment)
+			}
+			count := asdCountLabel(tc.n+1, "change", "changes")
+			if !strings.Contains(fragment, `data-testid="wall-commit-count">`+count+`</summary>`) {
+				t.Errorf("the count does not read %q over every change:\n%s", count, fragment)
+			}
+		})
 	}
 }

@@ -178,7 +178,7 @@ func TestProvisionWallStrip_ChangeStates(t *testing.T) {
 			if snap.Git.Dirty != tc.wantDirty {
 				t.Errorf("dirty = %v, want %v", snap.Git.Dirty, tc.wantDirty)
 			}
-			for _, want := range []string{`data-changes="` + tc.wantState + `"`, `data-testid="wall-commit-count">` + tc.wantCount + `</span>`} {
+			for _, want := range []string{`data-changes="` + tc.wantState + `"`, `data-testid="wall-commit-count">` + tc.wantCount + `</summary>`} {
 				if !strings.Contains(snap.Uncommitted, want) {
 					t.Errorf("Commit and push fragment lacks %s:\n%s", want, snap.Uncommitted)
 				}
