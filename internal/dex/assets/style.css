@@ -6281,10 +6281,11 @@ body:not(.board-page) > footer.site-foot,
 }
 .topbar-new-feature {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
+  min-width: 0;
 }
 .topbar-controls .home-new-feature {
   display: inline-block;
@@ -6297,10 +6298,11 @@ body:not(.board-page) > footer.site-foot,
   white-space: nowrap;
 }
 .topbar-cli-hint {
+  min-width: 0;
   font-family: var(--mono);
   font-size: 0.625rem;
   color: var(--muted-solid);
-  white-space: nowrap;
+  white-space: normal;
 }
-.topbar-cli-hint code { font-size: inherit; }
+.topbar-cli-hint code { font-size: inherit; overflow-wrap: anywhere; }
 /* verdi:workbench-only:end */
