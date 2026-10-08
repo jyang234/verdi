@@ -39,17 +39,12 @@ import (
 // record for record (SI-359 (7)), so a context root that dropped a call fails
 // the run here too.
 //
-// Disclosed, not proven:
-//
-//   - SI-359 (4b): git that a child program the binary starts runs itself (the
-//     go toolchain, make, npx) is outside the log and so outside this witness;
-//   - SI-359 (13): matching is whole-element and fail-closed over every argv
-//     element, data included, so a commit message or branch name spelt exactly
-//     as a token (`commit -m reset`) fails the witness; the fixtures keep such
-//     names out, and recovery's refusal of them is unchanged;
-//   - SI-359 (15): the Binary driver keeps only the records of the process it
-//     started, so the calls of a verdi process the binary itself starts (none
-//     does today) would be dropped from the log and from this witness.
+// Disclosed, not proven, and logged by the test (forbiddenTokenDisclosures;
+// ledger SI-367 (2)): SI-359 (4b), (13) and (15); and the mutating command
+// logs of close's completion and unwind (backlog BL-44) and of the execution
+// rituals' completion (backlog BL-155), which are never produced because
+// those rituals always refuse earlier. The pass is over the paths the table
+// does drive.
 func TestForbiddenTokens_EveryVerbCommandLog(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	table := ritualEffectsTable(t, bin)
@@ -69,6 +64,9 @@ func TestForbiddenTokens_EveryVerbCommandLog(t *testing.T) {
 	})
 	for _, line := range tally.lines() {
 		t.Log(line)
+	}
+	for _, d := range forbiddenTokenDisclosures() {
+		t.Log("disclosed, not proven: " + d)
 	}
 
 	t.Run("a test verb made to emit a forbidden token fails the witness", func(t *testing.T) {
@@ -96,6 +94,19 @@ func TestForbiddenTokens_EveryVerbCommandLog(t *testing.T) {
 	})
 
 	t.Run("the built binary writes its log to VERDI_GITLOG only when it is set", TestGitLogE2E_RecordsOnlyWhenSet)
+}
+
+// forbiddenTokenDisclosures is what the witness discloses rather than
+// proves, each led by its citation; the test logs every one. A fixed
+// table, so a function.
+func forbiddenTokenDisclosures() []string {
+	return []string{
+		"ledger SI-359 (4b): git that a child program the binary starts runs itself (the go toolchain, make, npx) is outside the log and so outside this witness",
+		"ledger SI-359 (13): matching is whole-element and fail-closed over every argv element, data included, so a commit message or branch name spelt exactly as a token (`commit -m reset`) fails the witness; the fixtures keep such names out, and recovery's refusal of them is unchanged",
+		"ledger SI-359 (15): the Binary driver keeps only the records of the process it started, so the calls of a verdi process the binary itself starts (none does today) would be dropped from the log and from this witness",
+		"backlog BL-44: close's completion and its failure unwind are never driven, because every hermetic close refuses first at the closure gate's countersign condition (ledger SI-349 (1)); the command logs of close's commit and of the unwind's switch back and branch deletion are never produced, so this witness never checks them",
+		"backlog BL-155: the execution rituals' completion (experiment start, experiment resume, MCP experiment) is never driven, because their rows refuse a mismatched input binding first (ledger SI-348 (1), SI-351 (1)); the command logs of their completing runs are never produced, so this witness never checks them",
+	}
 }
 
 // forbiddenTokenViolations is the witness's law over one run (SI-359 (6),
@@ -178,6 +189,33 @@ func (f *forbiddenTokenTally) lines() []string {
 		out = append(out, fmt.Sprintf("driver %s: %d run(s), %d logged call(s), each checked against %d forbidden tokens", k, f.runs[k], f.calls[k], len(gitforbid.Tokens())))
 	}
 	return out
+}
+
+// TestForbiddenTokenDisclosures pins what the witness logs as disclosed,
+// not proven (ledger SI-367 (2)): SI-359 (4b), (13) and (15), and the
+// mutating command logs it never reaches because close (backlog BL-44) and
+// the execution rituals (backlog BL-155) always refuse earlier. Each is
+// named by exactly one disclosure, and no other disclosure is logged, so
+// dropping one fails here.
+func TestForbiddenTokenDisclosures(t *testing.T) {
+	got := forbiddenTokenDisclosures()
+	cites := []string{"ledger SI-359 (4b)", "ledger SI-359 (13)", "ledger SI-359 (15)", "backlog BL-44", "backlog BL-155"}
+	for _, cite := range cites {
+		t.Run(cite, func(t *testing.T) {
+			var naming []string
+			for _, d := range got {
+				if strings.HasPrefix(d, cite+":") {
+					naming = append(naming, d)
+				}
+			}
+			if len(naming) != 1 {
+				t.Fatalf("%d disclosure(s) name %s, want exactly one: %q", len(naming), cite, got)
+			}
+		})
+	}
+	if len(got) != len(cites) {
+		t.Errorf("the witness logs %d disclosure(s), want exactly %d: %q", len(got), len(cites), got)
+	}
 }
 
 // TestForbiddenTokenViolations is the witness's law on synthetic runs (R5c2
