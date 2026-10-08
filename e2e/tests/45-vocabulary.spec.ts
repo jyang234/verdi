@@ -41,16 +41,16 @@ test.describe("vocabulary surfaces (spec/vocabulary-surfaces)", () => {
   }) => {
     const vocabBase = await vocabFixtureBase(page);
 
-    // The home page: vocab-probe's status chip — the column chip the
-    // glance's "In flight" bucket and the directory's grouped listing
-    // both render — reads the RENAMED state label, and the bare id
-    // appears nowhere as visible text on the page.
+    // The home page: vocab-probe's status chip — on its card in the
+    // index's Accepted column (spec/index-v2; the glance gave way to
+    // the columns, parent dc-12) — reads the RENAMED state label, and
+    // the bare id appears nowhere as visible text on the page.
     await page.goto(vocabBase);
-    const glanceChip = page
-      .getByTestId("glance-entry-vocab-probe")
+    const cardChip = page
+      .getByTestId("dir-entry-vocab-probe")
       .locator(".badge.badge-accepted-pending-build");
-    await expect(glanceChip).toBeVisible();
-    await expect(glanceChip).toHaveText("Ready to build");
+    await expect(cardChip).toBeVisible();
+    await expect(cardChip).toHaveText("Ready to build");
     await expect(
       page.getByText("accepted-pending-build", { exact: true }),
     ).toHaveCount(0);
