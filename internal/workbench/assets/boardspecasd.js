@@ -182,6 +182,12 @@
     adoptProjection(p);
     if (typeof p.html === "string" && p.html) applyRegion(p.html);
     if (typeof p.posture === "string" && p.posture) applyPosture(p.posture);
+    // The bar's fragments ride the same projection (spec/wall-strip-and-
+    // drawer-v2; SI-368 (2), (7), (8)): the strip's script applies the
+    // Commit and push fragment, the pill's facts and the branch list it
+    // carries, and leaves the bar as it was for the ones it does not.
+    var strip = window.__WALLSTRIP__;
+    if (strip && strip.apply) strip.apply(p);
     if (announceText) announce(announceText);
   }
 
@@ -216,7 +222,7 @@
       })
       .then(function (snap) {
         if (force && snap && mutationSeq === mutationsAtStart) {
-          applyProjection({ html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined });
+          applyProjection({ html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined, uncommitted: snap.uncommitted, pill: snap.pill, branches: snap.git ? snap.git.branches : undefined });
           return undefined;
         }
         if (seq !== refreshSeq) {
@@ -229,7 +235,7 @@
         if (snap) {
           var changed = snap.revision !== revision;
           applyProjection(
-            { html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined },
+            { html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined, uncommitted: snap.uncommitted, pill: snap.pill, branches: snap.git ? snap.git.branches : undefined },
             changed ? "Board updated" : null
           );
         }
