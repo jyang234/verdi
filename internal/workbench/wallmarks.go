@@ -134,37 +134,63 @@ func marksSealed(ref string) string {
 	return fmt.Sprintf("this wall is a read-only render of remote-tracking ref %s's committed content, for which no readiness is derived", ref)
 }
 
-// deriveWallMarks derives one wall's marks from its composed readiness.
-// The input is unreadable — one reason, no mark — when the load failed,
-// when nothing was loaded, when the snapshot's spec, branch or HEAD is not
-// the wall's (SI-338), or when two stub cards map to one stub concern, so
-// its mark could not name one card. Otherwise every Focus next concern
-// names the object card its Object is, and the stub card whose slug
-// journey's own rule maps to its id (SI-360 (1)); each mark carries its
-// chip word.
-func deriveWallMarks(in wallMarksInput) wallMarks {
+// readinessLoadFailed is the reason a readiness load's failure gives the
+// marks, the pill and the Readiness tab alike.
+func readinessLoadFailed(err error) string {
+	return "the readiness load failed: " + err.Error()
+}
+
+// readinessUnreadable is the reason the readiness a composed refresh
+// loaded cannot be read for this wall, or "": the load failed, nothing was
+// loaded, or the snapshot's spec, branch or HEAD is not the wall's
+// (SI-338). The marks and the pill share it (SI-368 (2)).
+func readinessUnreadable(in wallMarksInput) string {
 	if in.LoadErr != nil {
-		return unavailableMarks("the readiness load failed: " + in.LoadErr.Error())
+		return readinessLoadFailed(in.LoadErr)
 	}
 	snap := in.Readiness
 	if snap == nil {
-		return unavailableMarks(marksUnwired)
+		return marksUnwired
 	}
 	if snap.TargetRef != in.Ref || snap.Branch != in.Branch || snap.Head != in.Head {
-		return unavailableMarks(fmt.Sprintf("the readiness snapshot describes %s on branch %s at HEAD %s, and this wall shows %s on branch %s at HEAD %s",
+		return fmt.Sprintf("the readiness snapshot describes %s on branch %s at HEAD %s, and this wall shows %s on branch %s at HEAD %s",
 			orUnresolved(snap.TargetRef), orUnresolved(snap.Branch), orUnresolved(snap.Head),
-			orUnresolved(in.Ref), orUnresolved(in.Branch), orUnresolved(in.Head)))
+			orUnresolved(in.Ref), orUnresolved(in.Branch), orUnresolved(in.Head))
 	}
+	return ""
+}
+
+// stubSlugsByConcern maps each stub card's stub-unreconciled concern id to
+// the slugs journey's own rule maps onto it (SI-360 (1)), in the order
+// given: more than one slug under an id is a collision no single card
+// answers for (SI-362 (3)). The marks and the Readiness tab's targets
+// share it (SI-368 (16)).
+func stubSlugsByConcern(slugs []string) map[string][]string {
+	byConcern := make(map[string][]string, len(slugs))
+	for _, slug := range slugs {
+		id := stubConcernPrefix + journey.SanitizeStubSlug(slug)
+		byConcern[id] = append(byConcern[id], slug)
+	}
+	return byConcern
+}
+
+// deriveWallMarks derives one wall's marks from its composed readiness.
+// The input is unreadable — one reason, no mark — when readinessUnreadable
+// names a reason, or when two stub cards map to one stub concern, so its
+// mark could not name one card. Otherwise every Focus next concern names
+// the object card its Object is, and the stub card whose slug journey's
+// own rule maps to its id (SI-360 (1)); each mark carries its chip word.
+func deriveWallMarks(in wallMarksInput) wallMarks {
+	if reason := readinessUnreadable(in); reason != "" {
+		return unavailableMarks(reason)
+	}
+	snap := in.Readiness
 
 	objects := make(map[string]bool, len(in.ObjectIDs))
 	for _, id := range in.ObjectIDs {
 		objects[id] = true
 	}
-	stubsByConcern := make(map[string][]string, len(in.StubSlugs))
-	for _, slug := range in.StubSlugs {
-		id := stubConcernPrefix + journey.SanitizeStubSlug(slug)
-		stubsByConcern[id] = append(stubsByConcern[id], slug)
-	}
+	stubsByConcern := stubSlugsByConcern(in.StubSlugs)
 
 	var out wallMarks
 	for _, c := range snap.Attention {

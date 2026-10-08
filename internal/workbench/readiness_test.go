@@ -1134,7 +1134,7 @@ func TestReadinessRoute_StoreVocabularyRenamesThePagesWords(t *testing.T) {
 
 // TestReadinessPage_PerRequestStampAndSharedFacts is spec/readiness-page-v2
 // ac-4's static obligation (obligation/readiness-page-v2--ac-4--static;
-// SI-339 (1)), the page's half. One GET /readiness through the production
+// SI-339 (1)), both halves. One GET /readiness through the production
 // wiring — NewHandlerWith, a counting ReadinessLoader behind
 // Deps.ReadinessLoader, the one readiness seam — over the mixed fixture
 // proves three things: (1) the page carries the per-request derivation
@@ -1145,15 +1145,17 @@ func TestReadinessRoute_StoreVocabularyRenamesThePagesWords(t *testing.T) {
 // snapshot the seam returned for that request, and the seam was asked
 // exactly once, so there is no second derivation.
 //
-// DISCLOSED AS UNPROVEN: the drawer's Readiness tab does not exist yet
-// (lane F3 builds it after F4, plan order), so the obligation's other
-// half — "renders from the same readiness facts value the Readiness tab
-// renders" — is not proven here. F3's brief extends this test to render
-// the tab from the same value; until then the story cannot close on ac-4.
+// The tab's half (lane F3; SI-368 (1)): one GET of the wall's Readiness
+// tab, /board/spec/{name}/readiness, through the same handler and the
+// same seam, asks the seam exactly once more for the same ref, carries
+// the same per-request stamp, and renders the same facts value the page
+// rendered — every concern exactly once, with the page's state, primary
+// line and filed fact — in the tab's own words (SI-368 (14)).
 func TestReadinessPage_PerRequestStampAndSharedFacts(t *testing.T) {
 	snap := readinessWithRoleFixture()
 	loader := &countingReadinessLoader{snap: snap}
-	h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader, ReadinessDefaultSpec: snap.TargetRef})
+	root := t.TempDir()
+	h := NewHandlerWith(root, Deps{ReadinessLoader: loader, ReadinessDefaultSpec: snap.TargetRef})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readiness", nil))
 	if rec.Code != http.StatusOK {
@@ -1162,7 +1164,8 @@ func TestReadinessPage_PerRequestStampAndSharedFacts(t *testing.T) {
 	html := rec.Body.String()
 
 	// (1) The per-request derivation stamp, the seam's own text.
-	notice := sectionOf(t, html, `<aside class="readiness-stale" role="note" tabindex="0" data-readiness-stale="1" aria-label="Derivation stamp">`, `</aside>`)
+	const stampOpen = `<aside class="readiness-stale" role="note" tabindex="0" data-readiness-stale="1" aria-label="Derivation stamp">`
+	notice := sectionOf(t, html, stampOpen, `</aside>`)
 	if !strings.Contains(notice, stdhtml.EscapeString(snap.StaleNotice)) || !strings.Contains(snap.StaleNotice, snap.Head) {
 		t.Fatalf("page does not carry the per-request stamp %q:\n%s", snap.StaleNotice, notice)
 	}
@@ -1206,7 +1209,53 @@ func TestReadinessPage_PerRequestStampAndSharedFacts(t *testing.T) {
 			t.Fatalf("concern %q's filed fact is not the seam's %q:\n%s", concern.ID, concern.Summary, row)
 		}
 	}
-	t.Log("disclosed-as-unproven: the Readiness tab's half of ac-4 (the tab renders the same facts value) awaits lane F3; this test proves the page's half only")
+
+	// The tab's half: the same seam, one load of its own, the same stamp,
+	// the same facts value.
+	name := strings.TrimPrefix(snap.TargetRef, "spec/")
+	writeReadinessTabSpec(t, root, name)
+	tabRec := httptest.NewRecorder()
+	h.ServeHTTP(tabRec, httptest.NewRequest(http.MethodGet, "/board/spec/"+name+"/readiness", nil))
+	if tabRec.Code != http.StatusOK {
+		t.Fatalf("tab status = %d, body=%s", tabRec.Code, tabRec.Body.String())
+	}
+	tab := tabRec.Body.String()
+	if loader.calls != 2 || loader.refs[1] != snap.TargetRef {
+		t.Fatalf("the tab asked the seam %d times in all (refs %q), want exactly one load of %s beside the page's", loader.calls, loader.refs, snap.TargetRef)
+	}
+	if got := sectionOf(t, tab, stampOpen, `</aside>`); got != notice {
+		t.Fatalf("the tab's stamp differs from the page's:\n tab: %s\npage: %s", got, notice)
+	}
+	if got := regexp.MustCompile(`data-concern-id="([^"]+)"`).FindAllStringSubmatch(tab, -1); len(got) != len(snap.AllConcerns) {
+		t.Fatalf("the tab renders %d concern rows, the seam's value has %d", len(got), len(snap.AllConcerns))
+	}
+	facts := regexp.MustCompile(`readiness-concern--[a-z-]+|<p class="readiness-summary[^"]*">[^<]*</p>|<dd class="readiness-fact">[^<]*</dd>`)
+	for _, concern := range snap.AllConcerns {
+		if n := strings.Count(tab, `data-concern-id="`+stdhtml.EscapeString(concern.ID)+`"`); n != 1 {
+			t.Fatalf("concern %q rendered %d times in the tab, want exactly once", concern.ID, n)
+		}
+		pageFacts := facts.FindAllString(concernRow(t, html, concern.ID), -1)
+		tabFacts := facts.FindAllString(concernRow(t, tab, concern.ID), -1)
+		if len(pageFacts) == 0 || strings.Join(tabFacts, "\n") != strings.Join(pageFacts, "\n") {
+			t.Fatalf("concern %q's facts in the tab differ from the page's:\n tab: %q\npage: %q", concern.ID, tabFacts, pageFacts)
+		}
+	}
+}
+
+// writeReadinessTabSpec writes a minimal active spec named name under
+// root's working tree, so the wall's Readiness tab route serves it.
+func writeReadinessTabSpec(t *testing.T, root, name string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "---\nid: spec/" + name + "\nkind: spec\nclass: feature\ntitle: \"Pilot decline flow\"\nstatus: draft\nowners: [platform-team]\n" +
+		"problem: { text: \"a stale notice stands\", anchor: \"#problem\" }\noutcome: { text: \"every channel retracts it\", anchor: \"#outcome\" }\n" +
+		"acceptance_criteria:\n  - { id: ac-1, text: \"a stale notice is retracted\", evidence: [attestation], anchor: \"#ac-1\" }\n---\n# Pilot decline flow\n"
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestReadinessRoute_MissingSnapshot503(t *testing.T) {

@@ -362,12 +362,17 @@ func (b *branchBoards) serveRemoteOrGone(w http.ResponseWriter, r *http.Request,
 // serveSealed serves rt for a remote-only branch: the page and fragment
 // routes render the board sealed from the remote-tracking ref's committed
 // content (dc-4: read-only, remoteness disclosed, no worktree cut, no
-// local branch minted); every other route needs a working tree none
-// exists for, so it refuses with the same disclosure instead of lying
-// with an empty success.
+// local branch minted); the Readiness tab answers the sealed render's
+// readiness reason, as its marks do (SI-352 (1); SI-364 (3)), loading no
+// readiness; every other route needs a working tree none exists for, so
+// it refuses with the same disclosure instead of lying with an empty
+// success.
 func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branch, ref string, rt boardSpecRoute) {
 	switch rt.suffix {
 	case routeBoardPage, routeBoardFragment:
+	case routeBoardReadiness:
+		b.serveSealedReadiness(w, r, ref)
+		return
 	default:
 		msg := fmt.Sprintf("branch %s resolves only to remote-tracking ref %s: its board is a read-only render of that ref's committed content, and this route needs a working tree (none is cut for a remote-only branch)", branch, ref)
 		if rt.json {
@@ -404,6 +409,30 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(out) // response body write; post-header error is unactionable
+}
+
+// serveSealedReadiness answers the Readiness tab on a remote-only
+// branch's sealed render: the sealed reason the render's marks carry
+// (marksSealed), with no readiness loaded, for a spec the ref carries;
+// the sealed path's own 404 otherwise. GET only.
+func (b *branchBoards) serveSealedReadiness(w http.ResponseWriter, r *http.Request, ref string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.PathValue("name")
+	if !specNameRe.MatchString(name) {
+		b.renderSpecNotOnRef(r.Context(), w, name, ref)
+		return
+	}
+	if _, err := gitx.Show(r.Context(), b.root, ref, store.ActiveSpecRelPath(name)); err != nil {
+		// As loadSealed reads it: the ref was verified by the caller, so
+		// a failed read means the spec is not on the ref.
+		b.renderSpecNotOnRef(r.Context(), w, name, ref)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(renderReadinessTabUnavailable(marksSealed(ref)))) // response body write; post-header error is unactionable
 }
 
 // sealedASDView is the degraded ASD view for a remote-only branch's
