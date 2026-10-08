@@ -8,14 +8,16 @@ import (
 	"testing"
 )
 
-// TestEmptyGlanceFixture_Handler_Happy is spec/home-status-glance ac-3/co-1
+// TestEmptyGlanceFixture_Handler_Happy is spec/index-v2 ac-1's empty
+// state (the kept home-status-glance ac-3/co-1 property, parent dc-12)
 // proven directly through the REAL pipeline (Controller adjudication
 // ADJ-40, 2026-07-16): the handler starts a genuinely separate, hermetic
 // workbench instance backed by a REAL minimal store on disk — git init +
 // .verdi/verdi.yaml, ZERO specs — computed by the real
 // refindex.ComputeIndex, not a canned index. An empty store carries no
-// entries, so all THREE glance buckets render empty at once (heading, zero
-// count, None.), the strongest witness of ac-3 through the true pipe.
+// entries, so all FOUR columns render empty at once (heading, zero count,
+// the explicit empty state), the strongest witness of ac-1 through the
+// true pipe.
 func TestEmptyGlanceFixture_Handler_Happy(t *testing.T) {
 	f := newEmptyGlanceFixture()
 
@@ -44,33 +46,33 @@ func TestEmptyGlanceFixture_Handler_Happy(t *testing.T) {
 	}
 	page := string(body)
 
-	if !strings.Contains(page, `data-testid="home-glance"`) {
-		t.Fatalf("isolated render missing the glance section entirely; got: %s", page)
+	if !strings.Contains(page, `class="home-directory"`) {
+		t.Fatalf("isolated render missing the directory's columns entirely; got: %s", page)
 	}
 	// The real empty store has zero specs, so nothing is ever badged or
-	// linked: not a single glance entry may render (the populated-bucket
-	// contrast dc-4 also wants is proven by the shared-store e2e, not here).
-	if strings.Contains(page, `data-testid="glance-entry-`) {
-		t.Fatalf("empty store rendered a glance entry, want none through the real pipeline; got: %s", page)
+	// linked: not a single card may render (the populated-column contrast
+	// is proven by the shared-store e2e, not here).
+	if strings.Contains(page, `data-testid="dir-entry-`) {
+		t.Fatalf("empty store rendered a card, want none through the real pipeline; got: %s", page)
 	}
-	// All three fixed buckets render their heading, zero count, and
-	// None. empty-state — proven through refindex.ComputeIndex's real
+	// All four columns render their heading, zero count, and explicit
+	// empty state — proven through refindex.ComputeIndex's real
 	// default-branch walk, not a canned index (co-1; ADJ-40).
-	for _, slug := range []string{"on-the-desk", "in-flight", "settling"} {
-		start := strings.Index(page, `data-testid="glance-group-`+slug+`"`)
+	for _, group := range []string{"drafts-in-progress", "accepted-pending-build", "active-components", "terminal"} {
+		start := strings.Index(page, `data-testid="dir-group-`+group+`"`)
 		if start < 0 {
-			t.Fatalf("isolated render missing the %s bucket heading; got: %s", slug, page)
+			t.Fatalf("isolated render missing the %s column heading; got: %s", group, page)
 		}
 		end := strings.Index(page[start:], "</section>")
 		if end < 0 {
-			t.Fatalf("could not find the %s bucket's closing tag; got: %s", slug, page)
+			t.Fatalf("could not find the %s column's closing tag; got: %s", group, page)
 		}
-		group := page[start : start+end]
-		if !strings.Contains(group, "(0)") {
-			t.Fatalf("%s bucket missing its zero count; got: %s", slug, group)
+		column := page[start : start+end]
+		if !strings.Contains(column, `<span class="count">0</span>`) {
+			t.Fatalf("%s column missing its zero count; got: %s", group, column)
 		}
-		if !strings.Contains(group, `<p class="empty">None.</p>`) {
-			t.Fatalf("%s bucket missing the None. empty-state notice; got: %s", slug, group)
+		if !strings.Contains(column, `<p class="empty dir-empty">`) {
+			t.Fatalf("%s column missing its explicit empty state; got: %s", group, column)
 		}
 	}
 }

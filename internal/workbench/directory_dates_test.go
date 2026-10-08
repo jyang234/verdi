@@ -151,10 +151,15 @@ func TestWriteDirectorySection_DateCarriers(t *testing.T) {
 	}
 }
 
-// TestWriteDirectorySection_DateCarriersAddNothingVisible: the carriers are
-// the ONLY difference dates make to the directory's markup — no visible
-// text, class, or element changes (SI-297's non-visible carrier; the index
-// story renders ages later).
+// ageChipRe matches every rendered age chip (spec/index-v2 ac-2; SI-366
+// (13)) — the one visible mark the dates make on a card.
+var ageChipRe = regexp.MustCompile(`<span class="dir-age[^"]*"(?: title="[^"]*")?>[^<]*</span>`)
+
+// TestWriteDirectorySection_DateCarriersAddNothingVisible: the carriers,
+// the age chip and the disclosed flag are the ONLY differences dates make
+// to the directory's markup — no other text, class, or element changes
+// (SI-297's carrier; spec/index-v2 ac-2's age, read from it and from
+// nothing else).
 func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	dated := directoryFixtureEntries()
 	for i := range dated {
@@ -170,10 +175,20 @@ func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	if !strings.Contains(withDates.String(), `data-last-change="`) || !strings.Contains(withDates.String(), `data-quiet="`) {
 		t.Fatalf("the dated render carries no date carriers at all: %s", withDates.String())
 	}
-	stripped := dateCarrierRe.ReplaceAllString(withDates.String(), "")
-	strippedUndated := dateCarrierRe.ReplaceAllString(withoutDates.String(), "")
+	if !strings.Contains(withDates.String(), `<span class="dir-age">today</span>`) || !strings.Contains(withDates.String(), `<span class="dir-age dir-age-quiet">quiet 21 d</span>`) {
+		t.Fatalf("the dated render shows no ages: %s", withDates.String())
+	}
+	if !strings.Contains(withoutDates.String(), `>age unproven</span>`) {
+		t.Fatalf("the undated render does not disclose its ages unproven: %s", withoutDates.String())
+	}
+	strip := func(s string) string {
+		s = dateCarrierRe.ReplaceAllString(s, "")
+		s = ageChipRe.ReplaceAllString(s, "")
+		return strings.ReplaceAll(s, ` data-disclosed="true"`, ` data-disclosed="false"`)
+	}
+	stripped, strippedUndated := strip(withDates.String()), strip(withoutDates.String())
 	if stripped != strippedUndated {
-		t.Fatalf("dates changed more than the carrier attributes:\nwith dates (carriers stripped): %s\nwithout:                        %s", stripped, strippedUndated)
+		t.Fatalf("dates changed more than the carriers and the age chip:\nwith dates (stripped): %s\nwithout:               %s", stripped, strippedUndated)
 	}
 }
 

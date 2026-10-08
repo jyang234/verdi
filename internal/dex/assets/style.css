@@ -5928,3 +5928,180 @@ body:not(.board-page) > footer.site-foot,
   outline-offset: 2px;
 }
 /* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* ---------- the index's four columns (spec/index-v2 ac-1, ac-2; parent
+   workbench-redesign dc-12; handoff README "Screen 2 — Index") ----------
+   The directory's four status groups drawn side by side as columns — On
+   the desk, Accepted, Active components, On the shelf — each a panel with
+   a coloured top rule, its heading and count, a "where" line and a move
+   line, and either its cards or an explicit empty state. A card is the
+   li.dir-entry root (SI-366 (14)): title, ref, a chip row (status,
+   source, age, in review), its working links, its next move and any
+   disclosure. Every rule below overrides the legacy directory-home rules
+   above, which the docs site still carries unchanged; tokens only. The
+   grid folds by itself: four columns at a laptop width, two at 200 %
+   zoom, one at 320 px, with no horizontal overflow. Meaning is never
+   carried by colour alone (Wave 6 §5.2): the column's name, the age's
+   words, the chips' text and the disclosure's text say what the colours
+   echo. */
+.content:has(> .home-directory) { max-width: none; }
+.home-directory { margin: 0.6rem 0 1.6rem; }
+.dir-provenance { margin: 0 0 0.75rem; }
+.dir-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+  min-width: 0;
+}
+.dir-group {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--st-pending);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.dir-group--accepted-pending-build,
+.dir-group--active-components { border-top-color: var(--st-evidenced); }
+.dir-group--terminal { border-top-color: var(--st-nosignal); }
+.dir-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  padding: 0.625rem 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+.dir-group-head h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.dir-group-head .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted-solid);
+}
+.dir-group-where {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--st-pending);
+}
+.dir-group--accepted-pending-build .dir-group-where,
+.dir-group--active-components .dir-group-where { color: var(--st-evidenced); }
+.dir-group--terminal .dir-group-where { color: var(--st-nosignal); }
+.dir-group-move {
+  margin: 0;
+  padding: 0.375rem 0.75rem 0;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.dir-group .dir-empty {
+  margin: 0.75rem;
+  padding: 0.875rem 0.75rem;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: none;
+  font-size: 0.8125rem;
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--muted-solid);
+}
+.dir-group .dir-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0.5rem;
+  list-style: none;
+}
+.dir-cards .dir-entry,
+.dir-cards .dir-entry:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.5625rem 0.6875rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--st-pending);
+  border-radius: 5px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(20, 26, 18, 0.06);
+  font-size: 0.84375rem;
+  line-height: 1.35;
+}
+.dir-cards .dir-entry:hover { box-shadow: 0 4px 12px rgba(20, 26, 18, 0.16); }
+.dir-group--accepted-pending-build .dir-entry,
+.dir-group--active-components .dir-entry { border-left-color: var(--st-evidenced); }
+.dir-group--terminal .dir-entry { border-left-color: var(--st-nosignal); }
+.dir-cards .dir-entry[data-disclosed="true"] { border-style: dashed; border-color: var(--st-pending); }
+.dir-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.dir-card-title .dir-title { color: var(--ink); }
+.dir-card-title .dir-title:hover { color: var(--accent-strong); }
+.dir-cards .dir-ref {
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.dir-card-title .dir-ref { font-size: 0.84375rem; color: var(--ink); }
+.dir-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.125rem;
+}
+.dir-age,
+.dir-unproven {
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--muted-solid);
+}
+.dir-age-quiet { color: var(--st-pending); }
+.dir-unproven {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--st-pending);
+  border: 1px dashed var(--st-pending);
+  border-radius: 3px;
+  padding: 0 0.375rem;
+  cursor: help;
+}
+.dir-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.625rem;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+}
+.dir-move {
+  margin-top: 0.1875rem;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--accent);
+}
+.dir-move a { color: inherit; }
+.dir-cards .dir-disclosed { display: block; font-size: 0.75rem; overflow-wrap: anywhere; }
+/* verdi:workbench-only:end */

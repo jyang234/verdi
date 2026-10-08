@@ -1093,8 +1093,11 @@ func TestCanvasWallWritablePath_DomainLiveAndWritesIsolated(t *testing.T) {
 		if !strings.Contains(home, row) {
 			t.Errorf("the directory has no local design-branch row for %s", w.name)
 		}
-		if !strings.Contains(home, `<a class="dir-board" href="`+w.writablePath+`">spec/`+w.name+`</a>`) {
-			t.Errorf("%s's directory row does not link its writable path %s", w.name, w.writablePath)
+		// The card's title is its board link (spec/index-v2 ac-2; SI-366
+		// (1)): the draft's own decoded title, addressed at the writable
+		// path.
+		if !strings.Contains(home, `<a class="dir-board dir-title" href="`+w.writablePath+`">Decline canvas wall (`+w.name+`)</a>`) {
+			t.Errorf("%s's directory card does not link its writable path %s under its title", w.name, w.writablePath)
 		}
 		if !strings.Contains(board, `data-branch="`+w.branch()+`"`) {
 			t.Errorf("the serving checkout's branch menu does not list %s", w.branch())

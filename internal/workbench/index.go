@@ -94,8 +94,8 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 
 	// The mechanical spec importer (spec-import-contract: "The page is
 	// discoverable from home before new statements are requested"): one
-	// pointer ahead of the glance and directory sections, so an existing
-	// spec can be brought in before anyone is asked to write statements.
+	// pointer ahead of the directory's columns, so an existing spec can
+	// be brought in before anyone is asked to write statements.
 	body.WriteString(`<p class="home-import"><a href="` + routeSpecImportPage + `" data-testid="home-import-link">Import existing spec</a> &mdash; bring an existing Markdown or native spec onto a new design branch as it is: previewed and mapped mechanically, nothing invented, nothing created until you confirm.</p>`)
 
 	// The whole-store directory (spec/directory-home ac-1): the ref-index
@@ -122,14 +122,9 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 		})
 	}
 
-	// The leading status glance (spec/home-status-glance dc-1): a second,
-	// additive rendering pass over the SAME entries/indexErr above — no
-	// second index computation. Rendered BEFORE the exhaustive Directory
-	// section below (dc-5's fixed placement); it needs neither inReview
-	// nor mrNotice, since a glance card never carries an in-review chip or
-	// any other evidence-bearing state (dc-3).
-	writeGlanceSection(&body, root, entries, indexErr, home.Model)
-
+	// The directory's four columns (spec/index-v2 ac-1; parent dc-12,
+	// which merged the former leading glance into them): one rendering
+	// pass over the cards above, every entry exactly once.
 	writeDirectorySection(&body, cards, indexErr, mrNotice, home.OpenMRs != nil, home.Model, now)
 
 	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
