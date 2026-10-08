@@ -12,10 +12,14 @@ import (
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
-// TestDeriveWallPill (SI-368 (2)): the pill's facts from a composed
-// refresh's readiness are the current step and the unresolved count, or
-// the marks' input reason when that readiness cannot be read; a stub
+// TestDeriveWallPill (SI-368 (2), (24)(b)): the pill's facts from a
+// composed refresh's readiness are the current step and that step's own
+// unresolved count — never the whole Focus next list across every step —
+// or the marks' input reason when that readiness cannot be read; a stub
 // collision, which only the marks cannot draw, leaves the pill readable.
+// tabSnapshot's unresolved concerns sit in three steps: two in Define the
+// work, one in Define success, two in Get approval, none in Check
+// constraints.
 func TestDeriveWallPill(t *testing.T) {
 	head := "4f1c9d2ab7e0"
 	readable := tabSnapshot(head)
@@ -27,6 +31,8 @@ func TestDeriveWallPill(t *testing.T) {
 	proven.CurrentFocus, proven.Attention = "", nil
 	later := readable
 	later.CurrentFocus = readinesspilot.AreaReview
+	empty := readable
+	empty.CurrentFocus = readinesspilot.AreaContext
 	moved := readable
 	moved.Head = "0000000"
 	for _, tc := range []struct {
@@ -34,13 +40,14 @@ func TestDeriveWallPill(t *testing.T) {
 		in   wallMarksInput
 		want wallPill
 	}{
-		{"the current step and every unresolved concern", in(&readable, nil, "2fa-x"), wallPill{Step: 1, Unresolved: 5}},
-		{"a later current step", in(&later, nil), wallPill{Step: 4, Unresolved: 5}},
+		{"the current step's unresolved concerns alone", in(&readable, nil, "2fa-x"), wallPill{Step: 1, Unresolved: 2}},
+		{"a later current step counts its own", in(&later, nil), wallPill{Step: 4, Unresolved: 2}},
+		{"an empty current step is 0, never the total", in(&empty, nil), wallPill{Step: 3, Unresolved: 0}},
 		{"every step proven", in(&proven, nil), wallPill{}},
 		{"a failed load", in(nil, errBoom), wallPill{Unavailable: "the readiness load failed: " + errBoom.Error()}},
 		{"nothing loaded", in(nil, nil), wallPill{Unavailable: marksUnwired}},
 		{"a snapshot of another HEAD", in(&moved, nil), wallPill{Unavailable: deriveWallMarks(in(&moved, nil)).Unavailable}},
-		{"a stub collision the marks cannot draw", in(&readable, nil, "2fa-x", "s-2fa-x"), wallPill{Step: 1, Unresolved: 5}},
+		{"a stub collision the marks cannot draw", in(&readable, nil, "2fa-x", "s-2fa-x"), wallPill{Step: 1, Unresolved: 2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := deriveWallPill(tc.in); got != tc.want {
@@ -105,7 +112,9 @@ func TestWallPill_ServedOnTheComposedPollAlone(t *testing.T) {
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &poll) != nil {
 		t.Fatalf("GET snapshot = %d\n%s", rec.Code, rec.Body.String())
 	}
-	if want := (wallPill{Step: 1, Unresolved: len(snap.Attention)}); poll.Pill == nil || *poll.Pill != want {
+	// Define the work holds two of tabSnapshot's five unresolved concerns
+	// (SI-368 (24)(b)).
+	if want := (wallPill{Step: 1, Unresolved: 2}); poll.Pill == nil || *poll.Pill != want {
 		t.Fatalf("the poll's pill = %+v, want %+v", poll.Pill, want)
 	}
 	if len(loader.loads) != 1 {

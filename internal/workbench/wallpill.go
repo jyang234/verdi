@@ -1,16 +1,17 @@
 package workbench
 
 // The readiness pill's facts (spec/wall-strip-and-drawer-v2 ac-4; ledger
-// SI-368 (2)): the current step and the unresolved count, read from the
+// SI-368 (2)): the current step and its unresolved count, read from the
 // readiness the wall's composed refresh already loaded for its marks, or
 // the marks' reason where that readiness cannot be read. Facts only; the
 // pill's markup is a renderer's (lane F3a).
 
 // wallPill is the readiness pill's facts (SI-368 (2)): the current step's
-// position (1 to 4; 0 when every step is proven) and the count of
-// unresolved concerns — the snapshot's whole Focus next list (SI-350 (1))
-// — or, when the wall's readiness cannot be read, the one reason, under
-// the marks' rules.
+// position (1 to 4; 0 when every step is proven) and the count of that
+// step's own unresolved concerns ("Step 1 · 3 to resolve", as the handoff
+// counts them; SI-368 (24)(b)), never the whole Focus next list across
+// every step — or, when the wall's readiness cannot be read, the one
+// reason, under the marks' rules.
 type wallPill struct {
 	Step        int    `json:"step"`
 	Unresolved  int    `json:"unresolved"`
@@ -20,14 +21,22 @@ type wallPill struct {
 // deriveWallPill derives the pill from the readiness a composed refresh
 // already loaded (SI-368 (2)): the marks' input reason when that
 // readiness cannot be read for this wall (readinessUnreadable), else its
-// current step and unresolved count. A stub collision, which leaves only
-// the marks unable to name one card, leaves the pill readable.
+// current step and the Focus next concerns in that step alone. A stub
+// collision, which leaves only the marks unable to name one card, leaves
+// the pill readable.
 func deriveWallPill(in wallMarksInput) wallPill {
 	if reason := readinessUnreadable(in); reason != "" {
 		return wallPill{Unavailable: reason}
 	}
-	step, _ := readinessCurrentStep(*in.Readiness)
-	return wallPill{Step: step, Unresolved: len(in.Readiness.Attention)}
+	snap := in.Readiness
+	step, _ := readinessCurrentStep(*snap)
+	unresolved := 0
+	for _, c := range snap.Attention {
+		if step > 0 && c.Area == snap.CurrentFocus {
+			unresolved++
+		}
+	}
+	return wallPill{Step: step, Unresolved: unresolved}
 }
 
 // fixedPill is the pill of a wall whose marks are fixed — for the server
