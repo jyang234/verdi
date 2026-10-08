@@ -255,8 +255,9 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 	// autosave status and live region; the last action result is the
 	// bar's trailing row, outside the swapped region.
 	nav := `<a href="/">index</a>`
+	dialogs, revise := renderBoardDialogs(p)
 	var controls strings.Builder
-	writeWallControls(&controls, p, asd.Pill, snap.Uncommitted)
+	writeWallControls(&controls, p, asd.Pill, snap.Uncommitted, revise)
 	data := struct {
 		Name      string
 		Title     string
@@ -281,7 +282,7 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 		Region: template.HTML(region),
 		// The page-level dialogs, and the authoring wall's branch menu at
 		// the body level beside them (SI-368 (7)).
-		Dialogs:   template.HTML(renderBoardDialogs(p) + renderBranchMenu(p, git)),
+		Dialogs:   template.HTML(dialogs + renderBranchMenu(p, git)),
 		StateJSON: template.JS(stateJSON),
 		Bar:       snap.bar,
 	}
@@ -1415,13 +1416,17 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 	b.WriteString(`</section>`)
 }
 
-// renderBoardDialogs renders the page-level dialogs. Only authoring mode
-// gets the full set: review is a mirror, read-only a document (05
-// §Workbench) — EXCEPT the sealed accepted-pending-build feature wall,
-// whose one live affordance (Instantiate story, spec/scoping-canvas
-// ac-6) needs the confirmation chrome: its consequence is spoken before
-// it fires, and its receipt/refusal after, all through the same dialog.
-func renderBoardDialogs(p *BoardProjection) string {
+// renderBoardDialogs renders the page-level dialogs, and reports whether
+// the sealed wall's Revise dialog is among them — the one sealed-accepted-
+// feature decision the bar's Revise action follows (spec/wall-strip-and-
+// drawer-v2 ac-6), so the bar never offers what the dialog would not
+// serve. Only authoring mode gets the full set: review is a mirror,
+// read-only a document (05 §Workbench) — EXCEPT the sealed
+// accepted-pending-build feature wall, whose one live affordance
+// (Instantiate story, spec/scoping-canvas ac-6) needs the confirmation
+// chrome: its consequence is spoken before it fires, and its
+// receipt/refusal after, all through the same dialog.
+func renderBoardDialogs(p *BoardProjection) (string, bool) {
 	if p.Mode != modeAuthoring {
 		// The sealed wall's live affordances need the dialog chrome:
 		// stub-instantiate's confirmation (spec/scoping-canvas ac-6), the
@@ -1451,9 +1456,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 			if revise {
 				writeReviseDialog(&b, p)
 			}
-			return b.String()
+			return b.String(), revise
 		}
-		return ""
+		return "", false
 	}
 	var b strings.Builder
 	b.WriteString(`
@@ -1506,7 +1511,7 @@ func renderBoardDialogs(p *BoardProjection) string {
 <span class="board-trash-label" aria-hidden="true"></span>
 </div>`)
 	b.WriteString(renderASDDialogs(p))
-	return b.String()
+	return b.String(), false
 }
 
 // renderASDDialogs renders the ASD typed-operation dialogs (authoring

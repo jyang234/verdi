@@ -14,8 +14,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // The pill's data-state values.
@@ -75,24 +73,16 @@ func writeReadinessPill(b *strings.Builder, spec string, pill *wallPill) {
 	b.WriteString(`</a>`)
 }
 
-// reviseOffered is the sealed accepted feature wall's one Revise decision
-// (spec/uat-round-1 ac-11; 02 §Kind registry: supersession is the only
-// forward path after acceptance, and it is feature-only), shared by the
-// bar's action and the rail's note so neither offers what the server
-// would refuse.
-func reviseOffered(p *BoardProjection) bool {
-	return p.Mode == modeReadOnly && p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build"
-}
-
 // writeWallControls writes the wall page's controls slot (SI-323 (5), dc-3):
 // the Wall and Document switch; the readiness pill; in authoring, Commit
 // and push with its changes fragment beside it (uncommitted is the
 // snapshot's fragment, SI-368 (8)) under the anchor the readiness
 // review/worktree concern points at (SI-368 (3)); on the sealed wall, New
 // story and Revise as the bar's primary actions (ac-6; the ids the index
-// call to action and the dialogs rely on); the ⋯ button the drawer lane
-// wires (ac-4); and the autosave status and live region.
-func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, uncommitted string) {
+// call to action and the dialogs rely on; revise is the dialogs' own
+// decision, renderBoardDialogs); the ⋯ button the drawer lane wires
+// (ac-4); and the autosave status and live region.
+func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, uncommitted string, revise bool) {
 	esc := stdhtml.EscapeString
 	if p.DocumentHref != "" {
 		// The Wall and Document switch, in the controls slot (dc-3), with
@@ -107,7 +97,7 @@ func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, u
 		// the bar folds " & push" away from the eye.
 		b.WriteString(`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit<span class="wall-commit-push"> &amp; push</span></button>` + uncommitted + `</div>`)
 	case modeReadOnly:
-		writeSealedActions(b, p)
+		writeSealedActions(b, p, revise)
 	}
 	b.WriteString(`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-expanded="false" aria-label="More">&#8943;</button>`)
 	b.WriteString(`<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
@@ -117,16 +107,18 @@ func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, u
 // writeSealedActions writes the sealed wall's actions in the bar (ac-6):
 // New story, rendered only when the loader attached the creation form's
 // field descriptors (the same sealed-accepted-feature gate the create
-// action enforces), as the primary action; and Revise, under
-// reviseOffered, beside it. Every spoken class word is display prose and
-// resolves (vocabulary.go); the ids and test ids stay bare.
-func writeSealedActions(b *strings.Builder, p *BoardProjection) {
+// action enforces), as the primary action; and Revise, when the page's
+// dialogs carry the revise dialog (the one sealed-accepted-feature
+// decision, made where the lifecycle audit allows it), beside it. Every
+// spoken class word is display prose and resolves (vocabulary.go); the
+// ids and test ids stay bare.
+func writeSealedActions(b *strings.Builder, p *BoardProjection, revise bool) {
 	esc := stdhtml.EscapeString
 	if len(p.CreateFields) > 0 {
 		storyWord := p.words.word("story")
 		b.WriteString(`<button type="button" id="create-spec-btn" class="btn-primary create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
 	}
-	if reviseOffered(p) {
+	if revise {
 		featureWord := p.words.word("feature")
 		b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; ` + esc("Revise this "+featureWord) + `</button>`)
 	}
