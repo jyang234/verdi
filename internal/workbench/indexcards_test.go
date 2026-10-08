@@ -300,7 +300,7 @@ func TestProjectCard(t *testing.T) {
 		{
 			name: "a design draft with no decoded title: empty and disclosed, never its ref",
 			e:    refindex.Entry{Ref: "spec/untitled", Source: refindex.SourceRemote, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Date: before(day)},
-			want: cardFacts{name: "untitled", titleUnproven: "disclosed-unproven [workbench:title-unproven] spec/untitled: no title was decoded from this design branch's spec", age: ageFact{text: "1 d ago", days: 1}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}},
+			want: cardFacts{name: "untitled", titleUnproven: "disclosed-unproven [workbench:title-unproven] spec/untitled: no title was decoded from this design branch's spec", age: ageFact{text: "1 d ago", days: 1}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}, disclosed: true},
 		},
 		{
 			name: "a branch with no draft spec: no title, its own disclosure, disclosed",
@@ -331,10 +331,21 @@ func TestProjectCard(t *testing.T) {
 			want: cardFacts{name: "lost", title: "Lost", age: ageFact{text: "age unproven", unproven: disclosure.Render(dateLost)}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}, disclosed: true},
 		},
 		{
-			name: "an accepted feature: its call to action rides on the card, and its coverage never marks the card disclosed",
+			name: "an age unproven by the clock alone (no DateDisclosed) marks the card disclosed",
+			e:    refindex.Entry{Ref: "spec/ahead", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Date: before(-2 * day), Title: "Ahead"},
+			want: cardFacts{name: "ahead", title: "Ahead", age: ageFact{text: "age unproven", unproven: "disclosed-unproven [workbench:age-unproven] spec/ahead: last-change date " + before(-2*day) + " is after this render's clock 2024-06-15T12:00:00Z"}, review: reviewNotOpen, move: nextMove{kind: moveOpenWall, text: "open the wall"}, disclosed: true},
+		},
+		{
+			name: "an accepted feature with an unproven age: its call to action rides on the card, and the age marks it disclosed",
 			e:    acceptedFeature(),
 			tree: featureTree(),
-			want: cardFacts{name: "f", title: "F", class: artifact.ClassFeature, boardServable: true, age: ageFact{text: "age unproven", unproven: "disclosed-unproven [workbench:date-unproven] spec/f: no last-change date was computed for this entry"}, review: reviewNotOpen, move: nextMove{kind: moveSealedWall, text: "sealed wall"}, cta: &callToAction{unclaimed: 2, criterion: "ac-2", href: "/board/spec/f?new-story=ac-2", text: "2 AC unclaimed · ac-2 · New story"}},
+			want: cardFacts{name: "f", title: "F", class: artifact.ClassFeature, boardServable: true, age: ageFact{text: "age unproven", unproven: "disclosed-unproven [workbench:date-unproven] spec/f: no last-change date was computed for this entry"}, review: reviewNotOpen, move: nextMove{kind: moveSealedWall, text: "sealed wall"}, cta: &callToAction{unclaimed: 2, criterion: "ac-2", href: "/board/spec/f?new-story=ac-2", text: "2 AC unclaimed · ac-2 · New story"}, disclosed: true},
+		},
+		{
+			name: "a coverage disclosure alone never marks the card disclosed",
+			e:    func() refindex.Entry { e := acceptedFeature(); e.Date = before(5 * day); return e }(),
+			tree: func() specTreeMeta { t := featureTree(); t.boardServable = false; return t }(),
+			want: cardFacts{name: "f", title: "F", class: artifact.ClassFeature, age: ageFact{text: "5 d ago", days: 5}, review: reviewNotOpen, move: nextMove{kind: moveSealedWall, text: "sealed wall"}, cta: &callToAction{text: "coverage unproven", unproven: "no active-zone working-tree file exists to serve its wall"}},
 		},
 	}
 	for _, tt := range tests {

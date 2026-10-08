@@ -58,7 +58,9 @@ type cardFacts struct {
 	// (SI-366 (10)).
 	cta *callToAction
 	// disclosed is the card-level disclosure the "disclosed" filter
-	// selects (SI-366 (19)): the entry's Disclosed or DateDisclosed.
+	// selects (SI-366 (19), (21)(b)): any unproven fact the card itself
+	// states — the entry's Disclosed or DateDisclosed, an unproven age, or
+	// an unproven draft title — so the filter never hides one.
 	// Call-to-action coverage disclosures are excluded.
 	disclosed bool
 }
@@ -78,11 +80,10 @@ type cardContext struct {
 // its working-tree read (zero for a design-branch entry).
 func projectCard(e refindex.Entry, tree specTreeMeta, cc cardContext) cardFacts {
 	c := cardFacts{
-		entry:     e,
-		name:      strings.TrimPrefix(e.Ref, "spec/"),
-		age:       ageOf(e, cc.now),
-		review:    reviewOf(e, cc.review),
-		disclosed: e.Disclosed != nil || e.DateDisclosed != nil,
+		entry:  e,
+		name:   strings.TrimPrefix(e.Ref, "spec/"),
+		age:    ageOf(e, cc.now),
+		review: reviewOf(e, cc.review),
 	}
 	if e.Source == refindex.SourceDefault {
 		c.title = tree.title
@@ -96,6 +97,7 @@ func projectCard(e refindex.Entry, tree specTreeMeta, cc cardContext) cardFacts 
 			c.titleUnproven = disclosure.Render(disclosure.New("workbench:title-unproven", e.Ref, "no title was decoded from this design branch's spec"))
 		}
 	}
+	c.disclosed = e.Disclosed != nil || e.DateDisclosed != nil || c.age.unproven != "" || c.titleUnproven != ""
 	c.move = moveOf(e, c.review, cc.corpus, cc.words)
 	c.cta = ctaFrom(c.name, coverageOf(e, tree, cc.corpus), cc.words)
 	return c
