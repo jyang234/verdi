@@ -125,31 +125,34 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     // SHOWCASE.EMPTY_SPEC's one-line problem headline fits AND its `## Problem` body
     // section is empty — the one degenerate case: nothing more to show than
     // the three lines on its face, so the always-on dog-ear is suppressed.
-    // No clamp, no body, no expand affordance; on this authoring wall a
-    // click edits the line in place instead (spec/wall-strip-and-drawer-v2
-    // ac-1; SI-368 (13)), so the cursor is the text cursor and the expand
-    // dialog never appears.
+    // No clamp, no body, no affordance, and a click does nothing. This wall
+    // is served off a branch that is not its own, so its typed writes are
+    // refused and the strip's line is not editable here either (no
+    // in-place editor, the plain cursor). The strip shows each statement
+    // on ONE line in half its width, beside the chips and the readiness
+    // shell's column (retired later in the story), so "fits" is a wider
+    // premise than the three-line placard's: this headline fits at 2560 px.
+    await page.setViewportSize({ width: 2560, height: 900 });
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const placard = page.getByTestId("placard-problem");
     const p = placard.locator(".placard-text");
     await expect(p).toBeVisible();
     await expect(p).not.toHaveClass(/is-clamped/);
     await expect(p).not.toHaveAttribute("data-expandable", "");
-    await expect(p).toHaveCSS("cursor", "text");
+    await expect(p).toHaveCSS("cursor", "auto");
     await expect(placard.locator(".clamp-more")).toHaveCount(0);
     // The degenerate signature: no body section, not marked expandable, no
     // "full case file" control (the whole file is on its face).
     await expect(placard.getByTestId("placard-full-problem")).toHaveCount(0);
     await expect(placard).not.toHaveClass(/placard--expandable/);
     await expect(placard.locator(".placard-more")).toHaveCount(0);
+    await expect(placard).not.toHaveAttribute("data-strip-op", /./);
 
     await p.click();
-    // A generous beat past the expand delay: the dialog never appears; the
-    // in-place editor did, and Escape leaves nothing behind.
+    // A generous beat past the expand delay: the dialog never appears, and
+    // no editor either.
     await page.waitForTimeout(400);
     await expect(page.getByTestId("expand-dialog")).toHaveCount(0);
-    await expect(page.getByTestId("case-strip-editor-problem")).toBeVisible();
-    await page.keyboard.press("Escape");
     await expect(page.getByTestId("case-strip-editor-problem")).toHaveCount(0);
   });
 
@@ -187,7 +190,11 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     // because it HAS a fuller file to open, not because the viewport happened
     // to clamp its headline. SHOWCASE.DESIGN_SPEC's OUTCOME headline is short — at the
     // config's wide viewport (1880px) it does NOT overflow — yet the placard
-    // carries a rendered `## Outcome` body and stays expandable.
+    // carries a rendered `## Outcome` body and stays expandable. The strip
+    // shows the outcome on ONE line in half its width (beside the chips
+    // and the readiness shell's column, retired later in the story), so
+    // the headline fits at 2560 px, where the premise holds.
+    await page.setViewportSize({ width: 2560, height: 900 });
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const placard = page.getByTestId("placard-outcome");
     const p = placard.locator(".placard-text");

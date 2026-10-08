@@ -6227,6 +6227,9 @@ body:not(.board-page) > footer.site-foot,
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
+/* the button's inner words never take a pointer: the button itself is
+   the click's target, which the wall's script dispatches on by id */
+.topbar-controls .wall-commit-wrap #commit-push-btn .wall-commit-push { pointer-events: none; }
 .wall-commit {
   display: inline-flex;
   align-items: stretch;
