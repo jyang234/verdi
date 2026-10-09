@@ -27,7 +27,9 @@
 // when it opens, a failed count reading "unavailable", never 0 (SI-368
 // (11)); the toolbar's Yarn key opens Keys (SI-368 (9)). The drawer is a
 // dialog without a focus trap: opening it moves the focus to its tab, and
-// shutting it returns the focus to what opened it. Escape shuts the menu,
+// shutting it returns a focus inside it, or one left nowhere, to what
+// opened it; a focus the user put elsewhere — on a card, in a popover over
+// the drawer — stays where it is (SI-368 (30)). Escape shuts the menu,
 // then the drawer, wherever the focus is — one layer a press, in the
 // wall's order, which wallkeys.js keeps through this file's seam (SI-368
 // (17)); the drawer's and the menu's own Escape below are the same close
@@ -735,13 +737,15 @@
 
   function close() {
     if (drawer.hidden) return;
+    var a = document.activeElement;
+    var returns = !a || a === document.body || drawer.contains(a);
     drawer.hidden = true;
     if (scrim) scrim.hidden = true;
     current = null;
     drawer.removeAttribute("data-tab");
     var back = opener;
     opener = null;
-    if (back && back.isConnected && back.focus) back.focus({ preventScroll: true });
+    if (returns && back && back.isConnected && back.focus) back.focus({ preventScroll: true });
   }
 
   // -- finding a Readiness item's wall target (SI-368 (16)) ---------------------------

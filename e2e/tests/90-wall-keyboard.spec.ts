@@ -745,6 +745,58 @@ test.describe("wall-canvas", () => {
     await page.keyboard.press("Escape");
     expect(await selectedKey(page)).toBeNull();
 
+    // A press that closes a layer returns the focus to that layer's opener
+    // or leaves it where the user put it, and never leaves an open layer
+    // without the focus (SI-368 (30), F3CR-5). The posture popover over the
+    // drawer over the selection: the first press shuts the drawer and the
+    // focus stays on the popover's summary, the popover still open; the
+    // second shuts the popover, its summary keeping the focus; the third
+    // clears the selection.
+    const posture = page.getByTestId("asd-posture-tech");
+    const postureSummary = page.getByTestId("topbar-posture");
+    await select();
+    await tabUntil(page, "Shift+Tab reaches the readiness pill", focusIs(page, "readiness-pill"), true);
+    await page.keyboard.press("Enter");
+    await expect(drawer).toBeVisible();
+    await tabUntil(page, "Shift+Tab reaches the posture's summary", focusIs(page, "topbar-posture"), true, 300);
+    await page.keyboard.press("Enter");
+    await expect(posture).toHaveJSProperty("open", true);
+    await expect(drawer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(posture).toHaveJSProperty("open", true);
+    await expect(postureSummary).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(posture).toHaveJSProperty("open", false);
+    await expect(postureSummary).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // The drawer opened from ⋯, the focus then moved onto a card: the press
+    // shuts the drawer and the focus stays on the card, never pulled back
+    // to ⋯; the next clears the selection, the card keeping the focus.
+    await select();
+    await tabUntil(page, "Shift+Tab reaches ⋯", focusIs(page, "wall-more"), true, 300);
+    await page.keyboard.press("Enter");
+    await expect(more).toBeVisible();
+    for (let i = 0; i < 8 && !(await focusIs(page, "wall-more-provenance")()); i++) await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("wall-more-provenance")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(drawer).toBeVisible();
+    await expect(page.getByTestId("record-tab-provenance")).toHaveAttribute("aria-selected", "true");
+    await tabUntil(page, "Tab reaches ac-1 from the drawer", focusIs(page, "card-ac-1"), false, 300);
+    await expect(drawer).toBeVisible();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(ac1).toBeFocused();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+    await expect(ac1).toBeFocused();
+
     // The add-object dialog, from the toolbar's Card: one press closes it,
     // backdrop and dialog together, and ends the interaction that held the
     // projection (BL-175 (1)).

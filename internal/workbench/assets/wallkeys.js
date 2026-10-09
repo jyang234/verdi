@@ -309,8 +309,10 @@
     return !!(drawer() && drawer().closeMenu && drawer().closeMenu());
   }
 
-  // closeDrawer closes the open record drawer, which returns the focus to
-  // what opened it; false when it is shut.
+  // closeDrawer closes the open record drawer, which returns a focus inside
+  // it to what opened it and leaves a focus the user put elsewhere — on a
+  // card, in a popover over it — where it is, so no layer still open is
+  // left without the focus (SI-368 (30)); false when it is shut.
   function closeDrawer() {
     var d = drawer();
     if (!d || !d.current || !d.current()) return false;
