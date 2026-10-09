@@ -126,5 +126,36 @@ test.describe("wall-strip-and-drawer", () => {
     // An outside press closes the popover.
     await page.mouse.click(8, 8);
     await expect(body).toBeHidden();
+
+    // At 320 px, and at 375 px, the popover stays inside the viewport
+    // (Wave 6 §5.2; SI-368 (26)(a) F3AR-2): its body and each listed
+    // change lie within the page's width on the typed wall, so every
+    // target is reachable, and it still closes from the keyboard.
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(WALLS.typed);
+      await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+      body = await openPopover(page);
+      const boxes = await body.evaluate((el) => {
+        const edges = (b: Element) => {
+          const r = b.getBoundingClientRect();
+          return [r.left, r.right];
+        };
+        return {
+          viewport: document.documentElement.clientWidth,
+          body: edges(el),
+          targets: Array.from(el.querySelectorAll("li")).map(edges),
+        };
+      });
+      expect(boxes.body[0], `@${width}: the popover's left edge`).toBeGreaterThanOrEqual(0);
+      expect(boxes.body[1], `@${width}: the popover's right edge`).toBeLessThanOrEqual(boxes.viewport);
+      expect(boxes.targets.length, `@${width}: listed changes`).toBeGreaterThan(0);
+      for (const [left, right] of boxes.targets) {
+        expect(left, `@${width}: a target's left edge`).toBeGreaterThanOrEqual(0);
+        expect(right, `@${width}: a target's right edge`).toBeLessThanOrEqual(boxes.viewport);
+      }
+      await page.keyboard.press("Escape");
+      await expect(body).toBeHidden();
+    }
   });
 });

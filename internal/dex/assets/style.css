@@ -6271,6 +6271,13 @@ body:not(.board-page) > footer.site-foot,
 .wall-commit-popover > summary:hover,
 .wall-commit-popover[open] > summary { background: var(--accent-strong); border-color: var(--accent-strong); opacity: 1; }
 .wall-commit-popover > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the changes body hangs from the wrap's right edge; below the bar's
+   640 px the controls wrap under the posture and Commit & push may sit at
+   its row's start, where a body hung from its right edge would open
+   off-screen — there the body is laid across the bar instead: fixed, at
+   its static top (right under the count), 16 px in from either side, so
+   at 320 px it opens inside the viewport with its every target reachable,
+   and a page zoomed to 200 % measures the same */
 .wall-commit-changes {
   position: absolute;
   top: calc(100% + 6px);
@@ -6428,4 +6435,14 @@ body:not(.board-page) > footer.site-foot,
 }
 .wall-branch-menu [role="menuitem"]:hover,
 .wall-branch-menu [role="menuitem"]:focus-visible { background: var(--panel); color: var(--accent); }
+@container topbar (max-width: 600px) {
+  .wall-commit-changes {
+    position: fixed;
+    top: auto;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+  }
+}
 /* verdi:workbench-only:end */
