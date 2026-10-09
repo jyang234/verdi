@@ -118,12 +118,14 @@ test.describe("board legibility: the wall reads at a glance", () => {
 
     // SHOWCASE.EMPTY_SPEC is class: story — the four moves stand unadorned
     // (story spec + ACs + implements + commit IS the minimum path): no
-    // split lesson, and its criteria move is the story's own.
+    // split lesson, its yarn move names the document's own edges, and its
+    // criteria move is the story's own.
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     await expect(page.getByTestId("record-drawer")).toBeHidden();
     const storyGuide = await openRecordTab(page, "moves");
     await expect(storyGuide).toContainText("case file");
     await expect(storyGuide).toContainText("acceptance criteria");
+    await expect(storyGuide).toContainText("implements/resolves edges");
     await expect(storyGuide).toContainText("the first column says what must be true.");
     await expect(storyGuide).toContainText("Commit & push");
     await expect(storyGuide).not.toContainText("never lists its");

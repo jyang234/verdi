@@ -185,10 +185,18 @@ func writeMovesTab(b *strings.Builder, p *BoardProjection) {
 	if feature {
 		criteria = `<strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the ` + featureWord + ` lands. Use the dotted slot at the foot of a column to declare one.`
 	}
+	// A wall without the feature note names the document's own edges in its
+	// yarn move, as the four-move guide did: 05 §Workbench's minimum path is
+	// story spec + ACs + implements + commit, and copy drops no concept
+	// (SI-368 (30)). Edge types are identity ids, never renamed.
+	yarn := `<strong>String yarn</strong> &#8212; click a card, then drag its pin onto another card and pick the relationship.`
+	if !feature {
+		yarn += ` A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).`
+	}
 	writeRecordRows(b, "The minimum path", [][2]string{
 		{"1", `<strong>Read the case file</strong> &#8212; the problem and outcome above the wall are the spec&#8217;s own header. Click either to edit it in place.`},
 		{"2", criteria},
-		{"3", `<strong>String yarn</strong> &#8212; click a card, then drag its pin onto another card and pick the relationship.`},
+		{"3", yarn},
 		{"4", `<strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.`},
 	})
 	writeRecordRows(b, "Kept as they were", [][2]string{

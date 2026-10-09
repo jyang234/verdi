@@ -269,15 +269,26 @@ func TestBoardLegibility_Guide(t *testing.T) {
 		}
 	}
 
-	// A story wall keeps the four moves, with no class note.
+	// A story wall keeps the four moves, with no class note. Its yarn move
+	// names the document's own implements/resolves edges: 05 §Workbench's
+	// four-concept minimum path is story spec + ACs + implements + commit,
+	// and copy never drops a concept (SI-368 (30)). Edge types are
+	// identity ids, which a vocabulary rename leaves bare.
 	story := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
 	storyMoves := renderRecordDrawer(story, testASDView())
+	renamed := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
+	renamed.applyModelVocabulary(vocabTestModel())
+	renamedMoves := renderRecordDrawer(renamed, testASDView())
 	for _, want := range []string{
 		"case file", "acceptance criteria", "yarn", "Commit",
 		"the first column says what must be true.",
+		"A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).",
 	} {
 		if !strings.Contains(storyMoves, want) {
 			t.Errorf("story wall's moves missing %q", want)
+		}
+		if !strings.Contains(renamedMoves, want) {
+			t.Errorf("story wall's moves under a renamed vocabulary missing %q", want)
 		}
 	}
 	for _, gone := range []string{"never lists its", "lands."} {
