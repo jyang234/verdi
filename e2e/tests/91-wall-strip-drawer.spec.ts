@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Locator, type Request } from "@playwright/test";
-import { SHOWCASE, EDGE, CONTROL_URL, boardPath, dexSpecPath } from "./fixtures";
+import { SHOWCASE, EDGE, CONTROL_URL, boardPath, branchBoardPath, dexSpecPath } from "./fixtures";
 import { addSticky, editCard, uncommittedIndicator } from "./helpers";
 
 // spec/wall-strip-and-drawer-v2 — the case-file strip (ac-1) and its chips
@@ -82,6 +82,11 @@ async function expectBadgeChip(page: Page, chip: Locator, source: string): Promi
 const DRAWER_EMPTY_WALL = "/b/design%2Fdecline-drawer-empty/board/spec/decline-drawer-empty";
 const DRAWER_UNAVAILABLE_WALL = "/b/design%2Fdecline-drawer-unavailable/board/spec/decline-drawer-unavailable";
 
+// branchOf is a /b/ wall's branch, decoded from its address.
+function branchOf(wall: string): string {
+  return decodeURIComponent(wall.split("/")[2]);
+}
+
 // The design reads the drawer and the ⋯ menu make on demand (co-1).
 const DESIGN_READS = /\/api\/(get_design_provenance|prepare_design_review|get_design_context|get_design_capabilities)$/;
 
@@ -95,6 +100,17 @@ function readsOf(page: Page): string[] {
     if (r.method() === "GET" && /\/board\/spec\/[^/]+\/readiness$/.test(r.url())) reads.push("readiness");
   });
   return reads;
+}
+
+// expectProposal: the Review tab's last section names the branch and
+// SI-368 (12)'s forge-agnostic command, and holds no control that opens
+// anything (co-2).
+async function expectProposal(panel: Locator, branch: string): Promise<void> {
+  const command = panel.getByTestId("record-review-command");
+  await expect(command).toContainText(branch);
+  await expect(command).toContainText("Push the branch, then open a pull request on your forge:");
+  await expect(command.locator("code")).toHaveText(`git push -u origin ${branch}`);
+  await expect(command.locator("a, button, form")).toHaveCount(0);
 }
 
 // JSON_TEXT matches raw JSON printed as text: an object's opening brace
@@ -561,12 +577,8 @@ test.describe("wall-strip-and-drawer", () => {
       await expect(provenance.locator(".record-row").filter({ hasText: `edit-ac ${ac}` }).first()).toBeVisible();
       const review = await openTab(page, "review");
       await expectProse(review, ["Review base", "Semantic changes", "Needs a human eye", "Material warnings", "Policy in force", "Open a pull request"]);
-      const command = review.getByTestId("record-review-command");
-      await expect(command).toContainText(SHOWCASE.DESIGN_BRANCH);
-      await expect(command).toContainText("Push the branch, then open a pull request on your forge:");
-      await expect(command.locator("code")).toHaveText(`git push -u origin ${SHOWCASE.DESIGN_BRANCH}`);
+      await expectProposal(review, SHOWCASE.DESIGN_BRANCH);
       await expect(page.getByTestId("record-drawer").locator("a, button, [role=button], [role=link]").filter({ hasText: /pull request|merge request/i })).toHaveCount(0);
-      await expect(command.locator("a, button, form")).toHaveCount(0);
       const context = await openTab(page, "context");
       await expectProse(context, ["Current spec", "Parent feature", "Applicable policy", "What agents may do", "Pinned context", "Verdi-go findings", "Digests"]);
       const repo = await openTab(page, "repo");
@@ -604,17 +616,32 @@ test.describe("wall-strip-and-drawer", () => {
     await expect(fixed.getByTestId("readiness-unavailable")).toHaveText(/^Readiness is unavailable: .+\.$/);
     await page.getByTestId("record-drawer-close").click();
 
+    // On a wall that takes edits the Review tab names the branch, the bar's
+    // own fact, and the command even when the review packet cannot be read,
+    // its reason beside them (SI-368 (12), (28)(a)): the payoff-quote-portal
+    // draft, whose project has adopted no policy.
+    await page.goto(branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+    const draftReview = await openTab(page, "review");
+    await expect(draftReview.getByTestId("record-unavailable")).toHaveText(/^The review packet is unavailable: policy-forbidden: .+/);
+    await expectProposal(draftReview, SHOWCASE.SHOWCASE_DRAFT_BRANCH);
+    expect(await draftReview.innerText()).not.toMatch(JSON_TEXT);
+    await page.getByTestId("record-drawer-close").click();
+
     // Unavailable, with the reason: a provenance record that does not
     // decode leaves the Provenance and Review projections unreadable.
+    // Provenance has nothing beside its reason; Review keeps the one
+    // section its wall proposes from, the branch and the command.
     await page.goto(DRAWER_UNAVAILABLE_WALL);
-    for (const [tab, subject] of [
-      ["provenance", "Provenance is"],
-      ["review", "The review packet is"],
-    ]) {
+    for (const [tab, subject, sections] of [
+      ["provenance", "Provenance is", 0],
+      ["review", "The review packet is", 1],
+    ] as const) {
       const panel = await openTab(page, tab);
       await expect(panel.getByTestId("record-unavailable")).toHaveText(new RegExp(`^${subject} unavailable: .*decoding design provenance`));
-      await expect(panel.locator(".record-section")).toHaveCount(0);
+      await expect(panel.locator(".record-section")).toHaveCount(sections);
     }
+    await expectProposal(page.getByTestId("record-panel-review"), branchOf(DRAWER_UNAVAILABLE_WALL));
     await page.getByTestId("record-drawer-close").click();
     // A design context the core cannot compile: the sealed record whose
     // pinned context does not resolve in the hermetic history.

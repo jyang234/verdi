@@ -316,21 +316,32 @@
       { k: "digest", v: r.policy_digest ? short(r.policy_digest) : "none: no policy is adopted", title: r.policy_digest || "", mono: !!r.policy_digest },
     ]);
 
-    // SI-368 (12): forge-agnostic — the branch and the command, and never
-    // a control that opens anything (co-2). Only a wall that takes edits
-    // proposes from its branch; any other says so.
+    proposal(into, base.available ? base.branch : "");
+  }
+
+  // proposal is the Review tab's last section (SI-368 (12)): forge-
+  // agnostic, the branch and the command, and never a control that opens
+  // anything (co-2). Only a wall that takes edits proposes from its
+  // branch, and any other says so. The branch is the bar's own fact, so
+  // the command stands even when the review packet cannot be read
+  // (SI-368 (28)(a)); baseBranch is the packet's review base, or "".
+  function proposal(into, baseBranch) {
     var proposing = state.mode === "authoring" && !state.domainRefusal;
+    var f = fact("branch");
+    var branch = f && !f.badge ? f.v : "";
     var pr = section(into, "Open a pull request", proposing ? branch : "");
     pr.setAttribute("data-testid", "record-review-command");
     if (!proposing) {
       empty(pr, "No pull request is proposed from this wall: it takes no edit here, and a proposal is pushed from its own design branch.");
-    } else if (branch && branch !== base.branch) {
+    } else if (branch && branch !== baseBranch) {
       pr.appendChild(el("p", "record-prose", "Push the branch, then open a pull request on your forge:"));
       var pre = el("pre", "record-command");
       pre.appendChild(el("code", "", "git push -u origin " + branch));
       pr.appendChild(pre);
+    } else if (branch) {
+      empty(pr, "This wall is on the review base's own branch, " + branch + ": there is no branch to propose from.");
     } else {
-      empty(pr, branch ? "This wall is on the review base's own branch, " + branch + ": there is no branch to propose from." : "The packet names no branch to propose from.");
+      empty(pr, "No branch to propose from: " + String(f ? f.note || f.v || "no branch is checked out" : "the bar carries no branch fact").replace(/\.$/, "") + ".");
     }
   }
 
@@ -579,9 +590,17 @@
         design(tab === "provenance" ? "get_design_provenance" : "prepare_design_review").then(function (r) {
           if (!fresh(tab, n)) return;
           body.textContent = "";
-          if (r.reason) unavailable(body, tab === "provenance" ? "Provenance is" : "The review packet is", r.reason);
-          else if (tab === "provenance") renderProvenance(body, r.data);
-          else renderReview(body, r.data);
+          if (tab === "provenance") {
+            if (r.reason) unavailable(body, "Provenance is", r.reason);
+            else renderProvenance(body, r.data);
+          } else if (r.reason) {
+            // The packet's reason, and beside it the proposal, whose branch
+            // is the bar's (SI-368 (28)(a)).
+            unavailable(body, "The review packet is", r.reason);
+            proposal(body, "");
+          } else {
+            renderReview(body, r.data);
+          }
           done(body);
         });
         return;
