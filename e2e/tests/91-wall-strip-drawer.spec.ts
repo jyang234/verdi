@@ -1,14 +1,14 @@
 import { test, expect, type Page, type Locator, type Request } from "@playwright/test";
-import { SHOWCASE, EDGE, CONTROL_URL, boardPath, branchBoardPath, dexSpecPath } from "./fixtures";
-import { addSticky, editCard, uncommittedIndicator } from "./helpers";
+import { SHOWCASE, EDGE, CONTROL_URL, boardPath, branchBoardPath, dexSpecPath, stubCardTestId } from "./fixtures";
+import { addSticky, editCard, selectStub, stickyAction, uncommittedIndicator, wallToolbar } from "./helpers";
 
 // spec/wall-strip-and-drawer-v2 — the case-file strip (ac-1) and its chips
 // (ac-2), the branch menu, the readiness pill and the ⋯ menu's on-demand
 // counts (ac-4), and the record drawer's tabs (ac-5). Each test here is the
 // producer its obligation names (.verdi/obligations/wall-strip-and-
 // drawer-v2/ac-<n>--behavioral.md), titled as the claim spells it; the
-// file passes when run alone (BL-98). Lane F3c adds the rail's homes
-// (ac-6) to this file.
+// file passes when run alone (BL-98). The rail is gone, and its homes
+// (ac-6) are proven by the last test.
 //
 // State assertions ride roles, test ids, attributes and request bodies —
 // never screenshots (recording stays off).
@@ -691,6 +691,21 @@ test.describe("wall-strip-and-drawer", () => {
     await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     const sealedContext = await openTab(page, "context");
     await expect(sealedContext.getByTestId("record-unavailable")).toHaveText(/^The design context is unavailable: .+/);
+    // On a wall that takes no edit the Review tab proposes nothing (SI-368
+    // (28)(b), F3BR-3): the sealed record and the review mirror each say no
+    // pull request is proposed from them, and show no push command.
+    for (const [wall, mode] of [
+      [boardPath(SHOWCASE.READONLY_SPEC), "readonly"],
+      [boardPath(SHOWCASE.REVIEW_SPEC), "review"],
+    ] as const) {
+      await page.goto(wall);
+      await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", mode);
+      const proposes = (await openTab(page, "review")).getByTestId("record-review-command");
+      await expect(proposes.locator(".record-empty"), `${mode}: proposes nothing`).toHaveText(/^No pull request is proposed from this wall: /);
+      await expect(proposes.locator("code"), `${mode}: no push command`).toHaveCount(0);
+      expect(await proposes.innerText(), `${mode}: no push command`).not.toContain("git push");
+      await page.getByTestId("record-drawer-close").click();
+    }
     // A repository posture that cannot be proven: the store whose default
     // branch cannot be resolved names each fact's reason.
     const res = await page.request.get(`${CONTROL_URL}/unproven-board-fixture`);
@@ -700,5 +715,166 @@ test.describe("wall-strip-and-drawer", () => {
     const accepted = unproven.locator(".record-row").filter({ has: page.locator("dt", { hasText: /^accepted branch$/ }) });
     await expect(accepted.locator(".record-badge")).toHaveText("unproven");
     await expect(accepted.locator(".record-note")).toHaveText(/\S/);
+  });
+
+  test("The rail is gone and every item has a home", async ({ page }) => {
+    test.setTimeout(240_000);
+    const unprovenRes = await page.request.get(`${CONTROL_URL}/unproven-board-fixture`);
+    expect(unprovenRes.ok(), await unprovenRes.text()).toBe(true);
+    const unprovenWall = `${(await unprovenRes.text()).trim()}board/spec/${EDGE.UNPROVEN_BOARD_SPEC}`;
+
+    // No rail element on any wall, in any mode or room: the rail, the shell
+    // beside it, its JSON panels, its scratch and typed-operation panels,
+    // the four-move guide, a visible yarn key, Instantiate inside a stub
+    // card — and no column is kept for it: the wall frame takes the
+    // region's width.
+    const walls: [string, string, string][] = [
+      ["the live authoring wall", boardPath(SHOWCASE.DESIGN_SPEC), "authoring"],
+      ["the empty story wall", boardPath(SHOWCASE.EMPTY_SPEC), "authoring"],
+      ["the policy-less draft", branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC), "authoring"],
+      ["an authoring wall under its domain refusal", boardPath(EDGE.STATUSLESS_DRAFT_SPEC), "authoring"],
+      ["the review mirror", boardPath(SHOWCASE.REVIEW_SPEC), "review"],
+      ["the sealed record with stubs", boardPath(SHOWCASE.FEATURE_SPEC), "readonly"],
+      ["a read-only wall not yet accepted", branchBoardPath(SHOWCASE.DB_SAME_SPEC_BRANCH, SHOWCASE.DB_SAME_SPEC), "readonly"],
+      ["a read-only wall whose lifecycle is unproven", unprovenWall, "readonly"],
+    ];
+    const rail = [".board-side", "#asd-shell", '[data-testid="asd-shell"]', "[data-asd-panel]", ".asd-panel-json", "#add-sticky-btn", ".scratch-panel", "#asd-forms", "#asd-set-problem", "#asd-set-outcome", '[data-testid="board-guide"]', ".stub-instantiate", "#board-canvas [data-instantiate]"];
+    for (const [name, wall, mode] of walls) {
+      await page.goto(wall);
+      await expect(page.getByTestId("board"), name).toHaveAttribute("data-board-mode", mode);
+      for (const sel of rail) {
+        await expect(page.locator(sel), `${name}: ${sel}`).toHaveCount(0);
+      }
+      await expect(page.getByRole("button", { name: "Add sticky" }), `${name}: the rail's Add sticky`).toHaveCount(0);
+      // The rail's scratch panel's home: the toolbar's Sticky, offered
+      // exactly where the scratch tier is live.
+      if (mode === "authoring") await expect(stickyAction(page), `${name}: the toolbar's Sticky`).toBeVisible();
+      else await expect(stickyAction(page), `${name}: no Sticky outside authoring`).toHaveCount(0);
+      await expect(page.locator('[data-testid="yarn-key"]:visible'), `${name}: a visible yarn key`).toHaveCount(0);
+      const gap = await page.evaluate(() => {
+        const region = document.getElementById("boardv2-region")!.getBoundingClientRect();
+        const frame = document.querySelector('[data-testid="wall-frame"]')!.getBoundingClientRect();
+        return region.right - frame.right;
+      });
+      expect(gap, `${name}: the frame takes the region's width, with no rail column`).toBeLessThanOrEqual(24);
+      const empty = page.getByTestId("board-empty");
+      if (await empty.count()) await expect(empty, `${name}: the empty wall names no rail`).not.toContainText("rail");
+    }
+
+    // The review-mode inbox tray stays docked and visible: directly below
+    // the wall frame, in the region, keeping role=region "Inbox tray".
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
+    const tray = page.getByRole("region", { name: "Inbox tray" });
+    await expect(tray).toHaveCount(1);
+    await tray.scrollIntoViewIfNeeded();
+    await expect(tray).toBeVisible();
+    await expect(page.locator("#boardv2-region").getByRole("region", { name: "Inbox tray" })).toHaveCount(1);
+    const docked = await page.evaluate(() => {
+      const frame = document.querySelector('[data-testid="wall-frame"]')!.getBoundingClientRect();
+      const t = document.querySelector('[aria-label="Inbox tray"]')!.getBoundingClientRect();
+      return { below: t.top - frame.bottom, left: Math.abs(t.left - frame.left) };
+    });
+    expect(docked.below, "the tray sits below the wall frame").toBeGreaterThanOrEqual(0);
+    expect(docked.below, "the tray is docked to the wall frame").toBeLessThanOrEqual(32);
+    expect(docked.left, "the tray lines up with the wall frame").toBeLessThanOrEqual(2);
+    await expect(tray.locator('[data-annotation-type="review"]').first()).toBeVisible();
+    // The mirror explains itself among the notices.
+    await expect(page.locator(".board-notices .mirror-note")).toContainText("mirrors the merge request");
+
+    // On a sealed wall, New story and Revise are the top bar's primary
+    // action; their notes sit among the notices beside the sealed record's.
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
+    const bar = page.getByTestId("topbar");
+    const newStory = bar.getByRole("button", { name: /^New story$/ });
+    await expect(newStory).toBeVisible();
+    await expect(newStory).toHaveClass(/btn-primary/);
+    await expect(bar.getByRole("button", { name: /^Revise this feature$/ })).toBeVisible();
+    await expect(page.locator("#boardv2-region").getByRole("button", { name: /New story|Revise/ })).toHaveCount(0);
+    const notices = page.locator(".board-notices");
+    await expect(notices.locator(".sealed-panel")).toContainText("This spec is accepted");
+    await expect(notices.getByTestId("create-panel")).toBeVisible();
+    await expect(notices.getByTestId("revise-panel")).toBeVisible();
+
+    // Instantiate is on the stub card's toolbar: never inside the card, not
+    // offered with nothing selected, offered for the selected stub with its
+    // test id and its consequence, and the card keeps to its footprint.
+    const slug = SHOWCASE.STUB_SLUGS[0];
+    const stub = page.getByTestId(stubCardTestId(slug));
+    await expect(stub).toBeVisible();
+    await expect(stub.locator("[data-instantiate], .stub-instantiate")).toHaveCount(0);
+    await expect(stub).not.toContainText("Instantiate");
+    await expect(wallToolbar(page).locator("[data-instantiate]")).toHaveCount(0);
+    await selectStub(page, slug);
+    const instantiate = wallToolbar(page).getByTestId(`instantiate-${slug}`);
+    await expect(instantiate).toBeVisible();
+    await expect(instantiate).toHaveText("Instantiate story");
+    await expect(instantiate).toHaveAttribute("data-instantiate", slug);
+    const overflow = await stub.evaluate((card) => {
+      const box = card.getBoundingClientRect();
+      return Math.max(0, ...Array.from(card.children).map((c) => c.getBoundingClientRect().bottom - box.bottom));
+    });
+    expect(overflow, "the stub card's contents keep to its footprint (BL-167)").toBeLessThanOrEqual(0.5);
+    await instantiate.click();
+    const confirm = page.locator("#edge-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText(`Instantiate story “${slug}”`);
+    await expect(confirm).toContainText(`design/${slug}`);
+    await page.locator("#edge-confirm-cancel").click();
+    await expect(confirm).toBeHidden();
+    await expect(stub).toHaveAttribute("data-selected", "true");
+
+    // The policy setup guide is in the drawer's Readiness tab, its id once
+    // on the page, and nowhere on the wall.
+    await page.goto(branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC));
+    const readiness = await openTab(page, "readiness");
+    await expect(readiness.getByTestId("asd-policy-guide")).toBeVisible();
+    await expect(page.locator("#asd-policy-guide")).toHaveCount(1);
+    await expect(page.locator('#boardv2-region [data-testid="asd-policy-guide"]')).toHaveCount(0);
+    await page.getByTestId("record-drawer-close").click();
+
+    // Every readiness target resolves to an element that exists: a card, a
+    // stub, a strip half or a slot the wall draws, and each row without one
+    // offers nothing to find; every in-page link the tab carries lands. The
+    // criteria row finds its slot only where the wall draws the slot.
+    for (const [name, wall, slot] of [
+      ["the live authoring wall", boardPath(SHOWCASE.DESIGN_SPEC), true],
+      ["the review mirror", boardPath(SHOWCASE.REVIEW_SPEC), false],
+      ["the sealed record with stubs", boardPath(SHOWCASE.FEATURE_SPEC), false],
+      ["the sealed record", boardPath(SHOWCASE.READONLY_SPEC), false],
+    ] as const) {
+      await page.goto(wall);
+      const tab = await openTab(page, "readiness");
+      const rows = tab.locator("article[data-target-kind]");
+      expect(await rows.count(), `${name}: the tab lists its readiness`).toBeGreaterThan(0);
+      for (const row of await rows.all()) {
+        const id = await row.getAttribute("data-concern-id");
+        const kind = await row.getAttribute("data-target-kind");
+        const value = (await row.getAttribute("data-target")) ?? "";
+        const target = {
+          object: `#board-canvas [data-testid="card-${value}"]`,
+          stub: `#board-canvas [data-testid="stub-card-${value}"]`,
+          strip: `#boardv2-region [data-testid="placard-${value}"]`,
+          slot: `#boardv2-region .wall-slot[data-slot-kind="${value}"]`,
+        }[kind ?? ""];
+        if (kind === "none") {
+          await expect(row.locator(".readiness-target"), `${name}: ${id} offers nothing to find`).toHaveCount(0);
+          continue;
+        }
+        expect(target, `${name}: ${id}'s target kind ${kind}`).toBeTruthy();
+        await expect(page.locator(target!), `${name}: ${id} → ${kind} ${value}`).toHaveCount(1);
+      }
+      const criteria = tab.locator('article[data-concern-id="success/criteria"]');
+      await expect(criteria, `${name}: the criteria row`).toHaveCount(1);
+      await expect(criteria, `${name}: the criteria row's target`).toHaveAttribute("data-target-kind", slot ? "slot" : "none");
+      const dangling = await tab.evaluate((panel) =>
+        Array.from(panel.querySelectorAll<HTMLAnchorElement>('a[href^="#"]'))
+          .map((a) => a.getAttribute("href")!.slice(1))
+          .filter((id) => !document.getElementById(decodeURIComponent(id))),
+      );
+      expect(dangling, `${name}: every in-page link lands`).toEqual([]);
+      await page.getByTestId("record-drawer-close").click();
+    }
+    // No retired rail anchor is pointed at from anywhere on a wall.
+    await expect(page.locator('a[href="#asd-forms"], a[href="#asd-git"], a[href="#asd-policy-guide"]')).toHaveCount(0);
   });
 });

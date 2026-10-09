@@ -651,6 +651,118 @@ test.describe("wall-canvas", () => {
     expect(await selectedKey(page)).toBeNull();
   });
 
+  test("Escape closes the picker, a menu, the drawer, then the strip editor or a popover, before the selection — one layer a press (SI-368 (17))", async ({ page }) => {
+    test.setTimeout(150_000);
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const select = async () => {
+      await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+    };
+    const drawer = page.getByTestId("record-drawer");
+    const more = page.getByTestId("wall-more-menu");
+    const writes: string[] = [];
+    // Every write through the board's api; the drawer's and the menu's
+    // on-demand reads are not writes.
+    page.on("request", (r) => {
+      if (r.method() === "POST" && /\/api\//.test(r.url()) && !/\/api\/(get_design_|prepare_design_review|get_board)/.test(r.url())) writes.push(r.url());
+    });
+
+    // Commit and push's popover over the selection: the first press closes
+    // only the popover — it used to clear the selection with it (F3AR-6) —
+    // and the second clears the selection.
+    const commit = page.getByTestId("wall-commit-popover");
+    await select();
+    await tabUntil(page, "Shift+Tab reaches the Commit count", focusIs(page, "wall-commit-count"), true);
+    await expect(commit).toHaveJSProperty("open", true);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(commit).toHaveJSProperty("open", false);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // The ⋯ menu over the drawer over a strip editor whose focus has left,
+    // over the selection: each press closes one, in that order, the drawer
+    // wherever the focus is, and the editor's typed text is never written.
+    const onProblemHeadline = async () =>
+      page.evaluate(() => !!document.activeElement?.matches('[data-testid="placard-problem"] > .placard-text'));
+    const stripEditor = page.getByTestId("case-strip-editor-problem");
+    await select();
+    await tabUntil(page, "Shift+Tab reaches the problem's headline", onProblemHeadline, true);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("case-strip-text-problem")).toBeFocused();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" [90-escape]");
+    await tabUntil(page, "Shift+Tab reaches the readiness pill", focusIs(page, "readiness-pill"), true);
+    await expect(stripEditor).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(drawer).toBeVisible();
+    await tabUntil(page, "Shift+Tab reaches ⋯", focusIs(page, "wall-more"), true, 300);
+    await page.keyboard.press("Enter");
+    await expect(more).toBeVisible();
+    await expect(drawer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(more).toBeHidden();
+    await expect(page.getByTestId("wall-more")).toBeFocused();
+    await expect(drawer).toBeVisible();
+    await expect(stripEditor).toBeVisible();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(stripEditor).toBeVisible();
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(stripEditor).toHaveCount(0);
+    expect(await interactionLive(page)).toBe(false);
+    await expect(ac1).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+    await expect(page.getByTestId("placard-problem")).not.toContainText("[90-escape]");
+
+    // The type picker over the drawer over a selected thread: the picker
+    // closes first, then the drawer, then the selection.
+    const chip = page.getByTestId(`yarn-chip-spec-exempts-dc-1-${WALL.ADR_REF}`);
+    await tabUntil(page, "Tab reaches the exempts thread", focusIs(page, `yarn-chip-spec-exempts-dc-1-${WALL.ADR_REF}`));
+    await page.keyboard.press("Enter");
+    await expect(chip).toHaveAttribute("data-selected", "true");
+    await tabUntil(page, "Shift+Tab reaches the readiness pill", focusIs(page, "readiness-pill"), true);
+    await page.keyboard.press("Enter");
+    await expect(drawer).toBeVisible();
+    await tabUntil(page, "Shift+Tab reaches Retype", focusOnAction(page, "retype"), true, 300);
+    await page.keyboard.press("Enter");
+    const picker = page.locator("#edge-picker");
+    await expect(picker).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(picker).toBeHidden();
+    await expect(drawer).toBeVisible();
+    await expect(chip).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(chip).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("Escape");
+    expect(await selectedKey(page)).toBeNull();
+
+    // The add-object dialog, from the toolbar's Card: one press closes it,
+    // backdrop and dialog together, and ends the interaction that held the
+    // projection (BL-175 (1)).
+    await tabUntil(page, "Tab reaches the Card action", focusOnAction(page, "card"));
+    await page.keyboard.press("Enter");
+    const dialog = page.locator("#asd-op-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("asd-op-text")).toBeFocused();
+    await page.keyboard.type("never declared [90-escape]");
+    expect(await interactionLive(page)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("#modal-backdrop")).toBeHidden();
+    expect(await interactionLive(page)).toBe(false);
+
+    expect(writes, "no layer an Escape closed wrote anything").toEqual([]);
+  });
+
   test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {
     await openWritableWall(page);
     const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
