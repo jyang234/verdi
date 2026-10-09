@@ -100,6 +100,10 @@ func writeRecordPanel(b *strings.Builder, id string, p *BoardProjection, asd *as
 		writeRecordIntro(b, "semantic review packet · a view, not an approval", "What changed since the review base",
 			// vocab:identity — non-vocabulary homograph: "the draft" is the ASD protocol's canonical draft and "merge" the forge owner's merge, never the lifecycle state or transition words
 			"Derived on request from the draft and its provenance. Nothing here is persisted; acceptance is still the owner&#8217;s merge on the default branch.")
+		// The retired wall shell's review/acceptance row (SI-368 (3), (32)
+		// B3), from the wall's own state, mode and branch, above the
+		// packet the body loads.
+		writeReviewAcceptance(b, reviewAcceptanceOf(p, asd))
 		b.WriteString(body)
 		cli("review", " The agent can prepare this packet; it cannot mark it approved.")
 	case "context":
