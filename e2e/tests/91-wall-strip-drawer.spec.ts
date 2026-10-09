@@ -125,6 +125,35 @@ test.describe("wall-strip-and-drawer", () => {
       await page.reload();
       await expect(page.getByTestId("placard-problem").locator(".placard-text")).toHaveText(originalProblem);
 
+      // The open editor holds the swap (SI-368 (13): [data-holds-projection]
+      // in interactionLive). An outside write that moves the revision — a
+      // scratch sticky posted through the wall's API while the hand is in
+      // the editor — lands nothing on the wall past two poll ticks: the
+      // editor, its text and its focus survive, and the sticky is not
+      // there. Escape closes the editor, and the held refresh lands.
+      const holdDraft = "a statement the poll must never yank away [91-hold]";
+      const holdSticky = "an outside write during an open edit [91-hold]";
+      await page.getByTestId("placard-problem").locator(".placard-text").click();
+      await expect(page.getByTestId("case-strip-editor-problem")).toBeVisible();
+      await page.getByTestId("case-strip-text-problem").fill(holdDraft);
+      const made = await page.request.post(wall + "/api/sticky", { data: { text: holdSticky, type: "comment" } });
+      expect(made.status(), await made.text()).toBe(200);
+      const held = page.locator('[data-testid^="sticky-"]').filter({ hasText: holdSticky });
+      await page.waitForTimeout(4_500);
+      await expect(page.getByTestId("case-strip-editor-problem"), "the editor survives the poll").toBeVisible();
+      await expect(page.getByTestId("case-strip-text-problem")).toHaveValue(holdDraft);
+      await expect(page.getByTestId("case-strip-text-problem")).toBeFocused();
+      await expect(held, "the swap is held while the editor is open").toHaveCount(0);
+      await page.getByTestId("case-strip-text-problem").press("Escape");
+      await expect(page.getByTestId("case-strip-editor-problem")).toHaveCount(0);
+      await expect(held, "the held refresh lands on Escape").toHaveCount(1, { timeout: 8_000 });
+      await expect(page.getByTestId("placard-problem").locator(".placard-text")).toHaveText(originalProblem);
+      expect(mutations, "the hold wrote no operation").toEqual([]);
+      const heldID = (await held.getAttribute("data-id"))!;
+      const unheld = await page.request.post(wall + "/api/annotation-delete", { data: { ids: [heldID] } });
+      expect(unheld.status(), await unheld.text()).toBe(200);
+      await expect(held).toHaveCount(0, { timeout: 8_000 });
+
       // Enter applies exactly one set-problem — the typed operation with
       // the server's own anchor — and the strip shows the new statement.
       const problemText = `${originalProblem} [91-problem]`;
