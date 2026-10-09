@@ -46,7 +46,17 @@ const TITLES = {
   design: "Refinancing decline flow",
   draft: "Payoff quote portal",
   diagram: "Editor proposal",
+  // The sealed accepted feature (examples/showcase's escrow-autopay) and
+  // the never-committed changes wall (cmd/e2eharness/provision_wallstrip.go).
+  feature: "Escrow autopay enrollment",
+  unreadable: "Decline retraction (decline-changes-unreadable)",
 };
+
+// The changes wall whose comparison with HEAD is unreadable: F3-go2's
+// harness wall (provision_wallstrip.go), on its namesake branch, copied
+// here as 92-wall-commit-changes copies it (fixtures.ts stays F7's) and
+// pinned by the harness's TestWallStripPaths.
+const UNREADABLE_CHANGES_WALL = "/b/design%2Fdecline-changes-unreadable/board/spec/decline-changes-unreadable";
 
 // The readiness page lives on the readiness-pilot fixture's isolated
 // serve (49-readiness-pilot.spec.ts's own path to it): started lazily by
@@ -101,6 +111,24 @@ const PAGES: WorkbenchPage[] = [
     path: () => branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC),
     spec: true,
     title: TITLES.draft,
+  },
+  {
+    // spec/wall-strip-and-drawer-v2 (SI-368 (26)(a), F3AR-1 and F3AR-3):
+    // the sealed accepted feature's wall, whose bar carries New story and
+    // Revise as its primary actions and whose strip wears a long badge
+    // chip — the widest bar and the widest chips row the fixtures hold.
+    name: "sealed feature wall",
+    path: () => boardPath(SHOWCASE.FEATURE_SPEC),
+    spec: true,
+    title: TITLES.feature,
+  },
+  {
+    // The authoring wall with the long title and the pill that reads
+    // "readiness unavailable" (its comparison with HEAD is unreadable).
+    name: "unreadable changes wall",
+    path: () => UNREADABLE_CHANGES_WALL,
+    spec: true,
+    title: TITLES.unreadable,
   },
   {
     // spec/document-page-v2 ac-4 fixed the Document body's own overflow

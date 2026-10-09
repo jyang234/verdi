@@ -111,16 +111,19 @@ func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, u
 // dialogs carry the revise dialog (the one sealed-accepted-feature
 // decision, made where the lifecycle audit allows it), beside it. Every
 // spoken class word is display prose and resolves (vocabulary.go); the
-// ids and test ids stay bare.
+// ids and test ids stay bare. Each button's words are its full ones —
+// "New <story>", "Revise this <feature>" — behind a decorative glyph; on
+// a narrow row the bar folds the glyph and the words after the verb away
+// from the eye, as it folds Commit's " & push", and the names stay whole.
 func writeSealedActions(b *strings.Builder, p *BoardProjection, revise bool) {
 	esc := stdhtml.EscapeString
 	if len(p.CreateFields) > 0 {
 		storyWord := p.words.word("story")
-		b.WriteString(`<button type="button" id="create-spec-btn" class="btn-primary create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
+		b.WriteString(`<button type="button" id="create-spec-btn" class="btn-primary create-spec-btn" data-testid="create-spec-btn"><span class="wall-action-glyph" aria-hidden="true">&#8853;</span> New<span class="wall-action-rest"> ` + esc(storyWord) + `</span></button>`)
 	}
 	if revise {
 		featureWord := p.words.word("feature")
-		b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; ` + esc("Revise this "+featureWord) + `</button>`)
+		b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn"><span class="wall-action-glyph" aria-hidden="true">&#8635;</span> Revise<span class="wall-action-rest"> this ` + esc(featureWord) + `</span></button>`)
 	}
 }
 

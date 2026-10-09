@@ -6045,16 +6045,21 @@ body:not(.board-page) > footer.site-foot,
   max-width: 100%;
   min-width: 0;
 }
+/* the row never widens the strip: it shrinks to the chips' width and a
+   chip wider than that (a long receipt label, up to 18rem) shrinks and
+   ellipsizes with it, so a 320 px page never scrolls sideways */
 .case-strip .case-stamp-row {
   position: static;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .case-strip .case-class-tag { position: static; }
 .case-strip .case-stamp {
-  max-width: 18rem;
+  max-width: min(18rem, 100%);
   border-radius: 3px;
   transform: none;
 }
@@ -6213,6 +6218,33 @@ body:not(.board-page) > footer.site-foot,
   }
   .wall-commit-popover > summary { padding: 0 6px; }
   .wall-more-btn { padding: 7px 5px; }
+  /* the sealed wall's actions draw in too: each folds its glyph and the
+     words after its verb away from the eye — "New", "Revise"; the full
+     words stay in the button's name — and draws in its padding */
+  .topbar-controls .create-spec-btn { padding-left: 10px; padding-right: 10px; }
+  .topbar-controls .create-spec-btn .wall-action-glyph,
+  .topbar-controls .create-spec-btn .wall-action-rest {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+/* at the handoff's desktop widths the row never wraps, and neither does
+   the posture group: what gives way is the title (ellipsized, down to
+   1ch) and then the posture words, which shrink from one line down to
+   their widest fact and lay their facts on two lines inside the 52 px
+   row, each fact whole, before the group's items could stack or the
+   controls drop to a second row (the sealed wall's bar — New story and
+   Revise beside the pill, the formal state beside the bytes word and a
+   dirty tree — was the one that did); below this width the row wraps as
+   the chrome's own rule has it */
+@container topbar (min-width: 1400px) {
+  .topbar-row { flex-wrap: nowrap; }
+  .topbar-posture-group { flex-wrap: nowrap; }
+  .topbar-posture-group .asd-posture-tech { flex: 0 1 auto; }
 }
 /* Commit & push and its divided suffix, the count, which is the popover's
    summary; the indicator is a dot at the wrap's corner, its words for

@@ -154,10 +154,13 @@ func TestWallBar_ControlsByMode(t *testing.T) {
 		CreateFields: []designscaffold.Field{{Name: "Title", Kind: designscaffold.FieldInput}},
 	})
 	controls := sealed[strings.Index(sealed, `data-testid="topbar-controls"`):strings.Index(sealed, `<main id="boardv2-region">`)]
-	if !strings.Contains(controls, `<button type="button" id="create-spec-btn" class="btn-primary create-spec-btn" data-testid="create-spec-btn">&#8853; New story</button>`) {
+	// Each action's full words, the decorative glyph and the words after
+	// the verb in their own spans (the narrow row folds those away from
+	// the eye; the words stay in the button's accessible name).
+	if !strings.Contains(controls, `<button type="button" id="create-spec-btn" class="btn-primary create-spec-btn" data-testid="create-spec-btn"><span class="wall-action-glyph" aria-hidden="true">&#8853;</span> New<span class="wall-action-rest"> story</span></button>`) {
 		t.Errorf("the sealed wall's bar lacks New story as its primary action:\n%s", controls)
 	}
-	if !strings.Contains(controls, `<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; Revise this feature</button>`) {
+	if !strings.Contains(controls, `<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn"><span class="wall-action-glyph" aria-hidden="true">&#8635;</span> Revise<span class="wall-action-rest"> this feature</span></button>`) {
 		t.Errorf("the sealed wall's bar lacks Revise:\n%s", controls)
 	}
 	count(t, sealed, `data-testid="create-spec-btn"`, 1)
