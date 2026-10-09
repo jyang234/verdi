@@ -40,17 +40,21 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
 // readinessWords is one readiness surface's plain state words (SI-368
 // (14)): each formal state's chip label and its word in the stepper's
-// counts. The formal word itself stays in Technical details on every
-// surface, and a violated row's witness is there too.
+// counts, for one item and for more, so a count reads as a count of
+// items ("1 needs attention", "2 need attention"; SI-368 (24)(h)). The
+// formal word itself stays in Technical details on every surface, and a
+// violated row's witness is there too.
 type readinessWords struct {
 	proven, violated, unproven                string
 	provenCount, violatedCount, unprovenCount string
+	provenMany, violatedMany, unprovenMany    string
 }
 
 // readinessPageWords is the readiness page's plain triad (SI-339 (10)):
@@ -59,6 +63,7 @@ func readinessPageWords() readinessWords {
 	return readinessWords{
 		proven: "Proven", violated: "Violated", unproven: "Not enough evidence yet",
 		provenCount: "proven", violatedCount: "violated", unprovenCount: "not enough evidence yet",
+		provenMany: "proven", violatedMany: "violated", unprovenMany: "not enough evidence yet",
 	}
 }
 
@@ -74,16 +79,23 @@ func (w readinessWords) label(state readinesspilot.State) string {
 	}
 }
 
-// count is the state as a count's word in the stepper line: "2
-// violated", "1 proven".
-func (w readinessWords) count(state readinesspilot.State) string {
-	switch state {
-	case readinesspilot.StateProven:
+// count is the state as the word after a count of n items in the
+// stepper line: "2 violated", "1 proven"; on the wall "1 needs
+// attention", "2 need attention".
+func (w readinessWords) count(state readinesspilot.State, n int) string {
+	switch {
+	case state == readinesspilot.StateProven && n == 1:
 		return w.provenCount
-	case readinesspilot.StateViolated:
+	case state == readinesspilot.StateProven:
+		return w.provenMany
+	case state == readinesspilot.StateViolated && n == 1:
 		return w.violatedCount
-	default:
+	case state == readinesspilot.StateViolated:
+		return w.violatedMany
+	case n == 1:
 		return w.unprovenCount
+	default:
+		return w.unprovenMany
 	}
 }
 
@@ -198,7 +210,7 @@ func readinessStepLine(words readinessWords, c readinessStepCount, reason string
 		{c.proven, readinesspilot.StateProven},
 	} {
 		if p.n > 0 {
-			parts = append(parts, strconv.Itoa(p.n)+" "+words.count(p.state))
+			parts = append(parts, strconv.Itoa(p.n)+" "+words.count(p.state, p.n))
 		}
 	}
 	counts := "no concerns"
@@ -580,6 +592,17 @@ func writeReadinessConcern(b *strings.Builder, concern readinesspilot.Concern, e
 		b.WriteString(`<span class="readiness-rank">` + strconv.Itoa(rank) + `</span>`)
 	}
 	b.WriteString(`<div class="readiness-copy">`)
+	if em.surface.wall {
+		// Inside the wall the primary line leads (ac-5: each item's
+		// guidance sentence is its first line), with the row's wall
+		// target beside it, and the step label follows.
+		b.WriteString(`<div class="readiness-primary">`)
+		writeReadinessPrimary(b, concern)
+		if target, ok := em.surface.targets[concern.ID]; ok {
+			writeReadinessTargetButton(b, target)
+		}
+		b.WriteString(`</div>`)
+	}
 	b.WriteString(`<p class="readiness-stage">` + esc(em.labels[concern.Area]))
 	switch when {
 	case "now":
@@ -595,15 +618,39 @@ func writeReadinessConcern(b *strings.Builder, concern readinesspilot.Concern, e
 		}
 		b.WriteString(`</span></p>`)
 	}
-	if concern.Guidance != "" {
-		b.WriteString(`<p class="readiness-summary readiness-guidance">` + esc(concern.Guidance) + `</p>`)
-	} else {
-		b.WriteString(`<p class="readiness-summary">` + esc(concern.Summary) + `</p>`)
+	if !em.surface.wall {
+		writeReadinessPrimary(b, concern)
 	}
 	writeReadinessState(b, em.surface.words, concern.State)
 	writeReadinessTech(b, concern)
 	writeReadinessDestination(b, concern.Destination, em.surface.wall)
 	b.WriteString(`</div></article>`)
+}
+
+// writeReadinessPrimary writes the concern's primary line: the
+// source-derived guidance, or the fact for a proven row, which carries
+// none.
+func writeReadinessPrimary(b *strings.Builder, concern readinesspilot.Concern) {
+	if concern.Guidance != "" {
+		b.WriteString(`<p class="readiness-summary readiness-guidance">` + stdhtml.EscapeString(concern.Guidance) + `</p>`)
+		return
+	}
+	b.WriteString(`<p class="readiness-summary">` + stdhtml.EscapeString(concern.Summary) + `</p>`)
+}
+
+// writeReadinessTargetButton writes a Readiness tab row's wall target as
+// the one button that finds it (SI-368 (16)), named by what it finds: the
+// card's id, the stub's slug, the strip half, or the slot's object kind.
+// The drawer's script selects, or goes to, the target the row's
+// data-target-kind and data-target name.
+func writeReadinessTargetButton(b *strings.Builder, target readinessTarget) {
+	label, named := target.Value, target.Value
+	if target.Kind == readinessTargetSlot {
+		_, _, kind, _ := addSlotOp(boardlayout.ZoneKind(target.Value))
+		label, named = "+ "+kind, "the "+kind+" slot"
+	}
+	esc := stdhtml.EscapeString
+	b.WriteString(`<button type="button" class="readiness-target" data-testid="readiness-target" aria-label="Find ` + esc(named) + ` on the wall">` + esc(label) + `</button>`)
 }
 
 // writeReadinessTech writes the concern's Technical details disclosure:

@@ -21,7 +21,9 @@ import (
 // TestReadinessWallWords_KeepTheWallTriad (SI-368 (14); spec-documents
 // ac-12): the Readiness tab speaks the wall's triad — the very words the
 // wall shell's chips speak — and never the page's, and the page keeps its
-// own (SI-339 (10)).
+// own (SI-339 (10)). The tab's count words read as a count of items, the
+// verb agreeing with one item or more (SI-368 (24)(h)); the page's are
+// unchanged.
 func TestReadinessWallWords_KeepTheWallTriad(t *testing.T) {
 	wall, page := readinessWallWords(), readinessPageWords()
 	for _, tc := range []struct {
@@ -29,12 +31,13 @@ func TestReadinessWallWords_KeepTheWallTriad(t *testing.T) {
 		wallLabel      string
 		pageLabel      string
 		wallCountWord  string
+		wallCountMany  string
 		pageCountWord  string
 		shellPlainWord string
 	}{
-		{readinesspilot.StateProven, "Ready", "Proven", "ready", "proven", asdPlainState(asdStateProven)},
-		{readinesspilot.StateViolated, "Needs attention", "Violated", "needs attention", "violated", asdPlainState(asdStateViolated)},
-		{readinesspilot.StateUnproven, "Not enough evidence yet", "Not enough evidence yet", "not enough evidence yet", "not enough evidence yet", asdPlainState(asdStateUnproven)},
+		{readinesspilot.StateProven, "Ready", "Proven", "ready", "ready", "proven", asdPlainState(asdStateProven)},
+		{readinesspilot.StateViolated, "Needs attention", "Violated", "needs attention", "need attention", "violated", asdPlainState(asdStateViolated)},
+		{readinesspilot.StateUnproven, "Not enough evidence yet", "Not enough evidence yet", "without enough evidence yet", "without enough evidence yet", "not enough evidence yet", asdPlainState(asdStateUnproven)},
 	} {
 		t.Run(string(tc.state), func(t *testing.T) {
 			if got := wall.label(tc.state); got != tc.wallLabel || got != tc.shellPlainWord {
@@ -43,11 +46,16 @@ func TestReadinessWallWords_KeepTheWallTriad(t *testing.T) {
 			if got := page.label(tc.state); got != tc.pageLabel {
 				t.Errorf("the page's %s chip = %q, want %q", tc.state, got, tc.pageLabel)
 			}
-			if got := wall.count(tc.state); got != tc.wallCountWord {
-				t.Errorf("the tab's %s count word = %q, want %q", tc.state, got, tc.wallCountWord)
+			if got := wall.count(tc.state, 1); got != tc.wallCountWord {
+				t.Errorf("the tab's %s count word for one item = %q, want %q", tc.state, got, tc.wallCountWord)
 			}
-			if got := page.count(tc.state); got != tc.pageCountWord {
-				t.Errorf("the page's %s count word = %q, want %q", tc.state, got, tc.pageCountWord)
+			if got := wall.count(tc.state, 2); got != tc.wallCountMany {
+				t.Errorf("the tab's %s count word for two items = %q, want %q", tc.state, got, tc.wallCountMany)
+			}
+			for _, n := range []int{1, 2} {
+				if got := page.count(tc.state, n); got != tc.pageCountWord {
+					t.Errorf("the page's %s count word for %d = %q, want %q", tc.state, n, got, tc.pageCountWord)
+				}
 			}
 		})
 	}
@@ -197,8 +205,11 @@ func TestRenderReadinessTab(t *testing.T) {
 		t.Fatalf("the tab's body is not scoped as the tab:\n%.200s", tab)
 	}
 	requireWords(t, "the tab", tab, readinessWallWords(), readinessPageWords())
-	if !strings.Contains(tab, `<span class="readiness-station-line">1 needs attention, 1 not enough evidence yet, 1 ready — current focus</span>`) {
+	if !strings.Contains(tab, `<span class="readiness-station-line">1 needs attention, 1 without enough evidence yet, 1 ready — current focus</span>`) {
 		t.Errorf("the tab's stepper does not count in the wall's words")
+	}
+	if line := readinessStepLine(readinessWallWords(), readinessStepCount{violated: 2, unproven: 3, proven: 2}, "current focus"); line != "2 need attention, 3 without enough evidence yet, 2 ready — current focus" {
+		t.Errorf("the tab's stepper counts two items as %q, want them read as items", line)
 	}
 	if !strings.Contains(tab, stdhtml.EscapeString(snap.StaleNotice)) || !strings.Contains(tab, `data-readiness-stale="1"`) {
 		t.Error("the tab lacks the per-request derivation stamp")
@@ -229,9 +240,63 @@ func TestRenderReadinessTab(t *testing.T) {
 		}
 	}
 
+	// Guidance first (ac-5; parent dc-8; spec-documents ac-12): inside the
+	// tab each row's first line is its primary line — the guidance, or the
+	// fact of a proven row — with the step label and its timing mark after
+	// it, and the fact, timing and blocking flag in the technical
+	// disclosure. A row with a wall target carries one button naming it
+	// (SI-368 (16)): the card's id, the stub's slug, the strip half, or the
+	// slot's object kind; a row without one carries none.
+	chips := map[string]string{
+		"shape/problem":                            "problem",
+		"shape/outcome":                            "outcome",
+		"shape/question/oq-1":                      "oq-1",
+		"success/criteria":                         "+ criterion",
+		"success/coverage/ac-2":                    "ac-2",
+		"review/blocker/stub-unreconciled/s-2fa-x": "2fa-x",
+	}
+	for _, c := range snap.AllConcerns {
+		row := concernRow(t, tab, c.ID)
+		primary := c.Guidance
+		if primary == "" {
+			primary = c.Summary
+		}
+		copyAt := strings.Index(row, `<div class="readiness-copy">`)
+		if copyAt < 0 {
+			t.Fatalf("concern %s has no copy:\n%s", c.ID, row)
+		}
+		first := row[copyAt+len(`<div class="readiness-copy">`):]
+		if !strings.HasPrefix(first, `<div class="readiness-primary"><p class="readiness-summary`) || !strings.Contains(first[:strings.Index(first, `</p>`)+4], `>`+primary+`</p>`) {
+			t.Errorf("concern %s's first line is not its primary line %q:\n%.300s", c.ID, primary, first)
+		}
+		if stage := strings.Index(first, `<p class="readiness-stage">`); stage < strings.Index(first, `</div>`) {
+			t.Errorf("concern %s's step label precedes its primary line", c.ID)
+		}
+		tech := row[strings.Index(row, `<details class="readiness-tech">`):]
+		for _, fact := range []string{`<dt>Fact</dt>`, `<dt>Timing</dt>`, `<dt>Blocking</dt>`} {
+			if !strings.Contains(tech, fact) {
+				t.Errorf("concern %s's technical disclosure lacks %s", c.ID, fact)
+			}
+		}
+		label, targeted := chips[c.ID]
+		named := label
+		if c.ID == "success/criteria" {
+			named = "the criterion slot"
+		}
+		chip := `<button type="button" class="readiness-target" data-testid="readiness-target" aria-label="Find ` + named + ` on the wall">` + label + `</button>`
+		if got := strings.Count(row, `class="readiness-target"`); targeted && (got != 1 || !strings.Contains(row, chip)) {
+			t.Errorf("concern %s lacks its target button %s:\n%s", c.ID, chip, row)
+		} else if !targeted && got != 0 {
+			t.Errorf("concern %s names no wall target yet carries a target button", c.ID)
+		}
+	}
+
 	var page strings.Builder
 	writeReadinessBody(&page, nil, snap, readinessPageSurface())
 	requireWords(t, "the page", page.String(), readinessPageWords(), readinessWallWords())
+	if strings.Contains(page.String(), `class="readiness-primary"`) || strings.Contains(page.String(), `class="readiness-target"`) {
+		t.Error("the page's rows carry the tab's primary-first shape or a wall target")
+	}
 	if strings.Contains(page.String(), `data-target-kind`) || !strings.Contains(page.String(), `readiness-board-link`) {
 		t.Error("the page's body carries wall targets, or lost its board link")
 	}
@@ -422,4 +487,81 @@ func TestReadinessTab_OneProjectionAndTheMarksTargets(t *testing.T) {
 			t.Errorf("the mark on stub %s names %s, whose tab row does not target it:\n%.300s", slug, m.Concern, open)
 		}
 	}
+}
+
+// TestReadinessTab_CarriesThePolicyGuide (SI-368 (3), (24)(f); ac-6's
+// guide home): the Readiness tab carries the policy setup guide, chosen
+// by policyGuideFor from the capabilities consultation alone, under a
+// capabilities label beside the readiness — the not-adopted variant for
+// draftmutation's own not-adopted refusal, the no-design-assistance
+// variant for every other policy-forbidden refusal, on a wall whose
+// readiness is fixed as much as on one whose readiness loads, its test
+// ids kept; and no guide when capabilities were derived, when another
+// failure stands, or when no design service is wired.
+func TestReadinessTab_CarriesThePolicyGuide(t *testing.T) {
+	forbidden := func(detail string) *scriptedCapsBridge {
+		return &scriptedCapsBridge{script: func(int) (DesignReadOutcome, *DesignCapabilitiesView) {
+			return DesignReadOutcome{Failure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: detail}}, nil
+		}}
+	}
+	operational := &scriptedCapsBridge{script: func(int) (DesignReadOutcome, *DesignCapabilitiesView) {
+		return DesignReadOutcome{Failure: &DesignFailure{Classification: "operational", Code: "io-failure", Detail: "boom"}}, nil
+	}}
+	const label = `<section class="readiness-tab-capabilities" data-testid="readiness-tab-capabilities" aria-label="Capabilities">`
+	for _, tc := range []struct {
+		name   string
+		bridge DesignBridge
+		kind   policyGuideKind
+	}{
+		{"not adopted", forbidden(policyNotAdoptedDetail), policyGuideNotAdopted},
+		{"no design assistance", forbidden("effective policy carries no design_assistance payload"), policyGuideNoDesignAssistance},
+		{"capabilities derived", readinessGapCapsBridge(), policyGuideNone},
+		{"another failure", operational, policyGuideNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newMarksWallFixture(t)
+			snap := tabSnapshot(gitOut(t, root, "rev-parse", "HEAD"))
+			h := NewHandlerWith(root, Deps{Design: tc.bridge, ReadinessLoader: &swapLoader{snap: snap}})
+			cfg, err := store.Open(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := renderReadinessTab(cfg.Model, snap, tabSnapshotTargets())
+			if _, err := wtmanager.EnsureWorktree(context.Background(), root, "design/marks-other"); err != nil {
+				t.Fatalf("cutting the /b/ wall's worktree: %v", err)
+			}
+			for path, want := range map[string]string{
+				"/board/spec/" + marksWallName + "/readiness":                        body,
+				"/b/design%2Fmarks-other/board/spec/" + marksWallName + "/readiness": unavailableTab(marksBranchWall("design/marks-other")),
+			} {
+				rec := tabGet(t, t.Context(), h, path)
+				got := rec.Body.String()
+				if rec.Code != http.StatusOK || !strings.HasPrefix(got, want) {
+					t.Fatalf("GET %s = %d, want the tab's body first:\n%.400s", path, rec.Code, got)
+				}
+				guide := strings.TrimPrefix(got, want)
+				if tc.kind == policyGuideNone {
+					if guide != "" {
+						t.Errorf("GET %s carries a guide without a policy-forbidden refusal:\n%s", path, guide)
+					}
+					continue
+				}
+				if !strings.HasPrefix(guide, label) || !strings.HasSuffix(guide, `</section></section>`) {
+					t.Errorf("GET %s: the guide is not labelled as capabilities beside the readiness:\n%.300s", path, guide)
+				}
+				for _, id := range []string{`data-testid="asd-policy-guide"`, `data-policy-guide="` + string(tc.kind) + `"`, `data-testid="asd-policy-guide-report">policy-forbidden: `} {
+					if !strings.Contains(guide, id) {
+						t.Errorf("GET %s: the guide lacks %s", path, id)
+					}
+				}
+			}
+		})
+	}
+	t.Run("unwired", func(t *testing.T) {
+		root := newMarksWallFixture(t)
+		rec := tabGet(t, t.Context(), NewHandlerWith(root, Deps{}), "/board/spec/"+marksWallName+"/readiness")
+		if rec.Code != http.StatusOK || rec.Body.String() != unavailableTab(marksUnwired) {
+			t.Fatalf("the unwired tab = %d\n%s", rec.Code, rec.Body.String())
+		}
+	})
 }

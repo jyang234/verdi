@@ -42,11 +42,14 @@ const (
 // readinessWallWords is the wall's triad, which the drawer's Readiness
 // tab keeps (SI-368 (14); spec-documents ac-12): the words the wall
 // shell's state chips speak (asdPlainState), never the page's (SI-339
-// (10)).
+// (10)). The stepper's count words read as a count of items (SI-368
+// (24)(h)): "1 needs attention", "2 need attention", "3 ready", "1
+// without enough evidence yet".
 func readinessWallWords() readinessWords {
 	return readinessWords{
 		proven: "Ready", violated: "Needs attention", unproven: "Not enough evidence yet",
-		provenCount: "ready", violatedCount: "needs attention", unprovenCount: "not enough evidence yet",
+		provenCount: "ready", violatedCount: "needs attention", unprovenCount: "without enough evidence yet",
+		provenMany: "ready", violatedMany: "need attention", unprovenMany: "without enough evidence yet",
 	}
 }
 
@@ -157,21 +160,53 @@ func (s *boardSpecServer) boardReadinessTabHandler() http.HandlerFunc {
 }
 
 // readinessTab is the Readiness tab's body for spec name, whose
-// working-tree frontmatter is fm (boardReadinessTabHandler).
+// working-tree frontmatter is fm (boardReadinessTabHandler), followed by
+// the policy setup guide when the wall's capabilities call for one — on
+// a wall whose readiness is fixed as much as on one whose readiness loads
+// (readinessTabGuide).
 func (s *boardSpecServer) readinessTab(ctx context.Context, name string, fm *artifact.SpecFrontmatter) string {
 	if fixed := s.instanceMarks(); fixed != nil {
-		return renderReadinessTabUnavailable(fixed.Unavailable)
+		return renderReadinessTabUnavailable(fixed.Unavailable) + s.readinessTabGuide(ctx, name)
 	}
 	ctx, release := s.openProjection(ctx)
 	defer release()
+	guide := s.readinessTabGuide(ctx, name)
 	ref := "spec/" + name
 	snap, err := s.readinessLoader.Load(ctx, ref)
 	if reason := readinessTabUnreadable(ref, snap, err); reason != "" {
-		return renderReadinessTabUnavailable(reason)
+		return renderReadinessTabUnavailable(reason) + guide
 	}
 	stubs := make([]string, 0, len(fm.Stubs))
 	for _, st := range fm.Stubs {
 		stubs = append(stubs, st.Slug)
 	}
-	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs))
+	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs)) + guide
+}
+
+// readinessTabGuide is the policy setup guide the Readiness tab carries
+// (SI-368 (3), (24)(f)): chosen by policyGuideFor from the capabilities
+// consultation alone, never from readiness, so it needs no readiness
+// load; "" when no design service is wired or no guide applies.
+func (s *boardSpecServer) readinessTabGuide(ctx context.Context, name string) string {
+	if s.design == nil {
+		return ""
+	}
+	outcome, view := s.design.GetDesignCapabilities(ctx, s.root, "spec/"+name)
+	return renderReadinessTabGuide(policyGuideFor(true, view, outcome.Failure))
+}
+
+// renderReadinessTabGuide renders the guide beside the tab's readiness,
+// labelled as capabilities (SI-368 (3)): the inline, read-only guide the
+// wall shell carried (writePolicySetupGuide), its test ids kept; "" for
+// no guide.
+func renderReadinessTabGuide(g policyGuide) string {
+	if g.Kind == policyGuideNone {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<section class="readiness-tab-capabilities" data-testid="readiness-tab-capabilities" aria-label="Capabilities">`)
+	b.WriteString(`<p class="readiness-eyebrow">Capabilities</p><p class="readiness-purpose">From the wall&#39;s design capabilities, not from its readiness.</p>`)
+	writePolicySetupGuide(&b, g.Kind, g.Code, g.Detail)
+	b.WriteString(`</section>`)
+	return b.String()
 }
