@@ -1132,15 +1132,13 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 	esc := stdhtml.EscapeString
 	switch boardlayout.ZoneKind(c.Kind) {
 	case boardlayout.ZoneAC:
+		// The text is coverageChipText's, which the New story dialog shares.
 		n := p.ACCoverage[c.ID]
-		switch n {
-		case 0:
-			b.WriteString(`<span class="coverage-chip coverage-chip--none" data-testid="coverage-` + esc(c.ID) + `" data-coverage="0">no stub</span>`)
-		case 1:
-			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="1">covered by 1 stub</span>`)
-		default:
-			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">covered by ` + strconv.Itoa(n) + ` stubs</span>`)
+		modifier := "covered"
+		if n == 0 {
+			modifier = "none"
 		}
+		b.WriteString(`<span class="coverage-chip coverage-chip--` + modifier + `" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">` + esc(coverageChipText(n)) + `</span>`)
 	case boardlayout.ZoneOpenQuestion:
 		if n := p.OQClaims[c.ID]; n > 1 {
 			// "spike"/"spikes" here are display prose (the variant
