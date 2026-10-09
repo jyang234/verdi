@@ -40,9 +40,10 @@ import {
 // stays off).
 //
 // The filters, the forge-unavailable chip, the other-records strip and the
-// archived fold are this file's third and fourth tests (ac-3, ac-5; lane
-// F7b). Out of this file's scope, by lane: the New story call to action,
-// the list view and the keyboard (F7c).
+// archived fold are this file's third and fifth tests (ac-3, ac-5; lane
+// F7b), and the New story call to action its fourth (ac-4; lane F7c). The
+// list view, the keyboard and the honest failure are 97-index-list's
+// (ac-6).
 
 // READONLY_SPEC's and DIR_CLOSED_AWAITING_ARCHIVE's `story:` tracker
 // refs, the matrix and verdict addresses (SI-366 (20)).
@@ -506,6 +507,74 @@ test("index › On the shelf, the other-records strip, and the kept directory no
   await expect(page).toHaveURL(/\/disclosures$/);
 });
 
+test("index › The New story call to action", async ({ page }) => {
+  await page.goto("/");
+
+  // The accepted feature with unclaimed criteria: its card carries the
+  // call to action beside its move, naming the unclaimed count and the
+  // first unclaimed criterion in declared order, speaking the store's
+  // story word, and linking the feature's wall with the criterion as
+  // the query the wall's opener honours (SI-366 (10), (11)); no unproven
+  // mark, since coverage was read.
+  const feature = card(page, SHOWCASE.INDEX_CTA_FEATURE);
+  await expectIn(page, ACCEPTED, SHOWCASE.INDEX_CTA_FEATURE);
+  const cta = feature.getByTestId("dir-cta");
+  await expect(cta).toHaveCount(1);
+  await expect(cta).toBeVisible();
+  await expect(cta).toHaveText(`${SHOWCASE.INDEX_CTA_UNCLAIMED} AC unclaimed · ${SHOWCASE.INDEX_CTA_CRITERION} · New story`);
+  await expect(cta).toHaveAttribute("href", `/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}?new-story=${SHOWCASE.INDEX_CTA_CRITERION}`);
+  await expect(cta).toHaveAttribute("data-cta-ac", SHOWCASE.INDEX_CTA_CRITERION);
+  await expect(cta).toHaveAttribute("data-cta-unclaimed", String(SHOWCASE.INDEX_CTA_UNCLAIMED));
+  await expect(feature.locator(".dir-cta-unproven")).toHaveCount(0);
+  await expect(feature.locator(".dir-move")).toHaveText("→ sealed wall");
+
+  // The feature every criterion of which a stub claims shows no call to
+  // action — and no "coverage unproven" either: its coverage was read
+  // and found complete. No call to action anywhere counts zero.
+  const claimed = card(page, SHOWCASE.INDEX_CTA_CLAIMED_FEATURE);
+  await expectIn(page, ACCEPTED, SHOWCASE.INDEX_CTA_CLAIMED_FEATURE);
+  await expect(claimed.locator(".dir-cta")).toHaveCount(0);
+  await expect(claimed.locator(".dir-unproven")).toHaveCount(0);
+  const counts = await page.locator(".dir-cta-link").evaluateAll((els) => els.map((el) => Number(el.getAttribute("data-cta-unclaimed"))));
+  expect(counts.length).toBeGreaterThan(0);
+  for (const n of counts) {
+    expect(n).toBeGreaterThan(0);
+  }
+  // Only accepted features carry one: never a desk draft, a component or
+  // a shelved spec.
+  for (const group of [DESK, ACTIVE, SHELF]) {
+    await expect(column(page, group).locator(".dir-cta")).toHaveCount(0);
+  }
+
+  // Following it opens the feature's wall with the New story dialog
+  // open and exactly that criterion claimed, through the dialog's own
+  // button and checkbox (the hooks the contract names).
+  await cta.click();
+  await expect(page).toHaveURL(new RegExp(`/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}\\?new-story=${SHOWCASE.INDEX_CTA_CRITERION}$`));
+  const dialog = page.locator("#create-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId(`create-ac-${SHOWCASE.INDEX_CTA_CRITERION}`)).toBeChecked();
+  await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(1);
+  await expect(page.getByTestId("create-error")).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  // The same wall opened without the query shows no dialog: the opener
+  // acts on the contract alone.
+  await page.goto(`/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}`);
+  await expect(page.getByTestId("create-spec-btn")).toBeVisible();
+  await expect(dialog).toBeHidden();
+
+  // A criterion this wall does not declare: the dialog opens with
+  // nothing claimed and its error line names the criterion — never a
+  // silent open, never a different box checked.
+  await page.goto(`/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}?new-story=ac-99`);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(0);
+  await expect(page.getByTestId("create-error")).toBeVisible();
+  await expect(page.getByTestId("create-error")).toContainText("ac-99");
+});
+
 // LAST in this file (SI-366 (16)): the forge outage is one-way until the
 // harness's reset route is POSTed, which this test does before it ends.
 test("index › Filters, and review status disclosed when the forge is unreachable", async ({ page }) => {
@@ -524,11 +593,23 @@ test("index › Filters, and review status disclosed when the forge is unreachab
   await expect(pill(page, "everything").locator(".count")).toHaveText(String(total));
   await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
   const columnCounts = await page.locator(".dir-group h2 .count").allTextContents();
+  // Each column's cards, by id and in order, before anything is done to
+  // the page (F7BR-2): the outage below must leave every one where it is.
+  const columnCards: Record<string, (string | null)[]> = {};
+  for (const [group] of INDEX_COLUMNS) {
+    columnCards[group] = await column(page, group)
+      .locator(".dir-entry")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+  }
 
   // applyFilter presses one pill and asserts what ac-3 asks of it: every
   // card the filter's own attribute selects stays shown, every other card
   // is hidden, the pill's count is the selected cards, only that pill is
-  // pressed, and the column counts stay the totals (SI-366 (19)).
+  // pressed, and the column counts stay the totals (SI-366 (19)). The
+  // archived fold's summary says how many of its folded cards the filter
+  // selects, so a match the closed fold hides is never silent, and says
+  // nothing while everything is shown (F7BR-1).
+  const foldMark = column(page, SHELF).locator("details.dir-archived > summary .dir-archived-matched");
   async function applyFilter(id: (typeof FILTERS)[number], attr: string): Promise<void> {
     await pill(page, id).click();
     for (const other of FILTERS) {
@@ -538,6 +619,14 @@ test("index › Filters, and review status disclosed when the forge is unreachab
     await expect(page.locator(`.dir-entry:not([${attr}]):not([hidden])`)).toHaveCount(0);
     await expect(pill(page, id).locator(".count")).toHaveText(String(await page.locator(`.dir-entry[${attr}]`).count()));
     expect(await page.locator(".dir-group h2 .count").allTextContents()).toEqual(columnCounts);
+    if (id === "everything") {
+      await expect(foldMark).toBeHidden();
+      await expect(foldMark).toHaveText("");
+    } else {
+      await expect(foldMark).toBeVisible();
+      const folded = await column(page, SHELF).locator(`details.dir-archived .dir-entry[${attr}]`).count();
+      await expect(foldMark).toHaveText(`· ${folded} match`);
+    }
   }
   // Quiet drafts: the shared store's drafts all read quiet (one fixed
   // commit date against the wall clock), a default-branch spec never.
@@ -558,6 +647,19 @@ test("index › Filters, and review status disclosed when the forge is unreachab
   // Everything again: nothing hidden.
   await applyFilter("everything", "data-testid");
   await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
+  // The fold's mark counts rather than merely reading 0 (F7BR-1): the
+  // shared store's archived cards match no filter today, so one folded
+  // card is marked disclosed in this page's DOM alone — the attribute
+  // the script reads — and the disclosed filter must then say 1 while
+  // the card stays folded; everything clears the mark again.
+  const folded = page.locator("details.dir-archived .dir-entry").first();
+  await folded.evaluate((el) => el.setAttribute("data-disclosed", "true"));
+  await pill(page, "disclosed").click();
+  await expect(foldMark).toHaveText("· 1 match");
+  await expect(folded).toBeHidden();
+  await folded.evaluate((el) => el.setAttribute("data-disclosed", "false"));
+  await pill(page, "everything").click();
+  await expect(foldMark).toBeHidden();
 
   // The isolated dated store (exact): quiet selects exactly the quiet
   // cards, and with no forge configured the in-review pill says so —
@@ -616,6 +718,14 @@ test("index › Filters, and review status disclosed when the forge is unreachab
     await expect(pill(page, "everything").locator(".count")).toHaveText(String(await page.locator(".dir-entry").count()));
     expect(await page.locator(".dir-group h2 .count").allTextContents()).toEqual(columnCounts);
     await expect(page.locator(".dir-entry[hidden]")).toHaveCount(0);
+    // ...and every column holds exactly the cards it held before, in the
+    // same order (F7BR-2): the forge never moves a card.
+    for (const [group] of INDEX_COLUMNS) {
+      const after = await column(page, group)
+        .locator(".dir-entry")
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+      expect(after, `${group}'s cards after the outage`).toEqual(columnCards[group]);
+    }
   } finally {
     const reset = await page.request.post(FORGE_OUTAGE_RESET_URL);
     expect(reset.ok()).toBe(true);

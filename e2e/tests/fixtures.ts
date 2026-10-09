@@ -85,10 +85,13 @@
 // |   INDEX_DATED_EDITED, INDEX_DATED_AGES, INDEX_DATED_COLUMNS         |          | |
 // | INDEX_COMMITTED_SPECS                                              | SHOWCASE | index-v2 completeness (SI-366 (22)(c)): every committed corpus spec once, in its column |
 // | INDEX_ARCHIVED_SPECS                                               | SHOWCASE | index-v2 On the shelf (ac-5; SI-366 (8)): the committed archive-zone specs, folded at the shelf's foot |
+// | INDEX_CTA_FEATURE, INDEX_CTA_CRITERION, INDEX_CTA_UNCLAIMED,       | SHOWCASE | index-v2 call to action (ac-4; SI-366 (10), (11)): the committed accepted feature with unclaimed criteria, and the one every stub claims |
+// |   INDEX_CTA_CLAIMED_FEATURE                                        |          | |
 // | DIR_EMPTY_BRANCH                                                   | EDGE     | degenerate branch: no draft spec at all |
 // | DIR_DOOMED_DRAFT                                                   | EDGE     | mid-session branch deletion (stress/race path) |
 // | DIR_VANISHED_BRANCH                                                | EDGE     | a design branch that never existed: the deleted-branch notice page, reached by address alone (96) |
 // | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | mid-lifecycle shape: closed, still in specs/active/ (the On the shelf column's active-zone terminal card) |
+// | INDEX_FAILURE_UNDECODABLE                                          | EDGE     | the isolated index-failure store (cmd/e2eharness/indexfailure.go): the undecodable spec the one failure notice names (ac-6; SI-366 (15)) |
 // | DIAGRAM_PROPOSAL, DIAGRAM_PROPOSAL_BODY, DIAGRAM_BASE_BODY,        | SHOWCASE | diagram-editor happy path: drafting, structural ops, byte preservation, verification rail, peek/reset |
 // |   DIAGRAM_DERIVED, DIAGRAM_DERIVED_BODY, DIAGRAM_RAIL_TIER,        |          | |
 // |   DIAGRAM_RAIL_FINDINGS                                            |          | |
@@ -562,6 +565,17 @@ export const SHOWCASE = {
   // BINDING: mirrors the committed archive zone; change them together.
   INDEX_ARCHIVED_SPECS: ["loan-refi-2023", "refi-rate-check-2024"] as readonly string[],
 
+  // The call to action (ac-4; SI-366 (10), (11)): loan-workflow-v2 declares
+  // ac-1 and ac-3, lists no stub, and no committed story implements
+  // either, so its card reads "2 AC unclaimed · ac-1 · New story";
+  // escrow-autopay's two stubs list every one of its criteria, so its
+  // card carries no call to action and no unproven mark. BINDING: mirrors
+  // the committed corpus; change them together.
+  INDEX_CTA_FEATURE: "loan-workflow-v2",
+  INDEX_CTA_CRITERION: "ac-1",
+  INDEX_CTA_UNCLAIMED: 2,
+  INDEX_CTA_CLAIMED_FEATURE: "escrow-autopay",
+
   // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the drafting/structural-ops/rail/
   // peek-reset happy paths (37-board-diagram-editor)
@@ -795,6 +809,11 @@ export const EDGE = {
   // compatibility disclosure; the archive-zone twin is a shelf card too,
   // with no board link (spec/index-v2; parent dc-12).
   DIR_CLOSED_AWAITING_ARCHIVE: "rate-table-sunset",
+  // The isolated index-failure store's undecodable default-branch spec
+  // (cmd/e2eharness/indexfailure.go): the path the one failure notice
+  // names (ac-6; SI-366 (15)). BINDING: mirrors indexFailureUndecodablePath
+  // verbatim.
+  INDEX_FAILURE_UNDECODABLE: ".verdi/specs/active/index-failure-undecodable/spec.md",
 
   // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the disclosed-unavailable and
@@ -1018,6 +1037,11 @@ export const SPEC_IMPORT_FIXTURE_URL = `${CONTROL_URL}/spec-import-fixture`;
 // exact). Each answers its base URL as plain text.
 export const EMPTY_INDEX_FIXTURE_URL = `${CONTROL_URL}/empty-glance-fixture`;
 export const INDEX_DATES_FIXTURE_URL = `${CONTROL_URL}/index-dates-fixture`;
+// ...and the failing store (cmd/e2eharness/indexfailure.go; SI-366 (15)):
+// an isolated real store whose directory index computation fails on an
+// undecodable default-branch spec, served in-process, so ac-6's honest
+// failure is proven through the real pipeline in both views.
+export const INDEX_FAILURE_FIXTURE_URL = `${CONTROL_URL}/index-failure-fixture`;
 
 // The control server's forge outage switch and its reset (cmd/e2eharness/
 // control.go; SI-366 (16)): POST the first to make the open-MR feed answer
