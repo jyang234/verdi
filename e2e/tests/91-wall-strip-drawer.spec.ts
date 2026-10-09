@@ -133,6 +133,41 @@ async function expectProposal(panel: Locator, branch: string): Promise<void> {
   await expect(command.locator("a, button, form")).toHaveCount(0);
 }
 
+// ACCEPTANCE_OBLIGATION is the formal obligation the Review tab's
+// acceptance section keeps secondary (SI-368 (32) B3).
+const ACCEPTANCE_OBLIGATION = "AC-6/DC-15: the profile-required review of the exact proposed head authorizes merge";
+
+// expectAcceptance: the Review tab carries the retired wall shell's
+// review/acceptance row (SI-368 (3), (32) B3) — the plain human-review
+// label with the formal concern secondary, the primary line, the fact
+// when the row carries guidance, and the formal state and witnesses.
+async function expectAcceptance(
+  panel: Locator,
+  want: { state: string; primary: string; fact?: string; witnesses: string[] },
+): Promise<void> {
+  const acceptance = panel.getByTestId("record-review-acceptance");
+  await expect(acceptance).toHaveAttribute("data-state", want.state);
+  await expect(acceptance.getByTestId("record-human-review")).toHaveText("Human review · review/acceptance");
+  await expect(acceptance.getByTestId("record-acceptance-primary")).toHaveText(want.primary);
+  if (want.fact) await expect(acceptance.getByTestId("record-acceptance-fact")).toHaveText(want.fact);
+  else await expect(acceptance.getByTestId("record-acceptance-fact")).toHaveCount(0);
+  const formal = acceptance.getByTestId("record-acceptance-formal");
+  await expect(formal.locator(".record-row").first()).toContainText(want.state);
+  for (const witness of want.witnesses) await expect(formal).toContainText(witness);
+  await expect(acceptance.locator("a, button, form")).toHaveCount(0);
+}
+
+// agentWrites is the Context tab's "What agents may do" writes row: the
+// capabilities families' home (SI-368 (3), (32) B2).
+function agentWrites(panel: Locator): Locator {
+  const page = panel.page();
+  return panel
+    .locator(".record-section")
+    .filter({ has: page.getByRole("heading", { name: "What agents may do", exact: true }) })
+    .locator(".record-row")
+    .filter({ has: page.locator("dt", { hasText: /^writes$/ }) });
+}
+
 // JSON_TEXT matches raw JSON printed as text: an object's opening brace
 // before a key, or a quoted key and its colon.
 const JSON_TEXT = /\{\s*"|"[\w-]+"\s*:/;
@@ -619,11 +654,26 @@ test.describe("wall-strip-and-drawer", () => {
       await expectProse(provenance, ["Typed operations", "Unclassified direct edits"]);
       await expect(provenance.locator(".record-row").filter({ hasText: `edit-ac ${ac}` }).first()).toBeVisible();
       const review = await openTab(page, "review");
-      await expectProse(review, ["Review base", "Semantic changes", "Needs a human eye", "Material warnings", "Policy in force", "Open a pull request"]);
+      await expectProse(review, ["Acceptance", "Review base", "Semantic changes", "Needs a human eye", "Material warnings", "Policy in force", "Open a pull request"]);
       await expectProposal(review, SHOWCASE.DESIGN_BRANCH);
+      // The retired shell's review/acceptance row, homed in the Review tab
+      // (SI-368 (3), (32) B3): human review, and the owner's merge as the
+      // single acceptance decision, from the authoring wall's branch.
+      await expectAcceptance(review, {
+        state: "unproven",
+        primary: `Derive the semantic review packet (below), open a pull request from ${SHOWCASE.DESIGN_BRANCH}, and request the owner's review — the owner's merge is the single acceptance decision.`,
+        fact: "Human review has not accepted this proposal yet.",
+        witnesses: ["Git-derived state proposed", ACCEPTANCE_OBLIGATION],
+      });
       await expect(page.getByTestId("record-drawer").locator("a, button, [role=button], [role=link]").filter({ hasText: /pull request|merge request/i })).toHaveCount(0);
       const context = await openTab(page, "context");
       await expectProse(context, ["Current spec", "Parent feature", "Applicable policy", "What agents may do", "Pinned context", "Verdi-go findings", "Digests"]);
+      // The capabilities families' home (SI-368 (3), (32) B2): the design
+      // wall's proposal-only policy refuses delegated agents alone, so the
+      // writes row speaks to agents, not to the human writing here.
+      const designWrites = agentWrites(context);
+      await expect(designWrites.locator(".record-text")).toHaveText(/^Delegated agents cannot write here \(policy-mode\): .+/);
+      await expect(designWrites.locator(".record-badge")).toHaveText("agents refused");
       const repo = await openTab(page, "repo");
       await expectProse(repo, ["Working tree", "Accepted record"]);
       await expect(repo.locator(".record-row").filter({ hasText: "branch" }).first()).toContainText(SHOWCASE.DESIGN_BRANCH);
@@ -682,7 +732,9 @@ test.describe("wall-strip-and-drawer", () => {
     ] as const) {
       const panel = await openTab(page, tab);
       await expect(panel.getByTestId("record-unavailable")).toHaveText(new RegExp(`^${subject} unavailable: .*decoding design provenance`));
-      await expect(panel.locator(".record-section")).toHaveCount(sections);
+      // The sections the projection's body draws; the Review tab's
+      // acceptance section is the wall's own, above the body (SI-368 (32)).
+      await expect(panel.locator("[data-record-body] .record-section")).toHaveCount(sections);
     }
     await expectProposal(page.getByTestId("record-panel-review"), branchOf(DRAWER_UNAVAILABLE_WALL));
     await page.getByTestId("record-drawer-close").click();
@@ -693,17 +745,43 @@ test.describe("wall-strip-and-drawer", () => {
     await expect(sealedContext.getByTestId("record-unavailable")).toHaveText(/^The design context is unavailable: .+/);
     // On a wall that takes no edit the Review tab proposes nothing (SI-368
     // (28)(b), F3BR-3): the sealed record and the review mirror each say no
-    // pull request is proposed from them, and show no push command.
+    // pull request is proposed from them, and show no push command. Each
+    // carries its own acceptance (SI-368 (32) B3): the sealed record is
+    // accepted by the owner's merge; the review mirror's open merge request
+    // awaits it. And on each the serving checkout's design branch is not
+    // the spec's, a refusal that binds the human and agents alike, which
+    // the Context tab says so (SI-368 (32) B2).
+    const acceptances = {
+      readonly: {
+        state: "proven",
+        primary: "This revision is accepted: the owner's merge made it reachable from the default branch.",
+        witnesses: ["Git-derived state accepted-pending-build"],
+      },
+      review: {
+        state: "unproven",
+        primary: "The owner's merge of the open merge request is the single acceptance decision — no second ceremony.",
+        fact: "Human review is open: this wall mirrors the proposal's merge request.",
+        witnesses: ["an open merge request mirrors this spec", ACCEPTANCE_OBLIGATION],
+      },
+    };
     for (const [wall, mode] of [
       [boardPath(SHOWCASE.READONLY_SPEC), "readonly"],
       [boardPath(SHOWCASE.REVIEW_SPEC), "review"],
     ] as const) {
       await page.goto(wall);
       await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", mode);
-      const proposes = (await openTab(page, "review")).getByTestId("record-review-command");
+      const reviewTab = await openTab(page, "review");
+      const proposes = reviewTab.getByTestId("record-review-command");
       await expect(proposes.locator(".record-empty"), `${mode}: proposes nothing`).toHaveText(/^No pull request is proposed from this wall: /);
       await expect(proposes.locator("code"), `${mode}: no push command`).toHaveCount(0);
       expect(await proposes.innerText(), `${mode}: no push command`).not.toContain("git push");
+      await expectAcceptance(reviewTab, acceptances[mode]);
+      const writes = agentWrites(await openTab(page, "context"));
+      await expect(writes.locator(".record-text"), `${mode}: the refusal binds humans and agents alike`).toHaveText(
+        /^Typed draft writes are refused here for humans and agents alike \(design-branch\): branch \S+ is not mutable design branch .+/,
+      );
+      await expect(writes.locator(".record-badge")).toHaveText("refused");
+      expect(await writes.innerText(), `${mode}: no agent-only wording`).not.toContain("Delegated agents");
       await page.getByTestId("record-drawer-close").click();
     }
     // A repository posture that cannot be proven: the store whose default
