@@ -974,20 +974,21 @@ var createFieldLabels = map[string][2]string{
 	"Title":    {"Title", "derived from the name when left blank"},
 	"Owners":   {"Owners", designscaffold.DefaultOwners},
 	"StoryRef": {"Tracker ref", "todo:REPLACE-ME"},
-	"Problem":  {"Problem", "what hurts today — required"},
-	"Outcome":  {"Outcome", "what is true when this lands — required"},
+	"Problem":  {"Problem", "what hurts today"},
+	"Outcome":  {"Outcome", "what is true when this lands"},
 }
 
-// writeCreateDialog renders the creation form dialog (spec/creation-form
-// ac-3): fields generated from the SAME enumerated descriptors the
-// create action validates against — one contract, both halves — plus the
-// acceptance-criteria picker over this wall's declared ACs. The branch
-// tab is the identity being minted, in the stub tab's own mono voice: it
-// live-updates from the name field (boardspec.js) and encodes exactly
-// what submit will cut. Receipt and refusal copy ride data attributes,
-// resolved server-side so the client speaks display words (class words
-// through DisplayClass, verb words through DisplayVerb — never a bare
-// hand-written verb) without a client-side vocabulary table.
+// writeCreateDialog renders the New story dialog (spec/new-story-dialog-v2
+// ac-1, ac-2, co-1, dc-1; spec/creation-form ac-3): a header naming the
+// branch it will cut, fields generated from the SAME enumerated
+// descriptors the create action validates against — one contract, both
+// halves — and the criteria this wall declares, each with its coverage,
+// over a footer whose Create starts gated beside its status line. Every
+// word is the server's: the class words through the store's vocabulary
+// (co-1; SI-369 (8)), the branch prefix and the name grammar as the
+// server cuts and checks them (SI-369 (5), (6)), and the status, hint and
+// receipt copy on data attributes newstorydialog.js and boardspec.js only
+// compose — no client-side vocabulary table, no client-side grammar.
 func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 	esc := stdhtml.EscapeString
 	storyWord := p.words.word("story")
@@ -999,59 +1000,170 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 	// they filled it, and never when the resolved template asks for none.
 	b.WriteString(`<div role="dialog" aria-label="` + esc("New "+storyWord) + `" class="board-dialog create-dialog" id="create-dialog" hidden`)
 	b.WriteString(` data-receipt-title="` + esc(model.Capitalize(storyWord)+" created") + `"`)
-	b.WriteString(` data-receipt-body="` + esc("Branch {branch} now carries spec/{name}, scaffolded from the "+storyWord+" template with the acceptance criteria you chose.") + `"`)
+	b.WriteString(` data-receipt-body="` + esc("Branch "+designPrefix+"{name} now carries spec/{name}, scaffolded from the "+storyWord+" template with the acceptance criteria you chose.") + `"`)
 	b.WriteString(` data-receipt-tracker="` + esc("Its tracker ref is still the placeholder todo:REPLACE-ME — fill it in on the branch before "+p.words.verb("merge")+".") + `"`)
 	b.WriteString(` data-receipt-tail="` + esc("This wall (the serving checkout) has not moved.") + `"`)
 	b.WriteString(` data-error-acs="` + esc("Choose at least one acceptance criterion — the coverage claim the new "+storyWord+" is born with.") + `">`)
-	b.WriteString(`<span class="stub-tab create-branch-tab" id="create-branch-tab" aria-hidden="true">design/&#8230;</span>`)
-	b.WriteString(`<h2>New ` + esc(storyWord) + `</h2>`)
-	b.WriteString(`<p class="ritual-note">` + esc("Cuts a design branch carrying the new "+storyWord+" spec — every field below comes from the "+storyWord+" template itself. This checkout never moves.") + `</p>`)
+
+	// The header: the handoff's copy (SI-369 (8)) and the branch the
+	// dialog will cut, design/… until the name is valid (SI-369 (6)).
+	b.WriteString(`<div class="create-head"><div class="create-head-text"><h2>New ` + esc(storyWord) + `</h2>`)
+	b.WriteString(`<p class="create-lede">` + esc("Cuts a design branch carrying the "+storyWord+" spec. Nothing is written until you press Create.") + `</p></div>`)
+	b.WriteString(`<p class="create-cut"><span class="create-cut-label">will cut</span> <span class="create-branch-tab" id="create-branch-tab" data-cut="` + esc(designPrefix+"{name}") + `">` + esc(designPrefix) + `&#8230;</span></p></div>`)
+	b.WriteString(`<div class="create-body">`)
 
 	// The name: always asked — it is the identity every FieldIdentity
 	// descriptor derives from (the ref, the branch, the directory).
 	// data-pattern ships the server's own name grammar, specNameRe, which
 	// a parity test holds to the create action's ValidateSuccessorName
-	// (SI-369 (5)); the client compiles it as typed, never lowercased.
-	b.WriteString(`<div class="field"><label for="create-name">Name</label>`)
-	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name" data-pattern="` + esc(specNameRe.String()) + `">`)
-	b.WriteString(`<span class="field-hint">becomes the spec ref and the design branch</span></div>`)
+	// (SI-369 (5)); the client compiles it as typed, never lowercased. The
+	// hint describes the input: the ref and branch a valid name becomes,
+	// or the grammar break, quoting the same pattern.
+	b.WriteString(`<div class="field create-name-field"><label for="create-name">Name <span class="create-label-dot">&#183;</span> becomes the ref and the branch</label>`)
+	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name" aria-describedby="create-name-hint" data-pattern="` + esc(specNameRe.String()) + `">`)
+	unnamed := "spec/<name> · " + designPrefix + "<name>"
+	b.WriteString(`<span class="field-hint create-name-hint" id="create-name-hint" data-testid="create-name-hint"`)
+	b.WriteString(` data-text-empty="` + esc(unnamed) + `" data-text-valid="` + esc("spec/{name} · "+designPrefix+"{name}") + `"`)
+	b.WriteString(` data-text-invalid="` + esc(`"{name}" is not kebab-case; the grammar is `+specNameRe.String()) + `">` + esc(unnamed) + `</span></div>`)
 
-	for _, f := range p.CreateFields {
-		if f.Kind != designscaffold.FieldInput && f.Kind != designscaffold.FieldStatement {
-			continue
+	// The template's fields: its single-line inputs, then its required
+	// statements, each group in the template's own order.
+	for _, kind := range []designscaffold.FieldKind{designscaffold.FieldInput, designscaffold.FieldStatement} {
+		group := "create-inputs"
+		if kind == designscaffold.FieldStatement {
+			group = "create-statements"
 		}
-		label, ok := createFieldLabels[f.Name]
-		if !ok {
-			label = [2]string{f.Name, ""}
-		}
-		id := "create-field-" + f.Name
-		b.WriteString(`<div class="field"><label for="` + esc(id) + `">` + esc(label[0]) + `</label>`)
-		if f.Kind == designscaffold.FieldStatement {
-			b.WriteString(`<textarea id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" required placeholder="` + esc(label[1]) + `"></textarea>`)
-		} else {
-			b.WriteString(`<input id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" autocomplete="off" placeholder="` + esc(label[1]) + `">`)
+		b.WriteString(`<div class="` + group + `">`)
+		for _, f := range p.CreateFields {
+			if f.Kind == kind {
+				writeCreateField(b, f)
+			}
 		}
 		b.WriteString(`</div>`)
 	}
 
-	// The coverage picker: the new story's implements edges, chosen from
-	// this wall's own declared acceptance criteria — real claims, never a
-	// placeholder edge.
-	b.WriteString(`<fieldset class="create-acs"><legend>Implements</legend>`)
-	b.WriteString(`<p class="ritual-note">` + esc("The acceptance criteria the new "+storyWord+" claims — at least one.") + `</p>`)
+	writeCreateCriteria(b, p)
+	b.WriteString(`</div>`)
+
+	// The footer: the refusal slot, then Create — disabled until the name
+	// is valid and a criterion is claimed (SI-369 (7)), as it is on open —
+	// beside the status line, whose states the server words.
+	b.WriteString(`<div class="create-foot"><p class="create-error" id="create-error" data-testid="create-error" role="alert" hidden></p>`)
+	b.WriteString(`<div class="dialog-actions"><button type="button" id="create-ok" class="btn-primary" data-testid="create-ok" aria-describedby="create-status" disabled>` + esc("Create "+storyWord) + `</button>`)
+	b.WriteString(`<button type="button" id="create-cancel" data-testid="create-cancel">Cancel</button>`)
+	unnamedStatus := "name the " + storyWord + " to continue"
+	b.WriteString(`<p class="create-status" id="create-status" data-testid="create-status" role="status"`)
+	b.WriteString(` data-name="` + esc(unnamedStatus) + `" data-acs="claim at least one acceptance criterion"`)
+	b.WriteString(` data-ready="` + esc("cuts "+designPrefix+"{name} · claims {acs}") + `" data-missing-one="{fields} is required" data-missing-many="{fields} are required">`)
+	b.WriteString(esc(unnamedStatus) + `</p></div></div>`)
+	b.WriteString(`</div>`)
+}
+
+// writeCreateField writes one template field: a single-line input, or a
+// statement marked required — a statement left empty is refused on click,
+// by name (creation-form ac-3).
+func writeCreateField(b *strings.Builder, f designscaffold.Field) {
+	esc := stdhtml.EscapeString
+	label, ok := createFieldLabels[f.Name]
+	if !ok {
+		label = [2]string{f.Name, ""}
+	}
+	id := "create-field-" + f.Name
+	if f.Kind == designscaffold.FieldStatement {
+		b.WriteString(`<div class="field"><label for="` + esc(id) + `">` + esc(label[0]) + ` <span class="create-required">&#183; required</span></label>`)
+		b.WriteString(`<textarea id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" required placeholder="` + esc(label[1]) + `"></textarea></div>`)
+		return
+	}
+	b.WriteString(`<div class="field"><label for="` + esc(id) + `">` + esc(label[0]) + `</label>`)
+	b.WriteString(`<input id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" autocomplete="off" placeholder="` + esc(label[1]) + `"></div>`)
+}
+
+// writeCreateCriteria writes the criteria the new story may claim — its
+// implements edges, chosen from this wall's own declared acceptance
+// criteria, real claims, never a placeholder edge — each row carrying the
+// wall chip's text verbatim and, apart from it, the story half (SI-369
+// (1), (2)), under a legend counting the unclaimed ones (SI-369 (3)). Only
+// the checkbox carries data-create-ac: F7's opener checks it by that
+// attribute. The row's coverage state rides data-state; whether it is
+// claimed is the checkbox's own.
+func writeCreateCriteria(b *strings.Builder, p *BoardProjection) {
+	esc := stdhtml.EscapeString
+	rows := make(map[string]createCriterionView, len(p.CreateCoverage.Criteria))
+	for _, row := range p.CreateCoverage.Criteria {
+		rows[row.ID] = row
+	}
+	unproven := p.CreateCoverage.Unproven
+	for _, c := range p.Cards {
+		if _, ok := rows[c.ID]; !ok && c.Kind == string(boardlayout.ZoneAC) {
+			unproven = true
+		}
+	}
+	legend := strconv.Itoa(p.CreateCoverage.Uncovered) + " AC unclaimed"
+	if unproven {
+		legend = "coverage unproven"
+	}
+	b.WriteString(`<fieldset class="create-acs"><legend><span class="create-acs-title">` + esc("Implements · the acceptance criteria this "+p.words.word("story")+" claims, at least one") + `</span> `)
+	b.WriteString(`<span class="create-acs-count" id="create-acs-count" data-testid="create-acs-count">` + esc(legend) + `</span></legend>`)
 	for _, c := range p.Cards {
 		if c.Kind != string(boardlayout.ZoneAC) {
 			continue
 		}
-		b.WriteString(`<label class="create-ac"><input type="checkbox" data-create-ac="` + esc(c.ID) + `" data-testid="create-ac-` + esc(c.ID) + `">`)
-		b.WriteString(`<span class="create-ac-id">` + esc(c.ID) + `</span> <span class="create-ac-text">` + esc(c.Text) + `</span></label>`)
+		row, ok := rows[c.ID]
+		if !ok {
+			// A criterion the coverage has no row for is never shown as
+			// uncovered: what was not computed is disclosed.
+			row = createCriterionView{ID: c.ID, Disclosed: []string{"no coverage was computed for this criterion"}}
+		}
+		state := "covered"
+		switch {
+		case len(row.Disclosed) > 0:
+			state = "disclosed"
+		case row.Uncovered:
+			state = "uncovered"
+		}
+		modifier := "covered"
+		if row.Stubs == 0 {
+			modifier = "none"
+		}
+		b.WriteString(`<label class="create-ac" data-state="` + state + `"><input type="checkbox" data-create-ac="` + esc(c.ID) + `" data-testid="create-ac-` + esc(c.ID) + `"> `)
+		b.WriteString(`<span class="create-ac-id">` + esc(c.ID) + `</span> <span class="create-ac-text" title="` + esc(c.Text) + `">` + esc(c.Text) + `</span> `)
+		b.WriteString(`<span class="create-ac-cov create-ac-cov--` + modifier + `" data-testid="create-coverage-` + esc(c.ID) + `">` + esc(coverageChipText(row.Stubs)) + `</span>`)
+		if note, title := createClaimsNote(row, p.words); note != "" {
+			b.WriteString(` <span class="create-ac-note" data-testid="create-claims-` + esc(c.ID) + `"`)
+			if title != "" {
+				b.WriteString(` title="` + esc(title) + `"`)
+			}
+			b.WriteString(`>` + esc(note) + `</span>`)
+		}
+		b.WriteString(`</label>`)
 	}
 	b.WriteString(`</fieldset>`)
+}
 
-	b.WriteString(`<p class="create-error" id="create-error" data-testid="create-error" role="alert" hidden></p>`)
-	b.WriteString(`<div class="dialog-actions"><button type="button" id="create-ok" class="btn-primary" data-testid="create-ok">` + esc("Create "+storyWord) + `</button>`)
-	b.WriteString(`<button type="button" id="create-cancel">Cancel</button></div>`)
-	b.WriteString(`</div>`)
+// createClaimsNote words a criterion's story half apart from the wall
+// chip's stub half (SI-369 (2)): "claimed by n <story word(s)>" with the
+// refs in the title — never "implemented" — "unclaimed" when Uncovered()
+// holds (the legend's word, SI-369 (3)), and "coverage unproven" with the
+// reasons in the title when an input could not be read. A criterion only
+// stubs cover has nothing to add.
+func createClaimsNote(row createCriterionView, words classWords) (note, title string) {
+	var notes, titles []string
+	if n := len(row.Stories); n > 0 {
+		word := words.word("story")
+		if n > 1 {
+			word = words.plural("story")
+		}
+		notes = append(notes, "claimed by "+strconv.Itoa(n)+" "+word)
+		titles = append(titles, strings.Join(row.Stories, ", "))
+	}
+	if len(row.Disclosed) > 0 {
+		notes = append(notes, "coverage unproven")
+		titles = append(titles, strings.Join(row.Disclosed, "; "))
+	}
+	if row.Uncovered {
+		notes = append(notes, "unclaimed")
+	}
+	return strings.Join(notes, " · "), strings.Join(titles, "; ")
 }
 
 // overlapsColumn reports whether a card whose left edge is x overlaps
