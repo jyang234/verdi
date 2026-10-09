@@ -384,10 +384,15 @@ func TestWallUncommitted_BadgeWords(t *testing.T) {
 }
 
 // TestWallUncommitted_UnclassifiedCap is SI-368 (25)(e): the popover lists
-// at most uncommittedUnclassifiedCap unclassified entries, then "+n more";
-// a list at the cap carries no "+0 more"; and the count still counts every
-// change, listed or not, so the cap never understates what is uncommitted.
+// at most 20 unclassified entries — the ruled literal, pinned here so a
+// changed constant fails this test — then "+n more"; a list at the cap
+// carries no "+0 more"; and the count still counts every change, listed
+// or not, so the cap never understates what is uncommitted.
 func TestWallUncommitted_UnclassifiedCap(t *testing.T) {
+	const ruledCap = 20
+	if uncommittedUnclassifiedCap != ruledCap {
+		t.Fatalf("uncommittedUnclassifiedCap = %d, want SI-368 (25)(e)'s %d", uncommittedUnclassifiedCap, ruledCap)
+	}
 	entries := func(n int) []wallUnclassifiedChange {
 		out := make([]wallUnclassifiedChange, 0, n)
 		for i := 0; i < n; i++ {
@@ -401,9 +406,9 @@ func TestWallUncommitted_UnclassifiedCap(t *testing.T) {
 		wantMore   string
 	}{
 		{n: 1, wantListed: 1},
-		{n: uncommittedUnclassifiedCap, wantListed: uncommittedUnclassifiedCap},
-		{n: uncommittedUnclassifiedCap + 1, wantListed: uncommittedUnclassifiedCap, wantMore: "+1 more"},
-		{n: uncommittedUnclassifiedCap + 5, wantListed: uncommittedUnclassifiedCap, wantMore: "+5 more"},
+		{n: ruledCap, wantListed: ruledCap},
+		{n: ruledCap + 1, wantListed: ruledCap, wantMore: "+1 more"},
+		{n: ruledCap + 5, wantListed: ruledCap, wantMore: "+5 more"},
 	} {
 		t.Run(strconv.Itoa(tc.n), func(t *testing.T) {
 			fragment := renderWallUncommitted(deriveWallUncommitted(commitGit(true, &wallChanges{
