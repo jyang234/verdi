@@ -1,19 +1,19 @@
 package workbench
 
 // The ASD workbench's rendered-fact assembly (Wave 6 Task 2, design §6.2):
-// the revision/posture header facts, the promoted four-area shell's
-// concern derivation (the Wave 3.5 pilot's presentation idioms — SI-125's
-// plain labels, exactly-three preview, current-area-first ordering —
-// applied to this board's own typed facts), and the per-render client
-// facts (base digest/bytes, expected identity, grammar pattern, next
-// object ids, stored link tuples) the browser needs to construct typed
-// mutate_draft transactions without interpreting spec bytes itself.
+// the revision/posture header facts, the policy setup guide's choice from
+// the capabilities consultation, and the per-render client facts (base
+// digest/bytes, expected identity, grammar pattern, next object ids,
+// stored link tuples) the browser needs to construct typed mutate_draft
+// transactions without interpreting spec bytes itself. The wall shell's
+// own readiness derivation is retired (spec/wall-strip-and-drawer-v2 ac-7,
+// dc-4): the wall's readiness is the record drawer's Readiness tab, which
+// renders the per-request loader's facts (wallreadiness.go).
 //
 // Everything here is presentation over facts the application owners
 // already returned: the decoded frontmatter the projection was built
-// from, the projection itself, Git facts from gitx, and the capabilities
-// view the designapp bridge converted. Nothing derives lifecycle truth,
-// scores, or authority (design §3's adapter boundary).
+// from, the projection itself, and Git facts from gitx. Nothing derives
+// lifecycle truth, scores, or authority (design §3's adapter boundary).
 
 import (
 	"context"
@@ -22,96 +22,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
-	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
-
-// The four presentation areas, byte-identical to the readiness pilot's
-// promoted shell (SI-124/SI-125): ids are addressing, labels are the
-// participant-ratified plain words. Presentation concepts, never
-// lifecycle states.
-type asdAreaID string
-
-const (
-	asdAreaShape   asdAreaID = "shape-proposal"
-	asdAreaSuccess asdAreaID = "show-success"
-	asdAreaContext asdAreaID = "check-context"
-	asdAreaReview  asdAreaID = "request-review"
-)
-
-var asdAreaOrder = []asdAreaID{asdAreaShape, asdAreaSuccess, asdAreaContext, asdAreaReview}
-
-var asdAreaLabels = map[asdAreaID]string{
-	asdAreaShape:   "Define the work",
-	asdAreaSuccess: "Define success",
-	asdAreaContext: "Check constraints",
-	asdAreaReview:  "Get approval",
-}
-
-// The pilot's exact three-valued vocabulary (never a fourth word).
-const (
-	asdStateProven   = "proven"
-	asdStateViolated = "violated-with-witness"
-	asdStateUnproven = "unproven"
-)
-
-// asdConcern is one shell row: a source fact, its honest state, its
-// explicit timing/dependency (F-02), and its source-derived corrective
-// guidance (F-03). HumanReview marks the plainly-labeled human-review
-// rows (F-05); the formal obligation stays in Witnesses.
-type asdConcern struct {
-	ID          string
-	Area        asdAreaID
-	State       string
-	Blocking    bool
-	Summary     string
-	Guidance    string
-	Witnesses   []string
-	Dest        string // in-page fragment href ("" when none applies)
-	HumanReview bool
-}
-
-type asdArea struct {
-	ID    asdAreaID
-	Label string
-	State string
-}
-
-// asdShell is the derived presentation: lossless (All), prominence-only
-// ordering (Attention), one deterministic focus.
-type asdShell struct {
-	Areas              []asdArea
-	CurrentFocus       asdAreaID
-	Attention          []asdConcern
-	All                []asdConcern
-	DownstreamViolated int
-	// PolicySetupGuide is non-empty exactly when the wall reports
-	// policy-forbidden: the shell then renders the inline, read-only
-	// policy guide the context/policy notice links to
-	// (boardshellrender.go's writePolicySetupGuide), in the variant the
-	// refusal's own detail justifies. PolicyDetail is that refusal detail,
-	// verbatim and BARE (never the "<code>: <detail>" form): the guide-kind
-	// discriminant below matches it by substring, and designapp forwards
-	// draftmutation's bare Detail (ac-5). PolicyCode is the refusal's code
-	// carried separately, so the guide can quote code + ": " + detail —
-	// the same single-prefix form the context/policy witness uses (wave-1
-	// ledger R-5). Guidance only — nothing on this shell adopts a policy.
-	PolicySetupGuide policyGuideKind
-	PolicyCode       string
-	PolicyDetail     string
-}
 
 // policyGuideKind selects the policy guide variant from the refusal's own
 // discriminant. draftmutation raises policy-forbidden from TWO distinct
@@ -160,7 +81,7 @@ type policyGuide struct {
 // not-adopted variant only when a policy-forbidden refusal carries
 // draftmutation's own not-adopted discriminant; the no-design-assistance
 // variant for every other policy-forbidden refusal; and none for any other
-// failure. The wall shell's context/policy rows key off the same value.
+// failure. The Readiness tab carries the guide it chooses (SI-368 (3)).
 func policyGuideFor(designWired bool, caps *DesignCapabilitiesView, failure *DesignFailure) policyGuide {
 	if !designWired || caps != nil || failure == nil || failure.Code != "policy-forbidden" {
 		return policyGuide{}
@@ -170,366 +91,6 @@ func policyGuideFor(designWired bool, caps *DesignCapabilitiesView, failure *Des
 		kind = policyGuideNotAdopted
 	}
 	return policyGuide{Kind: kind, Code: failure.Code, Detail: failure.Detail}
-}
-
-// policyEditingClause scopes a policy-forbidden concern row's editing claim
-// to the board's mode. Ordinary human editing never requires policy, but
-// only an authoring board accepts browser writes at all: a review or
-// read-only board refuses them regardless of policy, so the row must not
-// say editing "proceeds" there (F3). authoringOutcome is what a write on
-// an authoring board records under this refusal.
-func policyEditingClause(mode, authoringOutcome string) string {
-	switch boardModeKind(mode) {
-	case modeAuthoring:
-		return "ordinary human editing does not require policy, so " + authoringOutcome
-	case modeReview:
-		return "ordinary human editing does not require policy, but this review board refuses browser writes regardless."
-	default:
-		return "ordinary human editing does not require policy, but this read-only board refuses browser writes regardless."
-	}
-}
-
-// asdShellInput is deriveASDShell's complete typed input — assembled from
-// the decoded frontmatter, projection, Git facts, and capabilities view;
-// the derivation itself reads nothing else.
-type asdShellInput struct {
-	ProblemPresent  bool
-	OutcomePresent  bool
-	OpenQuestions   []asdObjectFact
-	OpenStickyCount int
-	ACs             []asdACFact
-	UncoveredACs    []string // feature walls: declared ACs no stub covers
-	Class           string
-	Mode            string
-	Dirty           bool
-	Branch          string
-	StateFormal     string
-	UnderReview     bool
-	DesignWired     bool
-	Caps            *DesignCapabilitiesView
-	CapsFailure     *DesignFailure
-	PinnedContext   int
-	// SpikeWord is the resolved display word for the spike pseudo-class
-	// (spec/vocabulary-surfaces; proj.words.word("spike") at the caller),
-	// so a spike-claimed open question's prose routes through the display
-	// chain rather than hardcoding a bare vocabulary word (ledger
-	// L-M13a(6), the mechanical prose witness).
-	SpikeWord string
-}
-
-type asdObjectFact struct {
-	ID, Text string
-	// ClaimedBySlugs names, sorted, every spike stub whose `resolves`
-	// claims this open question (PLAN.md §7 I-128 option (a);
-	// spec/uat-round-1 ac-10). Empty/nil means unclaimed.
-	ClaimedBySlugs []string
-}
-
-type asdACFact struct {
-	ID            string
-	EvidenceCount int
-}
-
-// deriveASDShell maps the board's typed facts onto the four-area shell.
-// Every area receives an explicit positive or unresolved anchor (a proven
-// area is never vacuous), every unresolved row carries source-derived
-// guidance, and ordering follows SI-125 exactly: current-area unresolved
-// rows first, then blocking before nonblocking, violated before unproven,
-// area order, id — prominence only, nothing suppressed.
-func deriveASDShell(in asdShellInput) asdShell {
-	var all []asdConcern
-	add := func(c asdConcern) { all = append(all, c) }
-	guide := policyGuideFor(in.DesignWired, in.Caps, in.CapsFailure)
-
-	// -- shape-proposal: Define the work --------------------------------
-	if in.ProblemPresent {
-		add(asdConcern{ID: "shape/problem", Area: asdAreaShape, State: asdStateProven, Blocking: true,
-			Summary: "The problem statement is present."})
-	} else {
-		add(asdConcern{ID: "shape/problem", Area: asdAreaShape, State: asdStateViolated, Blocking: true,
-			Summary:   "No problem statement is declared.",
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceProblem, readinesspilot.GuidanceFacts{}),
-			Witnesses: []string{"spec.md frontmatter declares no problem attribute"},
-			Dest:      "#asd-forms"})
-	}
-	if in.OutcomePresent {
-		add(asdConcern{ID: "shape/outcome", Area: asdAreaShape, State: asdStateProven, Blocking: true,
-			Summary: "The outcome statement is present."})
-	} else {
-		add(asdConcern{ID: "shape/outcome", Area: asdAreaShape, State: asdStateViolated, Blocking: true,
-			Summary:   "No outcome statement is declared.",
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceOutcome, readinesspilot.GuidanceFacts{}),
-			Witnesses: []string{"spec.md frontmatter declares no outcome attribute"},
-			Dest:      "#asd-forms"})
-	}
-	for _, oq := range in.OpenQuestions {
-		if len(oq.ClaimedBySlugs) > 0 {
-			// A spike stub's `resolves` claims this question (PLAN.md §7
-			// I-128 option (a); spec/uat-round-1 ac-10): non-blocking, and
-			// acceptance does not need a wall edit — the spike answers it
-			// after acceptance (readinesspilot.Guidance, shared with the
-			// readiness derivation, SI-338 (1)).
-			//
-			// Two or more stubs may claim one question (the wall's own
-			// multi-claim observation, boardspecrender.go's oq-claims
-			// chip), so the head noun agrees with the count. The renameable
-			// class word itself stays the attributive SINGULAR both sibling
-			// surfaces speak — readinesspilot's "<word> stubs" and the stub
-			// cards' "<word> stub" — so the display plural
-			// (model.DisplayClassPlural) belongs to the chip, where that
-			// word is the head noun, and never here.
-			stubNoun := "stub"
-			if len(oq.ClaimedBySlugs) > 1 {
-				stubNoun = "stubs"
-			}
-			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
-				Summary: "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
-				Guidance: readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{
-					Object: oq.ID, SpikeWord: in.SpikeWord, ClaimingStubs: len(oq.ClaimedBySlugs),
-				}),
-				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
-				Dest:      "#obj-" + oq.ID})
-			continue
-		}
-		add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: true,
-			Summary:   "Open question " + oq.ID + " is unresolved: " + oq.Text,
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: oq.ID}),
-			Witnesses: []string{"declared open question " + oq.ID},
-			Dest:      "#obj-" + oq.ID})
-	}
-	if in.OpenStickyCount > 0 {
-		add(asdConcern{ID: "shape/board", Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
-			Summary:   fmt.Sprintf("%d open scratch record(s) sit on the wall.", in.OpenStickyCount),
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceScratch, readinesspilot.GuidanceFacts{}),
-			Witnesses: []string{fmt.Sprintf("%d open annotation record(s) on this board", in.OpenStickyCount)}})
-	}
-
-	// -- show-success: Define success -----------------------------------
-	if len(in.ACs) == 0 {
-		add(asdConcern{ID: "success/criteria", Area: asdAreaSuccess, State: asdStateViolated, Blocking: true,
-			Summary:   "No acceptance criteria are declared.",
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceCriteria, readinesspilot.GuidanceFacts{}),
-			Witnesses: []string{"spec.md frontmatter declares no acceptance_criteria"},
-			Dest:      "#asd-forms"})
-	} else {
-		add(asdConcern{ID: "success/criteria", Area: asdAreaSuccess, State: asdStateProven, Blocking: true,
-			Summary: fmt.Sprintf("%d acceptance criteria are declared.", len(in.ACs))})
-		for _, ac := range in.ACs {
-			if ac.EvidenceCount == 0 {
-				add(asdConcern{ID: "success/evidence/" + ac.ID, Area: asdAreaSuccess, State: asdStateUnproven, Blocking: false,
-					Summary:   "Acceptance criterion " + ac.ID + " declares no evidence kinds.",
-					Guidance:  "Declare how " + ac.ID + " will be proven (typed operation set-ac-evidence).",
-					Witnesses: []string{ac.ID + " evidence list is empty"},
-					Dest:      "#obj-" + ac.ID})
-			}
-		}
-	}
-	for _, acID := range in.UncoveredACs {
-		add(asdConcern{ID: "success/coverage/" + acID, Area: asdAreaSuccess, State: asdStateUnproven, Blocking: false,
-			Summary:   "No stub covers acceptance criterion " + acID + " yet.",
-			Guidance:  readinesspilot.Guidance(readinesspilot.GuidanceCoverage, readinesspilot.GuidanceFacts{Object: acID}),
-			Witnesses: []string{"declared stub coverage count for " + acID + " is 0"},
-			Dest:      "#obj-" + acID})
-	}
-
-	// -- check-context: Check constraints -------------------------------
-	switch {
-	case !in.DesignWired:
-		add(asdConcern{ID: "context/capabilities", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "Design capabilities are unavailable: the design application service is not wired on this server.",
-			Guidance:  "Run the workbench through `verdi serve`, which wires the design application service.",
-			Witnesses: []string{"design-service-unwired"}})
-	case in.Caps != nil:
-		witnesses := []string{"design_assistance mode " + in.Caps.PolicyMode, "effective policy digest " + in.Caps.PolicyDigest}
-		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateProven, Blocking: true,
-			Summary:   "Design-assistance policy is adopted (mode " + in.Caps.PolicyMode + ").",
-			Witnesses: witnesses})
-		switch {
-		case in.Caps.Mutable:
-			add(asdConcern{ID: "context/agent-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
-				// vocab:identity — "draft writes"/"draft-write" is the design_assistance mode's own enum family (AC-3), not the lifecycle state word
-				Summary:   "Delegated agents may apply typed draft writes here.",
-				Witnesses: []string{"mutable=true for the delegated-agent posture"}})
-		case in.Caps.RefusalPrecondition == "policy-mode":
-			// The ONE agent-specific precondition (review fix I-1):
-			// AuthorizePolicy's mode gate binds delegated agents alone —
-			// the browser human writes regardless of design_assistance
-			// mode.
-			add(asdConcern{ID: "context/agent-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
-				// vocab:identity — "this draft" names AC-1's canonical draft (ASD protocol term), not a lifecycle state word
-				Summary:   "Delegated agents cannot write to this draft (" + in.Caps.RefusalPrecondition + ").",
-				Witnesses: []string{in.Caps.RefusalDetail}})
-		default:
-			// design-branch and proposal-state bind EVERY writer
-			// (AuthorizeState runs for human and agent alike) — agent-only
-			// wording here would invite the human into a doomed edit
-			// (review fix I-1).
-			add(asdConcern{ID: "context/draft-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
-				// vocab:identity — "draft writes" is the ASD mutation contract's protocol phrasing (AC-1), not the lifecycle state word
-				Summary:   "Typed draft writes are refused here for humans and agents alike (" + in.Caps.RefusalPrecondition + ").",
-				Witnesses: []string{in.Caps.RefusalDetail}})
-		}
-	case guide.Kind == policyGuideNotAdopted:
-		// The ONE refusal that means genuine non-adoption (draftmutation's
-		// own discriminant, never the code alone) — in the SERVING CHECKOUT:
-		// the source resolves .verdi/policy on this checkout's filesystem,
-		// so an older branch can lack policy the project already accepted.
-		// The row states the checkout fact and sends the reader to inspect
-		// the accepted snapshot before any initial setup; it infers no cause
-		// for the gap (branch age, deletion, or otherwise).
-		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
-			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted, run verdi policy adopt --starter from the project root; human editing does not require one.",
-			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
-			Dest:      "#" + policySetupGuideID})
-	case guide.Kind == policyGuideNoDesignAssistance:
-		// Policy authority resolved, but it grants no design assistance
-		// (ResolvePolicyGrant's missing-design_assistance refusal). The
-		// adopted policy is neither absent nor unaccepted: the refusal's own
-		// detail is carried verbatim, never rewritten as non-adoption.
-		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); " + policyEditingClause(in.Mode, "browser editing proceeds under that policy's sealed digest."),
-			Guidance:  "Design assistance needs a design_assistance payload in the project's effective policy, proposed and reviewed through the project's own process; human editing does not require one. The policy guide below names the read-only checks.",
-			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
-			Dest:      "#" + policySetupGuideID})
-	default:
-		detail := "capabilities unavailable"
-		if in.CapsFailure != nil {
-			detail = in.CapsFailure.Code + ": " + in.CapsFailure.Detail
-		}
-		add(asdConcern{ID: "context/capabilities", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "Design capabilities could not be derived for this wall.",
-			Guidance:  "Resolve the named failure, then refresh.",
-			Witnesses: []string{detail}})
-	}
-	if in.PinnedContext > 0 {
-		add(asdConcern{ID: "context/pinned", Area: asdAreaContext, State: asdStateProven, Blocking: false,
-			Summary:   fmt.Sprintf("%d pinned context reference(s) are declared.", in.PinnedContext),
-			Witnesses: []string{fmt.Sprintf("context: declares %d pinned ref(s)", in.PinnedContext)}})
-	}
-
-	// -- request-review: Get approval -----------------------------------
-	if in.Dirty {
-		add(asdConcern{ID: "review/worktree", Area: asdAreaReview, State: asdStateUnproven, Blocking: true,
-			Summary:   "Uncommitted changes sit on this working tree.",
-			Guidance:  "Commit & push to file the proposal on " + in.Branch + " — review reads the committed head.",
-			Witnesses: []string{"git status reports a dirty working tree"},
-			Dest:      "#asd-git"})
-	} else {
-		add(asdConcern{ID: "review/worktree", Area: asdAreaReview, State: asdStateProven, Blocking: true,
-			Summary: "The working tree is clean: the proposal is filed on " + in.Branch + "."})
-	}
-	switch {
-	case in.StateFormal == string(specstate.AcceptedPendingBuild):
-		add(asdConcern{ID: "review/acceptance", Area: asdAreaReview, State: asdStateProven, Blocking: true,
-			// vocab:identity — non-vocabulary homograph: the forge's merge (owner's merge of the PR), never the `merge` lifecycle transition word
-			Summary:     "This revision is accepted: the owner's merge made it reachable from the default branch.",
-			HumanReview: true,
-			Witnesses:   []string{"Git-derived state " + in.StateFormal}})
-	case in.UnderReview:
-		add(asdConcern{ID: "review/acceptance", Area: asdAreaReview, State: asdStateUnproven, Blocking: true,
-			// vocab:identity — non-vocabulary homograph: the forge's merge request/owner's merge, never the `merge` lifecycle transition word
-			Summary: "Human review is open: this wall mirrors the proposal's merge request.",
-			// vocab:identity — non-vocabulary homograph: the forge's merge request/owner's merge, never the `merge` lifecycle transition word
-			Guidance:    "The owner's merge of the open merge request is the single acceptance decision — no second ceremony.",
-			HumanReview: true,
-			// vocab:identity — non-vocabulary homograph: the forge's merge request/authorizes-merge, never the `merge` lifecycle transition word
-			Witnesses: []string{"an open merge request mirrors this spec", "AC-6/DC-15: the profile-required review of the exact proposed head authorizes merge"}})
-	default:
-		add(asdConcern{ID: "review/acceptance", Area: asdAreaReview, State: asdStateUnproven, Blocking: true,
-			Summary: "Human review has not accepted this proposal yet.",
-			// vocab:identity — non-vocabulary homograph: the forge's owner's-merge of the pull request, never the `merge` lifecycle transition word
-			Guidance:    "Derive the semantic review packet (Semantic review, below), open a pull request from " + in.Branch + ", and request the owner's review — the owner's merge is the single acceptance decision.",
-			HumanReview: true,
-			// vocab:identity — non-vocabulary homograph: authorizes-merge is the forge gate, never the `merge` lifecycle transition word
-			Witnesses: []string{"Git-derived state " + in.StateFormal, "AC-6/DC-15: the profile-required review of the exact proposed head authorizes merge; no separate acceptance command exists"}})
-	}
-
-	shell := assembleASDShell(all)
-	shell.PolicySetupGuide = guide.Kind
-	shell.PolicyCode = guide.Code
-	shell.PolicyDetail = guide.Detail
-	return shell
-}
-
-// assembleASDShell computes area states, focus, ordering, and the
-// downstream-violated count from the complete concern list.
-func assembleASDShell(all []asdConcern) asdShell {
-	areaIndex := map[asdAreaID]int{}
-	for i, id := range asdAreaOrder {
-		areaIndex[id] = i
-	}
-	// Lossless ordering for All: area order, then concern id.
-	sort.SliceStable(all, func(i, j int) bool {
-		if areaIndex[all[i].Area] != areaIndex[all[j].Area] {
-			return areaIndex[all[i].Area] < areaIndex[all[j].Area]
-		}
-		return all[i].ID < all[j].ID
-	})
-
-	stateRank := map[string]int{asdStateViolated: 0, asdStateUnproven: 1}
-	areas := make([]asdArea, 0, len(asdAreaOrder))
-	for _, id := range asdAreaOrder {
-		state := asdStateProven
-		for _, c := range all {
-			if c.Area != id || !c.Blocking {
-				continue
-			}
-			if c.State == asdStateViolated {
-				state = asdStateViolated
-				break
-			}
-			if c.State == asdStateUnproven {
-				state = asdStateUnproven
-			}
-		}
-		areas = append(areas, asdArea{ID: id, Label: asdAreaLabels[id], State: state})
-	}
-	var focus asdAreaID
-	for _, a := range areas {
-		if a.State != asdStateProven {
-			focus = a.ID
-			break
-		}
-	}
-
-	var attention []asdConcern
-	for _, c := range all {
-		if c.State != asdStateProven {
-			attention = append(attention, c)
-		}
-	}
-	focusIdx, focused := areaIndex[focus], focus != ""
-	sort.SliceStable(attention, func(i, j int) bool {
-		a, b := attention[i], attention[j]
-		// SI-125: current-area unresolved rows first.
-		if focused {
-			ai, bi := a.Area == focus, b.Area == focus
-			if ai != bi {
-				return ai
-			}
-		}
-		if a.Blocking != b.Blocking {
-			return a.Blocking
-		}
-		if stateRank[a.State] != stateRank[b.State] {
-			return stateRank[a.State] < stateRank[b.State]
-		}
-		if areaIndex[a.Area] != areaIndex[b.Area] {
-			return areaIndex[a.Area] < areaIndex[b.Area]
-		}
-		return a.ID < b.ID
-	})
-
-	downstream := 0
-	if focused {
-		for _, c := range all {
-			if c.State == asdStateViolated && areaIndex[c.Area] > focusIdx {
-				downstream++
-			}
-		}
-	}
-	return asdShell{Areas: areas, CurrentFocus: focus, Attention: attention, All: all, DownstreamViolated: downstream}
 }
 
 // asdEdgeFact is one stored spec-layer link tuple, keyed by the rendered
@@ -549,14 +110,6 @@ type asdView struct {
 	StateFormal      string
 	StateLabel       string
 	RelationDiverged bool
-
-	// Shell.
-	Shell asdShell
-
-	// Capabilities facts (agent posture; browser gating rides Mode).
-	Caps        *DesignCapabilitiesView
-	CapsFailure *DesignFailure
-	DesignWired bool
 
 	// Client mutation facts.
 	BaseDigest       string
@@ -636,10 +189,10 @@ func (s *boardSpecServer) postureView(ctx context.Context, proj *BoardProjection
 }
 
 // buildASDView assembles the complete ASD render facts for one loaded
-// board. It performs the page's one capabilities consultation (a cited
-// designapp predecessor API — SI-168 disclosure) and the header's Git
-// fact reads; everything else is a pure function of the already-decoded
-// inputs.
+// board. It performs the header's Git fact reads; everything else is a
+// pure function of the already-decoded inputs. The wall consults no
+// capabilities: the policy setup guide those chose is the Readiness tab's
+// (SI-368 (3), (30)(c)), which consults them when it opens.
 func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *BoardProjection, git *boardGitState, raw []byte, fm *artifact.SpecFrontmatter, st specstate.Result) (*asdView, error) {
 	v := s.postureView(ctx, proj, git, raw, st, resolvePostureHeads(ctx, s.root, git, s.posture))
 	v.BaseSpecB64 = base64.StdEncoding.EncodeToString(raw)
@@ -647,14 +200,6 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 	v.ImportRecordHref = specImportRecordHrefFor(s.root, git.Branch, name)
 	worktreeHead := v.WorktreeHead
 
-	if s.design != nil {
-		v.DesignWired = true
-		// v.AcceptedHead is this render's own fresh resolution above —
-		// the memo key rides it without a second git call (finding 1).
-		view, failure := s.cachedCapabilities(ctx, name, git.Branch, worktreeHead, v.AcceptedHead, v.BaseDigest)
-		v.Caps = view
-		v.CapsFailure = failure
-	}
 	if proj.Mode == modeAuthoring && worktreeHead != "" && git.Branch != "" {
 		// The kernel's canonical checkout path is resolved once and cached
 		// (stable per server); branch and HEAD are this render's own fresh
@@ -723,53 +268,6 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		}
 	}
 
-	// Shell input.
-	in := asdShellInput{
-		ProblemPresent:  proj.Problem != "",
-		OutcomePresent:  proj.Outcome != "",
-		OpenStickyCount: len(proj.Stickies),
-		Class:           proj.Class,
-		Mode:            string(proj.Mode),
-		Dirty:           git.Dirty,
-		Branch:          git.Branch,
-		StateFormal:     string(st.State),
-		UnderReview:     proj.Mode == modeReview,
-		DesignWired:     v.DesignWired,
-		Caps:            v.Caps,
-		CapsFailure:     v.CapsFailure,
-		PinnedContext:   len(fm.Context),
-		SpikeWord:       proj.words.word("spike"),
-	}
-	claimedBy := map[string][]string{}
-	for _, st := range fm.Stubs {
-		if !st.Spike {
-			continue
-		}
-		for _, oqID := range st.Resolves {
-			claimedBy[oqID] = append(claimedBy[oqID], st.Slug)
-		}
-	}
-	for _, oq := range fm.OpenQuestions {
-		fact := asdObjectFact{ID: oq.ID, Text: oq.Text}
-		if slugs := claimedBy[oq.ID]; len(slugs) > 0 {
-			sorted := append([]string(nil), slugs...)
-			sort.Strings(sorted)
-			fact.ClaimedBySlugs = sorted
-		}
-		in.OpenQuestions = append(in.OpenQuestions, fact)
-	}
-	for _, ac := range fm.AcceptanceCriteria {
-		in.ACs = append(in.ACs, asdACFact{ID: ac.ID, EvidenceCount: len(ac.Evidence)})
-	}
-	if proj.Class == string(artifact.ClassFeature) {
-		for _, c := range proj.Cards {
-			if boardlayout.ZoneKind(c.Kind) == boardlayout.ZoneAC && proj.ACCoverage[c.ID] == 0 {
-				in.UncoveredACs = append(in.UncoveredACs, c.ID)
-			}
-		}
-		sort.Strings(in.UncoveredACs)
-	}
-	v.Shell = deriveASDShell(in)
 	return v, nil
 }
 
@@ -999,79 +497,4 @@ func asdCountLabel(n int, singular, plural string) string {
 		return strconv.Itoa(n) + " " + singular
 	}
 	return strconv.Itoa(n) + " " + plural
-}
-
-// capsCacheEntry is one memoized capabilities consultation — successful
-// consultations only (an operational failure is never memoized).
-type capsCacheEntry struct {
-	view *DesignCapabilitiesView
-}
-
-// policyStamp fingerprints the working tree's policy authority inputs
-// (.verdi/policy file names, sizes, and mtimes) so a live policy edit
-// invalidates the capabilities memo without re-running the full policy
-// resolution per poll. Errors and absence stamp distinctly.
-func (s *boardSpecServer) policyStamp() string {
-	h := sha256.New()
-	root := filepath.Join(s.root, ".verdi", "policy")
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return infoErr
-		}
-		fmt.Fprintf(h, "%s|%d|%d\n", path, info.Size(), info.ModTime().UnixNano())
-		return nil
-	})
-	if err != nil {
-		fmt.Fprintf(h, "err|%v", err)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// cachedCapabilities memoizes the designapp capabilities consultation per
-// exact fact key. The consultation itself stays designapp's alone — this
-// is transport-level memoization of an unchanged operation over unchanged
-// inputs, never a second derivation.
-//
-// The key carries the accepted/default-branch head the caller already
-// resolved for this render (Codex correction round 1, finding 1): an
-// owner merge advances the accepted head while the design checkout, its
-// spec bytes, and the policy tree all stay fixed, and the pre-merge
-// Mutable:true posture must never be served on a wall whose accepted
-// state moved. SUCCESS ONLY is memoized (closure N-1, the review-fix I-2
-// shape): an operational failure is returned to that render alone and the
-// next render retries.
-func (s *boardSpecServer) cachedCapabilities(ctx context.Context, name, branch, head, acceptedHead, digest string) (*DesignCapabilitiesView, *DesignFailure) {
-	key := name + "\x00" + branch + "\x00" + head + "\x00" + acceptedHead + "\x00" + digest + "\x00" + s.policyStamp()
-	s.capsMu.Lock()
-	if entry, ok := s.capsCache[key]; ok {
-		s.capsMu.Unlock()
-		return entry.view, nil
-	}
-	s.capsMu.Unlock()
-	outcome, view := s.design.GetDesignCapabilities(ctx, s.root, "spec/"+name)
-	if outcome.Failure != nil {
-		return view, outcome.Failure
-	}
-	s.capsMu.Lock()
-	if s.capsCache == nil {
-		s.capsCache = map[string]capsCacheEntry{}
-	}
-	// Bound the memo: one live entry per spec name (the key embeds every
-	// volatile fact, so replacing is correct and keeps the map from
-	// growing with history).
-	for k := range s.capsCache {
-		if strings.HasPrefix(k, name+"\x00") {
-			delete(s.capsCache, k)
-		}
-	}
-	s.capsCache[key] = capsCacheEntry{view: view}
-	s.capsMu.Unlock()
-	return view, nil
 }

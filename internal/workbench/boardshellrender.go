@@ -1,41 +1,18 @@
 package workbench
 
 // Server-side rendering for the ASD workbench's Wave 6 additions (design
-// §§3.1, 4.2, 6.2): the revision/posture header, the shell's concern row
-// (the readiness pilot's exact presentation idioms — SI-125 plain labels,
-// explicit timing/dependency, plain state chips with the formal state
-// retained in technical details), the policy setup guide the record
-// drawer's Readiness tab carries, and the typed-operation dialogs. The
-// promoted four-area shell, the typed-operation forms panel and the
-// on-demand JSON panels left the wall with the side rail
-// (spec/wall-strip-and-drawer-v2 ac-6, dc-2; SI-368 (27)(c)): the
+// §§3.1, 4.2, 6.2): the revision/posture header, the policy setup guide
+// the record drawer's Readiness tab carries, and the typed-operation
+// dialogs. The promoted four-area shell, the typed-operation forms panel
+// and the on-demand JSON panels left the wall with the side rail
+// (spec/wall-strip-and-drawer-v2 ac-6, dc-2; SI-368 (27)(c)), and the
+// shell's derivation and concern rows are retired (ac-7, dc-4): the
 // drawer's tabs are their home.
 
 import (
 	stdhtml "html"
-	"strconv"
 	"strings"
 )
-
-// asdPlainState maps the formal three-valued state to its plain primary
-// label — the pilot's exact participant-ratified words.
-func asdPlainState(state string) string {
-	switch state {
-	case asdStateProven:
-		return "Ready"
-	case asdStateViolated:
-		return "Needs attention"
-	default:
-		return "Not enough evidence yet"
-	}
-}
-
-// writeASDState writes one plain state chip; the modifier class keeps the
-// formal state machine-readable (e2e asserts chip classes, never label
-// text).
-func writeASDState(b *strings.Builder, state string) {
-	b.WriteString(`<span class="readiness-state readiness-state--` + state + `">` + asdPlainState(state) + `</span>`)
-}
 
 // writeASDPosture renders the top bar's posture group (design §4.2;
 // spec/chrome-and-tokens-v2 ac-2, dc-2): on a page about one spec the
@@ -333,91 +310,6 @@ func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, code, detai
 	}
 	b.WriteString(`</dl><p class="ritual-note">An empty <code>targets</code> list asks for no supplemental previews; it does not waive registered-consumer coverage. Neither <code>adopted: true</code> on the proposed snapshot nor <code>ready_for_submission: true</code> is review approval or acceptance on the default branch.</p></details>`)
 	b.WriteString(`<span hidden data-policy-guide-end></span></section>`)
-}
-
-// writeASDConcern renders one shell row (spec/spec-documents ac-12,
-// R-W4-7), which no wall renders since the shell left it; it retires with
-// the shell's derivation (spec/wall-strip-and-drawer-v2 dc-4, lane
-// F3-go3). The plain primary line is the source-derived guidance (F-03)
-// when the row carries one, otherwise the summary; when both exist the
-// fact stays visible as a secondary line, never hidden behind the
-// instruction. The plain state chip, the plain human-review label (F-05),
-// and the complete technical details follow; explicit timing/dependency
-// (F-02) rides the disclosure as a Timing row and data-timing on the
-// article — proven rows carry none. No derivation changes here.
-func writeASDConcern(b *strings.Builder, c asdConcern, asd *asdView, rank int) {
-	esc := stdhtml.EscapeString
-	class := "readiness-row"
-	if rank > 0 {
-		class = "readiness-card"
-	}
-	// Explicit timing and dependency (F-02): current-step rows say "now";
-	// later-step rows name what they wait on. Same condition the former
-	// inline stage-line span used.
-	timing, timingFact := "", ""
-	if asd.Shell.CurrentFocus != "" && c.State != asdStateProven {
-		if c.Area == asd.Shell.CurrentFocus {
-			timing, timingFact = "now", "now"
-		} else if asdAreaAfter(c.Area, asd.Shell.CurrentFocus) {
-			timing, timingFact = "later", "later — waits on "+asdAreaLabels[asd.Shell.CurrentFocus]
-		}
-	}
-	b.WriteString(`<article class="` + class + ` readiness-concern--` + esc(c.State) + `" data-concern-id="` + esc(c.ID) + `" data-area-id="` + esc(string(c.Area)) + `"`)
-	if timing != "" {
-		b.WriteString(` data-timing="` + timing + `"`)
-	}
-	b.WriteString(`>`)
-	if rank > 0 {
-		b.WriteString(`<span class="readiness-rank">` + strconv.Itoa(rank) + `</span>`)
-	}
-	b.WriteString(`<div class="readiness-copy">`)
-	b.WriteString(`<p class="readiness-stage">` + esc(asdAreaLabels[c.Area]) + `</p>`)
-	if c.HumanReview {
-		b.WriteString(`<p class="asd-human-review" data-testid="asd-human-review">Human review</p>`)
-	}
-	if c.Guidance != "" {
-		b.WriteString(`<p class="readiness-summary" data-testid="asd-guidance-` + esc(c.ID) + `">` + esc(c.Guidance) + `</p>`)
-	} else {
-		b.WriteString(`<p class="readiness-summary" data-testid="asd-summary-` + esc(c.ID) + `">` + esc(c.Summary) + `</p>`)
-	}
-	writeASDState(b, c.State)
-	if c.Guidance != "" {
-		b.WriteString(`<p class="asd-fact" data-testid="asd-fact-` + esc(c.ID) + `">` + esc(c.Summary) + `</p>`)
-	}
-	b.WriteString(`<details class="readiness-tech"><summary>Technical details</summary><dl class="readiness-tech-facts">`)
-	writeReadinessFact(b, "State", c.State)
-	writeReadinessFact(b, "Concern", c.ID)
-	writeReadinessFact(b, "Area", string(c.Area))
-	writeReadinessFact(b, "Blocking", strconv.FormatBool(c.Blocking))
-	if timingFact != "" {
-		writeReadinessFact(b, "Timing", timingFact)
-	}
-	if len(c.Witnesses) > 0 {
-		b.WriteString(`<dt>Witnesses</dt><dd><ul class="readiness-witnesses">`)
-		for _, wtn := range c.Witnesses {
-			b.WriteString(`<li><code>` + esc(wtn) + `</code></li>`)
-		}
-		b.WriteString(`</ul></dd>`)
-	}
-	b.WriteString(`</dl></details>`)
-	if c.Dest != "" && c.State != asdStateProven {
-		b.WriteString(`<p class="readiness-dest"><a class="asd-dest-link" href="` + esc(c.Dest) + `">Go to it</a></p>`)
-	}
-	b.WriteString(`</div></article>`)
-}
-
-// asdAreaAfter reports whether a occurs after b in the fixed area order.
-func asdAreaAfter(a, b asdAreaID) bool {
-	ai, bi := -1, -1
-	for i, id := range asdAreaOrder {
-		if id == a {
-			ai = i
-		}
-		if id == b {
-			bi = i
-		}
-	}
-	return ai > bi
 }
 
 // writeASDEditStubDialog renders the in-place stub correction dialog

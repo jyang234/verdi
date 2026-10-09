@@ -40,9 +40,8 @@ const (
 )
 
 // readinessWallWords is the wall's triad, which the drawer's Readiness
-// tab keeps (SI-368 (14); spec-documents ac-12): the words the wall
-// shell's state chips speak (asdPlainState), never the page's (SI-339
-// (10)). The stepper's count words read as a count of items (SI-368
+// tab keeps (SI-368 (14); spec-documents ac-12): the words the retired
+// wall shell's state chips spoke, never the page's (SI-339 (10)). The stepper's count words read as a count of items (SI-368
 // (24)(h)): "1 needs attention", "2 need attention", "3 ready", "1
 // without enough evidence yet".
 func readinessWallWords() readinessWords {

@@ -22,10 +22,9 @@ import (
 	"github.com/jyang234/verdi/internal/draftmutation"
 )
 
-// testASDView is the render tests' minimal valid ASD view: empty maps,
-// no capabilities, a derived shell over empty facts — enough for every
-// pre-Wave-6 render assertion to keep exercising its own concern while
-// the region now also carries the posture header and shell.
+// testASDView is the render tests' minimal valid ASD view: empty maps —
+// enough for every pre-Wave-6 render assertion to keep exercising its own
+// concern while the region also carries the posture header.
 func testASDView() *asdView {
 	v := &asdView{
 		SlugPattern:    specNameRe.String(),
@@ -35,7 +34,6 @@ func testASDView() *asdView {
 		StickySlugs:    map[string]string{},
 		EdgeFacts:      map[string][]asdEdgeFact{},
 	}
-	v.Shell = deriveASDShell(asdShellInput{})
 	return v
 }
 

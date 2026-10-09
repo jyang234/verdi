@@ -437,9 +437,9 @@ func (b *branchBoards) serveSealedReadiness(w http.ResponseWriter, r *http.Reque
 
 // sealedASDView is the degraded ASD view for a remote-only branch's
 // sealed render: no working tree exists, so there is no base to mutate
-// against, no expected identity, and no capabilities consultation — each
-// disclosed honestly (the shell's context row carries the exact reason)
-// rather than fabricated. Its worktree HEAD, default branch, accepted
+// against and no expected identity — each disclosed honestly rather than
+// fabricated; the Readiness tab answers the sealed reason
+// (serveSealedReadiness). Its worktree HEAD, default branch, accepted
 // HEAD, working-tree state, and base digest are unresolved for the same
 // reason, which the posture model records so the posture row and the top
 // bar disclose them — never a false "clean" or an empty digest (SI-323
@@ -463,25 +463,12 @@ func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 		ObjectEvidence: map[string]string{},
 		StickySlugs:    map[string]string{},
 		EdgeFacts:      map[string][]asdEdgeFact{},
-		DesignWired:    true,
-		CapsFailure: &DesignFailure{Classification: "operational", Code: "sealed-remote-board",
-			Detail: "a remote-only branch's board is a read-only render of " + ref + "'s committed content; capabilities require a working tree"},
 	}
 	// The readiness marks are unreadable on the sealed render (SI-352
 	// (1)): its one notice says why, and no card carries a mark.
 	marks := unavailableMarks(marksSealed(ref))
 	v.Marks = &marks
 	v.Pill = fixedPill(v.Marks)
-	v.Shell = deriveASDShell(asdShellInput{
-		ProblemPresent: proj.Problem != "",
-		OutcomePresent: proj.Outcome != "",
-		Class:          proj.Class,
-		Mode:           string(proj.Mode),
-		Branch:         branch,
-		StateFormal:    proj.Status,
-		DesignWired:    true,
-		CapsFailure:    v.CapsFailure,
-	})
 	return v
 }
 

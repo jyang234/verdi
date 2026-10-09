@@ -21,8 +21,8 @@ import (
 
 // TestReadinessWallWords_KeepTheWallTriad (SI-368 (14); spec-documents
 // ac-12): the Readiness tab speaks the wall's triad — the very words the
-// wall shell's chips speak — and never the page's, and the page keeps its
-// own (SI-339 (10)). The tab's count words read as a count of items, the
+// retired wall shell's chips spoke — and never the page's, and the page
+// keeps its own (SI-339 (10)). The tab's count words read as a count of items, the
 // verb agreeing with one item or more (SI-368 (24)(h)); the page's are
 // unchanged.
 func TestReadinessWallWords_KeepTheWallTriad(t *testing.T) {
@@ -36,9 +36,9 @@ func TestReadinessWallWords_KeepTheWallTriad(t *testing.T) {
 		pageCountWord  string
 		shellPlainWord string
 	}{
-		{readinesspilot.StateProven, "Ready", "Proven", "ready", "ready", "proven", asdPlainState(asdStateProven)},
-		{readinesspilot.StateViolated, "Needs attention", "Violated", "needs attention", "need attention", "violated", asdPlainState(asdStateViolated)},
-		{readinesspilot.StateUnproven, "Not enough evidence yet", "Not enough evidence yet", "without enough evidence yet", "without enough evidence yet", "not enough evidence yet", asdPlainState(asdStateUnproven)},
+		{readinesspilot.StateProven, "Ready", "Proven", "ready", "ready", "proven", "Ready"},
+		{readinesspilot.StateViolated, "Needs attention", "Violated", "needs attention", "need attention", "violated", "Needs attention"},
+		{readinesspilot.StateUnproven, "Not enough evidence yet", "Not enough evidence yet", "without enough evidence yet", "without enough evidence yet", "not enough evidence yet", "Not enough evidence yet"},
 	} {
 		t.Run(string(tc.state), func(t *testing.T) {
 			if got := wall.label(tc.state); got != tc.wallLabel || got != tc.shellPlainWord {

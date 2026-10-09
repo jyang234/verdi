@@ -2,18 +2,21 @@ package workbench
 
 // Codex correction (round 1) coverage — Wave 6 Task 2.
 //
-//   - Finding 1: the capabilities memo key must include the accepted/
-//     default-branch head identity (an owner merge advances the accepted
-//     head while checkout, spec bytes, and policy stay fixed — the wall
-//     turns read-only accepted, and a cached pre-merge Mutable:true
-//     posture would claim delegated agents can write on a sealed wall),
-//     and operational failures must never be memoized (closure N-1, the
-//     I-2 poisoning shape: cache successes only). Closure reopen: the
-//     accepted head must be resolved at the AUTHORITATIVE default-branch
-//     rev (specstate.Branch.Ref — origin/<name> when the remote-tracking
-//     ref exists, the projector's own preference), never the local
-//     branch NAME: in the ordinary cloned shape acceptance moves on
-//     origin/<name> while refs/heads/<name> stays a stale shadow.
+//   - Finding 1: a capabilities posture must never be served stale
+//     across an accepted-head advance (an owner merge advances the
+//     accepted head while checkout, spec bytes, and policy stay fixed —
+//     the wall turns read-only accepted, and a cached pre-merge posture
+//     would misstate what may write), and an operational failure must
+//     never be served from a memo (closure N-1, the I-2 poisoning shape).
+//     The wall shell's capabilities memo retired with the shell (SI-368
+//     (30)(c), (32) T3): the wall consults no capabilities, and the
+//     Readiness tab consults them afresh on every open, its cost recorded
+//     as BL-196's. Closure reopen: the accepted head must be resolved at
+//     the AUTHORITATIVE default-branch rev (specstate.Branch.Ref —
+//     origin/<name> when the remote-tracking ref exists, the projector's
+//     own preference), never the local branch NAME: in the ordinary
+//     cloned shape acceptance moves on origin/<name> while
+//     refs/heads/<name> stays a stale shadow.
 //   - Finding 2: a projection failure AFTER designapp.MutateDraft landed
 //     must disclose the landed transaction, any post-transaction
 //     disclosures, and the projection failure itself, classified
@@ -28,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -36,8 +40,8 @@ import (
 )
 
 // scriptedCapsBridge is testDesignBridge with a scripted, call-counted
-// GetDesignCapabilities: each render's consultation is observable, so a
-// cache hit (call count not advancing) is a first-class assertion.
+// GetDesignCapabilities: each consultation is observable, so a call count
+// that does not advance is a first-class assertion.
 type scriptedCapsBridge struct {
 	testDesignBridge
 	mu     sync.Mutex
@@ -102,8 +106,9 @@ func revParse(t *testing.T, root, ref string) string {
 // stale shadow. In each shape acceptance advances on the AUTHORITATIVE
 // ref while the design checkout, its HEAD, the spec bytes, and the
 // policy tree are all held fixed — and the second render's accepted-head
-// facts (memo key, posture-header AcceptedHead, ahead/behind) must all
-// follow that ref, freshly consulted.
+// facts (posture-header AcceptedHead, ahead/behind) must follow that ref,
+// while the capabilities posture the wall shows, in its Readiness tab's
+// policy guide, is consulted afresh (SI-368 (32) T3).
 func TestCachedCapabilities_RefreshesOnAcceptedHeadAdvance(t *testing.T) {
 	t.Run("local-branch authority (no origin ref)", func(t *testing.T) {
 		root := newBoardFixture(t)
@@ -122,36 +127,63 @@ func TestCachedCapabilities_RefreshesOnAcceptedHeadAdvance(t *testing.T) {
 	})
 }
 
+// forbiddenCaps is a capabilities consultation refused policy-forbidden
+// with detail.
+func forbiddenCaps(detail string) (DesignReadOutcome, *DesignCapabilitiesView) {
+	return DesignReadOutcome{Failure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: detail}}, nil
+}
+
+// openGuide GETs the wall's Readiness tab on h and returns the policy
+// guide's variant it carries, "" for none.
+func openGuide(t *testing.T, h http.Handler, name string) string {
+	t.Helper()
+	rec := tabGet(t, t.Context(), h, "/board/spec/"+name+"/readiness")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s's tab = %d\n%s", name, rec.Code, rec.Body.String())
+	}
+	m := regexp.MustCompile(`data-policy-guide="([^"]*)"`).FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 // assertAcceptedAdvanceRefreshes renders once, advances ONLY the named
 // authority ref (same tree), renders again, and asserts the second
-// render's accepted-head facts ride the authoritative ref with a fresh
-// capabilities consultation.
+// render's accepted-head facts ride the authoritative ref, that neither
+// render consults capabilities (the wall shows none: F3CR-7), and that
+// the Readiness tab opened after the advance shows the fresh posture, not
+// the one before it.
 func assertAcceptedAdvanceRefreshes(t *testing.T, root, advanceable, authorityRef string) {
 	t.Helper()
 	bridge := &scriptedCapsBridge{script: func(call int) (DesignReadOutcome, *DesignCapabilitiesView) {
 		if call == 1 {
-			return DesignReadOutcome{JSON: []byte(`{}`)}, &DesignCapabilitiesView{Mutable: true, PolicyMode: "draft-write", PolicyDigest: "sha256:caps-1"}
+			return forbiddenCaps(policyNotAdoptedDetail)
 		}
-		return DesignReadOutcome{JSON: []byte(`{}`)}, &DesignCapabilitiesView{Mutable: false, RefusalPrecondition: "policy-mode", RefusalDetail: "design_assistance mode off forbids delegated-agent writes", PolicyMode: "off", PolicyDigest: "sha256:caps-2"}
+		return forbiddenCaps(noDesignAssistanceDetail)
 	}}
 	s := &boardSpecServer{root: root, design: bridge}
+	h := NewHandlerWith(root, Deps{Design: bridge})
 	ctx := context.Background()
 
 	_, _, first, err := s.loadASD(ctx, boardFixtureName)
 	if err != nil {
 		t.Fatalf("first loadASD: %v", err)
 	}
-	if first.Caps == nil || !first.Caps.Mutable {
-		t.Fatalf("first render Caps = %+v, want the scripted Mutable:true posture", first.Caps)
+	if got := bridge.callCount(); got != 0 {
+		t.Fatalf("the wall's render consulted capabilities %d times, want none (F3CR-7)", got)
 	}
 	if !first.AheadBehindKnown {
 		t.Fatal("first render resolved no ahead/behind; the fixture cannot witness the counts riding the authoritative ref")
+	}
+	if got := openGuide(t, h, boardFixtureName); got != string(policyGuideNotAdopted) {
+		t.Fatalf("the tab before the advance shows guide %q, want the scripted %q", got, policyGuideNotAdopted)
 	}
 
 	advanceRef(t, root, advanceable)
 	authorityHead := revParse(t, root, authorityRef)
 	if authorityHead == first.AcceptedHead {
-		t.Fatalf("the authoritative ref %s did not advance (%q); the fixture cannot exercise the memo key", authorityRef, authorityHead)
+		t.Fatalf("the authoritative ref %s did not advance (%q); the fixture cannot exercise the advance", authorityRef, authorityHead)
 	}
 
 	_, _, second, err := s.loadASD(ctx, boardFixtureName)
@@ -167,70 +199,48 @@ func assertAcceptedAdvanceRefreshes(t *testing.T, root, advanceable, authorityRe
 	// state projector reads accepted bytes at — never a stale local
 	// shadow (the posture header prints exactly this value).
 	if second.AcceptedHead != authorityHead {
-		t.Fatalf("render 2 AcceptedHead = %q, want the authoritative %s head %q — the posture header prints a stale accepted head and the memo key cannot see the advance", second.AcceptedHead, authorityRef, authorityHead)
+		t.Fatalf("render 2 AcceptedHead = %q, want the authoritative %s head %q — the posture header prints a stale accepted head", second.AcceptedHead, authorityRef, authorityHead)
 	}
 	// Ahead/behind rides the same ref: one same-tree commit landed on it.
 	if !second.AheadBehindKnown || second.Behind != first.Behind+1 {
 		t.Fatalf("render 2 behind = %d (known %v), want %d: ahead/behind is not counted against the authoritative ref", second.Behind, second.AheadBehindKnown, first.Behind+1)
 	}
-	// The posture must be FRESH, not the cached pre-advance one.
+	// The posture must be FRESH, never the one before the advance.
+	if got := openGuide(t, h, boardFixtureName); got != string(policyGuideNoDesignAssistance) {
+		t.Fatalf("the tab after the advance shows guide %q, want the fresh %q — a stale posture was served", got, policyGuideNoDesignAssistance)
+	}
 	if got := bridge.callCount(); got != 2 {
-		t.Fatalf("capabilities consultations = %d, want 2: the memo served a stale posture across an accepted-head advance", got)
-	}
-	if second.Caps == nil || second.Caps.Mutable {
-		t.Fatalf("second render Caps = %+v, want the fresh Mutable:false policy-mode refusal — the wall claims delegated agents can write on a wall whose accepted state moved", second.Caps)
-	}
-	if second.Caps.RefusalPrecondition != "policy-mode" {
-		t.Fatalf("second render RefusalPrecondition = %q, want the fresh %q", second.Caps.RefusalPrecondition, "policy-mode")
+		t.Fatalf("capabilities consultations = %d, want 2: one per tab open, none by the wall's renders", got)
 	}
 }
 
 // TestCachedCapabilities_RetriesAfterOperationalFailure pins closure N-1:
-// an operational capabilities failure is returned to that render alone
-// and never memoized — the next render with identical facts re-consults
-// (the review-fix I-2 shape, applied to the capabilities memo). The
-// following render then proves the SUCCESS is cached.
+// an operational capabilities failure is answered to that request alone
+// and never served again — the next open with identical facts consults
+// afresh (the review-fix I-2 shape). With the memo retired (SI-368 (32)
+// T3), every open of the Readiness tab consults exactly once, success or
+// failure, and nothing is served from a memo.
 func TestCachedCapabilities_RetriesAfterOperationalFailure(t *testing.T) {
 	root := newBoardFixture(t)
 	bridge := &scriptedCapsBridge{script: func(call int) (DesignReadOutcome, *DesignCapabilitiesView) {
 		if call == 1 {
 			return DesignReadOutcome{Failure: &DesignFailure{Classification: "operational", Code: "io-failure", Detail: "transient: simulated first-consultation failure"}}, nil
 		}
-		return DesignReadOutcome{JSON: []byte(`{}`)}, &DesignCapabilitiesView{Mutable: true, PolicyMode: "draft-write", PolicyDigest: "sha256:caps-ok"}
+		return forbiddenCaps(policyNotAdoptedDetail)
 	}}
-	s := &boardSpecServer{root: root, design: bridge}
-	ctx := context.Background()
+	h := NewHandlerWith(root, Deps{Design: bridge})
 
-	_, _, first, err := s.loadASD(ctx, boardFixtureName)
-	if err != nil {
-		t.Fatalf("first loadASD: %v", err)
+	if got := openGuide(t, h, boardFixtureName); got != "" {
+		t.Fatalf("the tab shows guide %q on an operational failure, want none", got)
 	}
-	if first.CapsFailure == nil || first.CapsFailure.Code != "io-failure" {
-		t.Fatalf("first render CapsFailure = %+v, want the scripted io-failure", first.CapsFailure)
-	}
-
-	_, _, second, err := s.loadASD(ctx, boardFixtureName)
-	if err != nil {
-		t.Fatalf("second loadASD: %v", err)
+	if got := openGuide(t, h, boardFixtureName); got != string(policyGuideNotAdopted) {
+		t.Fatalf("the second open shows guide %q, want the retried consultation's %q", got, policyGuideNotAdopted)
 	}
 	if got := bridge.callCount(); got != 2 {
-		t.Fatalf("capabilities consultations = %d, want 2: the operational failure was served from the memo instead of being retried", got)
+		t.Fatalf("capabilities consultations = %d, want 2: the operational failure was served again instead of retried", got)
 	}
-	if second.CapsFailure != nil || second.Caps == nil || !second.Caps.Mutable {
-		t.Fatalf("second render = (caps %+v, failure %+v), want the retried Mutable:true success", second.Caps, second.CapsFailure)
-	}
-
-	// The success IS memoized: a third identical render answers from the
-	// cache without a fourth consultation.
-	_, _, third, err := s.loadASD(ctx, boardFixtureName)
-	if err != nil {
-		t.Fatalf("third loadASD: %v", err)
-	}
-	if got := bridge.callCount(); got != 2 {
-		t.Fatalf("capabilities consultations after the cached success = %d, want still 2", got)
-	}
-	if third.Caps == nil || !third.Caps.Mutable {
-		t.Fatalf("third render Caps = %+v, want the cached success", third.Caps)
+	if got := openGuide(t, h, boardFixtureName); got != string(policyGuideNotAdopted) || bridge.callCount() != 3 {
+		t.Fatalf("the third open shows guide %q after %d consultations, want %q after 3: each open consults afresh", got, bridge.callCount(), policyGuideNotAdopted)
 	}
 }
 
