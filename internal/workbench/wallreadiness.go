@@ -75,9 +75,12 @@ func readinessTabSurface(targets map[string]readinessTarget) readinessSurface {
 // marks' rule (stubSlugsByConcern), so two stubs sharing the concern
 // leave it selecting nothing rather than a guessed card (SI-362 (3));
 // the problem and outcome rows select their half of the case-file strip
-// and the criteria row the criteria column's add slot. Every other
-// concern has no entry: a plain row that selects nothing.
-func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stubSlugs []string) map[string]readinessTarget {
+// where the wall draws that half (halves, caseStripHalves: a spec lacking
+// a problem has no problem half, so its row selects nothing rather than
+// shutting the drawer onto nothing) and the criteria row the criteria
+// column's add slot. Every other concern has no entry: a plain row that
+// selects nothing.
+func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stubSlugs []string, halves map[string]bool) map[string]readinessTarget {
 	stubs := stubSlugsByConcern(stubSlugs)
 	targets := make(map[string]readinessTarget, len(snap.AllConcerns))
 	for _, c := range snap.AllConcerns {
@@ -86,9 +89,9 @@ func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stu
 			targets[c.ID] = readinessTarget{Kind: readinessTargetObject, Value: c.Object}
 		case len(stubs[c.ID]) == 1:
 			targets[c.ID] = readinessTarget{Kind: readinessTargetStub, Value: stubs[c.ID][0]}
-		case c.ID == "shape/problem":
+		case c.ID == "shape/problem" && halves["problem"]:
 			targets[c.ID] = readinessTarget{Kind: readinessTargetStrip, Value: "problem"}
-		case c.ID == "shape/outcome":
+		case c.ID == "shape/outcome" && halves["outcome"]:
 			targets[c.ID] = readinessTarget{Kind: readinessTargetStrip, Value: "outcome"}
 		case c.ID == "success/criteria":
 			targets[c.ID] = readinessTarget{Kind: readinessTargetSlot, Value: string(boardlayout.ZoneAC)}
@@ -180,7 +183,18 @@ func (s *boardSpecServer) readinessTab(ctx context.Context, name string, fm *art
 	for _, st := range fm.Stubs {
 		stubs = append(stubs, st.Slug)
 	}
-	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs)) + guide
+	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs, caseStripHalves(fm))) + guide
+}
+
+// caseStripHalves is the case-file strip's halves the wall renders for
+// fm: a half is on the wall exactly when its statement has text
+// (buildProjection, writeCaseStrip), so a spec lacking a problem has no
+// problem half to go to.
+func caseStripHalves(fm *artifact.SpecFrontmatter) map[string]bool {
+	return map[string]bool{
+		"problem": fm.Problem != nil && fm.Problem.Text != "",
+		"outcome": fm.Outcome != nil && fm.Outcome.Text != "",
+	}
 }
 
 // readinessTabGuide is the policy setup guide the Readiness tab carries

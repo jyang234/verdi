@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/gitx/readcensus"
@@ -148,12 +149,63 @@ func TestReadinessTargets(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap := readinesspilot.Snapshot{AllConcerns: []readinesspilot.Concern{tc.concern}}
-			got, ok := readinessTargets(snap, objects, tc.stubs)[tc.concern.ID]
+			got, ok := readinessTargets(snap, objects, tc.stubs, map[string]bool{"problem": true, "outcome": true})[tc.concern.ID]
 			switch {
 			case tc.want == nil && ok:
 				t.Fatalf("target = %+v, want none", got)
 			case tc.want != nil && (!ok || got != *tc.want):
 				t.Fatalf("target = %+v (%v), want %+v", got, ok, *tc.want)
+			}
+		})
+	}
+}
+
+// TestReadinessTargets_StripHalfOnTheWall (SI-368 (16), (28)(a); F3BR-2):
+// the problem and outcome rows target their half of the case-file strip
+// only where the wall renders that half, and are plain rows otherwise, so
+// a click never shuts the drawer onto nothing. shape/problem is
+// unresolved exactly when the spec lacks a problem, the very case whose
+// half is gone. Each case is checked against the strip the region itself
+// renders for that spec: a half is targeted exactly when it is drawn.
+func TestReadinessTargets_StripHalfOnTheWall(t *testing.T) {
+	stated := func(text, anchor string) *artifact.Attribute {
+		return &artifact.Attribute{Text: text, Anchor: anchor}
+	}
+	for _, tc := range []struct {
+		name             string
+		problem, outcome *artifact.Attribute
+		want             map[string]bool // the halves the problem and outcome rows target
+	}{
+		{"both stated", stated("p", "#problem"), stated("o", "#outcome"), map[string]bool{"problem": true, "outcome": true}},
+		{"a spec that lacks a problem", nil, stated("o", "#outcome"), map[string]bool{"outcome": true}},
+		{"a spec that lacks an outcome", stated("p", "#problem"), nil, map[string]bool{"problem": true}},
+		{"an empty problem statement", stated("", "#problem"), stated("o", "#outcome"), map[string]bool{"outcome": true}},
+		{"neither, so no strip", nil, nil, map[string]bool{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fm := &artifact.SpecFrontmatter{Class: artifact.ClassFeature, Problem: tc.problem, Outcome: tc.outcome}
+			snap := readinesspilot.Snapshot{AllConcerns: []readinesspilot.Concern{{ID: "shape/problem"}, {ID: "shape/outcome"}}}
+			targets := readinessTargets(snap, nil, nil, caseStripHalves(fm))
+
+			p, err := buildProjectionFM("strip-halves", fm, nil, nil, nil, nil, modeAuthoring)
+			if err != nil {
+				t.Fatalf("buildProjection: %v", err)
+			}
+			var strip strings.Builder
+			if p.Problem != "" || p.Outcome != "" { // the region's hasCaseFile
+				writeCaseStrip(&strip, p, &asdView{}, true)
+			}
+			for _, half := range []string{"problem", "outcome"} {
+				got, ok := targets["shape/"+half]
+				switch {
+				case tc.want[half] && (!ok || got != readinessTarget{readinessTargetStrip, half}):
+					t.Errorf("shape/%s targets %+v (%v), want the strip's %s half", half, got, ok, half)
+				case !tc.want[half] && ok:
+					t.Errorf("shape/%s targets %+v, want a plain row: the wall draws no %s half", half, got, half)
+				}
+				if drawn := strings.Contains(strip.String(), `data-testid="placard-`+half+`"`); drawn != ok {
+					t.Errorf("the %s half is drawn=%v but targeted=%v", half, drawn, ok)
+				}
 			}
 		})
 	}
