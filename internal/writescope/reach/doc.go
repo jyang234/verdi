@@ -90,7 +90,9 @@
 //     spec/write-scope-registry ac-1 (a verb that reaches a mutating gitx
 //     function with no declaration fails the witness) is proven for the
 //     module's current code and the pinned evasion corpus, and
-//     disclosed-as-unproven beyond them until BL-136 lands;
+//     disclosed-as-unproven beyond them until BL-136 lands, so its producer
+//     still fails on a violation but abstains, never passes, while the
+//     classes stay open (ledger SI-367 (1));
 //   - generic types are not candidates for interface dispatch; Build
 //     refuses a module where a generic type's method set (methods promoted
 //     from embedded fields included) has the methods of a module
