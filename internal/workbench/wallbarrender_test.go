@@ -83,7 +83,7 @@ func TestWallBar_AuthoringControls(t *testing.T) {
 		`<div class="wall-commit-wrap" id="asd-git" data-testid="wall-commit-wrap"><button type="button" id="commit-push-btn" class="btn-primary">Commit<span class="wall-commit-push"> &amp; push</span></button><div class="wall-commit" data-testid="wall-commit" data-changes="`,
 		`data-testid="uncommitted-indicator"`,
 		`<details class="wall-commit-popover" data-testid="wall-commit-popover"><summary class="wall-commit-count" data-testid="wall-commit-count" title="`,
-		`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-expanded="false" aria-label="More">&#8943;</button>`,
+		`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-controls="wall-more-menu" aria-expanded="false" aria-label="More">&#8943;</button>`,
 	} {
 		if !strings.Contains(controls, want) {
 			t.Errorf("the controls slot lacks %s:\n%s", want, controls)

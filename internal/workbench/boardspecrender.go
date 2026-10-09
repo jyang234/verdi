@@ -280,9 +280,11 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 			Refresh:  true,
 		}),
 		Region: template.HTML(region),
-		// The page-level dialogs, and the authoring wall's branch menu at
-		// the body level beside them (SI-368 (7)).
-		Dialogs:   template.HTML(dialogs + renderBranchMenu(p, git)),
+		// The page-level dialogs, the authoring wall's branch menu at the
+		// body level beside them (SI-368 (7)), and the record drawer with
+		// its ⋯ menu, outside the swapped region in every mode (SI-368
+		// (9)).
+		Dialogs:   template.HTML(dialogs + renderBranchMenu(p, git) + "\n" + renderRecordDrawer(p, asd)),
 		StateJSON: template.JS(stateJSON),
 		Bar:       snap.bar,
 	}

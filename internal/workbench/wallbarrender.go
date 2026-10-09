@@ -3,11 +3,12 @@ package workbench
 // The wall's top-bar controls (spec/wall-strip-and-drawer-v2 ac-3, ac-4,
 // ac-6; ledger SI-368 (2), (7), (8), (15), (18); lane F3a): the readiness
 // pill, Commit and push with its changes fragment, the sealed wall's
-// primary actions, the ⋯ button the drawer lane wires, and the authoring
-// wall's branch menu at the body level. The bar's controls are static
-// markup outside every swapped fragment; what moves on a refresh — the
-// Commit and push fragment, the pill's facts and the branch list — rides
-// the snapshot, and wallstrip.js applies it.
+// primary actions, the ⋯ button that opens the record drawer's menu
+// (walldrawerrender.go), and the authoring wall's branch menu at the body
+// level. The bar's controls are static markup outside every swapped
+// fragment; what moves on a refresh — the Commit and push fragment, the
+// pill's facts and the branch list — rides the snapshot, and wallstrip.js
+// applies it.
 
 import (
 	stdhtml "html"
@@ -80,8 +81,9 @@ func writeReadinessPill(b *strings.Builder, spec string, pill *wallPill) {
 // review/worktree concern points at (SI-368 (3)); on the sealed wall, New
 // story and Revise as the bar's primary actions (ac-6; the ids the index
 // call to action and the dialogs rely on; revise is the dialogs' own
-// decision, renderBoardDialogs); the ⋯ button the drawer lane wires
-// (ac-4); and the autosave status and live region.
+// decision, renderBoardDialogs); the ⋯ button, which opens the body-level
+// menu of the record drawer's tabs (ac-4; walldrawerrender.go); and the
+// autosave status and live region.
 func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, uncommitted string, revise bool) {
 	esc := stdhtml.EscapeString
 	if p.DocumentHref != "" {
@@ -99,7 +101,7 @@ func writeWallControls(b *strings.Builder, p *BoardProjection, pill *wallPill, u
 	case modeReadOnly:
 		writeSealedActions(b, p, revise)
 	}
-	b.WriteString(`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-expanded="false" aria-label="More">&#8943;</button>`)
+	b.WriteString(`<button type="button" class="wall-more-btn" data-testid="wall-more" aria-haspopup="menu" aria-controls="wall-more-menu" aria-expanded="false" aria-label="More">&#8943;</button>`)
 	b.WriteString(`<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
 		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`)
 }
