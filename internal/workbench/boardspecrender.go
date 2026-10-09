@@ -1008,8 +1008,11 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 
 	// The name: always asked — it is the identity every FieldIdentity
 	// descriptor derives from (the ref, the branch, the directory).
+	// data-pattern ships the server's own name grammar, specNameRe, which
+	// a parity test holds to the create action's ValidateSuccessorName
+	// (SI-369 (5)); the client compiles it as typed, never lowercased.
 	b.WriteString(`<div class="field"><label for="create-name">Name</label>`)
-	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name">`)
+	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name" data-pattern="` + esc(specNameRe.String()) + `">`)
 	b.WriteString(`<span class="field-hint">becomes the spec ref and the design branch</span></div>`)
 
 	for _, f := range p.CreateFields {
