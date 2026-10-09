@@ -1,8 +1,9 @@
 package workbench
 
-// The wall shell's guidance for the families it shares with the readiness
-// derivation is the derivation's own sentence (SI-338 (1): "the wall's
-// guidance sentences move into the derivation and are not copied").
+// The wall's guidance for the families the retired wall shell shared with
+// the readiness derivation is the derivation's own sentence (SI-338 (1):
+// "the wall's guidance sentences move into the derivation and are not
+// copied"), now read on the record drawer's Readiness tab.
 
 import (
 	"go/ast"
@@ -15,43 +16,79 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/store"
 )
 
-// TestASDShellGuidanceIsTheDerivationsSentence derives the wall shell over
-// inputs that raise every shared family and proves each row's guidance is
-// readinesspilot.Guidance's sentence for that family, byte for byte.
+// TestASDShellGuidanceIsTheDerivationsSentence raises every shared
+// family on real stored walls and proves each row's guidance on the
+// wall's readiness is readinesspilot.Guidance's sentence for that family,
+// byte for byte, with the store's own display word for the spike
+// pseudo-class routed in, never a bare vocabulary word. The wall shell
+// that derived these rows is retired; the wall's readiness is the record
+// drawer's Readiness tab, rendering the loader's facts (SI-368 (32) T1).
 func TestASDShellGuidanceIsTheDerivationsSentence(t *testing.T) {
-	in := asdShellInput{
-		ProblemPresent:  false,
-		OutcomePresent:  false,
-		OpenQuestions:   []asdObjectFact{{ID: "oq-1", Text: "t1"}, {ID: "oq-2", Text: "t2", ClaimedBySlugs: []string{"a-spike", "b-spike"}}, {ID: "oq-3", Text: "t3", ClaimedBySlugs: []string{"c-spike"}}},
-		OpenStickyCount: 2,
-		UncoveredACs:    []string{"ac-4"},
-		Mode:            "authoring",
-		Branch:          "design/x",
-		StateFormal:     "proposed",
-		SpikeWord:       "probe",
+	modelYAML, err := os.ReadFile(filepath.Join("..", "model", "testdata", "vocab-rename.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := map[string]string{
-		"shape/problem":         readinesspilot.Guidance(readinesspilot.GuidanceProblem, readinesspilot.GuidanceFacts{}),
-		"shape/outcome":         readinesspilot.Guidance(readinesspilot.GuidanceOutcome, readinesspilot.GuidanceFacts{}),
-		"shape/question/oq-1":   readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-1"}),
-		"shape/question/oq-2":   readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-2", SpikeWord: "probe", ClaimingStubs: 2}),
-		"shape/question/oq-3":   readinesspilot.Guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-3", SpikeWord: "probe", ClaimingStubs: 1}),
-		"shape/board":           readinesspilot.Guidance(readinesspilot.GuidanceScratch, readinesspilot.GuidanceFacts{}),
-		"success/criteria":      readinesspilot.Guidance(readinesspilot.GuidanceCriteria, readinesspilot.GuidanceFacts{}),
-		"success/coverage/ac-4": readinesspilot.Guidance(readinesspilot.GuidanceCoverage, readinesspilot.GuidanceFacts{Object: "ac-4"}),
+	renamed := map[string]string{".verdi/model.yaml": string(modelYAML)}
+	claim := newTabWall(t, claimWallName, claimWallSpec, renamed)
+	// The loader enumerates open question and agent-task stickies.
+	claim.postSticky(t, "question", "an open scratch question")
+	unshaped := newTabWall(t, unshapedWallName, unshapedWallSpec, renamed)
+	criterialess := newCriterialessWall(t, renamed)
+	cfg, err := store.Open(claim.root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got := map[string]string{}
-	for _, c := range deriveASDShell(in).All {
-		got[c.ID] = c.Guidance
+	spike := cfg.Model.DisplayClass("spike")
+	if spike == "spike" {
+		t.Fatalf("the renamed store speaks the bare spike word; the prose witness would vacuously pass")
 	}
-	for id, sentence := range want {
+
+	guidance := func(family readinesspilot.GuidanceFamily, facts readinesspilot.GuidanceFacts) string {
+		sentence := readinesspilot.Guidance(family, facts)
 		if sentence == "" {
-			t.Fatalf("readinesspilot.Guidance returned no sentence for %q", id)
+			t.Fatalf("readinesspilot.Guidance returned no sentence for family %d", family)
 		}
-		if got[id] != sentence {
-			t.Errorf("wall shell %q guidance = %q, want the derivation's %q", id, got[id], sentence)
+		return sentence
+	}
+	for _, wall := range []struct {
+		w    *tabWall
+		want map[string]string
+	}{
+		{claim, map[string]string{
+			"shape/question/oq-1": guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-1"}),
+			"shape/question/oq-2": guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-2", SpikeWord: spike, ClaimingStubs: 2}),
+			"shape/board/*":       guidance(readinesspilot.GuidanceScratch, readinesspilot.GuidanceFacts{}),
+		}},
+		{unshaped, map[string]string{
+			"shape/problem":         guidance(readinesspilot.GuidanceProblem, readinesspilot.GuidanceFacts{}),
+			"shape/outcome":         guidance(readinesspilot.GuidanceOutcome, readinesspilot.GuidanceFacts{}),
+			"shape/question/oq-1":   guidance(readinesspilot.GuidanceQuestion, readinesspilot.GuidanceFacts{Object: "oq-1", SpikeWord: spike, ClaimingStubs: 1}),
+			"success/coverage/ac-1": guidance(readinesspilot.GuidanceCoverage, readinesspilot.GuidanceFacts{Object: "ac-1"}),
+		}},
+		{criterialess, map[string]string{
+			"success/criteria": guidance(readinesspilot.GuidanceCriteria, readinesspilot.GuidanceFacts{}),
+		}},
+	} {
+		tab, _ := wall.w.tab(t)
+		for id, sentence := range wall.want {
+			if id == "shape/board/*" {
+				// The scratch board's one open item: shape/board/<kind>/<id>.
+				id = ""
+				for _, got := range tabConcernIDs(tab) {
+					if strings.HasPrefix(got, "shape/board/") {
+						id = got
+					}
+				}
+				if id == "" {
+					t.Fatalf("%s: the open sticky raised no scratch board row", wall.w.name)
+				}
+			}
+			if got := readTabRow(t, tab, id).Primary; got != sentence {
+				t.Errorf("%s: %q guidance = %q, want the derivation's %q", wall.w.name, id, got, sentence)
+			}
 		}
 	}
 }

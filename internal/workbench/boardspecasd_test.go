@@ -1,343 +1,335 @@
 package workbench
 
 // Unit coverage for the ASD workbench's derivation and strictness seams:
-// the four-area shell projection (SI-125 idioms over this board's typed
-// facts), the wiring that feeds that projection from one real stored spec
-// (buildASDView), the strict pre-application body grammar (design §3.2),
-// and the fixed-set route/action inventory (SI-167).
+// the four-area readiness the wall shows — since the wall shell's own
+// derivation retired (spec/wall-strip-and-drawer-v2 ac-7, dc-4), the
+// loader's facts in the record drawer's Readiness tab, against which the
+// shell's tests are repointed in place under their names (SI-368 (32)
+// T1) — the strict pre-application body grammar (design §3.2), and the
+// fixed-set route/action inventory (SI-167).
 
 import (
-	"context"
 	"reflect"
-	"sort"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
-func TestDeriveASDShell(t *testing.T) {
-	baseInput := func() asdShellInput {
-		return asdShellInput{
-			ProblemPresent: true,
-			OutcomePresent: true,
-			ACs:            []asdACFact{{ID: "ac-1", EvidenceCount: 1}},
-			Mode:           "authoring",
-			Branch:         "design/x",
-			StateFormal:    "proposed",
-			DesignWired:    true,
-			Caps:           &DesignCapabilitiesView{PolicyMode: "proposal-only", PolicyDigest: "sha256:abc", RefusalPrecondition: "policy-mode", RefusalDetail: "mode forbids agent writes"},
-			SpikeWord:      "spike",
-		}
+// unshapedWallName's spec is a draft feature declaring neither problem nor
+// outcome, with one open question claimed by a single spike stub — the
+// stub covering no criterion, so the feature's one criterion is uncovered.
+const unshapedWallName = "unshaped-wall"
+
+const unshapedWallSpec = `---
+id: spec/unshaped-wall
+kind: spec
+class: feature
+title: "Unshaped wall"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "ac one", evidence: [attestation], anchor: "#ac-1" }
+open_questions:
+  - { id: oq-1, text: "which retry strategy applies?", anchor: "#oq-1" }
+stubs:
+  - { slug: retry-strategy-spike, spike: true, resolves: [oq-1] }
+---
+# Unshaped wall
+
+## ac-1
+
+Prose.
+
+## oq-1
+
+Prose.
+`
+
+// criterialessWallName's spec is a draft story with no acceptance criteria
+// and one unclaimed open question, implementing its parent feature's
+// criterion: Define the work is the current step, and Define success
+// carries a violated row downstream of it.
+const criterialessWallName = "criterialess-wall"
+
+const criterialessWallSpec = `---
+id: spec/criterialess-wall
+kind: spec
+title: "Criterialess wall"
+owners: [platform-team]
+class: story
+story: jira:LOAN-2207
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+open_questions:
+  - { id: oq-1, text: "which channel carries it?", anchor: "#oq-1" }
+links:
+  - { type: implements, ref: spec/criterialess-parent#ac-1 }
+---
+# Criterialess wall
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## oq-1
+
+Prose.
+`
+
+const criterialessParentSpec = `---
+id: spec/criterialess-parent
+kind: spec
+class: feature
+title: "Criterialess parent"
+status: draft
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "ac one", evidence: [attestation], anchor: "#ac-1" }
+---
+# Criterialess parent
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+`
+
+// newCriterialessWall builds the criterialess wall, its parent feature
+// beside it, with any extra draft-branch files.
+func newCriterialessWall(t *testing.T, extra map[string]string) *tabWall {
+	t.Helper()
+	files := map[string]string{".verdi/specs/active/criterialess-parent/spec.md": criterialessParentSpec}
+	for path, body := range extra {
+		files[path] = body
 	}
+	return newTabWall(t, criterialessWallName, criterialessWallSpec, files)
+}
+
+// tabFocus is the Readiness tab's focused stepper station's area, "" when
+// it marks none, failing when it marks more than one.
+func tabFocus(t *testing.T, tab string) string {
+	t.Helper()
+	m := regexp.MustCompile(`<li class="readiness-station readiness-station--focus" data-area-id="([^"]+)"`).FindAllStringSubmatch(tab, -1)
+	switch len(m) {
+	case 0:
+		return ""
+	case 1:
+		return m[0][1]
+	}
+	t.Fatalf("the tab marks %d focused steps", len(m))
+	return ""
+}
+
+// TestDeriveASDShell is the retired wall shell's derivation test,
+// repointed in place (SI-368 (32) T1): each claim it made of the wall's
+// readiness is asserted on the record drawer's Readiness tab, which
+// renders the production loader's facts, over real stored walls; each
+// claim of a family only the shell produced is asserted at that family's
+// home (SI-368 (3)). The capabilities wording that "design-branch and
+// proposal-state refusals speak to humans and agents alike" lives in the
+// Context tab's script and is proven in e2e 91's ac-5, on the harness's
+// review mirror and sealed record, beside the design wall's policy-mode
+// refusal that speaks to agents alone (SI-368 (32) B2).
+func TestDeriveASDShell(t *testing.T) {
+	claim := newTabWall(t, claimWallName, claimWallSpec, nil)
+	unshaped := newTabWall(t, unshapedWallName, unshapedWallSpec, nil)
 
 	t.Run("every area carries an explicit anchor and ordering is deterministic", func(t *testing.T) {
-		shell := deriveASDShell(baseInput())
-		if len(shell.Areas) != 4 {
-			t.Fatalf("areas = %d, want 4", len(shell.Areas))
+		tab, snap := claim.tab(t)
+		stations := regexp.MustCompile(`<li class="readiness-station[^"]*" data-area-id="([^"]+)" data-state="([^"]+)"`).FindAllStringSubmatch(tab, -1)
+		wantAreas := []string{"shape-proposal", "show-success", "check-context", "request-review"}
+		if len(stations) != len(wantAreas) {
+			t.Fatalf("the tab's stepper has %d steps, want %d", len(stations), len(wantAreas))
 		}
-		for i, id := range asdAreaOrder {
-			if shell.Areas[i].ID != id {
-				t.Fatalf("area order[%d] = %s, want %s", i, shell.Areas[i].ID, id)
+		for i, s := range stations {
+			if s[1] != wantAreas[i] {
+				t.Errorf("step %d = %s, want %s", i+1, s[1], wantAreas[i])
+			}
+			if s[2] != string(snap.Areas[i].State) || (s[2] != "proven" && s[2] != "violated-with-witness" && s[2] != "unproven") {
+				t.Errorf("step %s carries state %q, want the loader's explicit %q", s[1], s[2], snap.Areas[i].State)
 			}
 		}
-		// The clean-tree proposed board: shape/success/context proven,
-		// review unproven (human review pending) — focus is request-review.
-		if shell.CurrentFocus != asdAreaReview {
-			t.Fatalf("focus = %s, want %s", shell.CurrentFocus, asdAreaReview)
+		if got := tabFocus(t, tab); got != string(snap.CurrentFocus) {
+			t.Fatalf("the tab's focus = %q, want the loader's one focus %q", got, snap.CurrentFocus)
 		}
-		second := deriveASDShell(baseInput())
-		if len(second.All) != len(shell.All) {
-			t.Fatal("derivation is not deterministic")
-		}
-		for i := range shell.All {
-			if shell.All[i].ID != second.All[i].ID {
-				t.Fatal("concern ordering is not deterministic")
-			}
+		again, _ := claim.tab(t)
+		if !reflect.DeepEqual(tabConcernIDs(again), tabConcernIDs(tab)) {
+			t.Fatal("the tab's concern ordering is not deterministic")
 		}
 	})
 
 	t.Run("missing problem is a blocking violation with source guidance", func(t *testing.T) {
-		in := baseInput()
-		in.ProblemPresent = false
-		shell := deriveASDShell(in)
-		if shell.CurrentFocus != asdAreaShape {
-			t.Fatalf("focus = %s, want shape", shell.CurrentFocus)
+		tab, snap := unshaped.tab(t)
+		row := readTabRow(t, tab, "shape/problem")
+		if row.State != string(readinesspilot.StateViolated) || row.Blocking != "true" || row.Primary != readinesspilot.Guidance(readinesspilot.GuidanceProblem, readinesspilot.GuidanceFacts{}) || len(row.Witnesses) == 0 {
+			t.Fatalf("shape/problem = %+v, want blocking violated with the source guidance and a witness", row)
 		}
-		found := false
-		for _, c := range shell.All {
-			if c.ID == "shape/problem" {
-				found = true
-				if c.State != asdStateViolated || !c.Blocking || c.Guidance == "" || len(c.Witnesses) == 0 {
-					t.Fatalf("shape/problem = %+v, want blocking violated with guidance and witness", c)
-				}
-			}
+		if got := tabFocus(t, tab); got != "shape-proposal" {
+			t.Fatalf("the tab's focus = %q, want shape-proposal", got)
 		}
-		if !found {
-			t.Fatal("no shape/problem concern")
-		}
-		// Attention leads with the current area's rows (SI-125).
-		if len(shell.Attention) == 0 || shell.Attention[0].Area != asdAreaShape {
-			t.Fatalf("attention head = %+v, want a shape-area row first", shell.Attention)
+		// Focus next leads with the current step's rows (SI-125).
+		first := regexp.MustCompile(`id="readiness-focus".*?<article [^>]*data-area-id="([^"]+)"`).FindStringSubmatch(tab)
+		if first == nil || first[1] != "shape-proposal" || snap.Attention[0].Area != readinesspilot.AreaShape {
+			t.Fatalf("Focus next's first item is not a shape-area row: %v", first)
 		}
 	})
 
 	t.Run("open questions are blocking unproven and never suppressed", func(t *testing.T) {
-		in := baseInput()
-		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1"}, {ID: "oq-2", Text: "t2"}}
-		shell := deriveASDShell(in)
+		tab, _ := claim.tab(t)
 		got := 0
-		for _, c := range shell.All {
-			if strings.HasPrefix(c.ID, "shape/question/") {
+		for _, id := range tabConcernIDs(tab) {
+			if strings.HasPrefix(id, "shape/question/") {
 				got++
-				if c.State != asdStateUnproven || !c.Blocking || c.Dest == "" {
-					t.Fatalf("question concern = %+v", c)
-				}
 			}
 		}
 		if got != 2 {
-			t.Fatalf("question concerns = %d, want 2 (lossless)", got)
+			t.Fatalf("question rows = %d, want 2 (lossless: one per declared open question)", got)
+		}
+		row := readTabRow(t, tab, "shape/question/oq-1")
+		if row.State != string(readinesspilot.StateUnproven) || row.Blocking != "true" || row.TargetKind != readinessTargetObject || row.Target != "oq-1" {
+			t.Fatalf("unclaimed question = %+v, want blocking unproven, going to its card", row)
 		}
 	})
 
 	t.Run("a spike-claimed open question is non-blocking with claim-aware guidance", func(t *testing.T) {
-		in := baseInput()
-		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"retry-strategy-spike"}}}
-		shell := deriveASDShell(in)
-		var found *asdConcern
-		for i := range shell.All {
-			if shell.All[i].ID == "shape/question/oq-1" {
-				found = &shell.All[i]
-			}
+		tab, _ := unshaped.tab(t)
+		row := readTabRow(t, tab, "shape/question/oq-1")
+		if row.State != string(readinesspilot.StateUnproven) || row.Blocking != "false" {
+			t.Fatalf("claimed question = %+v, want unproven non-blocking", row)
 		}
-		if found == nil {
-			t.Fatalf("no shape/question/oq-1 concern in %+v", shell.All)
+		if !strings.Contains(row.Fact, "claimed") || !strings.Contains(row.Fact, "unresolved") {
+			t.Fatalf("fact = %q, want it to say claimed and unresolved", row.Fact)
 		}
-		c := *found
-		if c.State != asdStateUnproven || c.Blocking {
-			t.Fatalf("claimed question concern = %+v, want unproven non-blocking", c)
+		if row.Primary != "No wall edit is required to accept: the claiming spike stub answers it after acceptance." || strings.Contains(row.Primary, "edit or remove") {
+			t.Fatalf("guidance = %q, want the one-stub claim-aware sentence, not the unclaimed edit-or-remove text", row.Primary)
 		}
-		if !strings.Contains(c.Summary, "retry-strategy-spike") || !strings.Contains(c.Summary, "claimed") || !strings.Contains(c.Summary, "unresolved") {
-			t.Fatalf("summary = %q, want it to name the claiming stub and say claimed+unresolved", c.Summary)
+		if !reflect.DeepEqual(row.Witnesses, []string{"oq-1", "retry-strategy-spike"}) {
+			t.Fatalf("witnesses = %q, want the question and its claiming stub", row.Witnesses)
 		}
-		if c.Guidance == "" || strings.Contains(c.Guidance, "edit or remove") {
-			t.Fatalf("guidance = %q, want claim-aware guidance, not the unclaimed edit-or-remove text", c.Guidance)
-		}
-		wantWitnesses := []string{"declared open question oq-1", "retry-strategy-spike"}
-		sort.Strings(wantWitnesses)
-		gotWitnesses := append([]string(nil), c.Witnesses...)
-		sort.Strings(gotWitnesses)
-		if !reflect.DeepEqual(gotWitnesses, wantWitnesses) {
-			t.Fatalf("witnesses = %q, want %q", c.Witnesses, wantWitnesses)
-		}
-		if c.Dest == "" {
-			t.Fatalf("claimed question concern lost its destination: %+v", c)
+		if row.TargetKind != readinessTargetObject || row.Target != "oq-1" {
+			t.Fatalf("claimed question lost its destination: %+v", row)
 		}
 	})
 
 	t.Run("multiple claiming stubs are named, witnessed, and spoken in the plural", func(t *testing.T) {
-		in := baseInput()
-		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"alpha-spike", "zeta-spike"}}}
-		shell := deriveASDShell(in)
-		var c asdConcern
-		for _, row := range shell.All {
-			if row.ID == "shape/question/oq-1" {
-				c = row
+		tab, _ := claim.tab(t)
+		row := readTabRow(t, tab, "shape/question/oq-2")
+		for _, want := range []string{"oq-2", "alpha-spike", "zeta-spike"} {
+			if !containsString(row.Witnesses, want) {
+				t.Fatalf("witnesses = %q, want the question and both claiming stubs", row.Witnesses)
 			}
 		}
-		if !strings.Contains(c.Summary, "alpha-spike") || !strings.Contains(c.Summary, "zeta-spike") {
-			t.Fatalf("summary = %q, want both claiming stub slugs", c.Summary)
+		// The loader's prose (SI-368 (32) T1): the fact speaks the claim,
+		// and the guidance's head noun and verb agree with the number of
+		// claiming stubs — "stubs answer" here, "stub answers" above.
+		if row.Fact != "Declared open question is claimed by spike stubs and remains unresolved" {
+			t.Fatalf("fact = %q, want the loader's claimed-question fact", row.Fact)
 		}
-		for _, want := range []string{"alpha-spike", "zeta-spike"} {
-			ok := false
-			for _, w := range c.Witnesses {
-				if w == want {
-					ok = true
-				}
-			}
-			if !ok {
-				t.Fatalf("witnesses = %q, missing %q", c.Witnesses, want)
-			}
-		}
-		// The sentences are pinned exactly (lane review F2): the head
-		// noun and its verb agree with the number of claiming stubs. The
-		// class word stays the attributive singular every sibling
-		// surface speaks (readinesspilot's "<word> stubs", the stub
-		// cards' "<word> stub"); only "stub"/"stubs" and "answers"/
-		// "answer" move.
-		wantPluralSummary := "Open question oq-1 is claimed by spike stubs alpha-spike, zeta-spike and remains unresolved: t1"
-		if c.Summary != wantPluralSummary {
-			t.Fatalf("two-slug summary =\n  %q\nwant\n  %q", c.Summary, wantPluralSummary)
-		}
-		wantPluralGuidance := "No wall edit is required to accept: the claiming spike stubs answer it after acceptance."
-		if c.Guidance != wantPluralGuidance {
-			t.Fatalf("two-slug guidance =\n  %q\nwant\n  %q", c.Guidance, wantPluralGuidance)
-		}
-
-		one := baseInput()
-		one.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"alpha-spike"}}}
-		var single asdConcern
-		for _, row := range deriveASDShell(one).All {
-			if row.ID == "shape/question/oq-1" {
-				single = row
-			}
-		}
-		wantSingleSummary := "Open question oq-1 is claimed by spike stub alpha-spike and remains unresolved: t1"
-		if single.Summary != wantSingleSummary {
-			t.Fatalf("one-slug summary =\n  %q\nwant\n  %q", single.Summary, wantSingleSummary)
-		}
-		wantSingleGuidance := "No wall edit is required to accept: the claiming spike stub answers it after acceptance."
-		if single.Guidance != wantSingleGuidance {
-			t.Fatalf("one-slug guidance =\n  %q\nwant\n  %q", single.Guidance, wantSingleGuidance)
+		if row.Primary != "No wall edit is required to accept: the claiming spike stubs answer it after acceptance." {
+			t.Fatalf("two-stub guidance = %q", row.Primary)
 		}
 	})
 
 	t.Run("an unclaimed question among a claimed one stays blocking", func(t *testing.T) {
-		in := baseInput()
-		in.OpenQuestions = []asdObjectFact{
-			{ID: "oq-1", Text: "t1"},
-			{ID: "oq-2", Text: "t2", ClaimedBySlugs: []string{"retry-strategy-spike"}},
+		tab, _ := claim.tab(t)
+		if row := readTabRow(t, tab, "shape/question/oq-1"); row.Blocking != "true" {
+			t.Fatalf("unclaimed question = %+v, want blocking", row)
 		}
-		shell := deriveASDShell(in)
-		var unclaimed, claimed asdConcern
-		for _, row := range shell.All {
-			switch row.ID {
-			case "shape/question/oq-1":
-				unclaimed = row
-			case "shape/question/oq-2":
-				claimed = row
-			}
-		}
-		if !unclaimed.Blocking {
-			t.Fatalf("unclaimed concern = %+v, want blocking", unclaimed)
-		}
-		if claimed.Blocking {
-			t.Fatalf("claimed concern = %+v, want non-blocking", claimed)
+		if row := readTabRow(t, tab, "shape/question/oq-2"); row.Blocking != "false" {
+			t.Fatalf("claimed question = %+v, want non-blocking", row)
 		}
 	})
 
 	t.Run("downstream violations count exactly and areas never suppress", func(t *testing.T) {
-		in := baseInput()
-		in.ProblemPresent = false // focus: shape
-		in.ACs = nil              // success violated downstream
-		shell := deriveASDShell(in)
-		if shell.CurrentFocus != asdAreaShape {
-			t.Fatalf("focus = %s", shell.CurrentFocus)
+		tab, snap := newCriterialessWall(t, nil).tab(t)
+		if snap.CurrentFocus != readinesspilot.AreaShape || tabFocus(t, tab) != "shape-proposal" {
+			t.Fatalf("focus = %q (tab %q), want shape-proposal", snap.CurrentFocus, tabFocus(t, tab))
 		}
-		if shell.DownstreamViolated != 1 {
-			t.Fatalf("downstream violated = %d, want 1 (success/criteria)", shell.DownstreamViolated)
+		if row := readTabRow(t, tab, "success/criteria"); row.State != string(readinesspilot.StateViolated) {
+			t.Fatalf("success/criteria = %+v, want violated", row)
 		}
-		// The downstream violated row stays in Attention (prominence, not
-		// suppression).
-		seen := false
-		for _, c := range shell.Attention {
-			if c.ID == "success/criteria" {
-				seen = true
+		var downstream []string
+		for _, c := range snap.AllConcerns {
+			if c.State == readinesspilot.StateViolated && c.Area != readinesspilot.AreaShape {
+				downstream = append(downstream, c.ID)
 			}
 		}
-		if !seen {
-			t.Fatal("downstream violation missing from the queue")
+		known := regexp.MustCompile(`data-known-concern="([^"]+)"`).FindAllStringSubmatch(tab, -1)
+		if len(known) != len(downstream) || len(downstream) == 0 {
+			t.Fatalf("known problems in later steps = %d, want exactly the %d downstream violations %q", len(known), len(downstream), downstream)
 		}
-	})
-
-	t.Run("design-branch and proposal-state refusals speak to humans and agents alike", func(t *testing.T) {
-		// Review fix I-1: only the policy-mode precondition is agent-
-		// specific (AuthorizePolicy's human bypass); the design-branch and
-		// proposal-state preconditions refuse the browser human too
-		// (AuthorizeState runs for every actor), so agent-only wording
-		// would be dishonest.
-		for _, tc := range []struct{ precondition, detail string }{
-			{"design-branch", "branch main is not mutable design branch design/x"},
-			{"proposal-state", "Git-derived state accepted-pending-build is not mutable proposal state"},
-		} {
-			in := baseInput()
-			in.Caps = &DesignCapabilitiesView{PolicyMode: "draft-write", PolicyDigest: "sha256:abc", RefusalPrecondition: tc.precondition, RefusalDetail: tc.detail}
-			shell := deriveASDShell(in)
-			found := false
-			for _, c := range shell.All {
-				if c.ID != "context/draft-writes" {
-					continue
-				}
-				found = true
-				if strings.Contains(c.Summary, "Delegated agents") {
-					t.Fatalf("%s: summary %q is agent-only wording; the refusal binds the human writer too", tc.precondition, c.Summary)
-				}
-				if !strings.Contains(c.Summary, tc.precondition) {
-					t.Fatalf("%s: summary %q does not name the failing precondition", tc.precondition, c.Summary)
-				}
-				witnessed := false
-				for _, w := range c.Witnesses {
-					if w == tc.detail {
-						witnessed = true
-					}
-				}
-				if !witnessed {
-					t.Fatalf("%s: witnesses %q do not carry the kernel detail %q", tc.precondition, c.Witnesses, tc.detail)
-				}
-			}
-			if !found {
-				t.Fatalf("%s: no context/draft-writes concern in %+v", tc.precondition, shell.All)
-			}
-		}
-		// The policy-mode precondition keeps its agent-specific label.
-		shell := deriveASDShell(baseInput())
-		for _, c := range shell.All {
-			if c.ID == "context/agent-writes" && !strings.Contains(c.Summary, "Delegated agents") {
-				t.Fatalf("policy-mode summary %q lost its agent-specific labeling", c.Summary)
-			}
+		// The downstream violations stay in the tab (prominence, not
+		// suppression): each keeps its one row.
+		for _, id := range downstream {
+			readTabRow(t, tab, id)
 		}
 	})
 
 	t.Run("not-adopted policy is honest absence, not a violation", func(t *testing.T) {
-		in := baseInput()
-		in.Caps = nil
-		in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: "project has not adopted policy authority"}
-		shell := deriveASDShell(in)
-		for _, c := range shell.All {
-			if c.ID == "context/policy" {
-				if c.State != asdStateUnproven || c.Blocking {
-					t.Fatalf("context/policy = %+v, want nonblocking unproven", c)
-				}
-				if !strings.Contains(c.Summary, "not-applicable") {
-					t.Fatalf("summary %q does not name the not-applicable posture", c.Summary)
-				}
-				return
-			}
+		// The context/policy row's home is the policy guide (SI-368 (3),
+		// (32) B1): no readiness verdict, and on an authoring wall the
+		// not-applicable posture a write records is named.
+		html := wallGuide(policyForbiddenInput(), modeAuthoring)
+		expectNoReadinessState(t, "the not-adopted guide", html)
+		if line, _ := testIDElementText(html, "asd-policy-guide-editing"); !strings.Contains(line, "not-applicable") {
+			t.Fatalf("the guide's editing line %q does not name the not-applicable posture", line)
 		}
-		t.Fatal("no context/policy concern")
 	})
 
 	t.Run("human review is plainly labeled with the formal obligation secondary", func(t *testing.T) {
-		shell := deriveASDShell(baseInput())
-		for _, c := range shell.All {
-			if c.ID == "review/acceptance" {
-				if !c.HumanReview {
-					t.Fatalf("review/acceptance = %+v, want HumanReview", c)
-				}
-				joined := strings.Join(c.Witnesses, " ")
-				if !strings.Contains(joined, "AC-6") {
-					t.Fatalf("formal secondary evidence missing: %v", c.Witnesses)
-				}
-				return
-			}
+		// review/acceptance's home is the Review tab (SI-368 (3), (32) B3).
+		a := reviewAcceptanceFor("proposed", modeAuthoring, "design/x")
+		var b strings.Builder
+		writeReviewAcceptance(&b, a)
+		if label, n := testIDElementText(b.String(), "record-human-review"); n != 1 || !strings.HasPrefix(label, "Human review") {
+			t.Fatalf("human-review label = %q (%d)", label, n)
 		}
-		t.Fatal("no review/acceptance concern")
+		if !strings.Contains(strings.Join(a.Witnesses, " "), "AC-6") {
+			t.Fatalf("formal secondary evidence missing: %v", a.Witnesses)
+		}
 	})
 
 	t.Run("dirty tree blocks review with the commit guidance", func(t *testing.T) {
-		in := baseInput()
-		in.Dirty = true
-		shell := deriveASDShell(in)
-		for _, c := range shell.All {
-			if c.ID == "review/worktree" {
-				if c.State != asdStateUnproven || !c.Blocking || !strings.Contains(c.Guidance, "Commit") {
-					t.Fatalf("review/worktree = %+v", c)
-				}
-				return
+		// review/worktree's home is the bar's Commit and push indicator and
+		// popover (SI-368 (3)): a dirty tree sets the indicator, the popover
+		// names the branch, and its note says to commit and push because
+		// review reads the committed head.
+		html := renderWallUncommitted(deriveWallUncommitted(&boardGitState{Branch: "design/x", Dirty: true}))
+		if strings.Contains(html, `data-testid="uncommitted-indicator" hidden`) {
+			t.Fatalf("a dirty tree leaves the indicator clear:\n%s", html)
+		}
+		for _, want := range []string{"uncommitted on design/x", "Commits the working tree and pushes this branch", "review reads the committed head"} {
+			if !strings.Contains(html, want) {
+				t.Fatalf("the Commit popover lacks %q:\n%s", want, html)
 			}
 		}
-		t.Fatal("no review/worktree concern")
 	})
+}
+
+// containsString reports whether list holds s.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDecodeStrictActionBody(t *testing.T) {
@@ -513,89 +505,63 @@ func newClaimWallFixture(t *testing.T) string {
 		})
 }
 
-// shellConcerns indexes a rendered shell's rows by concern id.
-func shellConcerns(shell asdShell) map[string]asdConcern {
-	byID := make(map[string]asdConcern, len(shell.All))
-	for _, c := range shell.All {
-		byID[c.ID] = c
-	}
-	return byID
-}
-
 // TestBuildASDView_SpikeClaimedQuestions is the WIRING witness for ac-10
-// on the wall (PLAN.md §7 I-128 option (a)): deriveASDShell's own unit
-// tests hand it asdObjectFacts directly, so nothing proved that the view
-// builder reads `stubs:` out of the stored frontmatter at all. This case
-// starts at one real spec.md in a real store and asserts the rendered
-// shell — the claimed question's exact sentences and witnesses, the
-// unclaimed question's unchanged blocking guidance, and the plain stub's
-// silence.
+// on the wall (PLAN.md §7 I-128 option (a)), repointed in place onto the
+// Readiness tab (SI-368 (32) T1): it starts at one real spec.md in a real
+// store and asserts that the stored `stubs:` reach the wall's readiness
+// through the loader — the claimed question's exact guidance and
+// witnesses, the unclaimed question's unchanged blocking guidance, and
+// the plain stub's silence on every question row.
 func TestBuildASDView_SpikeClaimedQuestions(t *testing.T) {
-	root := newClaimWallFixture(t)
-	s := &boardSpecServer{root: root}
-	ctx := context.Background()
+	tab, _ := newTabWall(t, claimWallName, claimWallSpec, nil).tab(t)
 
-	_, _, asd, err := s.loadASD(ctx, claimWallName)
-	if err != nil {
-		t.Fatalf("loadASD: %v", err)
-	}
-	byID := shellConcerns(asd.Shell)
-
-	claimed, ok := byID["shape/question/oq-2"]
-	if !ok {
-		t.Fatalf("no shape/question/oq-2 concern in %+v", asd.Shell.All)
-	}
-	if claimed.State != asdStateUnproven || claimed.Blocking {
+	claimed := readTabRow(t, tab, "shape/question/oq-2")
+	if claimed.State != string(readinesspilot.StateUnproven) || claimed.Blocking != "false" {
 		t.Fatalf("claimed question = %+v, want unproven and non-blocking", claimed)
 	}
-	wantSummary := "Open question oq-2 is claimed by spike stubs alpha-spike, zeta-spike and remains unresolved: what refresh-window SLA applies?"
-	if claimed.Summary != wantSummary {
-		t.Fatalf("claimed summary =\n  %q\nwant\n  %q", claimed.Summary, wantSummary)
+	if want := "Declared open question is claimed by spike stubs and remains unresolved"; claimed.Fact != want {
+		t.Fatalf("claimed fact =\n  %q\nwant\n  %q", claimed.Fact, want)
 	}
-	wantGuidance := "No wall edit is required to accept: the claiming spike stubs answer it after acceptance."
-	if claimed.Guidance != wantGuidance {
-		t.Fatalf("claimed guidance =\n  %q\nwant\n  %q", claimed.Guidance, wantGuidance)
+	if want := "No wall edit is required to accept: the claiming spike stubs answer it after acceptance."; claimed.Primary != want {
+		t.Fatalf("claimed guidance =\n  %q\nwant\n  %q", claimed.Primary, want)
 	}
-	wantWitnesses := []string{"declared open question oq-2", "alpha-spike", "zeta-spike"}
-	if !reflect.DeepEqual(claimed.Witnesses, wantWitnesses) {
-		t.Fatalf("claimed witnesses = %q, want %q", claimed.Witnesses, wantWitnesses)
+	// The loader's witnesses, in its sorted order (SI-368 (32) T1).
+	if want := []string{"alpha-spike", "oq-2", "zeta-spike"}; !reflect.DeepEqual(claimed.Witnesses, want) {
+		t.Fatalf("claimed witnesses = %q, want %q", claimed.Witnesses, want)
 	}
 
-	unclaimed, ok := byID["shape/question/oq-1"]
-	if !ok {
-		t.Fatalf("no shape/question/oq-1 concern in %+v", asd.Shell.All)
-	}
-	if !unclaimed.Blocking {
+	unclaimed := readTabRow(t, tab, "shape/question/oq-1")
+	if unclaimed.Blocking != "true" {
 		t.Fatalf("unclaimed question = %+v, want blocking", unclaimed)
 	}
-	wantUnclaimedGuidance := "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it."
-	if unclaimed.Guidance != wantUnclaimedGuidance {
-		t.Fatalf("unclaimed guidance =\n  %q\nwant\n  %q", unclaimed.Guidance, wantUnclaimedGuidance)
+	if want := "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it."; unclaimed.Primary != want {
+		t.Fatalf("unclaimed guidance =\n  %q\nwant\n  %q", unclaimed.Primary, want)
 	}
-	if len(unclaimed.Witnesses) != 1 || unclaimed.Witnesses[0] != "declared open question oq-1" {
+	if !reflect.DeepEqual(unclaimed.Witnesses, []string{"oq-1"}) {
 		t.Fatalf("unclaimed witnesses = %q, want the declaration alone", unclaimed.Witnesses)
 	}
 
 	// The plain coverage stub claims an acceptance criterion, so it never
-	// reaches a question row — not in a summary, not as a witness.
-	for _, c := range asd.Shell.All {
-		if strings.Contains(c.Summary, "plain-coverage-stub") {
-			t.Fatalf("%s summary names the plain stub: %q", c.ID, c.Summary)
+	// reaches a question row — not in a fact, not as a witness.
+	for _, id := range tabConcernIDs(tab) {
+		if !strings.HasPrefix(id, "shape/question/") {
+			continue
 		}
-		for _, w := range c.Witnesses {
-			if w == "plain-coverage-stub" {
-				t.Fatalf("%s witnesses the plain stub: %q", c.ID, c.Witnesses)
-			}
+		row := readTabRow(t, tab, id)
+		if strings.Contains(row.Fact, "plain-coverage-stub") || containsString(row.Witnesses, "plain-coverage-stub") {
+			t.Fatalf("%s names the plain stub: %+v", id, row)
 		}
 	}
 }
 
-// TestBuildASDView_NonSpikeStubNeverClaims pins the view builder's
-// fail-closed half. A plain stub CANNOT legally carry `resolves` — the
-// decode seam refuses that frontmatter outright (02 §Kind registry, DC-4,
-// asserted here) — so the builder's spike test is the defense behind a
-// refused state: were such a stub to reach it anyway, the question it
-// names stays the ordinary blocking unclaimed row.
+// TestBuildASDView_NonSpikeStubNeverClaims pins the fail-closed half. A
+// plain stub CANNOT legally carry `resolves` — the decode seam refuses
+// that frontmatter outright (02 §Kind registry, DC-4, asserted here) — so
+// the spike test behind it is the defense behind a refused state. Since
+// the wall's readiness is the loader's (SI-368 (32) T5), that defense is
+// the loader's spike filter, claimedQuestionsOf, pinned by
+// internal/readinessload's TestClaimedQuestionsOf_NonSpikeStubNeverClaims:
+// a plain stub reaching it anyway claims nothing.
 func TestBuildASDView_NonSpikeStubNeverClaims(t *testing.T) {
 	fmBytes, _, err := artifact.SplitFrontmatter([]byte(claimWallSpec))
 	if err != nil {
@@ -608,38 +574,5 @@ func TestBuildASDView_NonSpikeStubNeverClaims(t *testing.T) {
 	}
 	if _, err := artifact.DecodeSpec([]byte(illegal)); err == nil || !strings.Contains(err.Error(), "resolves requires spike") {
 		t.Fatalf("DecodeSpec(plain stub with resolves) err = %v, want the DC-4 refusal", err)
-	}
-
-	root := newClaimWallFixture(t)
-	s := &boardSpecServer{root: root}
-	ctx := context.Background()
-	proj, git, _, extras, err := s.loadBoard(ctx, claimWallName)
-	if err != nil {
-		t.Fatalf("loadBoard: %v", err)
-	}
-	// The refused shape, injected past the decode seam.
-	extras.fm.Stubs = append(extras.fm.Stubs, artifact.Stub{
-		Slug:               "smuggled-plain-stub",
-		AcceptanceCriteria: []string{"ac-1"},
-		Resolves:           []string{"oq-1"},
-	})
-	view, err := s.buildASDView(ctx, claimWallName, proj, git, extras.raw, extras.fm, extras.state)
-	if err != nil {
-		t.Fatalf("buildASDView: %v", err)
-	}
-	unclaimed, ok := shellConcerns(view.Shell)["shape/question/oq-1"]
-	if !ok {
-		t.Fatalf("no shape/question/oq-1 concern in %+v", view.Shell.All)
-	}
-	if !unclaimed.Blocking {
-		t.Fatalf("oq-1 = %+v, want the blocking unclaimed row: a non-spike stub claims nothing", unclaimed)
-	}
-	if strings.Contains(unclaimed.Summary, "smuggled-plain-stub") || strings.Contains(unclaimed.Summary, "claimed") {
-		t.Fatalf("oq-1 summary = %q, want the unclaimed sentence", unclaimed.Summary)
-	}
-	for _, w := range unclaimed.Witnesses {
-		if w == "smuggled-plain-stub" {
-			t.Fatalf("oq-1 witnesses = %q, want no claim witness", unclaimed.Witnesses)
-		}
 	}
 }

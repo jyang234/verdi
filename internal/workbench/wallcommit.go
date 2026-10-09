@@ -170,7 +170,8 @@ func wallUncommittedFragment(p *BoardProjection, git *boardGitState) string {
 // uncommittedUnclassifiedCap of them, then "+n more"; an unreadable
 // comparison its reason. A clean tree says so, and a change git reports
 // that the summary does not list keeps the indicator set and says that
-// instead.
+// instead. Its note says what Commit and push does and why: review reads
+// the committed head.
 func renderWallUncommitted(u wallUncommitted) string {
 	esc := stdhtml.EscapeString
 	var b strings.Builder
@@ -226,7 +227,9 @@ func renderWallUncommitted(u wallUncommitted) string {
 			b.WriteString(`<p class="wall-commit-none" data-testid="wall-commit-none">No uncommitted changes.</p>`)
 		}
 	}
-	b.WriteString(`<p class="wall-commit-note">Commits the working tree and pushes this branch.</p>`)
+	// The retired wall shell's review/worktree guidance (SI-368 (3), (32)):
+	// why the tree is committed — review reads the committed head.
+	b.WriteString(`<p class="wall-commit-note">Commits the working tree and pushes this branch: review reads the committed head.</p>`)
 	b.WriteString(`</div></details></div>`)
 	return b.String()
 }
