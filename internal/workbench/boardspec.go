@@ -460,6 +460,13 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 			proj.CreateFields = fields
 		}
 	}
+	// The New story dialog's criterion coverage (spec/new-story-dialog-v2
+	// ac-2, dc-2): only where the form above attached, so it reads no
+	// state of its own, and from this render's one corpus index, so it
+	// builds no second one.
+	if len(proj.CreateFields) > 0 {
+		proj.CreateCoverage = createCoverageOf("spec/"+proj.Spec, fm, newCorpusRead(ix, nil))
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}

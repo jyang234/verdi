@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/featurecoverage"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/index"
 )
@@ -250,6 +251,24 @@ func matchingStoryRefs(ix backlinker, featureRef string, acIDs []string) []strin
 	}
 	sort.Strings(refs)
 	return refs
+}
+
+// storyLinksOf assembles featurecoverage.Compute's story half for
+// featureRef's criteria from the corpus's implements backlinks: for each
+// criterion, in the order given, one link per story matchingStoryRefs
+// finds for it alone. It is the one assembly the index cards' call to
+// action (coverageOf) and the New story dialog (createCoverageOf) share,
+// so the two read stories identically (index-coverage co-2; SI-369 (13)).
+// A superseded story still claims its criterion: the inversion filters on
+// the edge type only (SI-369 (14)).
+func storyLinksOf(links backlinker, featureRef string, criteria []string) []featurecoverage.StoryLink {
+	var out []featurecoverage.StoryLink
+	for _, id := range criteria {
+		for _, story := range matchingStoryRefs(links, featureRef, []string{id}) {
+			out = append(out, featurecoverage.StoryLink{CriterionID: id, StoryRef: story})
+		}
+	}
+	return out
 }
 
 // isArchivedStorePath reports whether an indexed entry's backing file

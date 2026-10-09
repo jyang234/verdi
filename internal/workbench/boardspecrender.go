@@ -208,6 +208,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 <script src="/assets/walltoolbar.js"></script>
 <script src="/assets/wallkeys.js"></script>
 <script src="/assets/wallminimap.js"></script>
+<script src="/assets/newstorydialog.js"></script>
 <script src="/assets/wallnewstory.js"></script>
 </body>
 </html>
@@ -1008,8 +1009,11 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 
 	// The name: always asked — it is the identity every FieldIdentity
 	// descriptor derives from (the ref, the branch, the directory).
+	// data-pattern ships the server's own name grammar, specNameRe, which
+	// a parity test holds to the create action's ValidateSuccessorName
+	// (SI-369 (5)); the client compiles it as typed, never lowercased.
 	b.WriteString(`<div class="field"><label for="create-name">Name</label>`)
-	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name">`)
+	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name" data-pattern="` + esc(specNameRe.String()) + `">`)
 	b.WriteString(`<span class="field-hint">becomes the spec ref and the design branch</span></div>`)
 
 	for _, f := range p.CreateFields {
@@ -1132,15 +1136,13 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 	esc := stdhtml.EscapeString
 	switch boardlayout.ZoneKind(c.Kind) {
 	case boardlayout.ZoneAC:
+		// The text is coverageChipText's, which the New story dialog shares.
 		n := p.ACCoverage[c.ID]
-		switch n {
-		case 0:
-			b.WriteString(`<span class="coverage-chip coverage-chip--none" data-testid="coverage-` + esc(c.ID) + `" data-coverage="0">no stub</span>`)
-		case 1:
-			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="1">covered by 1 stub</span>`)
-		default:
-			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">covered by ` + strconv.Itoa(n) + ` stubs</span>`)
+		modifier := "covered"
+		if n == 0 {
+			modifier = "none"
 		}
+		b.WriteString(`<span class="coverage-chip coverage-chip--` + modifier + `" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">` + esc(coverageChipText(n)) + `</span>`)
 	case boardlayout.ZoneOpenQuestion:
 		if n := p.OQClaims[c.ID]; n > 1 {
 			// "spike"/"spikes" here are display prose (the variant

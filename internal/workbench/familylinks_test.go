@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/featurecoverage"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/index"
@@ -276,6 +277,45 @@ func TestMatchingStoryRefs(t *testing.T) {
 			got := matchingStoryRefs(ix, "spec/flx-parent", tc.acIDs)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("matchingStoryRefs(%v) = %#v, want %#v", tc.acIDs, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStoryLinksOf: the one story-link assembly the index's coverageOf
+// and the New story dialog share (SI-369 (13); index-coverage co-2) —
+// for each criterion in declared order, one link per distinct story whose
+// implements edge names it, read through matchingStoryRefs, so any other
+// edge type, a criterion nothing implements, and an empty criterion list
+// contribute nothing.
+func TestStoryLinksOf(t *testing.T) {
+	links := fakeBacklinks{
+		"spec/f#ac-1": {{From: "spec/b-story", Type: "implemented-by"}, {From: "spec/a-story", Type: "implemented-by"}, {From: "spec/a-story", Type: "implemented-by"}},
+		"spec/f#ac-2": {{From: "spec/check", Type: "verified-by"}},
+		"spec/f#ac-3": {{From: "spec/a-story", Type: "implemented-by"}},
+		"spec/g#ac-1": {{From: "spec/elsewhere", Type: "implemented-by"}},
+	}
+	for _, tc := range []struct {
+		name     string
+		criteria []string
+		want     []featurecoverage.StoryLink
+	}{
+		{
+			name:     "criteria in declared order, stories sorted and distinct within each",
+			criteria: []string{"ac-3", "ac-1"},
+			want: []featurecoverage.StoryLink{
+				{CriterionID: "ac-3", StoryRef: "spec/a-story"},
+				{CriterionID: "ac-1", StoryRef: "spec/a-story"},
+				{CriterionID: "ac-1", StoryRef: "spec/b-story"},
+			},
+		},
+		{name: "another edge type claims nothing", criteria: []string{"ac-2"}, want: nil},
+		{name: "a criterion nothing implements claims nothing", criteria: []string{"ac-9"}, want: nil},
+		{name: "no criteria, no links", criteria: nil, want: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storyLinksOf(links, "spec/f", tc.criteria); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("storyLinksOf(%v) = %#v, want %#v", tc.criteria, got, tc.want)
 			}
 		})
 	}
