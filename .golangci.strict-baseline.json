@@ -642,8 +642,6 @@
 {"count":1,"linter":"gochecknoglobals","message":"droppedKeys is a global variable","package":"internal/supersede","source":"var droppedKeys = map[string]bool{\"status\": true, \"frozen\": true}"},
 {"count":1,"linter":"gochecknoglobals","message":"validObligationStatuses is a global variable","package":"internal/upstream","source":"var validObligationStatuses = map[ObligationStatus]bool{"},
 {"count":1,"linter":"gochecknoglobals","message":"validReviewVerdicts is a global variable","package":"internal/upstream","source":"var validReviewVerdicts = map[ReviewVerdict]bool{"},
-{"count":1,"linter":"gochecknoglobals","message":"asdAreaLabels is a global variable","package":"internal/workbench","source":"var asdAreaLabels = map[asdAreaID]string{"},
-{"count":1,"linter":"gochecknoglobals","message":"asdAreaOrder is a global variable","package":"internal/workbench","source":"var asdAreaOrder = []asdAreaID{asdAreaShape, asdAreaSuccess, asdAreaContext, asdAreaReview}"},
 {"count":1,"linter":"gochecknoglobals","message":"boardDocumentPageTemplate is a global variable","package":"internal/workbench","source":"var boardDocumentPageTemplate = template.Must(template.New(\"boarddocument\").Funcs(shellFuncs).Parse(`<!doctype html>"},
 {"count":1,"linter":"gochecknoglobals","message":"boardPageTemplate is a global variable","package":"internal/workbench","source":"var boardPageTemplate = template.Must(template.New(\"board\").Funcs(shellFuncs).Parse(`<!doctype html>"},
 {"count":1,"linter":"gochecknoglobals","message":"boardSpecPageTemplate is a global variable","package":"internal/workbench","source":"var boardSpecPageTemplate = template.Must(template.New(\"boardspec\").Funcs(shellFuncs).Parse(`<!doctype html>"},

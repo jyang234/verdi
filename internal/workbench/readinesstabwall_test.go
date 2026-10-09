@@ -168,15 +168,3 @@ func tabConcernIDs(tab string) []string {
 	}
 	return ids
 }
-
-// snapConcern is concern id of snap, or a failed test.
-func snapConcern(t *testing.T, snap readinesspilot.Snapshot, id string) readinesspilot.Concern {
-	t.Helper()
-	for _, c := range snap.AllConcerns {
-		if c.ID == id {
-			return c
-		}
-	}
-	t.Fatalf("the loader's snapshot has no concern %s", id)
-	return readinesspilot.Concern{}
-}
