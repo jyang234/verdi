@@ -6246,6 +6246,12 @@ body:not(.board-page) > footer.site-foot,
   .topbar-posture-group { flex-wrap: nowrap; }
   .topbar-posture-group .asd-posture-tech { flex: 0 1 auto; }
 }
+/* the formal state beside the bytes word, shown when it is not the word
+   itself ("accepted (accepted-pending-build)" on a sealed wall), reads at
+   the summary's own colour: dimmed to 0.7 it fell under the AA contrast
+   the bar's axe check holds every page to, once a sealed wall joined
+   87's page list */
+.topbar-posture-summary .asd-posture-formal { opacity: 1; }
 /* Commit & push and its divided suffix, the count, which is the popover's
    summary; the indicator is a dot at the wrap's corner, its words for
    the ear */
