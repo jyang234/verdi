@@ -167,14 +167,17 @@ func (s *boardSpecServer) boardReadinessTabHandler() http.HandlerFunc {
 // working-tree frontmatter is fm (boardReadinessTabHandler), followed by
 // the policy setup guide when the wall's capabilities call for one — on
 // a wall whose readiness is fixed as much as on one whose readiness loads
-// (readinessTabGuide).
+// (readinessTabGuide). The wall's own projection (loadBoard), which
+// decides its mode and its add slots, is loaded at most once per tab,
+// and only when the guide or the targets need it.
 func (s *boardSpecServer) readinessTab(ctx context.Context, name string, fm *artifact.SpecFrontmatter) string {
 	if fixed := s.instanceMarks(); fixed != nil {
-		return renderReadinessTabUnavailable(fixed.Unavailable) + s.readinessTabGuide(ctx, name)
+		return renderReadinessTabUnavailable(fixed.Unavailable) + s.readinessTabGuide(ctx, name, s.readinessTabWall(ctx, name))
 	}
 	ctx, release := s.openProjection(ctx)
 	defer release()
-	guide := s.readinessTabGuide(ctx, name)
+	wall := s.readinessTabWall(ctx, name)
+	guide := s.readinessTabGuide(ctx, name, wall)
 	ref := "spec/" + name
 	snap, err := s.readinessLoader.Load(ctx, ref)
 	if reason := readinessTabUnreadable(ref, snap, err); reason != "" {
@@ -184,22 +187,51 @@ func (s *boardSpecServer) readinessTab(ctx context.Context, name string, fm *art
 	for _, st := range fm.Stubs {
 		stubs = append(stubs, st.Slug)
 	}
-	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs, caseStripHalves(fm), s.readinessTabSlots(ctx, name))) + guide
+	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs, caseStripHalves(fm), readinessTabSlots(wall()))) + guide
 }
 
-// readinessTabSlots is the add slots the wall of spec name draws, by
-// object kind (slotKindsDrawn), from the wall's own projection: whether
-// the wall takes edits is its mode and its domain refusal, which only
-// the board's load decides. It runs inside the tab's one application
-// projection. A board that cannot be loaded here draws no slot that the
-// tab may point at, so its criteria row is a plain row — never a target
-// onto nothing; the wall's own render reports the load's failure.
-func (s *boardSpecServer) readinessTabSlots(ctx context.Context, name string) map[string]bool {
-	p, _, _, _, err := s.loadBoard(ctx, name)
-	if err != nil {
+// readinessTabWall is the wall of spec name's own projection, loaded on
+// the first call and kept for the tab's request: it runs inside the
+// tab's one application projection when the tab has one. A board that
+// cannot be loaded here is nil; the wall's own render reports the load's
+// failure.
+func (s *boardSpecServer) readinessTabWall(ctx context.Context, name string) func() *BoardProjection {
+	var (
+		p      *BoardProjection
+		loaded bool
+	)
+	return func() *BoardProjection {
+		if !loaded {
+			loaded = true
+			if board, _, _, _, err := s.loadBoard(ctx, name); err == nil {
+				p = board
+			}
+		}
+		return p
+	}
+}
+
+// readinessTabSlots is the add slots the wall p draws, by object kind
+// (slotKindsDrawn): whether the wall takes edits is its mode and its
+// domain refusal, which only the board's load decides. A board that
+// could not be loaded (nil) draws no slot that the tab may point at, so
+// its criteria row is a plain row — never a target onto nothing.
+func readinessTabSlots(p *BoardProjection) map[string]bool {
+	if p == nil {
 		return nil
 	}
 	return slotKindsDrawn(p)
+}
+
+// readinessTabMode is the wall p's mode for the policy guide's editing
+// line (SI-368 (32) B1): read-only when the board could not be loaded,
+// so the guide never says that editing proceeds on a wall whose mode it
+// cannot read.
+func readinessTabMode(p *BoardProjection) boardModeKind {
+	if p == nil {
+		return modeReadOnly
+	}
+	return p.Mode
 }
 
 // caseStripHalves is the case-file strip's halves the wall renders for
@@ -216,27 +248,33 @@ func caseStripHalves(fm *artifact.SpecFrontmatter) map[string]bool {
 // readinessTabGuide is the policy setup guide the Readiness tab carries
 // (SI-368 (3), (24)(f)): chosen by policyGuideFor from the capabilities
 // consultation alone, never from readiness, so it needs no readiness
-// load; "" when no design service is wired or no guide applies.
-func (s *boardSpecServer) readinessTabGuide(ctx context.Context, name string) string {
+// load, and scoped in its editing line to the wall's mode (SI-368 (32)
+// B1), which wall loads only when a guide applies; "" when no design
+// service is wired or no guide applies.
+func (s *boardSpecServer) readinessTabGuide(ctx context.Context, name string, wall func() *BoardProjection) string {
 	if s.design == nil {
 		return ""
 	}
 	outcome, view := s.design.GetDesignCapabilities(ctx, s.root, "spec/"+name)
-	return renderReadinessTabGuide(policyGuideFor(true, view, outcome.Failure))
+	guide := policyGuideFor(true, view, outcome.Failure)
+	if guide.Kind == policyGuideNone {
+		return ""
+	}
+	return renderReadinessTabGuide(guide, readinessTabMode(wall()))
 }
 
 // renderReadinessTabGuide renders the guide beside the tab's readiness,
 // labelled as capabilities (SI-368 (3)): the inline, read-only guide the
-// wall shell carried (writePolicySetupGuide), its test ids kept; "" for
-// no guide.
-func renderReadinessTabGuide(g policyGuide) string {
+// wall shell carried (writePolicySetupGuide), its test ids kept, on a
+// wall in mode; "" for no guide.
+func renderReadinessTabGuide(g policyGuide, mode boardModeKind) string {
 	if g.Kind == policyGuideNone {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(`<section class="readiness-tab-capabilities" data-testid="readiness-tab-capabilities" aria-label="Capabilities">`)
 	b.WriteString(`<p class="readiness-eyebrow">Capabilities</p><p class="readiness-purpose">From the wall&#39;s design capabilities, not from its readiness.</p>`)
-	writePolicySetupGuide(&b, g.Kind, g.Code, g.Detail)
+	writePolicySetupGuide(&b, g.Kind, g.Code, g.Detail, mode)
 	b.WriteString(`</section>`)
 	return b.String()
 }

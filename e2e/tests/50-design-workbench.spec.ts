@@ -553,10 +553,10 @@ test.describe("posture and policy", () => {
     // context/policy row's home is the policy setup guide itself, in the
     // record drawer's Readiness tab under its Capabilities label, which
     // the readiness pill opens (spec/wall-strip-and-drawer-v2 ac-6; SI-368
-    // (3), (27)(c)). The row's own words stay pinned where they are
-    // derived (TestPolicyConcern_RowsHonorBoardMode); the guide below
-    // states the same serving-checkout fact, the inspect-first step and
-    // the mode-scoped editing wording.
+    // (3), (27)(c)). The row's words moved into the guide with it (SI-368
+    // (32)): the serving-checkout fact, the inspect-first step, and the
+    // editing line scoped to the wall's mode, which Go pins in every mode
+    // (TestPolicyConcern_RowsHonorBoardMode) and this authoring wall shows.
     const readiness = await openRecordTab(page, "readiness");
     await expect(readiness.getByTestId("readiness-tab-capabilities")).toContainText("Capabilities");
     await expect(page.locator("#boardv2-region").getByTestId("asd-policy-guide")).toHaveCount(0);
@@ -609,10 +609,14 @@ test.describe("posture and policy", () => {
     expect((await inspect.innerText()).trim().endsWith("\nJSON")).toBe(true);
     await expect(guide.locator("pre.asd-policy-guide-cmd")).toHaveCount(4);
     // Truthful, mode-scoped wording — never "editing continues" as an
-    // unconditional claim a read-only wall would belie.
+    // unconditional claim a read-only wall would belie — and, on this
+    // authoring wall, what a browser write records (SI-368 (32)).
     await expect(summaries.first()).toContainText(
       "Ordinary human editing does not require policy; this board's read-only restrictions still apply.",
     );
+    const editing = summaries.first().getByTestId("asd-policy-guide-editing");
+    await expect(editing).toHaveAttribute("data-board-mode", "authoring");
+    await expect(editing).toHaveText("On this authoring board, browser editing proceeds and records the explicit not-applicable policy posture.");
     // Read-only by construction: no form, button, input, or fetch panel.
     await expect(guide.locator("form, button, input, select, textarea, [data-asd-panel]")).toHaveCount(0);
   });

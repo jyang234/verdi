@@ -579,6 +579,32 @@ func TestReadinessTab_OneProjectionAndTheMarksTargets(t *testing.T) {
 	}
 }
 
+// TestReadinessTabMode (SI-368 (32) B1): the policy guide's editing line
+// reads the wall's own mode from its load, and a wall whose board could
+// not be loaded reads as read-only, so the guide never says that editing
+// proceeds on a wall whose mode it cannot read.
+func TestReadinessTabMode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		p    *BoardProjection
+		want boardModeKind
+	}{
+		{"an authoring wall", &BoardProjection{Mode: modeAuthoring}, modeAuthoring},
+		{"a review wall", &BoardProjection{Mode: modeReview}, modeReview},
+		{"a read-only wall", &BoardProjection{Mode: modeReadOnly}, modeReadOnly},
+		{"a board that could not be loaded", nil, modeReadOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := readinessTabMode(tc.p); got != tc.want {
+				t.Fatalf("readinessTabMode = %q, want %q", got, tc.want)
+			}
+			if tc.p == nil && readinessTabSlots(tc.p) != nil {
+				t.Fatal("a board that could not be loaded draws add slots")
+			}
+		})
+	}
+}
+
 // TestReadinessTab_CarriesThePolicyGuide (SI-368 (3), (24)(f); ac-6's
 // guide home): the Readiness tab carries the policy setup guide, chosen
 // by policyGuideFor from the capabilities consultation alone, under a
@@ -643,6 +669,14 @@ func TestReadinessTab_CarriesThePolicyGuide(t *testing.T) {
 					if !strings.Contains(guide, id) {
 						t.Errorf("GET %s: the guide lacks %s", path, id)
 					}
+				}
+				// The guide's editing line follows the wall's own mode, read
+				// from the wall's load (SI-368 (32) B1): both marks walls are
+				// authoring walls (effectiveMode: a new proposed spec on a
+				// design branch), on the projection's path and the fixed one.
+				if line, n := testIDElementText(guide, "asd-policy-guide-editing"); n != 1 || !strings.HasPrefix(line, "On this authoring board, browser editing proceeds") ||
+					!strings.Contains(guide, `data-testid="asd-policy-guide-editing" data-board-mode="authoring"`) {
+					t.Errorf("GET %s: the guide's editing line = %q (%d), want the authoring wall's", path, line, n)
 				}
 			}
 		})

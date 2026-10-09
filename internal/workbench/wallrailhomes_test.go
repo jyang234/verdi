@@ -93,6 +93,17 @@ func noticesOf(region string) string {
 	return region[start:end]
 }
 
+// policyForbiddenView is a render view whose wall shell derived the
+// policy-forbidden context/policy row, so the rail's absence holds whatever
+// the policy guide's facts. It retires with the shell's derivation (lane
+// F3-go3, SI-368 (32)).
+func policyForbiddenView() *asdView {
+	v := testASDView()
+	v.Shell = deriveASDShell(asdShellInput{Mode: string(modeAuthoring), Branch: "design/x", DesignWired: true,
+		CapsFailure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: policyNotAdoptedDetail}})
+	return v
+}
+
 // TestWallRail_GoneFromEveryWall: no wall renders the rail, the shell or
 // any item the rail held, in its region or anywhere on its page, whatever
 // the policy guide's facts (the shell drew the guide when policy was
