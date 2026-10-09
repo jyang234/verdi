@@ -22,7 +22,10 @@ test("home lists specs, boards, and services, and links each", async ({ page }) 
   await expect(directory.locator('a[href="/verdict/jira:LOAN-1482"]')).toBeVisible();
 
   // The store's board, linked to its board page (the v0 board key route,
-  // which the glance section never emits — no collision here).
+  // which the glance section never emits — no collision here). The
+  // boards list is a collapsed fold in the other-records strip
+  // (spec/index-v2 ac-5): open it so the link can be seen.
+  await page.locator("details.home-boards > summary").click();
   await expect(page.locator('a[href="/board/STORY-1482"]')).toBeVisible();
 
   // The discovered service (the e2e harness folds in testdata/svcfix).
@@ -38,6 +41,8 @@ test("home clicks through to a spec page", async ({ page }) => {
 
 test("home clicks through to the board", async ({ page }) => {
   await page.goto("/");
+  // The boards list is a collapsed fold (spec/index-v2 ac-5): open it first.
+  await page.locator("details.home-boards > summary").click();
   await page.locator('a[href="/board/STORY-1482"]').click();
   await expect(page.getByTestId("topbar-title")).toHaveText("Board: STORY-1482");
   await expect(page.locator(".card")).toContainText("spec/stale-decline");

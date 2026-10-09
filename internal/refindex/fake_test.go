@@ -34,6 +34,10 @@ type fakeGitRunner struct {
 	// order — the witness that each walk asks for all of its dates in ONE
 	// port call (co-1; the batch budget), never one call per entry.
 	commitDatesCalls [][]string
+	// showCalls records every Show call as "<ref>:<path>", in call order —
+	// the witness that a draft's title comes from the content the walk
+	// already reads, never a second read (SI-366 (1)).
+	showCalls []string
 }
 
 func (f *fakeGitRunner) DefaultBranch(ctx context.Context, dir string) (string, error) {
@@ -49,6 +53,7 @@ func (f *fakeGitRunner) RemoteDesignBranches(ctx context.Context, dir string) ([
 }
 
 func (f *fakeGitRunner) Show(ctx context.Context, dir, ref, path string) ([]byte, error) {
+	f.showCalls = append(f.showCalls, ref+":"+path)
 	return f.showFn(ctx, dir, ref, path)
 }
 

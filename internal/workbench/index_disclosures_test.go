@@ -120,8 +120,8 @@ func buildIndexDisclosureFreeFixture(t *testing.T) string {
 }
 
 var (
-	indexCountRe    = regexp.MustCompile(`<p class="home-disclosures" data-disclosures-count="([0-9]+)">`)
-	indexUnprovenRe = regexp.MustCompile(`<p class="home-disclosures" data-disclosures-unproven="([^"]*)">`)
+	indexCountRe    = regexp.MustCompile(`<a class="home-disclosures" data-disclosures-count="([0-9]+)" href="/disclosures"`)
+	indexUnprovenRe = regexp.MustCompile(`<a class="home-disclosures" data-disclosures-unproven="([^"]*)" href="/disclosures"`)
 	pageCountRe     = regexp.MustCompile(`<section class="disclosures-view" data-count="([0-9]+)">`)
 )
 

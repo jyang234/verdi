@@ -257,9 +257,12 @@ func TestSpecImport_HomeAndPageDiscoverable(t *testing.T) {
 	if !strings.Contains(home[link-200:link+200], `href="/design/import"`) {
 		t.Fatalf("home import link does not address /design/import: %s", home[link-200:link+200])
 	}
-	glance := strings.Index(home, `data-testid="home-glance"`)
-	if glance >= 0 && link > glance {
-		t.Fatalf("the import link must be discoverable before the glance/directory sections (link at %d, glance at %d)", link, glance)
+	directory := strings.Index(home, `class="home-directory"`)
+	if directory < 0 {
+		t.Fatalf("home page has no directory section: %s", home)
+	}
+	if link > directory {
+		t.Fatalf("the import link must be discoverable before the directory's columns (link at %d, directory at %d)", link, directory)
 	}
 
 	status, page := c.get("/design/import")

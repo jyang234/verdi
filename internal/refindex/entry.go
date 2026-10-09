@@ -54,10 +54,11 @@ const (
 // than StatusGroup is (ac-3's identical override).
 //
 // This is a purely additive, in-memory computed signal — never persisted,
-// never a frontmatter field (home-status-glance dc-1 upheld) — and it is
-// consumed today ONLY by the home page's status-glance section. Every
-// other refindex consumer (internal/workbench/directory.go's exhaustive
-// render; this package's own tests) reads none of it and is unaffected by
+// never a frontmatter field (the kept home-status-glance dc-1 property,
+// parent workbench-redesign dc-12) — and it is consumed today ONLY by the
+// index's cards (internal/workbench: a card's next move, and the archived
+// fold spec/index-v2 ac-5 names). Every other refindex consumer (this
+// package's own tests included) reads none of it and is unaffected by
 // its presence; ComputeIndex's production code paths set it explicitly on
 // every Entry they construct, so the zero value below never appears on a
 // real entry. A test fixture built elsewhere that leaves Zone unset gets
@@ -135,4 +136,13 @@ type Entry struct {
 	// disclosure.Disclosure carries only one Text string apiece, so the
 	// two reasons are never conflated into one field.
 	DateDisclosed *disclosure.Disclosure
+	// Title is an ordinary design-branch draft's own title, decoded from
+	// the spec.md content the design-branch walk already reads to resolve
+	// it — no git read of its own (spec/index-v2 ac-2; SI-366 (1)). It is
+	// empty for a default-branch entry, whose consumers keep reading the
+	// serving working tree's title, and for a degraded (no-draft-spec)
+	// entry, which has no content to title. It is never derived from the
+	// ref: a draft that fails to decode fails the walk as an operational
+	// error before any title could be invented for it.
+	Title string
 }

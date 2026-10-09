@@ -41,19 +41,36 @@ test.describe("vocabulary surfaces (spec/vocabulary-surfaces)", () => {
   }) => {
     const vocabBase = await vocabFixtureBase(page);
 
-    // The home page: vocab-probe's status chip — the column chip the
-    // glance's "In flight" bucket and the directory's grouped listing
-    // both render — reads the RENAMED state label, and the bare id
-    // appears nowhere as visible text on the page.
+    // The home page: vocab-probe's status chip — on its card in the
+    // index's Accepted column (spec/index-v2; the glance gave way to
+    // the columns, parent dc-12) — reads the RENAMED state label, and
+    // the bare id appears nowhere as visible text on the page.
     await page.goto(vocabBase);
-    const glanceChip = page
-      .getByTestId("glance-entry-vocab-probe")
+    const cardChip = page
+      .getByTestId("dir-entry-vocab-probe")
       .locator(".badge.badge-accepted-pending-build");
-    await expect(glanceChip).toBeVisible();
-    await expect(glanceChip).toHaveText("Ready to build");
+    await expect(cardChip).toBeVisible();
+    await expect(cardChip).toHaveText("Ready to build");
     await expect(
       page.getByText("accepted-pending-build", { exact: true }),
     ).toHaveCount(0);
+
+    // The columns' own copy follows the renamed words too (spec/index-v2;
+    // SI-366 (22)(a)): the Accepted column's where line speaks the
+    // renamed state, its move line the renamed story plural, and the
+    // desk's move line the renamed merge verb — while the headings keep
+    // their StatusGroup identity words.
+    const accepted = page.getByTestId("dir-group-accepted-pending-build");
+    await expect(accepted.locator("h2")).toContainText("Accepted");
+    await expect(accepted.locator(".dir-group-where")).toHaveText(
+      "default branch · Ready to build",
+    );
+    await expect(accepted.locator(".dir-group-move")).toHaveText(
+      "Filed on the default branch. Evidence lands as Workstreams are built.",
+    );
+    const desk = page.getByTestId("dir-group-drafts-in-progress");
+    await expect(desk.locator(".dir-group-where")).toHaveText("any branch · draft");
+    await expect(desk.locator(".dir-group-move")).toContainText("A Sign off of its branch");
 
     // The served board: the case-file class tag reads the renamed class
     // word while its testid and CSS modifier keep the bare id, and the

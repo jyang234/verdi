@@ -77,9 +77,21 @@
 // | OQ_ID, STUB_SLUGS, INSTANTIATE_SLUG                                | SHOWCASE | scoping-canvas happy path on real/committed stub content |
 // | SUPERSEDED_FEATURE_SPEC, SUPERSEDED_STORY_SPEC                    | SHOWCASE | committed supersession chains (rate-lock, escrow-notify) |
 // | DIR_LOCAL_DRAFT, DIR_REMOTE_DRAFT, DIR_INREVIEW_SPEC               | SHOWCASE | directory-home happy path: grouped listing, source disclosure, in-review chip |
+// | DIR_INREVIEW_TITLE, DIR_ARCHIVED_SPEC, DIR_ARCHIVED_TITLE,         | SHOWCASE | index-v2 cards (96-index-pipeline): the titles, the archived card, and the superseded card's successor on the committed corpus |
+// |   DIR_TERMINAL_SPEC, DIR_TERMINAL_SUCCESSOR, READONLY_SPEC_TITLE,  |          | |
+// |   NO_CASEFILE_SPEC_TITLE                                           |          | |
+// | INDEX_DATED_DRAFT_13, INDEX_DATED_DRAFT_14, INDEX_DATED_DRAFT_15,  | SHOWCASE | index-v2 ages and quiet marks (SI-366 (13)) on the isolated dated store (cmd/e2eharness/indexdates.go) |
+// |   INDEX_DATED_DESK_COMPONENT, INDEX_DATED_LANDED,                  |          | |
+// |   INDEX_DATED_EDITED, INDEX_DATED_AGES, INDEX_DATED_COLUMNS         |          | |
+// | INDEX_COMMITTED_SPECS                                              | SHOWCASE | index-v2 completeness (SI-366 (22)(c)): every committed corpus spec once, in its column |
+// | INDEX_ARCHIVED_SPECS                                               | SHOWCASE | index-v2 On the shelf (ac-5; SI-366 (8)): the committed archive-zone specs, folded at the shelf's foot |
+// | INDEX_CTA_FEATURE, INDEX_CTA_CRITERION, INDEX_CTA_UNCLAIMED,       | SHOWCASE | index-v2 call to action (ac-4; SI-366 (10), (11)): the committed accepted feature with unclaimed criteria, and the one every stub claims |
+// |   INDEX_CTA_CLAIMED_FEATURE                                        |          | |
 // | DIR_EMPTY_BRANCH                                                   | EDGE     | degenerate branch: no draft spec at all |
 // | DIR_DOOMED_DRAFT                                                   | EDGE     | mid-session branch deletion (stress/race path) |
-// | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | home-status-glance mid-lifecycle shape: closed, still in specs/active/ |
+// | DIR_VANISHED_BRANCH                                                | EDGE     | a design branch that never existed: the deleted-branch notice page, reached by address alone (96) |
+// | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | mid-lifecycle shape: closed, still in specs/active/ (the On the shelf column's active-zone terminal card) |
+// | INDEX_FAILURE_UNDECODABLE                                          | EDGE     | the isolated index-failure store (cmd/e2eharness/indexfailure.go): the undecodable spec the one failure notice names (ac-6; SI-366 (15)) |
 // | DIAGRAM_PROPOSAL, DIAGRAM_PROPOSAL_BODY, DIAGRAM_BASE_BODY,        | SHOWCASE | diagram-editor happy path: drafting, structural ops, byte preservation, verification rail, peek/reset |
 // |   DIAGRAM_DERIVED, DIAGRAM_DERIVED_BODY, DIAGRAM_RAIL_TIER,        |          | |
 // |   DIAGRAM_RAIL_FINDINGS                                            |          | |
@@ -459,6 +471,112 @@ export const SHOWCASE = {
   DIR_INREVIEW_SPEC: designSpecName,
 
   // -------------------------------------------------------------------------
+  // Index (spec/index-v2) — the four columns and their cards at GET /
+  // (96-index-pipeline). Only this story changes fixtures.ts (co-2).
+  // -------------------------------------------------------------------------
+
+  // The in-review draft's title (provision_board.go's design spec), the
+  // card's title link text (SI-366 (1)). The directory fixture drafts'
+  // titles follow directoryFixtureTitle below.
+  DIR_INREVIEW_TITLE: "Refinancing decline flow",
+  // The archive-zone closed feature (examples/showcase's specs/archive):
+  // an On the shelf card with no board link (dc-3: only servable
+  // addresses) and no next move (SI-366 (2)).
+  DIR_ARCHIVED_SPEC: "loan-refi-2023",
+  DIR_ARCHIVED_TITLE: "Loan refinance rollout 2023 (fixture, closed)",
+  // The committed superseded component still in the active zone, and the
+  // component whose `supersedes` link names it: the card's next move
+  // reads "see successor" and links the successor's corpus page.
+  DIR_TERMINAL_SPEC: "legacy-cache-policy",
+  DIR_TERMINAL_SUCCESSOR: "store-layout-notes",
+  // The working-tree titles of READONLY_SPEC (the default-branch feature
+  // with stories) and NO_CASEFILE_SPEC (the active component).
+  READONLY_SPEC_TITLE: "Stale decline handling (fixture)",
+  NO_CASEFILE_SPEC_TITLE: "Store layout notes (fixture)",
+
+  // The isolated dated store (cmd/e2eharness/indexdates.go; SI-296):
+  // every entry's last change is a known number of days before its
+  // serve's fixed clock, so each card's age is exact (SI-366 (13)): the
+  // three drafts straddle the fourteen-day quiet boundary (index-data
+  // ac-2: quiet is > 14 d, exclusive), the draft component on the desk
+  // is quiet, and the two landed components age by their landing commit
+  // — the edited one by its in-place edit, not its first landing.
+  // BINDING: names and ages mirror indexdates.go's table verbatim; change
+  // them together.
+  INDEX_DATED_DRAFT_13: "dated-draft-13",
+  INDEX_DATED_DRAFT_14: "dated-draft-14",
+  INDEX_DATED_DRAFT_15: "dated-draft-15",
+  INDEX_DATED_DESK_COMPONENT: "dated-desk-component",
+  INDEX_DATED_LANDED: "dated-landed",
+  INDEX_DATED_EDITED: "dated-edited",
+  INDEX_DATED_AGES: {
+    "dated-draft-13": "13 d ago",
+    "dated-draft-14": "14 d ago",
+    "dated-draft-15": "quiet 15 d",
+    "dated-desk-component": "quiet 30 d",
+    "dated-landed": "50 d ago",
+    "dated-edited": "25 d ago",
+  } as Readonly<Record<string, string>>,
+  // The dated store's exact per-column card lists, in document order
+  // (refindex sorts every entry by ref): the desk holds the default-branch
+  // draft component and the three drafts, Active components the two
+  // landed components, and the other two columns are empty (SI-366
+  // (22)(c)).
+  INDEX_DATED_COLUMNS: {
+    "drafts-in-progress": ["dated-desk-component", "dated-draft-13", "dated-draft-14", "dated-draft-15"],
+    "accepted-pending-build": [],
+    "active-components": ["dated-edited", "dated-landed"],
+    "terminal": [],
+  } as Readonly<Record<string, readonly string[]>>,
+
+  // Every committed default-branch spec (examples/showcase's specs/active
+  // and specs/archive, which the harness store carries verbatim) and the
+  // column its status puts it in (workbench-directory dc-2; specstate's
+  // projection for a feature or story: a landed spec reads
+  // accepted-pending-build, an explicit legacy terminal status or a landed
+  // successor's validated supersession reads superseded or closed; a
+  // component reads its authored status). 96 asserts each appears exactly
+  // once in that column, so a render that drops a class of cards cannot
+  // pass (SI-366 (22)(c)). The harness-provisioned default-branch specs
+  // (DIR_CLOSED_AWAITING_ARCHIVE, STATUSLESS_SEALED_SPEC, the FL_* family)
+  // are asserted by their own suites. BINDING: mirrors the committed
+  // corpus; change them together.
+  INDEX_COMMITTED_SPECS: {
+    "borrower-update-api": "accepted-pending-build",
+    "borrower-update-mobile": "accepted-pending-build",
+    "borrower-update-mobile-spike": "accepted-pending-build",
+    "escrow-autopay": "accepted-pending-build",
+    "escrow-notify-v2": "accepted-pending-build",
+    "loan-workflow-v2": "accepted-pending-build",
+    "rate-lock-v2": "accepted-pending-build",
+    "stale-decline": "accepted-pending-build",
+    "store-layout-notes": "active-components",
+    "escrow-notify": "terminal",
+    "legacy-cache-policy": "terminal",
+    "loan-workflow": "terminal",
+    "rate-lock": "terminal",
+    "loan-refi-2023": "terminal",
+    "refi-rate-check-2024": "terminal",
+  } as Readonly<Record<string, string>>,
+
+  // The committed archive-zone specs (examples/showcase's specs/archive,
+  // carried verbatim): every one folds into the shelf's archived
+  // <details>, never a card in the column's body (ac-5; SI-366 (8)).
+  // BINDING: mirrors the committed archive zone; change them together.
+  INDEX_ARCHIVED_SPECS: ["loan-refi-2023", "refi-rate-check-2024"] as readonly string[],
+
+  // The call to action (ac-4; SI-366 (10), (11)): loan-workflow-v2 declares
+  // ac-1 and ac-3, lists no stub, and no committed story implements
+  // either, so its card reads "2 AC unclaimed · ac-1 · New story";
+  // escrow-autopay's two stubs list every one of its criteria, so its
+  // card carries no call to action and no unproven mark. BINDING: mirrors
+  // the committed corpus; change them together.
+  INDEX_CTA_FEATURE: "loan-workflow-v2",
+  INDEX_CTA_CRITERION: "ac-1",
+  INDEX_CTA_UNCLAIMED: 2,
+  INDEX_CTA_CLAIMED_FEATURE: "escrow-autopay",
+
+  // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the drafting/structural-ops/rail/
   // peek-reset happy paths (37-board-diagram-editor)
   // -------------------------------------------------------------------------
@@ -668,6 +786,12 @@ export const EDGE = {
 
   DIR_EMPTY_BRANCH: "uncharted-idea", // no draft spec → disclosed notice entry
   DIR_DOOMED_DRAFT: "doomed-draft", // deleted mid-session via CONTROL_URL
+  // A design branch no one ever cut: its board address resolves to no
+  // ref, so the branch-gone notice page (branchboard.go's dispatch →
+  // notfound.go's renderStaleEntryNotice) renders for it exactly as for a
+  // branch deleted after the directory rendered — the shape 96 asserts
+  // without deleting a provisioned branch (37 keeps the real deletion).
+  DIR_VANISHED_BRANCH: "never-cut-draft",
 
   // -------------------------------------------------------------------------
   // Home status glance (spec/home-status-glance) — the "closed awaiting
@@ -681,9 +805,15 @@ export const EDGE = {
   // examples/showcase corpus): parent workbench-legibility dc-4's own
   // "closed awaiting archive" example, distinct from the archive-zone
   // ARCHIVED_SPEC (loan-refi-2023) the directory-home suite already
-  // covers. The glance shows this one in settling; the archive-zone twin
-  // is excluded entirely (dc-2/ADJ-32 f1).
+  // covers. The index shows this one as an On the shelf card with its
+  // compatibility disclosure; the archive-zone twin is a shelf card too,
+  // with no board link (spec/index-v2; parent dc-12).
   DIR_CLOSED_AWAITING_ARCHIVE: "rate-table-sunset",
+  // The isolated index-failure store's undecodable default-branch spec
+  // (cmd/e2eharness/indexfailure.go): the path the one failure notice
+  // names (ac-6; SI-366 (15)). BINDING: mirrors indexFailureUndecodablePath
+  // verbatim.
+  INDEX_FAILURE_UNDECODABLE: ".verdi/specs/active/index-failure-undecodable/spec.md",
 
   // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the disclosed-unavailable and
@@ -831,15 +961,27 @@ export function dirGroupTestId(group: string): string {
   return `dir-group-${group}`;
 }
 
-// data-testid helpers for the home status glance (spec/home-status-glance
-// dc-5's binding selector contract, mirroring dirEntryTestId/dirGroupTestId
-// above verbatim): NEW, additional testids that never replace or repurpose
-// dir-entry-*/dir-group-*.
-export function glanceEntryTestId(name: string): string {
-  return `glance-entry-${name}`;
+// The four columns' headings, keyed by dir-group test id suffix, in
+// workbench-directory dc-2's order (spec/index-v2 ac-1; parent dc-12). The
+// former glance-group-*/glance-entry-* test ids gave way to these (dc-12).
+export const INDEX_COLUMNS: ReadonlyArray<readonly [group: string, heading: string]> = [
+  ["drafts-in-progress", "On the desk"],
+  ["accepted-pending-build", "Accepted"],
+  ["active-components", "Active components"],
+  ["terminal", "On the shelf"],
+];
+
+// The title cmd/e2eharness/provision_directory.go gives a directory
+// fixture draft (DIR_LOCAL_DRAFT, DIR_REMOTE_DRAFT): its card's title link
+// text (SI-366 (1)). BINDING: mirrors directoryDraftSpec verbatim.
+export function directoryFixtureTitle(name: string): string {
+  return `${name} (directory fixture)`;
 }
-export function glanceGroupTestId(slug: string): string {
-  return `glance-group-${slug}`;
+
+// The title cmd/e2eharness/indexdates.go gives every dated-store spec:
+// the card's title on that store. BINDING: mirrors indexDatesComponent.
+export function indexDatedTitle(name: string): string {
+  return `${name} (dated e2e fixture)`;
 }
 
 // Provisioned by cmd/e2eharness/provision_diagram.go on the design branch
@@ -885,6 +1027,28 @@ export function worktreeDiagramPath(name: string, diagram: string): string {
 // never CI or approval — default branch and no policy/model/forge/tracker
 // configuration. Its /info and /tamper siblings serve the honesty cases.
 export const SPEC_IMPORT_FIXTURE_URL = `${CONTROL_URL}/spec-import-fixture`;
+
+// The control server endpoints that start (once) and name two isolated
+// REAL stores the index's columns are proven against (spec/index-v2
+// ac-1, ac-2): the empty store (cmd/e2eharness/emptyglance.go — git init
+// + verdi.yaml, zero specs, so every column renders its empty state
+// through the real refindex pipeline; ADJ-40), and the dated store
+// (indexdates.go — a `verdi serve` under VERDI_NOW, so every age is
+// exact). Each answers its base URL as plain text.
+export const EMPTY_INDEX_FIXTURE_URL = `${CONTROL_URL}/empty-glance-fixture`;
+export const INDEX_DATES_FIXTURE_URL = `${CONTROL_URL}/index-dates-fixture`;
+// ...and the failing store (cmd/e2eharness/indexfailure.go; SI-366 (15)):
+// an isolated real store whose directory index computation fails on an
+// undecodable default-branch spec, served in-process, so ac-6's honest
+// failure is proven through the real pipeline in both views.
+export const INDEX_FAILURE_FIXTURE_URL = `${CONTROL_URL}/index-failure-fixture`;
+
+// The control server's forge outage switch and its reset (cmd/e2eharness/
+// control.go; SI-366 (16)): POST the first to make the open-MR feed answer
+// 503 until the second is POSTed. A suite that downs the forge resets it
+// before it ends, so the next file reads the forge as provisioned.
+export const FORGE_OUTAGE_URL = `${CONTROL_URL}/outage`;
+export const FORGE_OUTAGE_RESET_URL = `${CONTROL_URL}/outage/reset`;
 
 const specImportInputRoot = path.resolve(__dirname, "..", "..", "internal", "specimport", "testdata");
 

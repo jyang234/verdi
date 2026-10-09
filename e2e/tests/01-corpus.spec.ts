@@ -9,9 +9,8 @@ import { SHOWCASE } from "./fixtures";
 test("corpus page renders title, frontmatter, and the dispositions table", async ({ page }) => {
   // Reach the spec page the way a user does: from the home index, not a
   // hand-typed URL (DEFECT A made home a real, clickable index). Scoped to
-  // the exhaustive Directory section: spec/home-status-glance's leading
-  // glance section links this SAME entry to the SAME href by the frozen
-  // contract's own design (dc-3), so an unscoped lookup now resolves twice.
+  // the directory's columns (.home-directory, spec/index-v2), where this
+  // entry's card links its corpus page exactly once.
   await page.goto("/");
   await page.locator(".home-directory").locator(`a[href="/a/spec/${SHOWCASE.READONLY_SPEC}"]`).click();
 

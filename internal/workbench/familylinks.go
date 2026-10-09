@@ -231,8 +231,10 @@ func attachStubStoryLinks(ctx context.Context, proj *BoardProjection, ix *index.
 // (dc-4: any overlap at all is a match, rendered plainly, never merged
 // or ranked). ix.Backlinks already sorts by (type, from) per AC id, but
 // merging results across more than one AC id can interleave two already-
-// sorted runs, so the combined slice is explicitly sorted here.
-func matchingStoryRefs(ix *index.Index, featureRef string, acIDs []string) []string {
+// sorted runs, so the combined slice is explicitly sorted here. ix is the
+// corpus index's backlink lookup, so the index cards' call to action
+// (indexcards.go's coverageOf) reads stories through this same inversion.
+func matchingStoryRefs(ix backlinker, featureRef string, acIDs []string) []string {
 	seen := make(map[string]bool)
 	var refs []string
 	for _, acID := range acIDs {
