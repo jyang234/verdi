@@ -343,13 +343,7 @@ func coverageOf(e refindex.Entry, tree specTreeMeta, corpus corpusRead) coverage
 	if corpus.err != nil {
 		return coverageRead{applies: true, unproven: "the corpus index could not be built: " + corpus.err.Error()}
 	}
-	featureRef := e.Ref
-	var links []featurecoverage.StoryLink
-	for _, id := range tree.criteria {
-		for _, story := range matchingStoryRefs(corpus.links, featureRef, []string{id}) {
-			links = append(links, featurecoverage.StoryLink{CriterionID: id, StoryRef: story})
-		}
-	}
+	links := storyLinksOf(corpus.links, e.Ref, tree.criteria)
 	return coverageRead{
 		applies:  true,
 		criteria: tree.criteria,
