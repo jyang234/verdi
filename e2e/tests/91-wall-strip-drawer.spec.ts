@@ -1,13 +1,14 @@
 import { test, expect, type Page, type Locator, type Request } from "@playwright/test";
-import { SHOWCASE, EDGE, boardPath, dexSpecPath } from "./fixtures";
-import { addSticky } from "./helpers";
+import { SHOWCASE, EDGE, CONTROL_URL, boardPath, dexSpecPath } from "./fixtures";
+import { addSticky, editCard, uncommittedIndicator } from "./helpers";
 
 // spec/wall-strip-and-drawer-v2 — the case-file strip (ac-1) and its chips
-// (ac-2). The two tests here are the producers their obligations name
-// (.verdi/obligations/wall-strip-and-drawer-v2/ac-1--behavioral.md and
-// ac-2--behavioral.md), titled as the claims spell them; the file passes
-// when run alone (BL-98). Lane F3b adds the branch menu, the pill, the
-// drawer and the rail's homes (ac-4 to ac-6) to this file.
+// (ac-2), the branch menu, the readiness pill and the ⋯ menu's on-demand
+// counts (ac-4), and the record drawer's tabs (ac-5). Each test here is the
+// producer its obligation names (.verdi/obligations/wall-strip-and-
+// drawer-v2/ac-<n>--behavioral.md), titled as the claim spells it; the
+// file passes when run alone (BL-98). Lane F3c adds the rail's homes
+// (ac-6) to this file.
 //
 // State assertions ride roles, test ids, attributes and request bodies —
 // never screenshots (recording stays off).
@@ -70,6 +71,85 @@ async function expectBadgeChip(page: Page, chip: Locator, source: string): Promi
   await drawer.locator(".drawer-close").click();
   await expect(page.locator(".badge-drawer:not([hidden])")).toHaveCount(0);
   await expect(chip).toBeFocused();
+}
+
+// The F3-go2 harness walls (cmd/e2eharness/provision_wallstrip.go), each an
+// authoring wall on its own namesake branch, copied here as 92 copies its
+// own (fixtures.ts stays F7's) and pinned by TestWallStripPaths: a spec
+// whose drawer projections are empty (no provenance record, no yarn, no
+// pinned context), and one whose committed provenance record does not
+// decode, so its Provenance and Review projections are unavailable.
+const DRAWER_EMPTY_WALL = "/b/design%2Fdecline-drawer-empty/board/spec/decline-drawer-empty";
+const DRAWER_UNAVAILABLE_WALL = "/b/design%2Fdecline-drawer-unavailable/board/spec/decline-drawer-unavailable";
+
+// The design reads the drawer and the ⋯ menu make on demand (co-1).
+const DESIGN_READS = /\/api\/(get_design_provenance|prepare_design_review|get_design_context|get_design_capabilities)$/;
+
+// readsOf records every on-demand design read and every Readiness tab
+// load the page makes from now on.
+function readsOf(page: Page): string[] {
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    const op = DESIGN_READS.exec(r.url());
+    if (op && r.method() === "POST") reads.push(op[1]);
+    if (r.method() === "GET" && /\/board\/spec\/[^/]+\/readiness$/.test(r.url())) reads.push("readiness");
+  });
+  return reads;
+}
+
+// JSON_TEXT matches raw JSON printed as text: an object's opening brace
+// before a key, or a quoted key and its colon.
+const JSON_TEXT = /\{\s*"|"[\w-]+"\s*:/;
+
+// openTab opens one drawer tab through its own opener: the pill for
+// Readiness, the ⋯ menu for every other — or, with the drawer already
+// open, its tab — and returns its panel once its body has settled.
+async function openTab(page: Page, tab: string): Promise<Locator> {
+  const drawer = page.getByTestId("record-drawer");
+  if (await drawer.isHidden()) {
+    if (tab === "readiness") await page.getByTestId("readiness-pill").click();
+    else {
+      await page.getByTestId("wall-more").click();
+      await page.getByTestId(`wall-more-${tab}`).click();
+    }
+  } else {
+    await page.getByTestId(`record-tab-${tab}`).click();
+  }
+  await expect(page.getByTestId(`record-tab-${tab}`)).toHaveAttribute("aria-selected", "true");
+  const panel = page.getByTestId(`record-panel-${tab}`);
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('[data-record-body][aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 });
+  return panel;
+}
+
+// expectProse: a tab renders the sections named, each a heading, and no
+// raw JSON text anywhere in it.
+async function expectProse(panel: Locator, sections: string[]): Promise<void> {
+  for (const name of sections) {
+    await expect(panel.getByRole("heading", { name, exact: true }), `section ${name}`).toBeVisible();
+  }
+  expect(await panel.innerText(), "a tab prints no raw JSON").not.toMatch(JSON_TEXT);
+}
+
+// postTypedEdit posts one typed edit-ac on the design wall from outside the
+// page, against the wall's current base, so its provenance holds an entry.
+async function postTypedEdit(page: Page, id: string, text: string, evidence: string[]): Promise<void> {
+  const wall = boardPath(SHOWCASE.DESIGN_SPEC);
+  const snap = await (await page.request.get(wall + "/snapshot")).json();
+  const resp = await page.request.post(wall + "/api/mutate_draft", {
+    data: {
+      request: {
+        schema: "verdi.draftmutation/v1",
+        spec: "spec/" + SHOWCASE.DESIGN_SPEC,
+        base_digest: snap.base_digest,
+        base_spec_b64: snap.base_spec_b64,
+        expected: snap.expected,
+        operations: [{ op: "edit-ac", id, text, evidence, anchor: "#" + id }],
+      },
+    },
+  });
+  expect(resp.status(), await resp.text()).toBe(200);
+  expect((await resp.json()).result, "the typed mutation landed").toBeTruthy();
 }
 
 test.describe("wall-strip-and-drawer", () => {
@@ -284,5 +364,271 @@ test.describe("wall-strip-and-drawer", () => {
     await expect(disclosure).toContainText("[gate:pending-supersession]");
     await expect(page.locator('.case-stamp[data-badge-source="ladder:pending-supersession"]')).toHaveCount(0);
     expect(await disclosure.evaluate((el) => el.tagName)).not.toBe("BUTTON");
+  });
+
+  test("The branch menu, the readiness pill, and the menu's on-demand counts", async ({ page }) => {
+    test.setTimeout(150_000);
+    const wall = boardPath(SHOWCASE.DESIGN_SPEC);
+    const ac = SHOWCASE.AC_IDS[1];
+    const reads = readsOf(page);
+    await page.goto(wall);
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+
+    try {
+      // The branch menu on the branch text in the top bar: the switcher
+      // opens it, and over uncommitted changes the guard still refuses a
+      // switch — the wall stays on its branch, the edit kept.
+      await editCard(page, ac, (text) => `${text} [91-guard]`);
+      await expect(uncommittedIndicator(page)).toBeVisible();
+      const switcher = page.getByTestId("topbar").getByTestId("branch-switcher");
+      await expect(switcher).toHaveText(SHOWCASE.DESIGN_BRANCH);
+      await switcher.click();
+      await expect(switcher).toHaveAttribute("aria-expanded", "true");
+      const menu = page.locator("#branch-menu");
+      await expect(menu).toBeVisible();
+      await menu.getByRole("menuitem", { name: SHOWCASE.MAIN_BRANCH, exact: true }).click();
+      const guard = page.getByRole("alertdialog", { name: "Uncommitted changes" });
+      await expect(guard).toBeVisible();
+      await guard.getByRole("button", { name: "Stay on branch" }).click();
+      await expect(guard).toBeHidden();
+      await expect(page.getByTestId("topbar").getByTestId("branch-switcher")).toHaveText(SHOWCASE.DESIGN_BRANCH);
+      await expect(page.getByTestId(`card-${ac}`)).toContainText("[91-guard]");
+
+      // Nothing the drawer reads is fetched before it is asked for: no
+      // count, no projection, no readiness load.
+      await page.waitForTimeout(1_000);
+      expect(reads, "nothing is read before the pill or the menu opens").toEqual([]);
+
+      // The readiness pill opens the drawer's Readiness tab — one readiness
+      // load, when the tab opens — and its link stays the page's address
+      // for a browser without JavaScript.
+      const pill = page.getByTestId("readiness-pill");
+      await expect(pill).toHaveAttribute("href", `/readiness?spec=${SHOWCASE.DESIGN_SPEC}`);
+      await pill.click();
+      await expect(page).toHaveURL(new RegExp(`${wall}$`));
+      const drawer = page.getByTestId("record-drawer");
+      await expect(drawer).toBeVisible();
+      await expect(page.getByTestId("record-tab-readiness")).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByTestId("record-tab-readiness")).toBeFocused();
+      await expect(page.getByTestId("record-panel-readiness").getByTestId("readiness-tab")).toBeVisible({ timeout: 15_000 });
+      expect(reads.filter((r) => r === "readiness").length, "the pill loads the readiness").toBeGreaterThan(0);
+      expect(reads.filter((r) => r !== "readiness"), "the pill reads nothing else").toEqual([]);
+      // Shut, the focus goes back to the pill.
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
+      await expect(pill).toBeFocused();
+
+      // The ⋯ menu opens the other tabs; its counts load when it opens and
+      // only then — one read each for Provenance and Review, none for Repo
+      // (the bar's own ahead fact) — and each item shows its count.
+      reads.length = 0;
+      await page.waitForTimeout(500);
+      expect(reads, "no count is read before the menu opens").toEqual([]);
+      const more = page.getByTestId("wall-more");
+      await more.click();
+      await expect(more).toHaveAttribute("aria-expanded", "true");
+      const items = page.getByTestId("wall-more-menu");
+      await expect(items).toBeVisible();
+      const counts = {
+        provenance: /^\d+ (entry|entries)$/,
+        review: /^\d+ needs? a human eye$/,
+        repo: /^\d+ ahead$/,
+      };
+      for (const [tab, words] of Object.entries(counts)) {
+        const count = page.getByTestId(`wall-more-count-${tab}`);
+        await expect(count, `${tab}'s count`).toHaveText(words, { timeout: 15_000 });
+        await expect(count).not.toHaveAttribute("data-count-state", "unavailable");
+      }
+      expect([...reads].sort(), "the menu's counts cost one read each").toEqual(["get_design_provenance", "prepare_design_review"]);
+      for (const [tab, label] of [
+        ["provenance", "Provenance"],
+        ["review", "Semantic review"],
+        ["context", "Design context"],
+        ["repo", "Repository details"],
+        ["moves", "Four moves"],
+        ["keys", "Keyboard"],
+      ]) {
+        await expect(items.getByTestId(`wall-more-${tab}`)).toContainText(label);
+      }
+      // The keyboard runs the menu: the first item has the focus, the
+      // arrows move it, Escape shuts the menu and gives it back to ⋯.
+      await expect(items.getByTestId("wall-more-provenance")).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(items.getByTestId("wall-more-review")).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(items).toBeHidden();
+      await expect(more).toBeFocused();
+      await expect(more).toHaveAttribute("aria-expanded", "false");
+      // An item opens its tab.
+      await more.click();
+      await items.getByTestId("wall-more-repo").click();
+      await expect(page.getByTestId("record-tab-repo")).toHaveAttribute("aria-selected", "true");
+      await page.getByTestId("record-drawer-close").click();
+      await expect(drawer).toBeHidden();
+    } finally {
+      await page.goto(wall);
+      const now = (await page.getByTestId(`card-${ac}`).textContent()) ?? "";
+      if (now.includes("[91-guard]")) await editCard(page, ac, (text) => text.replace(" [91-guard]", ""));
+    }
+
+    // A count that cannot be read says "unavailable", never 0: the wall
+    // whose provenance record does not decode.
+    await page.goto(DRAWER_UNAVAILABLE_WALL);
+    await page.getByTestId("wall-more").click();
+    for (const tab of ["provenance", "review"]) {
+      const count = page.getByTestId(`wall-more-count-${tab}`);
+      await expect(count, `${tab}'s failed count`).toHaveText("unavailable", { timeout: 15_000 });
+      await expect(count).toHaveAttribute("data-count-state", "unavailable");
+      expect(await count.getAttribute("title"), `${tab}'s failure names its reason`).toMatch(/\S/);
+    }
+  });
+
+  test("Every drawer tab renders prose and tables, never JSON", async ({ page }) => {
+    test.setTimeout(180_000);
+    const wall = boardPath(SHOWCASE.DESIGN_SPEC);
+    const ac = SHOWCASE.AC_IDS[1];
+    // One typed operation on the wall, and its undo, so its provenance
+    // holds entries whatever ran before.
+    await page.goto(wall);
+    const card = page.getByTestId(`card-${ac}`);
+    const text = (await card.locator(".card-text").getAttribute("title"))!;
+    const evidence = (await card.getAttribute("data-evidence"))!.split(",").filter(Boolean);
+    expect(text, "the criterion's own text").toBeTruthy();
+    await postTypedEdit(page, ac, `${text} [91-ac5]`, evidence);
+    await page.reload();
+    await expect(card).toContainText("[91-ac5]");
+
+    try {
+      // Readiness: the shared readiness body in the wall's words, each
+      // Focus next item guidance first — its fact, timing and blocking flag
+      // filed in its technical disclosure — and an item's click selects its
+      // card on the wall.
+      const readiness = await openTab(page, "readiness");
+      const body = readiness.getByTestId("readiness-tab");
+      await expect(body).toBeVisible();
+      await expect(body.locator(".readiness-station")).toHaveCount(4);
+      await expect(body.getByRole("heading", { name: /^Focus next/ })).toBeVisible();
+      expect(await readiness.innerText()).not.toMatch(JSON_TEXT);
+      const items = body.locator("#readiness-focus > .readiness-queue-list > li > .readiness-card");
+      expect(await items.count(), "the current step lists its items").toBeGreaterThan(0);
+      for (const item of await items.all()) {
+        const copy = item.locator(".readiness-copy");
+        const first = copy.locator(":scope > *").first();
+        await expect(first, "the item's first line is its primary line").toHaveClass("readiness-primary");
+        const primary = first.locator("p.readiness-summary");
+        await expect(primary).toHaveClass(/readiness-guidance/);
+        const tech = copy.locator("details.readiness-tech");
+        await tech.locator("summary").click();
+        const facts = tech.locator(".readiness-tech-facts");
+        for (const label of ["Fact", "Timing", "Blocking"]) {
+          await expect(facts.locator("dt", { hasText: new RegExp(`^${label}$`) }), `${label} in the disclosure`).toHaveCount(1);
+        }
+        expect((await facts.locator("dd.readiness-fact").textContent())?.trim(), "the fact is filed, not the primary line").not.toBe((await primary.textContent())?.trim());
+        await tech.locator("summary").click();
+      }
+      const target = body.locator('article.readiness-card[data-target-kind="object"]').first();
+      const id = (await target.getAttribute("data-target"))!;
+      await target.locator("p.readiness-summary").click();
+      await expect(page.getByTestId(`card-${id}`), `the item selects ${id}'s card`).toHaveAttribute("data-selected", "true");
+      await expect(target).toHaveAttribute("data-found", "true");
+      await expect(page.getByTestId("record-drawer")).toBeVisible();
+
+      // The drawer lives outside the swapped region (SI-368 (9)): an outside
+      // write that moves the revision swaps the wall under the open tab,
+      // and the drawer stays, its tab chosen, the Readiness loaded again for
+      // the new revision (SI-368 (21)).
+      const loads: string[] = readsOf(page);
+      const swapText = "an outside write under the open drawer [91-ac5]";
+      const made = await page.request.post(wall + "/api/sticky", { data: { text: swapText, type: "comment" } });
+      expect(made.status(), await made.text()).toBe(200);
+      const swapped = page.locator('[data-testid^="sticky-"]').filter({ hasText: swapText });
+      await expect(swapped, "the poll swapped the wall").toHaveCount(1, { timeout: 10_000 });
+      await expect(page.getByTestId("record-drawer")).toBeVisible();
+      await expect(page.getByTestId("record-tab-readiness")).toHaveAttribute("aria-selected", "true");
+      await expect.poll(() => loads.filter((r) => r === "readiness").length, { timeout: 15_000 }).toBeGreaterThan(0);
+      await expect(readiness.getByTestId("readiness-tab")).toBeVisible({ timeout: 15_000 });
+      const swapID = (await swapped.getAttribute("data-id"))!;
+      const gone = await page.request.post(wall + "/api/annotation-delete", { data: { ids: [swapID] } });
+      expect(gone.status(), await gone.text()).toBe(200);
+
+      // Provenance: the typed operations as a timeline of rows, and the
+      // unclassified direct edits; the Review packet's sections, naming the
+      // branch and the command, with no control that opens a pull request;
+      // the bounded Context with its capabilities; the bar's posture as the
+      // Repo tab; the Moves and the Keys.
+      const provenance = await openTab(page, "provenance");
+      await expectProse(provenance, ["Typed operations", "Unclassified direct edits"]);
+      await expect(provenance.locator(".record-row").filter({ hasText: `edit-ac ${ac}` }).first()).toBeVisible();
+      const review = await openTab(page, "review");
+      await expectProse(review, ["Review base", "Semantic changes", "Needs a human eye", "Material warnings", "Policy in force", "Open a pull request"]);
+      const command = review.getByTestId("record-review-command");
+      await expect(command).toContainText(SHOWCASE.DESIGN_BRANCH);
+      await expect(command).toContainText("Push the branch, then open a pull request on your forge:");
+      await expect(command.locator("code")).toHaveText(`git push -u origin ${SHOWCASE.DESIGN_BRANCH}`);
+      await expect(page.getByTestId("record-drawer").locator("a, button, [role=button], [role=link]").filter({ hasText: /pull request|merge request/i })).toHaveCount(0);
+      await expect(command.locator("a, button, form")).toHaveCount(0);
+      const context = await openTab(page, "context");
+      await expectProse(context, ["Current spec", "Parent feature", "Applicable policy", "What agents may do", "Pinned context", "Verdi-go findings", "Digests"]);
+      const repo = await openTab(page, "repo");
+      await expectProse(repo, ["Working tree", "Accepted record"]);
+      await expect(repo.locator(".record-row").filter({ hasText: "branch" }).first()).toContainText(SHOWCASE.DESIGN_BRANCH);
+      const moves = await openTab(page, "moves");
+      await expectProse(moves, ["The minimum path", "Kept as they were"]);
+      const keys = await openTab(page, "keys");
+      await expectProse(keys, ["Selection", "Acting on the selection", "Yarn key"]);
+      await page.getByTestId("record-drawer-close").click();
+    } finally {
+      await postTypedEdit(page, ac, text, evidence);
+    }
+
+    // An honest empty state on a wall without the projection: no typed
+    // operation recorded, no pinned context, no structural warning, no
+    // yarn — each said in a sentence, never an empty list or a zero
+    // dressed as a value.
+    await page.goto(DRAWER_EMPTY_WALL);
+    const empties: [string, string, RegExp][] = [
+      ["provenance", "Typed operations", /No typed operation is recorded/],
+      ["review", "Material warnings", /None\. The diff since the review base raised no structural warning/],
+      ["context", "Pinned context", /declares no pinned context/],
+      ["keys", "Yarn key", /No yarn on this wall yet/],
+    ];
+    for (const [tab, section, words] of empties) {
+      const panel = await openTab(page, tab);
+      await expect(panel.locator(".record-section").filter({ has: page.getByRole("heading", { name: section, exact: true }) }).locator(".record-empty")).toHaveText(words);
+      expect(await panel.innerText()).not.toMatch(JSON_TEXT);
+    }
+    // The posture reason where a projection is unavailable: this wall's
+    // branch is not the serving checkout's, so its readiness cannot be
+    // derived here, and the tab says why.
+    const fixed = await openTab(page, "readiness");
+    await expect(fixed.getByTestId("readiness-unavailable")).toHaveText(/^Readiness is unavailable: .+\.$/);
+    await page.getByTestId("record-drawer-close").click();
+
+    // Unavailable, with the reason: a provenance record that does not
+    // decode leaves the Provenance and Review projections unreadable.
+    await page.goto(DRAWER_UNAVAILABLE_WALL);
+    for (const [tab, subject] of [
+      ["provenance", "Provenance is"],
+      ["review", "The review packet is"],
+    ]) {
+      const panel = await openTab(page, tab);
+      await expect(panel.getByTestId("record-unavailable")).toHaveText(new RegExp(`^${subject} unavailable: .*decoding design provenance`));
+      await expect(panel.locator(".record-section")).toHaveCount(0);
+    }
+    await page.getByTestId("record-drawer-close").click();
+    // A design context the core cannot compile: the sealed record whose
+    // pinned context does not resolve in the hermetic history.
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
+    const sealedContext = await openTab(page, "context");
+    await expect(sealedContext.getByTestId("record-unavailable")).toHaveText(/^The design context is unavailable: .+/);
+    // A repository posture that cannot be proven: the store whose default
+    // branch cannot be resolved names each fact's reason.
+    const res = await page.request.get(`${CONTROL_URL}/unproven-board-fixture`);
+    expect(res.ok(), await res.text()).toBe(true);
+    await page.goto(`${(await res.text()).trim()}board/spec/${EDGE.UNPROVEN_BOARD_SPEC}`);
+    const unproven = await openTab(page, "repo");
+    const accepted = unproven.locator(".record-row").filter({ has: page.locator("dt", { hasText: /^accepted branch$/ }) });
+    await expect(accepted.locator(".record-badge")).toHaveText("unproven");
+    await expect(accepted.locator(".record-note")).toHaveText(/\S/);
   });
 });

@@ -297,19 +297,37 @@ test.describe("the six application operations", () => {
   });
 
   test("provenance and semantic review are on-demand panels, collapsed by default", async ({ page }) => {
+    // The record drawer's Provenance and Review tabs (spec/wall-strip-and-
+    // drawer-v2 ac-5; SI-368 (10)): shut by default, nothing derived until
+    // a tab opens (AC-4/DC-7 — provenance stays off the main board), then
+    // one on-demand read each, rendered as prose and rows, never JSON.
+    const reads: string[] = [];
+    page.on("request", (r) => {
+      const op = /\/api\/(get_design_provenance|prepare_design_review)$/.exec(r.url());
+      if (op && r.method() === "POST") reads.push(op[1]);
+    });
     await page.goto(DESIGN());
-    const prov = page.getByTestId("asd-provenance");
-    const review = page.getByTestId("asd-review");
+    const drawer = page.getByTestId("record-drawer");
+    await expect(drawer).toBeHidden();
+    await page.waitForTimeout(500);
+    expect(reads, "nothing derived before a tab opens").toEqual([]);
+    await page.getByTestId("wall-more").click();
+    await page.getByTestId("wall-more-provenance").click();
+    const prov = page.getByTestId("record-panel-provenance");
     await expect(prov).toBeVisible();
-    await expect(review).toBeVisible();
-    // Collapsed by default: no derived content until opened (AC-4/DC-7 —
-    // provenance stays off the main board).
-    await expect(prov.locator(".asd-panel-json")).toHaveCount(0);
-    await prov.locator("summary").click();
-    await expect(prov.locator(".asd-panel-json")).toBeVisible();
+    await expect(prov.getByRole("heading", { name: "Typed operations" })).toBeVisible();
     await expect(prov).toContainText("never evidence");
-    await review.locator("summary").click();
-    await expect(review.locator(".asd-panel-json")).toBeVisible();
+    await page.getByTestId("record-tab-review").click();
+    const review = page.getByTestId("record-panel-review");
+    await expect(review.getByRole("heading", { name: "Needs a human eye" })).toBeVisible();
+    await page.getByTestId("record-tab-provenance").click();
+    await expect(prov.getByRole("heading", { name: "Typed operations" })).toBeVisible();
+    expect(await prov.innerText(), "provenance prints no JSON").not.toMatch(/[{}]|"schema"|"entries"/);
+    await page.getByTestId("record-tab-review").click();
+    await expect(review.getByRole("heading", { name: "Needs a human eye" })).toBeVisible();
+    expect(await review.innerText(), "the review packet prints no JSON").not.toMatch(/[{}]|"schema"|"baseline"/);
+    expect(reads).toContain("get_design_provenance");
+    expect(reads).toContain("prepare_design_review");
   });
 });
 

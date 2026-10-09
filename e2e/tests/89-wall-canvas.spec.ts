@@ -1046,11 +1046,16 @@ test.describe("wall-canvas", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Pin an artifact" })).toBeHidden();
     await expect(pin).toHaveAttribute("aria-expanded", "false");
-    // The yarn key action opens the existing yarn key (SI-350 (9)): the
-    // rail's section, brought into view and focused.
+    // The yarn key action opens the yarn key (SI-350 (9)): the record
+    // drawer's Keys tab, which carries it (spec/wall-strip-and-drawer-v2,
+    // SI-368 (9)), focused on its tab, the key in view; the drawer shut
+    // gives the focus back to the action.
     await toolbar.getByRole("button", { name: "Yarn key", exact: true }).click();
-    await expect(page.getByTestId("yarn-key")).toBeFocused();
-    await expect(page.getByTestId("yarn-key")).toBeInViewport();
+    await expect(page.getByTestId("record-tab-keys")).toBeFocused();
+    await expect(page.getByTestId("record-panel-keys").getByTestId("record-yarn-key")).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
+    await expect(toolbar.getByRole("button", { name: "Yarn key", exact: true })).toBeFocused();
 
     // An object card: edit, the thread hint, read in document, the thread
     // count, and delete — and nothing else.

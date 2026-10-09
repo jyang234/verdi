@@ -36,6 +36,17 @@ async function importBase(page: Page): Promise<string> {
   return url;
 }
 
+// openImportOrigin opens the record drawer's Provenance tab through the
+// wall's ⋯ menu and returns the import origin it carries (spec/wall-strip-
+// and-drawer-v2, SI-368 (6)).
+async function openImportOrigin(page: Page) {
+  await page.getByTestId("wall-more").click();
+  await page.getByTestId("wall-more-provenance").click();
+  const origin = page.getByTestId("record-panel-provenance").getByTestId("asd-import-origin");
+  await expect(origin).toBeVisible();
+  return origin;
+}
+
 function at(base: string, p: string): string {
   return base + p.replace(/^\//, "");
 }
@@ -265,24 +276,27 @@ test.describe("spec import: labeled Markdown journey", () => {
     expect(applied.body.board_path).toBe(boardHref);
     expect(applied.body.statements_deferred).toBe(false);
 
-    // The ordinary branch board, authoring, with the source-record link
-    // beside the semantic review panel explaining the import origin apart
+    // The ordinary branch board, authoring, with the source-record link in
+    // the record drawer's Provenance tab, beside the Review tab (spec/wall-
+    // strip-and-drawer-v2, SI-368 (6)), explaining the import origin apart
     // from ASD history and acceptance.
     await page.goto(at(base, boardHref));
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
-    const origin = page.getByTestId("asd-import-origin");
-    await expect(origin).toBeVisible();
+    const origin = await openImportOrigin(page);
     await expect(origin.locator("a")).toHaveAttribute("href", importRecordPath("design/" + slug, slug));
     await expect(origin).toContainText("not verified here");
     await expect(origin).toContainText("not an ASD provenance entry");
     await expect(origin).toContainText("classify the creation as unclassified");
     await expect(origin).toContainText("not evidence of acceptance");
     const adjacent = await page.evaluate(() => {
-      const review = document.querySelector('[data-testid="asd-review"]')!;
       const origin = document.querySelector('[data-testid="asd-import-origin"]')!;
-      return review.parentElement === origin.parentElement && Boolean(review.compareDocumentPosition(origin) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const panel = origin.closest('[data-testid="record-panel-provenance"]');
+      const review = document.querySelector('[data-testid="record-panel-review"]');
+      return !!panel && !!review && panel.nextElementSibling === review;
     });
     expect(adjacent).toBe(true);
+    await page.getByTestId("record-drawer-close").click();
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
     await expect(page.locator('[data-testid="placard-problem"] .placard-text')).toContainText("retype every requirement");
 
     // An ordinary supported edit through the typed form, committed on the
@@ -301,12 +315,12 @@ test.describe("spec import: labeled Markdown journey", () => {
     await expect(page.getByTestId("uncommitted-indicator")).toBeHidden({ timeout: 10_000 });
     await page.reload();
     await expect(page.locator('[data-testid="placard-outcome"] .placard-text')).toContainText("[72-edit]");
-    await expect(page.getByTestId("asd-import-origin")).toBeVisible();
+    const kept = await openImportOrigin(page);
 
     // The record remains verifiable and honest: the ORIGINAL import
     // verified against committed bytes, the current spec disclosed as
     // changed — never as corrupted provenance.
-    await page.getByTestId("asd-import-origin").locator("a").click();
+    await kept.locator("a").click();
     const record = page.getByTestId("import-record");
     await expect(record).toBeVisible();
     await expect(record).toHaveAttribute("data-current-spec-matches", "false");
@@ -676,8 +690,7 @@ test.describe("spec import: corrupted record", () => {
     // assert verification from that presence: verification is the record
     // view's own successful read, which here discloses the corruption.
     await page.goto(at(base, created.board_path));
-    const origin = page.getByTestId("asd-import-origin");
-    await expect(origin).toBeVisible();
+    const origin = await openImportOrigin(page);
     await expect(origin).not.toContainText("verified against");
     await expect(origin).toContainText("not verified here");
     await expect(origin).toContainText("not an ASD provenance entry");
