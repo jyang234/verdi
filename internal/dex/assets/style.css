@@ -6112,7 +6112,9 @@ body:not(.board-page) > footer.site-foot,
    The filter row above the columns: four mono pills, the pressed one in
    ink, a disabled one dashed and pending-coloured because its answer is
    unknown. A card a filter does not select carries the hidden attribute,
-   which must beat the card's own flex display above. On the shelf, the
+   which the stylesheet's shared [hidden] rule (display: none
+   !important, far above) already hides, so no rule here repeats it. On
+   the shelf, the
    archived fold is a native <details> at the column's foot; below the
    columns, the other-records strip is three collapsed <details> under
    one small heading. The bar's index controls — the view toggle, the
@@ -6120,7 +6122,6 @@ body:not(.board-page) > footer.site-foot,
    its CLI hint — wrap with the bar's controls slot below 640 px, so every
    control stays visible at 320 px. Tokens only; meaning never by colour
    alone (Wave 6 §5.2): every pill, chip and fold says its state in words. */
-.dir-cards .dir-entry[hidden] { display: none; }
 .dir-filters {
   display: flex;
   flex-wrap: wrap;
