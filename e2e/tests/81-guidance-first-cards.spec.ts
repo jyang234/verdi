@@ -1,15 +1,21 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, type Locator } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
+import { openRecordTab } from "./helpers";
 
 // spec/spec-documents Wave 4 Task 4 — guidance-first concern cards (ac-12,
 // R-W4-7) and the policy guide's verb pointer (ac-10, R-W4-8).
 //
-// On the wall shell and the /readiness cockpit each concern card shows its
+// On the wall and the /readiness cockpit each concern card shows its
 // guidance sentence as the primary line when it carries one (otherwise the
-// summary), keeps the fact visible as a secondary .asd-fact line, and files
-// the concern id, timing and blocking flag in the existing Technical
-// details disclosure. The four area labels and the plain-word triad are
-// unchanged; nothing here changes a derivation. State assertions ride
+// summary), keeps the fact in the existing Technical details disclosure
+// with the concern id, timing and blocking flag. The four area labels and
+// the plain-word triad are unchanged; nothing here changes a derivation.
+// The wall's readiness is the record drawer's Readiness tab since the
+// wall shell retired (spec/wall-strip-and-drawer-v2 ac-5, ac-7; SI-368
+// (14), (24)(a)): the wall's assertions read the tab's shared shape —
+// the primary line first, the fact, timing (the snapshot's current or
+// eventual, SI-339 (3)) and blocking flag in the disclosure — in the
+// wall's own triad words, its titles unchanged. State assertions ride
 // classes and data attributes, never free innerText (lane rule).
 
 const DESIGN = () => boardPath(SHOWCASE.DESIGN_SPEC);
@@ -39,6 +45,25 @@ const PLAIN_LABELS: Record<string, string> = {
 
 // openRemainder expands the focus queue's exact-count remainder so every
 // queued row is in the rendered tree (SI-125 keeps it lossless).
+
+// wallReadiness opens the wall's readiness — the record drawer's
+// Readiness tab — and returns its body.
+async function wallReadiness(page: Page): Promise<Locator> {
+  return (await openRecordTab(page, "readiness")).getByTestId("readiness-tab");
+}
+
+// stageLabel reads a row's step label as the label's own text, the
+// step-relation span ("now", "later — waits on …") set apart (SI-368
+// (24)(a)).
+async function stageLabel(row: Locator): Promise<string> {
+  return row.locator(".readiness-stage").evaluate((el) =>
+    Array.from(el.childNodes)
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent ?? "")
+      .join("")
+      .trim(),
+  );
+}
 async function openRemainder(page: Page) {
   const more = page.locator(
     '[data-testid="asd-more"] > summary, details.readiness-more > summary',
@@ -77,8 +102,8 @@ test("wall cards lead with guidance, keep the fact visible, and file timing unde
   page,
 }) => {
   await page.goto(DESIGN());
+  const shell = await wallReadiness(page);
   await openRemainder(page);
-  const shell = page.getByTestId("asd-shell");
   // The inline stage-line timing span is gone everywhere.
   await expect(shell.locator(".asd-timing")).toHaveCount(0);
 
@@ -102,53 +127,53 @@ test("wall cards lead with guidance, keep the fact visible, and file timing unde
     const area = (await row.getAttribute("data-area-id"))!;
     const state = await formalState(row);
 
-    // Primary line first, then the chip; the fact only after the chip and
-    // only when guidance leads. Exactly one primary line per card.
-    const shape = await cardShape(row);
-    expect(shape.stage, id).toBe(0);
-    expect(shape.primary, id).toBeGreaterThan(shape.stage);
-    expect(shape.chip, id).toBeGreaterThan(shape.primary);
-    expect(shape.summaries, id).toBe(1);
-    if (shape.guidance >= 0) {
-      expect(shape.guidance, id).toBe(shape.primary);
-      expect(shape.fact, id).toBeGreaterThan(shape.chip);
-      guided++;
-    } else {
-      expect(shape.summary, id).toBe(shape.primary);
-      expect(shape.fact, id).toBe(-1);
-    }
+    // The primary line leads the card, then the step label, then the
+    // chip: exactly one primary line per card — the guidance sentence when
+    // the row carries one (an unresolved row), its fact otherwise (a
+    // proven row) — and the fact itself kept in the disclosure.
+    const copy = row.locator(".readiness-copy");
+    await expect(copy.locator(":scope > *").first(), id).toHaveClass("readiness-primary");
+    const primary = copy.locator(":scope > .readiness-primary > p.readiness-summary");
+    await expect(primary, id).toHaveCount(1);
+    expect(await copy.locator("p.readiness-summary").count(), id).toBe(1);
+    const order = await copy.evaluate((el) => {
+      const kids = Array.from(el.children);
+      return {
+        primary: kids.findIndex((k) => k.matches(".readiness-primary")),
+        stage: kids.findIndex((k) => k.matches("p.readiness-stage")),
+        chip: kids.findIndex((k) => k.matches(".readiness-state")),
+      };
+    });
+    expect(order.stage, id).toBeGreaterThan(order.primary);
+    expect(order.chip, id).toBeGreaterThan(order.stage);
+    const guidance = (await primary.getAttribute("class"))!.includes("readiness-guidance");
+    if (state === "proven") expect(guidance, `${id}: a proven row leads with its fact`).toBe(false);
+    if (guidance) guided++;
 
-    // Timing: now on the focus area, later after it, none otherwise or
-    // on a proven row — as a data attribute and a disclosure row, never
-    // on the stage line.
+    // Timing: the step relation as a data attribute — "later" after the
+    // current step, "now" for every other unresolved row, none on a
+    // proven row (SI-346 (2)) — and the snapshot's own current or
+    // eventual in the disclosure, never on the stage line.
     let expected: "now" | "later" | null = null;
-    if (state !== "proven" && focus) {
-      if (area === focus) expected = "now";
-      else if (AREA_ORDER.indexOf(area) > AREA_ORDER.indexOf(focus))
-        expected = "later";
+    if (state !== "proven") {
+      expected = focus && AREA_ORDER.indexOf(area) > AREA_ORDER.indexOf(focus) ? "later" : "now";
     }
     if (expected) {
       await expect(row).toHaveAttribute("data-timing", expected);
+      if (expected === "now") now++;
     } else {
       expect(await row.getAttribute("data-timing"), id).toBeNull();
     }
     await row.locator(".readiness-tech summary").click();
+    const fact = row.locator('dt:text-is("Fact") + dd');
+    await expect(fact, `${id}: the fact kept in the disclosure`).toBeVisible();
+    await expect(fact).not.toHaveText("");
     await expect(row.locator('dt:text-is("Concern") + dd')).toHaveText(id);
     await expect(row.locator('dt:text-is("Blocking") + dd')).toHaveText(
       /^(true|false)$/,
     );
-    const timing = row.locator('dt:text-is("Timing") + dd');
-    if (expected === "now") {
-      await expect(timing).toHaveText("now");
-      now++;
-    } else if (expected === "later") {
-      await expect(timing).toHaveText(/^later — waits on /);
-      await expect(timing).toHaveText(
-        `later — waits on ${AREA_LABEL[focus!]}`,
-      );
-    } else {
-      await expect(timing).toHaveCount(0);
-    }
+    await expect(row.locator('dt:text-is("Timing") + dd')).toHaveText(/^(current|eventual)$/);
+    expect(await stageLabel(row), id).toBe(AREA_LABEL[area]);
   }
   // The fixture exercises both shapes and the "now" row.
   expect(guided).toBeGreaterThan(0);
@@ -159,8 +184,8 @@ test("the four area labels and the three plain state words are unchanged on the 
   page,
 }) => {
   await page.goto(DESIGN());
+  const shell = await wallReadiness(page);
   await openRemainder(page);
-  const shell = page.getByTestId("asd-shell");
   const stations = shell.locator(".readiness-rail .readiness-station");
   await expect(stations).toHaveCount(4);
   for (let i = 0; i < RAIL.length; i++) {
@@ -186,7 +211,7 @@ test("the four area labels and the three plain state words are unchanged on the 
     const state = await formalState(row);
     expect(AREA_ORDER).toContain(area);
     expect(Object.keys(PLAIN_LABELS)).toContain(state);
-    await expect(row.locator(".readiness-stage")).toHaveText(AREA_LABEL[area]);
+    expect(await stageLabel(row), (await row.getAttribute("data-concern-id"))!).toBe(AREA_LABEL[area]);
     await expect(row.locator(".readiness-state")).toHaveText(
       PLAIN_LABELS[state],
     );
@@ -272,7 +297,8 @@ test("the policy setup guide points at verdi policy adopt --starter and stays re
   page,
 }) => {
   await page.goto(DRAFT_B());
-  const guide = page.getByTestId("asd-policy-guide");
+  const readiness = await openRecordTab(page, "readiness");
+  const guide = readiness.getByTestId("asd-policy-guide");
   await expect(guide).toHaveAttribute("data-policy-guide", "not-adopted");
   await expect(guide).toContainText(
     "verdi policy adopt --starter [--profile solo|team]",
@@ -288,16 +314,19 @@ test("the policy setup guide points at verdi policy adopt --starter and stays re
   await expect(
     guide.locator("form, button, input, select, textarea, [data-asd-panel]"),
   ).toHaveCount(0);
-  // Inspect-first still precedes the verb, in the guide and on the row.
+  // Inspect-first still precedes the verb, in the guide and on the row —
+  // the context/policy row's home being the guide itself, under the
+  // Readiness tab's Capabilities label (SI-368 (3)).
   const text = (await guide.textContent()) ?? "";
   expect(text.indexOf("Inspect first")).toBeGreaterThanOrEqual(0);
   expect(text.indexOf("Inspect first")).toBeLessThan(
     text.indexOf("verdi policy adopt"),
   );
-  await openRemainder(page);
-  const rowGuidance = page.getByTestId("asd-guidance-context/policy");
-  await expect(rowGuidance).toContainText("verdi policy adopt --starter");
-  const row = (await rowGuidance.textContent()) ?? "";
+  const capabilities = readiness.getByTestId("readiness-tab-capabilities");
+  await expect(capabilities).toContainText("verdi policy adopt --starter");
+  const row = (await capabilities.textContent()) ?? "";
+  expect(row.indexOf("Capabilities"), "the guide sits under the Capabilities label").toBeGreaterThanOrEqual(0);
+  expect(row.indexOf("Capabilities")).toBeLessThan(row.indexOf("Policy setup guide"));
   expect(row.indexOf("Inspect")).toBeGreaterThanOrEqual(0);
   expect(row.indexOf("Inspect")).toBeLessThan(row.indexOf("verdi policy adopt"));
 });
@@ -313,28 +342,35 @@ test("light and dark schemes ink both the primary line and the secondary fact", 
       };
       const ink = (sel: string) =>
         getComputedStyle(document.querySelector(sel)!).color;
-      const bodyBg = getComputedStyle(document.body).backgroundColor;
+      // The lines' ground is the record drawer's, where the wall's
+      // readiness is read.
+      const ground = getComputedStyle(document.querySelector('[data-testid="record-drawer"]')!).backgroundColor;
+      const row = '[data-testid="readiness-tab"] article[data-concern-id]';
       return {
-        bg: luminance(bodyBg),
-        summary: ink("#asd-shell article[data-concern-id] .readiness-summary"),
-        fact: ink("#asd-shell article[data-concern-id] .asd-fact"),
-        summaryLum: luminance(
-          ink("#asd-shell article[data-concern-id] .readiness-summary"),
-        ),
-        factLum: luminance(
-          ink("#asd-shell article[data-concern-id] .asd-fact"),
-        ),
+        bg: luminance(ground),
+        summary: ink(row + " .readiness-summary"),
+        fact: ink(row + " dd.readiness-fact"),
+        summaryLum: luminance(ink(row + " .readiness-summary")),
+        factLum: luminance(ink(row + " dd.readiness-fact")),
       };
     });
 
+  // The secondary fact is read where the tab keeps it: in the first row's
+  // opened disclosure.
+  const openFirstFact = async () => {
+    const shell = await wallReadiness(page);
+    await openRemainder(page);
+    await shell.locator("article[data-concern-id] .readiness-tech summary").first().click();
+    await expect(shell.locator("article[data-concern-id] dd.readiness-fact").first()).toBeVisible();
+  };
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto(DESIGN());
-  await openRemainder(page);
+  await openFirstFact();
   const light = await palette();
 
   await page.emulateMedia({ colorScheme: "dark" });
   await page.reload();
-  await openRemainder(page);
+  await openFirstFact();
   const dark = await palette();
 
   // The selected palette is actually used on both lines, and each stays

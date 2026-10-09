@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, EDGE, boardPath, stubCardTestId, refCardTestId } from "./fixtures";
+import { selectStub, wallToolbar } from "./helpers";
 
 // spec/family-board-links: family navigation rendered in both directions
 // from the `implements` edge alone (dc-1) — a story board's parent-
@@ -177,12 +178,14 @@ test.describe("family board links: the live in-between disclosure (ac-3)", () =>
     // Instantiate affordance stays exactly as available as it always
     // was (clicking it would fail informatively — "branch already
     // exists" — a refusal 31-board-stub-instantiate.spec.ts already
-    // proves works).
+    // proves works). The affordance is the stub's toolbar's: the stub is
+    // selected first (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (5)).
     await expect(stub.locator('[data-testid^="stub-story-link-"]')).toHaveCount(
       0,
     );
+    await selectStub(page, EDGE.FL_INSTANTIATED_CHILD);
     await expect(
-      stub.getByTestId(`instantiate-${EDGE.FL_INSTANTIATED_CHILD}`),
+      wallToolbar(page).getByTestId(`instantiate-${EDGE.FL_INSTANTIATED_CHILD}`),
     ).toBeVisible();
   });
 
@@ -192,9 +195,12 @@ test.describe("family board links: the live in-between disclosure (ac-3)", () =>
     await page.goto(boardPath(EDGE.FL_PARENT));
     const stub = page.getByTestId(stubCardTestId(EDGE.FL_UNSTARTED_CHILD));
 
-    // Today's plain state: the Instantiate affordance, and nothing else.
+    // Today's plain state: the Instantiate affordance — the stub's
+    // toolbar's, the stub selected first (spec/wall-strip-and-drawer-v2
+    // ac-6; SI-368 (5)) — and nothing else.
+    await selectStub(page, EDGE.FL_UNSTARTED_CHILD);
     await expect(
-      stub.getByTestId(`instantiate-${EDGE.FL_UNSTARTED_CHILD}`),
+      wallToolbar(page).getByTestId(`instantiate-${EDGE.FL_UNSTARTED_CHILD}`),
     ).toBeVisible();
     await expect(
       stub.getByTestId(`stub-instantiated-notice-${EDGE.FL_UNSTARTED_CHILD}`),

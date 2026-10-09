@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky } from "./helpers";
+import { addSticky, openStickyDraft } from "./helpers";
 
 // Owner UAT (round 6, item 2): "it starts a purple question sticky…
 // It should either have a default blank state or you should be able to
@@ -21,7 +21,7 @@ test.describe("board sticky creation: the author picks the type", () => {
   test("the draft offers the four creatable types and honors the choice", async ({
     page,
   }) => {
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     await expect(draft).toBeVisible();
 
@@ -65,7 +65,7 @@ test.describe("board sticky creation: the author picks the type", () => {
   test("text without a chosen type never saves; Escape discards the draft", async ({
     page,
   }) => {
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     const editor = draft.getByRole("textbox", { name: "Sticky text" });
     const text = "an untyped thought that must not autosave";

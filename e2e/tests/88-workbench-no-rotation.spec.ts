@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { SHOWCASE, EDGE, boardPath } from "./fixtures";
-import { addSticky, dragToTrash, expectAutosaved, pinArtifact } from "./helpers";
+import { addSticky, dragToTrash, expectAutosaved, openStickyDraft, pinArtifact } from "./helpers";
 
 // spec/chrome-and-tokens-v2 ac-3: no workbench element is rotated, and the
 // stamps are drawn as chips — status, class, and mode marks render as
@@ -196,7 +196,7 @@ test.describe("chrome-and-tokens", () => {
       }
 
       // The draft composer, never parked, writes in serif.
-      await page.getByRole("button", { name: "Add sticky" }).click();
+      await openStickyDraft(page);
       const draft = page.locator(".sticky-draft");
       await expect(draft).toBeVisible();
       await draft.getByRole("button", { name: "Story" }).click();

@@ -299,12 +299,14 @@ test.describe("spec import: labeled Markdown journey", () => {
     await expect(page.getByTestId("record-drawer")).toBeHidden();
     await expect(page.locator('[data-testid="placard-problem"] .placard-text')).toContainText("retype every requirement");
 
-    // An ordinary supported edit through the typed form, committed on the
-    // branch, survives a reload.
-    await page.locator("#asd-set-outcome").click();
-    await page.getByTestId("asd-op-text").fill("Operators import existing specs directly into a board [72-edit].");
+    // An ordinary supported edit through the typed operation — the
+    // outcome edited in place in the case-file strip, one set-outcome
+    // (the retired rail's Set outcome; spec/wall-strip-and-drawer-v2 ac-1,
+    // ac-6) — committed on the branch, survives a reload.
+    await page.locator('[data-testid="placard-outcome"] .placard-text').click();
+    await page.getByTestId("case-strip-text-outcome").fill("Operators import existing specs directly into a board [72-edit].");
     const mutated = page.waitForResponse((r) => r.url().includes("/api/mutate_draft") && r.ok());
-    await page.getByTestId("asd-op-ok").click();
+    await page.getByTestId("case-strip-apply-outcome").click();
     await mutated;
     await expect(page.locator('[data-testid="placard-outcome"] .placard-text')).toContainText("[72-edit]", { timeout: 10_000 });
     await page.getByRole("button", { name: "Commit & push" }).click();

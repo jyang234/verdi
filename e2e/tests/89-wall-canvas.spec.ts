@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { EDGE, SHOWCASE, boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
-import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
+import { clearWallSelection, expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
 
 // spec/wall-canvas-v2 ac-1 and ac-2 (lane F2a): every card renders at the
 // design's footprint, unrotated, keeping its receipts' exact texts; the
@@ -718,8 +718,11 @@ test.describe("wall-canvas", () => {
     // The canvas is bounded to the viewport, so on a short window it
     // scrolls vertically as well as horizontally. The sticky is parked far
     // down and right first, so both axes have room whatever the file's
-    // earlier tests left.
-    await page.setViewportSize({ width: 1440, height: 600 });
+    // earlier tests left. The window is 1280 wide: with the side rail
+    // retired (spec/wall-strip-and-drawer-v2 ac-6) the canvas takes the
+    // region's whole width, and at 1440 it no longer leaves the 240 px of
+    // horizontal room this premise needs.
+    await page.setViewportSize({ width: 1280, height: 600 });
     await openWall(page);
     await parkSticky(page, 1408, 900);
     const room = await canvas(page).evaluate((el) => ({ x: el.scrollWidth - el.clientWidth, y: el.scrollHeight - el.clientHeight }));
@@ -1394,8 +1397,12 @@ test.describe("wall-canvas", () => {
     expect(posted.length).toBe(beforeEscape);
     await expect(page.locator("#board-canvas .objcard").filter({ hasText: "never declared" })).toHaveCount(0);
 
-    // The existing add-object dialog stays for keyboard-only use.
-    await page.locator("#asd-add-object").focus();
+    // The existing add-object dialog stays for keyboard-only use: its one
+    // visible opener is the toolbar's Card, with nothing selected (the
+    // rail's forms that opened it are retired; spec/wall-strip-and-
+    // drawer-v2 ac-6; SI-368 (6)).
+    await clearWallSelection(page);
+    await wallToolbar(page).getByRole("button", { name: "Card", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.locator("#asd-op-dialog")).toBeVisible();
     await expect(page.getByTestId("asd-op-text")).toBeFocused();

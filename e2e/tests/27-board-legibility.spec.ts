@@ -1,15 +1,18 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky } from "./helpers";
+import { addSticky, openRecordTab, stickyAction } from "./helpers";
 
 // The legibility contract (owner UAT: the board must read, at a glance,
 // like a murder board — "put all the facts and entities on the board to
 // draw relationships and keep track of context", human-legibly). These
 // are the behavioral halves of that redesign: labeled zone bands, the
-// teaching empty wall, the collapsed four-move guide (05 §Workbench
-// "The four-concept minimum path" — everything else discoverable, never
-// front-loaded), the yarn key that names only the threads present, and
-// mode identity readable from the page chrome.
+// teaching empty wall, the four-move guide shut until asked (05
+// §Workbench "The four-concept minimum path" — everything else
+// discoverable, never front-loaded), the yarn key that names only the
+// threads present, and mode identity readable from the page chrome. The
+// guide and the yarn key are the record drawer's Moves and Keys tabs
+// since the rail that held them is retired (spec/wall-strip-and-
+// drawer-v2 ac-6, dc-2).
 
 // AMENDED with the scoping canvas: the stubs band (spec/scoping-canvas
 // dc-6) sits between open questions and references. It is CLASS-GATED:
@@ -90,16 +93,15 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(page.locator(".zone-label--empty")).toHaveCount(0);
   });
 
-  test("the four-move guide: collapsed in authoring, absent from mirror and record", async ({
+  test("the four-move guide: the drawer's Moves tab, shut until asked, saying on mirror and record where the moves are made", async ({
     page,
   }) => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
-    const guide = page.getByTestId("board-guide");
-    await expect(guide).toBeVisible();
-    // Never front-loaded: closed until asked.
-    await expect(guide).not.toHaveAttribute("open", "");
-    await guide.locator("summary").click();
-    await expect(guide).toHaveAttribute("open", "");
+    // Never front-loaded: the wall renders no guide of its own, and the
+    // drawer whose Moves tab carries it is shut until asked.
+    await expect(page.getByTestId("board-guide")).toHaveCount(0);
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
+    const guide = await openRecordTab(page, "moves");
     // The four concepts, in the guide's own words.
     await expect(guide).toContainText("case file");
     await expect(guide).toContainText("acceptance criteria");
@@ -108,28 +110,30 @@ test.describe("board legibility: the wall reads at a glance", () => {
     // SHOWCASE.DESIGN_SPEC is class: feature — its guide teaches the split (owner
     // directive: a PM must see, on first read, that a feature wall holds
     // outcome ACs + stubs while stories are their own specs pointing up).
-    const note = guide.getByTestId("guide-class-note");
+    const note = guide.locator(".record-drawer-note");
     await expect(note).toBeVisible();
     await expect(note).toContainText("feature");
     await expect(note).toContainText("implements");
     await expect(note).toContainText("a feature never lists its stories");
 
-    // SHOWCASE.EMPTY_SPEC is class: story — the four-move copy stands unadorned
-    // (story spec + ACs + implements + commit IS the minimum path).
+    // SHOWCASE.EMPTY_SPEC is class: story — the four moves stand unadorned
+    // (story spec + ACs + implements + commit IS the minimum path): no
+    // split lesson, and its criteria move is the story's own.
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
-    const storyGuide = page.getByTestId("board-guide");
-    await expect(storyGuide).toBeVisible();
-    await expect(storyGuide).not.toHaveAttribute("open", "");
-    await storyGuide.locator("summary").click();
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
+    const storyGuide = await openRecordTab(page, "moves");
     await expect(storyGuide).toContainText("case file");
     await expect(storyGuide).toContainText("acceptance criteria");
-    await expect(storyGuide).toContainText("implements/resolves edges");
+    await expect(storyGuide).toContainText("the first column says what must be true.");
     await expect(storyGuide).toContainText("Commit & push");
-    await expect(storyGuide.getByTestId("guide-class-note")).toHaveCount(0);
+    await expect(storyGuide).not.toContainText("never lists its");
 
+    // The mirror and the sealed record take no edit: the wall renders no
+    // guide, and the moves say where they are made.
     for (const spec of [SHOWCASE.REVIEW_SPEC, SHOWCASE.READONLY_SPEC]) {
       await page.goto(boardPath(spec));
       await expect(page.getByTestId("board-guide")).toHaveCount(0);
+      await expect(await openRecordTab(page, "moves")).toContainText("this wall takes no edit");
     }
   });
 
@@ -211,8 +215,8 @@ test.describe("board legibility: the wall reads at a glance", () => {
             ),
           ).sort(),
         );
-      const keyPairs = await page
-        .locator('[data-testid="yarn-key"] li')
+      const keyPairs = await (await openRecordTab(page, "keys"))
+        .locator('[data-testid="record-yarn-key"] .record-row')
         .evaluateAll((els) =>
           els
             .map(
@@ -222,14 +226,16 @@ test.describe("board legibility: the wall reads at a glance", () => {
             .sort(),
         );
       expect(keyPairs).toEqual(chipPairs);
+      await page.getByTestId("record-drawer-close").click();
     };
 
     await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
-    const key = page.getByTestId("yarn-key");
+    const key = (await openRecordTab(page, "keys")).getByTestId("record-yarn-key");
     await expect(key).toBeVisible();
     // The sealed fixture's own document-level implements edge is always
     // on this wall, whatever else leaked in.
-    await expect(key.locator('li[data-edge-type="implements"]')).toBeVisible();
+    await expect(key.locator('.record-row[data-edge-type="implements"]')).toBeVisible();
+    await page.getByTestId("record-drawer-close").click();
     await keyMatchesChips();
 
     // The document's own chip says whose edge it is — the document is
@@ -252,7 +258,10 @@ test.describe("board legibility: the wall reads at a glance", () => {
     const empty = page.getByTestId("board-empty");
     await expect(empty).toBeVisible();
     await expect(empty).toContainText("Nothing pinned yet");
-    await expect(empty).toContainText("Add sticky");
+    // It names the toolbar's Sticky, the retired rail's Add sticky
+    // (spec/wall-strip-and-drawer-v2 ac-6), never the rail.
+    await expect(empty).toContainText("Sticky");
+    await expect(empty).not.toContainText("rail");
 
     // No object cards — the leanest valid story spec still hangs its
     // implements thread (a reference card), and the wall still invites.
@@ -273,11 +282,12 @@ test.describe("board legibility: the wall reads at a glance", () => {
       }
     }
 
-    // The invitation works: the case file is up, and Add sticky is live.
+    // The invitation works: the case file is up, and the toolbar's Sticky
+    // is live.
     await expect(page.getByTestId("placard-problem")).toContainText(
       "verified by hand",
     );
-    await expect(page.getByRole("button", { name: "Add sticky" })).toBeVisible();
+    await expect(stickyAction(page)).toBeVisible();
   });
 
   test("a new sticky lands at the bottom of its type's lane", async ({
@@ -362,7 +372,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
       /review · mirror of the MR/,
     );
     await expect(page.locator("body")).toHaveClass(/mode-review/);
-    // The mirror explains itself in the rail.
+    // The mirror explains itself among the notices.
     await expect(page.locator(".mirror-note")).toContainText(
       "mirrors the merge request",
     );

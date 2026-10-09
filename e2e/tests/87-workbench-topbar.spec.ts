@@ -835,31 +835,43 @@ test.describe("chrome-and-tokens", () => {
 
     // An outside press on something that is not focusable closes it and
     // returns focus to the summary, and the page does not scroll for it
-    // (SI-331): the shell's step text, in view, on a scrolled page.
+    // (SI-331): the wall's bare cork, in view, on a scrolled page (the
+    // shell's step text this test pressed is retired with the shell,
+    // spec/wall-strip-and-drawer-v2 ac-6).
     await summary.click();
     await expect(details).toHaveAttribute("open", "");
     await page.evaluate(() => window.scrollTo(0, 200));
     const y0 = await page.evaluate(() => window.scrollY);
-    const step = page.getByTestId("asd-step");
-    const box = await step.boundingBox();
-    expect(box, "the shell's step text is on screen").not.toBeNull();
-    await page.mouse.click(box!.x + 4, box!.y + box!.height / 2);
+    const cork = await page.evaluate(() => {
+      const c = document.getElementById("board-canvas")!;
+      const r = c.getBoundingClientRect();
+      const top = Math.max(r.top, 0) + 4;
+      const bottom = Math.min(r.bottom, window.innerHeight) - 4;
+      for (let y = top; y < bottom; y += 12) {
+        for (let x = r.left + 4; x < Math.min(r.right, window.innerWidth) - 4; x += 12) {
+          if (document.elementFromPoint(x, y) === c) return { x, y };
+        }
+      }
+      return null;
+    });
+    expect(cork, "the wall's bare cork is on screen").not.toBeNull();
+    await page.mouse.click(cork!.x, cork!.y);
     await expect(details).not.toHaveAttribute("open", "");
     await expect.poll(() => activeKey(page)).toBe("topbar-posture");
     expect(Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThanOrEqual(1);
 
     // A press on a focusable control closes it and keeps that control's
-    // focus: a disclosure summary in the shell (focusable, and its press
-    // navigates nowhere).
+    // focus: an object card on the wall (focusable, and its press selects
+    // it and navigates nowhere; the shell's disclosure this test pressed
+    // is retired with the shell, spec/wall-strip-and-drawer-v2 ac-6).
     await summary.click();
     await expect(details).toHaveAttribute("open", "");
-    const control = page.locator("#asd-shell details > summary").first();
+    const control = page.getByTestId("card-" + SHOWCASE.AC_IDS[0]);
+    await control.scrollIntoViewIfNeeded();
     await expect(control).toBeVisible();
     await control.click();
     await expect(details).not.toHaveAttribute("open", "");
-    await expect
-      .poll(() => page.evaluate(() => document.activeElement?.tagName + "." + (document.activeElement?.closest("#asd-shell") ? "shell" : "")))
-      .toBe("SUMMARY.shell");
+    await expect.poll(() => activeKey(page)).toBe("card-" + SHOWCASE.AC_IDS[0]);
 
     // On the diagram editor, whose page-level Escape is its exit
     // (tool-view-exit ac-1), the first Escape closes only the popover and
