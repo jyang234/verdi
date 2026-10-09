@@ -149,7 +149,7 @@ func TestReadinessTargets(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap := readinesspilot.Snapshot{AllConcerns: []readinesspilot.Concern{tc.concern}}
-			got, ok := readinessTargets(snap, objects, tc.stubs, map[string]bool{"problem": true, "outcome": true})[tc.concern.ID]
+			got, ok := readinessTargets(snap, objects, tc.stubs, map[string]bool{"problem": true, "outcome": true}, map[string]bool{string(boardlayout.ZoneAC): true})[tc.concern.ID]
 			switch {
 			case tc.want == nil && ok:
 				t.Fatalf("target = %+v, want none", got)
@@ -185,7 +185,7 @@ func TestReadinessTargets_StripHalfOnTheWall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fm := &artifact.SpecFrontmatter{Class: artifact.ClassFeature, Problem: tc.problem, Outcome: tc.outcome}
 			snap := readinesspilot.Snapshot{AllConcerns: []readinesspilot.Concern{{ID: "shape/problem"}, {ID: "shape/outcome"}}}
-			targets := readinessTargets(snap, nil, nil, caseStripHalves(fm))
+			targets := readinessTargets(snap, nil, nil, caseStripHalves(fm), nil)
 
 			p, err := buildProjectionFM("strip-halves", fm, nil, nil, nil, nil, modeAuthoring)
 			if err != nil {
@@ -206,6 +206,44 @@ func TestReadinessTargets_StripHalfOnTheWall(t *testing.T) {
 				if drawn := strings.Contains(strip.String(), `data-testid="placard-`+half+`"`); drawn != ok {
 					t.Errorf("the %s half is drawn=%v but targeted=%v", half, drawn, ok)
 				}
+			}
+		})
+	}
+}
+
+// TestReadinessTargets_SlotOnTheWall (SI-368 (16); F3b fix pass residual
+// 3): the criteria row targets the criteria column's add slot only where
+// the wall draws that slot — a live authoring wall, the slot fitting its
+// column — and is a plain row everywhere else (an authoring wall under its
+// domain refusal, a review mirror, a read-only wall), so "Find the
+// criterion slot" never shuts the drawer onto nothing. Each case is
+// checked against the region the wall itself renders: the slot is
+// targeted exactly when it is drawn.
+func TestReadinessTargets_SlotOnTheWall(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    boardModeKind
+		refusal string
+		want    bool
+	}{
+		{"a live authoring wall", modeAuthoring, "", true},
+		{"an authoring wall under its domain refusal", modeAuthoring, "not the namesake branch", false},
+		{"a review mirror", modeReview, "", false},
+		{"a read-only wall", modeReadOnly, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := slotProjection(tc.mode, tc.refusal)
+			snap := readinesspilot.Snapshot{AllConcerns: []readinesspilot.Concern{{ID: "success/criteria"}}}
+			got, ok := readinessTargets(snap, nil, nil, nil, slotKindsDrawn(p))["success/criteria"]
+			switch {
+			case tc.want && (!ok || got != readinessTarget{readinessTargetSlot, string(boardlayout.ZoneAC)}):
+				t.Errorf("success/criteria targets %+v (%v), want the criteria slot", got, ok)
+			case !tc.want && ok:
+				t.Errorf("success/criteria targets %+v, want a plain row: the wall draws no criteria slot", got)
+			}
+			region := renderBoardRegion(p, &boardGitState{}, testASDView())
+			if drawn := strings.Contains(region, `data-slot-kind="`+string(boardlayout.ZoneAC)+`"`); drawn != ok {
+				t.Errorf("the criteria slot is drawn=%v but targeted=%v", drawn, ok)
 			}
 		})
 	}

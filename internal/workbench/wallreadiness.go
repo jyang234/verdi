@@ -77,10 +77,11 @@ func readinessTabSurface(targets map[string]readinessTarget) readinessSurface {
 // the problem and outcome rows select their half of the case-file strip
 // where the wall draws that half (halves, caseStripHalves: a spec lacking
 // a problem has no problem half, so its row selects nothing rather than
-// shutting the drawer onto nothing) and the criteria row the criteria
-// column's add slot. Every other concern has no entry: a plain row that
-// selects nothing.
-func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stubSlugs []string, halves map[string]bool) map[string]readinessTarget {
+// shutting the drawer onto nothing), and the criteria row the criteria
+// column's add slot where the wall draws that slot (slots, keyed by
+// object kind: slotKindsDrawn — only a wall that takes edits draws one).
+// Every other concern has no entry: a plain row that selects nothing.
+func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stubSlugs []string, halves, slots map[string]bool) map[string]readinessTarget {
 	stubs := stubSlugsByConcern(stubSlugs)
 	targets := make(map[string]readinessTarget, len(snap.AllConcerns))
 	for _, c := range snap.AllConcerns {
@@ -93,7 +94,7 @@ func readinessTargets(snap readinesspilot.Snapshot, objects map[string]bool, stu
 			targets[c.ID] = readinessTarget{Kind: readinessTargetStrip, Value: "problem"}
 		case c.ID == "shape/outcome" && halves["outcome"]:
 			targets[c.ID] = readinessTarget{Kind: readinessTargetStrip, Value: "outcome"}
-		case c.ID == "success/criteria":
+		case c.ID == "success/criteria" && slots[string(boardlayout.ZoneAC)]:
 			targets[c.ID] = readinessTarget{Kind: readinessTargetSlot, Value: string(boardlayout.ZoneAC)}
 		}
 	}
@@ -183,7 +184,22 @@ func (s *boardSpecServer) readinessTab(ctx context.Context, name string, fm *art
 	for _, st := range fm.Stubs {
 		stubs = append(stubs, st.Slug)
 	}
-	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs, caseStripHalves(fm))) + guide
+	return renderReadinessTab(s.model, snap, readinessTargets(snap, artifact.DeclaredObjectIDs(fm), stubs, caseStripHalves(fm), s.readinessTabSlots(ctx, name))) + guide
+}
+
+// readinessTabSlots is the add slots the wall of spec name draws, by
+// object kind (slotKindsDrawn), from the wall's own projection: whether
+// the wall takes edits is its mode and its domain refusal, which only
+// the board's load decides. It runs inside the tab's one application
+// projection. A board that cannot be loaded here draws no slot that the
+// tab may point at, so its criteria row is a plain row — never a target
+// onto nothing; the wall's own render reports the load's failure.
+func (s *boardSpecServer) readinessTabSlots(ctx context.Context, name string) map[string]bool {
+	p, _, _, _, err := s.loadBoard(ctx, name)
+	if err != nil {
+		return nil
+	}
+	return slotKindsDrawn(p)
 }
 
 // caseStripHalves is the case-file strip's halves the wall renders for

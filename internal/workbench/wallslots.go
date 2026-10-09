@@ -105,6 +105,23 @@ func addSlotsFor(p *BoardProjection) []addSlot {
 	return out
 }
 
+// slotKindsDrawn is the object kinds whose add slot the wall draws for p:
+// none unless the domain is live (renderBoardRegion's domainLive: an
+// authoring wall whose spec writes the kernel accepts — a slot is a typed
+// write), and then each column where the slot fits (addSlotsFor). The
+// drawer's Readiness tab points its criteria row at the criteria slot
+// only where this says it is drawn (SI-368 (16)).
+func slotKindsDrawn(p *BoardProjection) map[string]bool {
+	drawn := map[string]bool{}
+	if p.Mode != modeAuthoring || p.DomainRefusal != "" {
+		return drawn
+	}
+	for _, s := range addSlotsFor(p) {
+		drawn[s.Kind] = true
+	}
+	return drawn
+}
+
 // writeAddSlots renders the slots inside the canvas. Called only where
 // the domain is live: a slot is a typed write.
 func writeAddSlots(b *strings.Builder, p *BoardProjection) {
