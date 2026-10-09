@@ -6398,6 +6398,11 @@ body:not(.board-page) > footer.site-foot,
   padding: 6px 12px;
   border-radius: 4px;
 }
+/* their glyphs and the words after their verbs never take a pointer: the
+   button itself is the click's target, which the wall's script
+   dispatches on by id (as Commit & push's folded words) */
+.topbar-controls .create-spec-btn .wall-action-glyph,
+.topbar-controls .create-spec-btn .wall-action-rest { pointer-events: none; }
 .topbar-controls #create-spec-btn {
   border: 1px solid var(--accent);
   background: var(--accent);

@@ -623,6 +623,59 @@ test.describe("chrome-and-tokens", () => {
       expect(h, `${p.name} @1440: one 52 px row`).toBeLessThanOrEqual(56);
     }
 
+    // The sealed wall's New story and Revise open their dialogs from a
+    // press anywhere on them: the wall's script dispatches on the pressed
+    // element's id, so the glyph and the words after the verb, each in its
+    // own span, never take the pointer. At 1440 those spans are folded
+    // away from the eye, the names stay whole, and the press lands on the
+    // visible verb; at the project's 1880 px they show, and the press
+    // lands on each of them.
+    const sealedWall = PAGES.find((p) => p.name === "sealed feature wall")!;
+    const sealedActions = [
+      { testid: "create-spec-btn", dialog: "#create-dialog", cancel: "#create-cancel", name: "New story", verb: "New" },
+      { testid: "revise-spec-btn", dialog: "#revise-dialog", cancel: "#revise-cancel", name: "Revise this feature", verb: "Revise" },
+    ];
+    const pressAt = async (at: { x: number; y: number }, a: (typeof sealedActions)[number], where: string) => {
+      await page.mouse.click(at.x, at.y);
+      await expect(page.locator(a.dialog), `${a.name}: a press on ${where} opens its dialog`).toBeVisible();
+      await page.locator(a.cancel).click();
+      await expect(page.locator(a.dialog)).toBeHidden();
+    };
+    await gotoPage(page, sealedWall);
+    for (const a of sealedActions) {
+      const btn = bar(page).getByTestId(a.testid);
+      await expect(btn).toHaveAccessibleName(a.name);
+      for (const part of [".wall-action-glyph", ".wall-action-rest"]) {
+        const w = await btn.locator(part).evaluate((el) => el.getBoundingClientRect().width);
+        expect(w, `${a.name} @1440: ${part} folded away from the eye`).toBeLessThanOrEqual(1);
+      }
+      const verbAt = await btn.evaluate((el, verb) => {
+        const node = Array.from(el.childNodes).find((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim() === verb);
+        if (!node) return null;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const r = range.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, a.verb);
+      expect(verbAt, `${a.name} @1440: the visible verb "${a.verb}"`).not.toBeNull();
+      await pressAt(verbAt!, a, `its visible verb @1440`);
+    }
+    await page.setViewportSize({ width: 1880, height: 1000 });
+    await gotoPage(page, sealedWall);
+    for (const a of sealedActions) {
+      const btn = bar(page).getByTestId(a.testid);
+      await expect(btn).toHaveAccessibleName(a.name);
+      for (const part of [".wall-action-glyph", ".wall-action-rest"]) {
+        const r = await btn.locator(part).evaluate((el) => {
+          const b = el.getBoundingClientRect();
+          return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width };
+        });
+        expect(r.w, `${a.name} @1880: ${part} shows`).toBeGreaterThan(1);
+        await pressAt(r, a, `${part} @1880`);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     // Without JavaScript: the bar is in the initial server response, and a
     // script-less browser renders it.
     const sizes: Record<string, number> = {};
