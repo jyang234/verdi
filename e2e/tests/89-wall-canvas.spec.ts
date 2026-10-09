@@ -258,7 +258,10 @@ function contrastIn(fg: string, bg: string): number {
 // intersect the pill's (SI-358 (4)): the pill must cover none of them. An
 // element's visible box is its own, clipped by every ancestor that clips
 // its overflow (the canvas scrolls: a paper past its foot is not on
-// screen), so what is counted is what a reader could see.
+// screen), so what is counted is what a reader could see. The content of
+// a closed <details> — everything but its summary — is not on screen
+// either, though Chromium may lay it out, so it is skipped as display:
+// none is (SI-368 (30)).
 async function overlapsOf(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const pillEl = document.querySelector('[data-testid="wall-status"]');
@@ -282,6 +285,15 @@ async function overlapsOf(page: Page): Promise<string[]> {
       }
       return b;
     };
+    // inClosedDetails: the element sits in a closed <details>'s content,
+    // outside that details' own summary.
+    const inClosedDetails = (el: Element) => {
+      for (let p: Element | null = el; p && p.parentElement; p = p.parentElement) {
+        const d = p.parentElement;
+        if (d instanceof HTMLDetailsElement && !d.open && p !== d.querySelector(":scope > summary")) return true;
+      }
+      return false;
+    };
     const sel =
       "h1, h2, h3, h4, p, span, a, button, input, textarea, select, summary, li, td, th, label, " +
       ".objcard, .stubcard, .refcard, .sticky, .yarn-chip, .zone-label, .board-notice, .placard";
@@ -290,6 +302,7 @@ async function overlapsOf(page: Page): Promise<string[]> {
       if (pillEl.contains(el) || el.contains(pillEl)) continue;
       const cs = getComputedStyle(el);
       if (cs.display === "none" || cs.visibility === "hidden") continue;
+      if (inClosedDetails(el)) continue;
       // An element drawn at opacity 0 by itself or an ancestor (the idle
       // trash target) is not on screen either.
       let transparent = false;
@@ -896,6 +909,75 @@ test.describe("wall-canvas", () => {
       await page.mouse.up();
       await expect(page.getByTestId("autosave-status")).toHaveText("saved", { timeout: 8_000 });
     }
+  });
+
+  test("the pill covers nothing while another wall's uncommitted edit fills the closed Commit popover (SI-368 (30))", async ({ page }) => {
+    // The state the e2e shard reaches in its real order (F3CR-1): another
+    // wall of this checkout carries an uncommitted typed edit — 50's typed
+    // forms leave theirs behind — so this wall's Commit popover lists it,
+    // and the popover stays closed. Chromium lays out the content of a
+    // closed <details>, so a list that kept its layout boxes would sit
+    // under the pill on the short zoomed viewport. The edit is made here,
+    // so the test reaches the state alone.
+    const other = boardPath(SHOWCASE.DESIGN_SPEC);
+    await page.goto(other);
+    const snapResp = await page.request.get(other + "/snapshot");
+    expect(snapResp.status()).toBe(200);
+    const snap = await snapResp.json();
+    const id = (await page.getByTestId("board").getAttribute("data-next-id-oq"))!;
+    const made = await page.request.post(other + "/api/mutate_draft", {
+      data: {
+        request: {
+          schema: "verdi.draftmutation/v1",
+          spec: "spec/" + SHOWCASE.DESIGN_SPEC,
+          base_digest: snap.base_digest,
+          base_spec_b64: snap.base_spec_b64,
+          expected: snap.expected,
+          operations: [{ op: "add-question", id, text: "an uncommitted question on another wall [89-pill]", anchor: "#" + id }],
+        },
+      },
+      headers: { "Content-Type": "application/json" },
+    });
+    const madeBody = await made.json();
+    expect(madeBody.result, JSON.stringify(madeBody)).toBeTruthy();
+
+    await page.setViewportSize({ width: 720, height: 450 });
+    await page.goto(boardPath(WALL.SPEC));
+    await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+    await page.evaluate(() => {
+      (document.body.style as unknown as { zoom: string }).zoom = "200%";
+    });
+    await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+    // This wall's popover names the other wall's edit, and is closed.
+    await expect(page.getByTestId("wall-commit")).toHaveAttribute("data-changes", /^(unclassified|mixed)$/);
+    const changes = page.getByTestId("wall-commit-changes");
+    await expect(changes.locator(".wall-commit-reason")).not.toHaveCount(0);
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", false);
+    // A closed popover's list takes no layout: no box anywhere, under the
+    // pill or not.
+    const boxes = await changes.evaluate((el) =>
+      [el, ...Array.from(el.querySelectorAll("*"))].map((n) => {
+        const r = n.getBoundingClientRect();
+        return r.width * r.height;
+      }),
+    );
+    expect(boxes.filter((a) => a > 0), "the closed popover's list draws no box").toEqual([]);
+    // And the pill covers nothing, with a card selected, as the pill test
+    // asks, and with the frame in view.
+    await page.evaluate(() => {
+      (window as unknown as { __WALLSELECT__: { select: (s: unknown) => void } }).__WALLSELECT__.select({ kind: "card", key: "dc-1" });
+    });
+    await expect(page.getByTestId("card-dc-1")).toHaveAttribute("data-selected", "true");
+    expect(await overlapsOf(page), "the pill covers nothing beside the closed popover").toEqual([]);
+    await frameIntoView(page);
+    expect(await overlapsOf(page), "the pill covers nothing with the frame in view").toEqual([]);
+    // Opened, the list is drawn — the rule hides only the closed state.
+    await page.getByTestId("wall-commit-count").click();
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", true);
+    await expect(changes).toBeVisible();
+    await expect(changes.locator(".wall-commit-reason").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", false);
   });
 
   test("the pill's summary is readable at 320 px in authoring (ac-2; SI-358 (4))", async ({ page }) => {

@@ -6322,6 +6322,11 @@ body:not(.board-page) > footer.site-foot,
   color: var(--ink);
   text-align: left;
 }
+/* a closed popover's body takes no layout: Chromium hides a closed
+   <details>'s content from paint, not from layout, so the body, hung
+   absolute or fixed from the count, would keep its boxes over whatever
+   sits under it — the status pill among them (SI-368 (30)) */
+.wall-commit-popover:not([open]) > .wall-commit-changes { display: none; }
 .wall-commit-changes h3,
 .wall-commit-eyebrow {
   margin: 8px 0 4px;
