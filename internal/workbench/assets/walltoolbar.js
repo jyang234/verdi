@@ -156,8 +156,9 @@
     return l;
   }
 
-  // yarnKeyAction opens the existing yarn key (SI-350 (9)): the rail's
-  // section, until wall-strip-and-drawer-v2 moves it into the drawer.
+  // yarnKeyAction offers the yarn key (SI-350 (9)) where the wall has
+  // one: the action opens the record drawer's Keys tab, which carries it
+  // (wall-strip-and-drawer-v2 SI-368 (9); walldrawer.js).
   function yarnKeyAction(h) {
     if (!document.querySelector(".yarn-key")) return;
     if (h.childElementCount) h.appendChild(divider());
@@ -341,7 +342,12 @@
     if (correct) correct.click();
   }
 
-  function revealYarnKey() {
+  function revealYarnKey(actor) {
+    var drawer = window.__WALLDRAWER__;
+    if (drawer && drawer.open) {
+      drawer.open("keys", actor);
+      return;
+    }
     var key = document.querySelector(".yarn-key");
     if (!key) return;
     if (!key.hasAttribute("tabindex")) key.setAttribute("tabindex", "-1");
@@ -383,7 +389,7 @@
       case "pin":
         return; // boardspec.js toggles the tray from the button's aria-controls
       case "yarn-key":
-        revealYarnKey();
+        revealYarnKey(actor);
         return;
       case "edit":
         editElement(target);

@@ -6489,3 +6489,670 @@ body:not(.board-page) > footer.site-foot,
   }
 }
 /* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == the record drawer and the ⋯ menu =======================================
+   spec/wall-strip-and-drawer-v2 ac-4, ac-5, dc-2; ledger SI-368 (9) to
+   (12), (16); lane F3b. The handoff's "Record drawer" and "⋯ menu", at the
+   body level outside the swapped region. Tokens only (chrome-and-tokens-v2
+   ac-4); shadows keep their rgba(). */
+
+/* ---- the drawer: 460 px at the right, under the bar (its top follows
+   the bar's bottom, walldrawer.js), over the scrim; the whole width where
+   the viewport is narrower. It stacks over the wall and under the board's
+   dialogs and the derivation drawer (z-index 20 and 21), so a dialog the
+   bar opens — Commit & push, New story, Revise — is never hidden behind
+   it; the bar's own popovers and the menus sit over it. ---- */
+.record-drawer-scrim {
+  position: fixed;
+  inset: var(--record-drawer-top, 0px) 0 0 0;
+  z-index: 16;
+  background: var(--scrim);
+}
+.record-drawer {
+  position: fixed;
+  top: var(--record-drawer-top, 0px);
+  right: 0;
+  bottom: 0;
+  z-index: 17;
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  border-left: 1px solid var(--rule);
+  box-shadow: -14px 0 40px rgba(20, 26, 18, 0.22);
+  container-type: inline-size;
+  container-name: record-drawer;
+}
+.record-drawer-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 10px 12px 0 14px;
+  border-bottom: 1px solid var(--rule);
+}
+/* the tab strip: one row at the drawer's 460 px; at a phone's width the
+   tabs wrap rather than scroll or clip */
+.record-drawer-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.record-drawer-tab {
+  flex: none;
+  margin: 0 0 -1px;
+  padding: 8px 6px 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.record-drawer-tab:hover { color: var(--ink); }
+.record-drawer-tab[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom-color: var(--ink);
+}
+.record-drawer-close {
+  flex: none;
+  align-self: center;
+  margin: 0 0 4px auto;
+  padding: 0 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.record-drawer-close:hover { color: var(--ink); }
+.record-drawer-tab:focus-visible,
+.record-drawer-close:focus-visible,
+.record-drawer-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.record-drawer-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.record-drawer-panel { padding: 0 24px 24px; }
+
+/* ---- a tab's intro, sections, rows, badges, empty states and footer
+   (handoff "Generic panel rows") ---- */
+.record-drawer-intro { padding-top: 18px; }
+.record-drawer-eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.record-drawer-title {
+  margin: 4px 0 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.record-drawer-note {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.record-drawer-note:empty { display: none; }
+.record-section { margin-top: 20px; }
+.record-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.record-section-title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.record-section[data-tone="violated"] .record-section-title { color: var(--st-violated); }
+.record-section[data-tone="evidenced"] .record-section-title { color: var(--st-evidenced); }
+.record-section[data-tone="frozen"] .record-section-title { color: var(--frozen); }
+.record-section-aside {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-rows { margin: 0; }
+.record-row {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.record-key {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-value {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--serif);
+  overflow-wrap: anywhere;
+}
+.record-value.record-mono { font-family: var(--mono); font-size: 12px; }
+.record-note {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-solid);
+}
+.record-badge-cell { margin: 0; justify-self: end; }
+/* a badge's words carry its meaning; its colour only repeats them */
+.record-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+  white-space: nowrap;
+}
+.record-badge[data-tone="evidenced"] { color: var(--st-evidenced); }
+.record-badge[data-tone="authored"] { color: var(--authored); }
+.record-badge[data-tone="violated"] { color: var(--st-violated); }
+.record-badge[data-tone="pending"] { color: var(--st-pending); border-style: dashed; }
+.record-badge[data-tone="frozen"] { color: var(--frozen); }
+.record-empty {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-unavailable,
+.record-drawer .readiness-tab-unavailable {
+  margin: 18px 0 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--st-pending);
+  border-radius: 6px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.record-status {
+  margin: 18px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.record-prose {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.record-command {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.record-drawer-foot {
+  margin: 18px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer-foot code { font-size: inherit; }
+.record-drawer .asd-import-origin { margin: 18px 0 0; font-size: 13px; line-height: 1.5; }
+.record-drawer kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 11px;
+  text-align: center;
+}
+/* the yarn key's rows: the swatch in the thread's colour (dashed or
+   dotted as the wall draws it) beside its type's name */
+.record-yarn .record-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.record-yarn .yarn-key-swatch { transform: none; }
+.record-yarn [data-edge-type="implements"] .yarn-key-swatch { color: var(--yarn-implements); }
+.record-yarn [data-edge-type="resolves"] .yarn-key-swatch { color: var(--yarn-resolves); }
+.record-yarn [data-edge-type="depends-on"] .yarn-key-swatch { color: var(--yarn-depends-on); }
+.record-yarn [data-edge-type="supersedes"] .yarn-key-swatch { color: var(--yarn-supersedes); border-top-style: dashed; }
+.record-yarn [data-edge-type="exempts"] .yarn-key-swatch { color: var(--yarn-exempts); }
+.record-yarn [data-edge-type="relates"] .yarn-key-swatch { color: var(--yarn-relates); border-top-style: dashed; }
+.record-yarn [data-layer="scoping"] .yarn-key-swatch { border-top-style: dotted; }
+.record-yarn [data-layer="scoping"][data-edge-type="covers"] .yarn-key-swatch { color: var(--st-evidenced); }
+.record-yarn [data-layer="scoping"][data-edge-type="resolves"] .yarn-key-swatch { color: var(--st-waived); }
+.record-drawer-noscript {
+  margin: 0.9rem 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the Readiness tab: the shared readiness body in the drawer's
+   measure (handoff "Record drawer", Readiness) ---- */
+.record-drawer .readiness-tab { padding-top: 18px; }
+.record-drawer .readiness-orient { display: block; margin: 0; }
+.record-drawer .readiness-eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+.record-drawer .readiness-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-class-chip {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-refs {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-dot { margin: 0 6px; color: var(--rule); }
+.record-drawer .readiness-step {
+  margin: 8px 0 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.record-drawer .readiness-purpose { margin: 6px 0 0; font-size: 12.5px; max-width: none; }
+.record-drawer .readiness-stale {
+  display: block;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+/* the four stations: a 4-column grid, each topped by its state's colour */
+.record-drawer .readiness-rail { margin: 18px 0 0; }
+.record-drawer .readiness-rail-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 0;
+}
+.record-drawer .readiness-station + .readiness-station { border-left: 0; }
+.record-drawer .readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 100%;
+  padding: 8px 2px 0;
+  border-top: 3px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+}
+.record-drawer .readiness-station[data-state="proven"] .readiness-station-link { border-top-color: var(--st-evidenced); }
+.record-drawer .readiness-station[data-state="violated-with-witness"] .readiness-station-link { border-top-color: var(--st-violated); }
+.record-drawer .readiness-station[data-state="unproven"] .readiness-station-link { border-top-color: var(--st-pending); }
+.record-drawer .readiness-station-link:hover { background: var(--panel); }
+.record-drawer .readiness-station-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.record-drawer .readiness-station-num { font-size: 10px; color: var(--ink); }
+.record-drawer .readiness-station-label {
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.record-drawer .readiness-station-id {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-station-line {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+/* the state chip in the tab: a mono badge, bordered (dashed when there is
+   not enough evidence yet), so colour is never the only signal */
+.record-drawer .readiness-state {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-order {
+  margin: 14px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-columns { display: block; }
+.record-drawer .readiness-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 22px 0 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.record-drawer .readiness-queue .readiness-heading { color: var(--st-pending); }
+.record-drawer .readiness-heading--violated { color: var(--st-violated); }
+.record-drawer .readiness-heading--proven { color: var(--st-evidenced); }
+.record-drawer .readiness-queue { margin: 0; }
+.record-drawer .readiness-queue-note,
+.record-drawer .readiness-completed-note {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-queue-list { display: flex; flex-direction: column; gap: 8px; }
+/* a Focus next item: its guidance first, its target beside it; a click
+   finds the target on the wall (SI-368 (16)) */
+.record-drawer .readiness-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--st-pending);
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: none;
+  transition: background 0.15s;
+}
+.record-drawer .readiness-concern--violated-with-witness.readiness-card { border-left-color: var(--st-violated); }
+.record-drawer .readiness-card:not([data-target-kind="none"]) { cursor: pointer; }
+.record-drawer .readiness-card:not([data-target-kind="none"]):hover { background: var(--panel); }
+.record-drawer .readiness-card[data-found] { border-color: var(--ink); border-left-color: var(--ink); }
+.record-drawer .readiness-rank {
+  display: block;
+  width: auto;
+  height: auto;
+  padding-top: 2px;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.record-drawer .readiness-primary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.record-drawer .readiness-summary {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.record-drawer .readiness-target {
+  flex: none;
+  max-width: 45%;
+  padding: 1px 6px;
+  border: 1px solid var(--st-pending);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--st-pending);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+.record-drawer .readiness-target:hover,
+.record-drawer .readiness-target:focus-visible { background: var(--st-pending-tint); }
+.record-drawer .readiness-target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.record-drawer .readiness-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-when { text-transform: none; letter-spacing: 0; }
+.record-drawer .readiness-copy > .readiness-state { align-self: flex-start; }
+.record-drawer .readiness-tech { margin: 2px 0 0; }
+.record-drawer .readiness-tech summary { font-family: var(--mono); font-size: 11px; }
+.record-drawer .readiness-tech-facts { font-size: 11px; }
+.record-drawer .readiness-more-summary {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted-solid);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.record-drawer .readiness-known,
+.record-drawer .readiness-completed {
+  margin-top: 22px;
+  padding-top: 0;
+  border-top: 1px solid var(--rule);
+}
+.record-drawer .readiness-known-list { margin: 0; padding: 0; list-style: none; }
+.record-drawer .readiness-known-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 6px 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.record-drawer .readiness-known-link:hover .readiness-known-text { text-decoration: underline; }
+.record-drawer .readiness-known-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.record-drawer .readiness-known-text {
+  flex: 1 1 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.record-drawer .readiness-completed-list { margin: 0; padding: 0; list-style: none; }
+.record-drawer .readiness-row { padding: 8px 0; border-top: 1px solid var(--rule); }
+.record-drawer .readiness-row .readiness-summary { font-size: 13px; font-weight: 400; }
+.record-drawer .readiness-queue-empty,
+.record-drawer .readiness-known-empty,
+.record-drawer .readiness-completed-empty {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-tab-capabilities {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+
+/* ---- the ⋯ menu: 260 px under the button, its counts loaded when it
+   opens (SI-368 (11)) ---- */
+.wall-more-menu {
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  min-width: 260px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(20, 26, 18, 0.22);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.wall-more-group {
+  margin: 0;
+  padding: 6px 10px 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.wall-more-sep { height: 1px; margin: 6px 4px; background: var(--rule); }
+.wall-more-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wall-more-item:hover,
+.wall-more-item:focus-visible { background: var(--panel); }
+.wall-more-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wall-more-aside { color: var(--muted-solid); white-space: nowrap; }
+.wall-more-aside[data-count-state="attention"] { color: var(--authored); font-weight: 700; }
+.wall-more-aside[data-count-state="unavailable"] { color: var(--st-pending); }
+
+/* ---- a phone's width: the drawer takes the viewport, a 16 px gutter;
+   the rows stack their key over the value; the stations pair up ---- */
+@container record-drawer (max-width: 420px) {
+  .record-drawer-head { padding: 8px 8px 0 10px; }
+  .record-drawer-panel { padding: 0 16px 20px; }
+  .record-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .record-key { grid-column: 1 / -1; }
+  .record-drawer .readiness-rail-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .record-drawer { border-left: 0; }
+}
+/* verdi:workbench-only:end */
