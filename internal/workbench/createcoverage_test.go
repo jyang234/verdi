@@ -142,8 +142,8 @@ func TestCreateCoverageOf(t *testing.T) {
 			},
 		},
 		{
-			name: "a nil index is unread, never an empty corpus",
-			fm:   &artifact.SpecFrontmatter{AcceptanceCriteria: []artifact.AcceptanceCriterion{{ID: "ac-1"}}},
+			name:   "a nil index is unread, never an empty corpus",
+			fm:     &artifact.SpecFrontmatter{AcceptanceCriteria: []artifact.AcceptanceCriterion{{ID: "ac-1"}}},
 			corpus: newCorpusRead(nil, nil),
 			want: createCoverageView{
 				Criteria: []createCriterionView{{ID: "ac-1", Disclosed: []string{"the corpus index could not be built: the corpus index was not built"}}},
@@ -340,7 +340,7 @@ func TestLoadBoard_CreateCoverageOnlyWithTheForm(t *testing.T) {
 	noManifest := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + dialogCoverageName + "/spec.md": dialogCoverageSpec,
-			".verdi/.gitignore":                                      "data/\n",
+			".verdi/.gitignore": "data/\n",
 		},
 		Message: "seed a sealed feature without a store manifest",
 	}})
