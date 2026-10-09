@@ -85,7 +85,7 @@ func columnCopyFor(g refindex.StatusGroup, mdl *model.Model) columnCopy {
 // only archived entries shows the fold, not an empty state.
 func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []cardFacts, mdl *model.Model, now time.Time) {
 	c := columnCopyFor(g, mdl)
-	whereSuffix, note := deskUnprovenCopy(g, countUnproven(cards), mdl)
+	whereSuffix, notes := deskQualifiers(g, cards, mdl)
 	buf.WriteString(`<section class="dir-group dir-group--`)
 	buf.WriteString(string(g))
 	buf.WriteString(`" data-testid="dir-group-`)
@@ -99,9 +99,11 @@ func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []car
 	buf.WriteString(`</span></header><p class="dir-group-move">`)
 	buf.WriteString(stdhtml.EscapeString(c.move))
 	buf.WriteString(`</p>`)
-	if note != "" {
-		buf.WriteString(`<p class="dir-group-note" data-testid="dir-group-unproven">`)
-		buf.WriteString(stdhtml.EscapeString(note))
+	for _, n := range notes {
+		buf.WriteString(`<p class="dir-group-note" data-testid="dir-group-`)
+		buf.WriteString(n.id)
+		buf.WriteString(`">`)
+		buf.WriteString(stdhtml.EscapeString(n.text))
 		buf.WriteString(`</p>`)
 	}
 	if len(cards) == 0 {
@@ -135,6 +137,74 @@ func countUnproven(cards []cardFacts) int {
 		}
 	}
 	return n
+}
+
+// countNoDraft counts the cards for a design branch with no draft spec at
+// all (refindex's degraded no-draft-spec entry: disclosed, with no status
+// because there was no content to read).
+func countNoDraft(cards []cardFacts) int {
+	n := 0
+	for _, c := range cards {
+		if isNoDraft(c.entry) {
+			n++
+		}
+	}
+	return n
+}
+
+// isNoDraft reports whether e is refindex's degraded design-branch entry —
+// a branch that resolves but carries no spec.md: disclosed, with no
+// status, never a default-branch entry (whose disclosure, when it has
+// one, rides beside a projected status).
+func isNoDraft(e refindex.Entry) bool {
+	return e.Disclosed != nil && e.SpecStatus == "" && e.Source != refindex.SourceDefault
+}
+
+// deskNote is one note under the desk column's move line, saying why a
+// kind of entry waits there: its test-id suffix and its text.
+type deskNote struct {
+	id, text string
+}
+
+// deskQualifiers is the desk column's extra copy for the entries its
+// fixed copy does not describe (SI-366 (22)(a): the column's copy must be
+// true for every entry it holds): the unproven default-branch entries
+// (BL-184) and the branches with no draft spec at all (F7BR-4; SI-366
+// (23)(c)) — the where line's qualifiers, in that order, and a note for
+// each kind, each through the display vocabulary. Nothing for any other
+// column, or when the desk holds neither.
+func deskQualifiers(g refindex.StatusGroup, cards []cardFacts, mdl *model.Model) (whereSuffix string, notes []deskNote) {
+	if g != refindex.StatusGroupDraftsInProgress {
+		return "", nil
+	}
+	if s, note := deskUnprovenCopy(g, countUnproven(cards), mdl); note != "" {
+		whereSuffix += s
+		notes = append(notes, deskNote{id: "unproven", text: note})
+	}
+	if s, note := deskNoDraftCopy(g, countNoDraft(cards), mdl); note != "" {
+		whereSuffix += s
+		notes = append(notes, deskNote{id: "nodraft", text: note})
+	}
+	return whereSuffix, notes
+}
+
+// deskNoDraftCopy is the desk column's extra copy when it holds n
+// branches with no draft spec (F7BR-4): "any branch · draft" is not true
+// of a branch that has nothing to write into yet, so the where line says
+// so and a note names them — the draft word through the display
+// vocabulary. Nothing for any other column, or for n == 0.
+func deskNoDraftCopy(g refindex.StatusGroup, n int, mdl *model.Model) (whereSuffix, note string) {
+	if g != refindex.StatusGroupDraftsInProgress || n == 0 {
+		return "", ""
+	}
+	draft := mdl.DisplayState("", "draft")
+	whereSuffix = " or no " + draft + " yet"
+	if n == 1 {
+		note = "One branch has no " + draft + " spec yet: the index lists it so the branch is not lost, and its card says so."
+	} else {
+		note = strconv.Itoa(n) + " branches have no " + draft + " spec yet: the index lists them so no branch is lost, and each card says so."
+	}
+	return whereSuffix, note
 }
 
 // deskUnprovenCopy is the desk column's extra copy when it holds n entries

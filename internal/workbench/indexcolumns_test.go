@@ -547,3 +547,80 @@ func TestWriteDirectoryEntry_CallToAction(t *testing.T) {
 		})
 	}
 }
+
+// TestWriteDirectoryColumn_DeskNamesNoDraftEntries (F7BR-4; SI-366
+// (23)(c), (22)(a)): the desk's copy must be true for a branch with no
+// draft spec too, so when the column holds one its where line says so
+// beside the draft word and a note names such branches — each through
+// the display vocabulary, after the unproven qualifier when both apply —
+// and without one the copy is unchanged. No other column ever carries
+// the note.
+func TestWriteDirectoryColumn_DeskNamesNoDraftEntries(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "murky-scope", "feature", "draft", "")
+	noDraft := func(name string) refindex.Entry {
+		d := disclosure.New("refindex:no-draft-spec", "spec/"+name, `design branch "design/`+name+`" resolves but has no spec.md yet`)
+		return refindex.Entry{Ref: "spec/" + name, Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, Zone: refindex.ZoneActive, Disclosed: &d, Date: daysBeforeNow(2)}
+	}
+	u := disclosure.New("refindex:unproven-spec-state", "spec/murky-scope", "specstate: no default branch could be resolved for the store")
+	unproven := refindex.Entry{Ref: "spec/murky-scope", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "unproven", Disclosed: &u, Zone: refindex.ZoneActive, Date: daysBeforeNow(2)}
+	draft := refindex.Entry{Ref: "spec/local-draft", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Title: "Local draft", Date: daysBeforeNow(3)}
+	renamed := &model.Model{Vocabulary: model.Vocabulary{States: map[string]string{"draft": "sketch", "unproven": "unread"}}}
+
+	tests := []struct {
+		name      string
+		entries   []refindex.Entry
+		mdl       *model.Model
+		wantWhere string
+		wantNotes []string
+	}{
+		{"no such entry: the copy is unchanged", []refindex.Entry{draft}, nil, "any branch · draft", nil},
+		{"one branch with no draft beside a draft", []refindex.Entry{draft, noDraft("uncharted-idea")}, nil, "any branch · draft or no draft yet",
+			[]string{`<p class="dir-group-note" data-testid="dir-group-nodraft">One branch has no draft spec yet: the index lists it so the branch is not lost, and its card says so.</p>`}},
+		{"two such branches", []refindex.Entry{noDraft("uncharted-idea"), noDraft("blank-slate")}, nil, "any branch · draft or no draft yet",
+			[]string{`<p class="dir-group-note" data-testid="dir-group-nodraft">2 branches have no draft spec yet: the index lists them so no branch is lost, and each card says so.</p>`}},
+		{"an unproven entry and a branch with no draft: both qualifiers, unproven first", []refindex.Entry{noDraft("uncharted-idea"), unproven, draft}, nil, "any branch · draft or unproven or no draft yet",
+			[]string{
+				`<p class="dir-group-note" data-testid="dir-group-unproven">One entry has an unproven status: the store could not prove its state, so it waits here, and its card says why.</p><p class="dir-group-note" data-testid="dir-group-nodraft">One branch has no draft spec yet: the index lists it so the branch is not lost, and its card says so.</p>`,
+			}},
+		{"a renaming store speaks its own words", []refindex.Entry{draft, noDraft("uncharted-idea")}, renamed, "any branch · sketch or no sketch yet",
+			[]string{`<p class="dir-group-note" data-testid="dir-group-nodraft">One branch has no sketch spec yet: the index lists it so the branch is not lost, and its card says so.</p>`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writeDirectorySection(&buf, homeCards(root, tt.entries, cardContext{now: datesNow}), nil, "", false, tt.mdl, datesNow, viewPipeline)
+			body := buf.String()
+			desk := columnBlock(t, body, refindex.StatusGroupDraftsInProgress)
+			if !strings.Contains(desk, `<span class="dir-group-where">`+tt.wantWhere+`</span>`) {
+				t.Errorf("desk where line: want %q in %s", tt.wantWhere, desk)
+			}
+			if tt.wantNotes == nil && strings.Contains(desk, "dir-group-nodraft") {
+				t.Errorf("desk must carry no no-draft note without such an entry; got: %s", desk)
+			}
+			for _, note := range tt.wantNotes {
+				if !strings.Contains(desk, note) {
+					t.Errorf("desk missing its note %s; got: %s", note, desk)
+				}
+			}
+			for _, g := range statusGroupOrder[1:] {
+				if strings.Contains(columnBlock(t, body, g), "dir-group-note") {
+					t.Errorf("column %s must never carry the desk's notes", g)
+				}
+			}
+			if n := countNoDraft(homeCards(root, tt.entries, cardContext{now: datesNow})); n != strings.Count(desk, "refindex:no-draft-spec") {
+				t.Errorf("countNoDraft = %d, but the desk draws %d no-draft disclosures", n, strings.Count(desk, "refindex:no-draft-spec"))
+			}
+		})
+	}
+	// isNoDraft never counts a default-branch entry's disclosure, nor an
+	// entry with a status, as a branch with no draft.
+	for _, e := range []refindex.Entry{unproven, draft, {Ref: "spec/x", Source: refindex.SourceDefault, Disclosed: &u}} {
+		if isNoDraft(e) {
+			t.Errorf("isNoDraft(%s) = true, want false", e.Ref)
+		}
+	}
+	if !isNoDraft(noDraft("uncharted-idea")) {
+		t.Error("isNoDraft(a degraded design-branch entry) = false, want true")
+	}
+}
