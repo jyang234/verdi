@@ -201,9 +201,21 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 				"ClassLabel", "StatusLabel", "Problem", "Outcome",
 				"ProblemBodyHTML", "OutcomeBodyHTML",
 				"Cards", "RefCards", "Edges", "Stickies", "Tray",
-				"StubViews", "ACCoverage", "OQClaims", "CreateFields",
+				"StubViews", "ACCoverage", "OQClaims", "CreateFields", "CreateCoverage",
 				"Notices", "CaseFileBadges", "CaseFileDisclosures", "words",
 			},
+		},
+		{
+			// The New story dialog's coverage (spec/new-story-dialog-v2):
+			// two counts the clone value-copies, and the rows it copies.
+			name: "create coverage",
+			typ:  fieldType(t, reflect.TypeOf(proj), "CreateCoverage"),
+			want: []string{"Criteria", "Uncovered", "Unproven"},
+		},
+		{
+			name: "create coverage criterion element",
+			typ:  fieldType(t, fieldType(t, reflect.TypeOf(proj), "CreateCoverage"), "Criteria").Elem(),
+			want: []string{"ID", "Stubs", "Stories", "Disclosed", "Uncovered"},
 		},
 		{
 			name: "card element",
