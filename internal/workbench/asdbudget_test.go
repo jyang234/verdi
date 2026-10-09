@@ -107,6 +107,8 @@ func TestAssetBudgetError(t *testing.T) {
 		{"boardspec.js", 1, true},
 		{"wallselect.js", 64 * 1024, true},
 		{"wallselect.js", 64*1024 + 1, false},
+		{"newstorydialog.js", 64 * 1024, true}, // the New story dialog's script (SI-369 (9))
+		{"newstorydialog.js", 64*1024 + 1, false},
 		{"specimport.js", 96 * 1024, true},
 		{"specimport.js", 96*1024 + 1, false},
 		{"wallselect.js", 0, false},

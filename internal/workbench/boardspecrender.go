@@ -208,6 +208,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 <script src="/assets/walltoolbar.js"></script>
 <script src="/assets/wallkeys.js"></script>
 <script src="/assets/wallminimap.js"></script>
+<script src="/assets/newstorydialog.js"></script>
 <script src="/assets/wallnewstory.js"></script>
 </body>
 </html>
