@@ -78,8 +78,7 @@ func createCoverageOf(featureRef string, fm *artifact.SpecFrontmatter, corpus co
 		ids[i] = ac.ID
 	}
 	var links []featurecoverage.StoryLink
-	if corpus.err != nil {
-		reason := "the corpus index could not be built: " + corpus.err.Error()
+	if reason := corpus.unreadReason(); reason != "" {
 		for _, id := range ids {
 			links = append(links, featurecoverage.StoryLink{CriterionID: id, Unreadable: reason})
 		}

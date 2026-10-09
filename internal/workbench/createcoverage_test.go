@@ -365,3 +365,22 @@ func TestLoadBoard_CreateCoverageOnlyWithTheForm(t *testing.T) {
 		})
 	}
 }
+
+// TestCorpusRead_UnreadReason: the one disclosure the index and the dialog
+// give for a corpus they could not read — empty for a built index, the
+// build's own error otherwise, and a missing index named as such.
+func TestCorpusRead_UnreadReason(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		corpus corpusRead
+		want   string
+	}{
+		{"a built index reads", corpusRead{links: fakeBacklinks{}}, ""},
+		{"a build error is disclosed", newCorpusRead(nil, errors.New("duplicate ref")), "the corpus index could not be built: duplicate ref"},
+		{"a missing index is disclosed", newCorpusRead(nil, nil), "the corpus index could not be built: the corpus index was not built"},
+	} {
+		if got := tc.corpus.unreadReason(); got != tc.want {
+			t.Errorf("%s: unreadReason = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

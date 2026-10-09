@@ -307,6 +307,16 @@ func newCorpusRead(ix *index.Index, err error) corpusRead {
 	return corpusRead{links: ix}
 }
 
+// unreadReason is the coverage disclosure for a corpus index that could
+// not be built, or "" when it was: the one wording the index's coverageOf
+// and the New story dialog's createCoverageOf both disclose.
+func (c corpusRead) unreadReason() string {
+	if c.err == nil {
+		return ""
+	}
+	return "the corpus index could not be built: " + c.err.Error()
+}
+
 // coverageRead is an accepted feature's criterion coverage as the call
 // to action reads it.
 type coverageRead struct {
@@ -340,8 +350,8 @@ func coverageOf(e refindex.Entry, tree specTreeMeta, corpus corpusRead) coverage
 	if !tree.boardServable {
 		return coverageRead{applies: true, unproven: "no active-zone working-tree file exists to serve its wall"}
 	}
-	if corpus.err != nil {
-		return coverageRead{applies: true, unproven: "the corpus index could not be built: " + corpus.err.Error()}
+	if reason := corpus.unreadReason(); reason != "" {
+		return coverageRead{applies: true, unproven: reason}
 	}
 	links := storyLinksOf(corpus.links, e.Ref, tree.criteria)
 	return coverageRead{
