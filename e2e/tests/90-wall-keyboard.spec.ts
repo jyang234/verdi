@@ -815,6 +815,38 @@ test.describe("wall-canvas", () => {
     expect(writes, "no layer an Escape closed wrote anything").toEqual([]);
   });
 
+  test("a Tab past the Commit count shuts its popover with the press, so the next Escape clears the selection (SI-368 (17))", async ({ page }) => {
+    // The popover opens on the count's focus and shuts when the focus
+    // leaves it (wallstrip.js). Shut on a timer instead, it stood open
+    // after the focus had moved on: the browser ran the timer behind the
+    // keys that followed (0 to 22 presses later, measured over this
+    // suite's back-to-back keys), and an Escape among them closed that
+    // popover, a layer the user had left, instead of clearing the
+    // selection (the next test's intermittent "card:stub:notice-
+    // retraction", 3 runs of its flow in 100). Each pass reads the
+    // popover once, right after the Tab, never polled.
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const commit = page.getByTestId("wall-commit-popover");
+    for (let pass = 0; pass < 5; pass++) {
+      await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+      await tabUntil(page, "Shift+Tab reaches the Commit count", focusIs(page, "wall-commit-count"), true);
+      await expect(commit).toHaveJSProperty("open", true);
+      await page.keyboard.press("Tab");
+      const after = await commit.evaluate((d) => {
+        const a = document.activeElement;
+        return { open: (d as HTMLDetailsElement).open, left: !!a && a !== document.body && !d.contains(a), active: a ? a.getAttribute("data-testid") || a.tagName : null };
+      });
+      expect(after.left, `pass ${pass}: the Tab moved the focus out of the popover (to ${after.active})`).toBe(true);
+      expect(after.open, `pass ${pass}: the popover shut with the press that moved the focus to ${after.active}`).toBe(false);
+      await page.keyboard.press("Escape");
+      expect(await selectedKey(page), `pass ${pass}: the next Escape clears the selection`).toBeNull();
+    }
+  });
+
   test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {
     await openWritableWall(page);
     const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));

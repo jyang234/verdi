@@ -315,12 +315,19 @@
   });
 
   // The focus leaving the popover closes it (it opened on focus, so a Tab
-  // passing through the count never leaves it standing open).
+  // passing through the count never leaves it standing open). Focus moving
+  // to another element closes it at once, with the key that moved it: a
+  // timer would run behind the keys that follow, and an Escape among them
+  // would close this popover, a layer the user has left, instead of the
+  // next (SI-368 (17)). Focus going nowhere is settled once it lands.
   document.addEventListener("focusout", function (e) {
     var d = commitDetails();
     if (!d || !d.open) return;
     var to = e.relatedTarget;
-    if (to instanceof Element && d.contains(to)) return;
+    if (to instanceof Element) {
+      if (!d.contains(to)) d.open = false;
+      return;
+    }
     setTimeout(function () {
       if (d.isConnected && d.open && !d.contains(document.activeElement)) d.open = false;
     }, 0);
