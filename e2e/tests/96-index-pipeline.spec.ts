@@ -559,6 +559,23 @@ test("index › The New story call to action", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 
+  // The opener honours the criterion it is named, not a position: the
+  // wall's later uncovered criterion (loan-workflow-v2 declares ac-1 then
+  // ac-3 and nothing claims either, the two INDEX_CTA_UNCLAIMED counts —
+  // fixtures.ts) opens the dialog with exactly that box checked, never
+  // the dialog's first box (F7CR-1).
+  const later = "ac-3";
+  await page.goto(`/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}?new-story=${later}`);
+  await expect(dialog).toBeVisible();
+  const boxes = await dialog.locator("[data-create-ac]").evaluateAll((els) => els.map((el) => el.getAttribute("data-create-ac")));
+  expect(boxes.indexOf(later), `${later} is declared after the dialog's first box, among ${boxes.join(", ")}`).toBeGreaterThan(0);
+  await expect(page.getByTestId(`create-ac-${later}`)).toBeChecked();
+  await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(1);
+  await expect(dialog.locator(`[data-create-ac="${boxes[0]}"]`)).not.toBeChecked();
+  await expect(page.getByTestId("create-error")).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
   // The same wall opened without the query shows no dialog: the opener
   // acts on the contract alone.
   await page.goto(`/board/spec/${SHOWCASE.INDEX_CTA_FEATURE}`);

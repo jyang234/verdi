@@ -133,9 +133,22 @@ async function focusPrimary(c: Locator): Promise<void> {
   await c.focus();
 }
 
-// focusedCard is the test id of the card holding focus, or null.
+// focusedCard is the test id of the card whose primary link holds focus —
+// its a.dir-board, else its a.dir-title, else the card itself when it has
+// no link at all (SI-366 (14)) — or null when focus is in no card. Focus
+// on any other element of a card reads as a witness naming that element,
+// never as the card's id, so a walk that lands beside the primary link
+// fails (F7CR-2).
 async function focusedCard(page: Page): Promise<string | null> {
-  return page.evaluate(() => document.activeElement?.closest(".dir-entry")?.getAttribute("data-testid") ?? null);
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    const c = el?.closest(".dir-entry");
+    if (!el || !c) return null;
+    const id = c.getAttribute("data-testid");
+    const primary = c.querySelector("a.dir-board") ?? c.querySelector("a.dir-title") ?? (c.querySelector("a") ? null : c);
+    if (el === primary) return id;
+    return `${id}: focus on <${el.tagName.toLowerCase()} class="${el.getAttribute("class") ?? ""}">, not its primary link`;
+  });
 }
 
 // walk presses key from the current focus until focus stops moving, and
@@ -258,12 +271,13 @@ test("index › The list view, keyboard movement, and an honest failure", async 
 
   // (c) The keyboard, in both views (SI-366 (14)): from the first card
   // Down visits every card a reader can see, in document order, each
-  // once, and stops at the end; Up returns; Right and Left step the same
-  // way; Tab leaves the cards (no trap). The no-draft branch's card has
-  // no link, so it is focusable itself, the arrows reach it, focus stays
-  // visible, and Enter does nothing there; Enter on a card with a link
-  // follows the link natively. A filter's hidden cards and a closed
-  // fold's cards are skipped, and join the walk once shown.
+  // once, landing on its primary link, and stops at the end; Up returns;
+  // Right and Left step the same way; Tab leaves the cards (no trap).
+  // The no-draft branch's card has no link, so it is focusable itself,
+  // the arrows reach it, focus stays visible, and Enter does nothing
+  // there; Enter on a card with a link, reached by an arrow, follows the
+  // link natively. A filter's hidden cards and a closed fold's cards are
+  // skipped, and join the walk once shown.
   for (const view of ["pipeline", "list"] as const) {
     await page.goto(view === "list" ? "/?view=list" : "/");
     await expect(dir).toHaveAttribute("data-view", view);
@@ -323,8 +337,20 @@ test("index › The list view, keyboard movement, and an honest failure", async 
     await focusPrimary(page.getByTestId(expected[expected.length - 1]));
     expect(await walk(page, "ArrowDown"), `${view}: Down reaches the opened fold's cards`).toEqual(withArchived.slice(withArchived.indexOf(expected[expected.length - 1])));
 
-    // Enter on a linked card follows its link natively.
-    await focusPrimary(card(page, SHOWCASE.DIR_LOCAL_DRAFT));
+    // Enter on a linked card reached by an arrow follows its link
+    // natively: the arrow lands on the card's primary link, so Enter has
+    // that link to follow (F7CR-2).
+    const draft = dirEntryTestId(SHOWCASE.DIR_LOCAL_DRAFT);
+    const from = withArchived.indexOf(draft);
+    expect(from, `${view}: the local draft's card is reachable`).toBeGreaterThanOrEqual(0);
+    if (from > 0) {
+      await focusPrimary(page.getByTestId(withArchived[from - 1]));
+      await page.keyboard.press("ArrowDown");
+    } else {
+      await focusPrimary(page.getByTestId(withArchived[from + 1]));
+      await page.keyboard.press("ArrowUp");
+    }
+    expect(await focusedCard(page), `${view}: an arrow reaches the local draft's primary link`).toBe(draft);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(draftBoardHref(SHOWCASE.DIR_LOCAL_DRAFT).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
   }
