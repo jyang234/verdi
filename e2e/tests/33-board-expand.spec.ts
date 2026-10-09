@@ -274,8 +274,10 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   // AMENDED (spec/wall-canvas-v2 ac-2; SI-350 (4)): a single click on a
   // card SELECTS it and no longer opens the expand dialog; Enter or a
   // double click edits it, and the editor reads the whole text back. The
-  // clamp stays visible (fade and ⋯) — truncation is never silent — and
-  // the placards above keep their click-to-expand unchanged.
+  // clamp stays visible (fade and ⋯) — truncation is never silent. The
+  // strip's halves above edit in place on the authoring wall
+  // (spec/wall-strip-and-drawer-v2 ac-1; SI-368 (13)); their full text
+  // is behind the "full case file" control, as the tests above pin.
   test("a card double-click still edits; a single click selects", async ({
     page,
   }) => {
