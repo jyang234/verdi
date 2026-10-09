@@ -130,7 +130,7 @@ func TestWriteDirectorySection_DateCarriers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			writeDirectorySection(&buf, homeCards(t.TempDir(), []refindex.Entry{tt.e}, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+			writeDirectorySection(&buf, homeCards(t.TempDir(), []refindex.Entry{tt.e}, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 			attrs := dirEntryAttrs(t, buf.String(), strings.TrimPrefix(tt.e.Ref, "spec/"))
 			for attr, want := range map[string]string{
 				"data-last-change":   tt.wantLastChange,
@@ -174,8 +174,8 @@ func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	root := t.TempDir()
 
 	var withDates, withoutDates bytes.Buffer
-	writeDirectorySection(&withDates, homeCards(root, dated, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
-	writeDirectorySection(&withoutDates, homeCards(root, undated, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	writeDirectorySection(&withDates, homeCards(root, dated, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
+	writeDirectorySection(&withoutDates, homeCards(root, undated, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 
 	if !strings.Contains(withDates.String(), `data-last-change="`) || !strings.Contains(withDates.String(), `data-quiet="`) {
 		t.Fatalf("the dated render carries no date carriers at all: %s", withDates.String())

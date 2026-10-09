@@ -190,9 +190,15 @@ const designPrefix = "design/"
 // card carries; mrConfigured gates the second-source provenance line. now
 // is the render's one clock reading (HomeDeps.Clock, read once per render
 // by the caller): every entry's quiet carrier is decided against it
-// (spec/index-data ac-2, dc-3; SI-297).
-func writeDirectorySection(buf *bytes.Buffer, cards []cardFacts, indexErr error, mrNotice string, mrConfigured bool, mdl *model.Model, now time.Time) {
-	buf.WriteString(`<section class="home-directory">`)
+// (spec/index-data ac-2, dc-3; SI-297). view is the view drawn (ac-6;
+// SI-366 (7)): the section carries it as data-view and the stylesheet
+// lays the same sections out as columns or as rows — one DOM, so every
+// card renders exactly once in either, and an index failure reads the
+// same in both.
+func writeDirectorySection(buf *bytes.Buffer, cards []cardFacts, indexErr error, mrNotice string, mrConfigured bool, mdl *model.Model, now time.Time, view indexView) {
+	buf.WriteString(`<section class="home-directory" data-view="`)
+	buf.WriteString(string(view))
+	buf.WriteString(`">`)
 	// vocab:identity — the directory's own StatusGroup taxonomy word (L-M8 genus), not the lifecycle state
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
 	if mrConfigured {

@@ -53,7 +53,7 @@ func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) ht
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		out, err := renderHome(r.Context(), root, home, extras)
+		out, err := renderHome(r.Context(), root, home, extras, indexViewOf(r.URL.Query()))
 		if err != nil {
 			renderError(r.Context(), w, root, http.StatusInternalServerError, err)
 			return
@@ -77,8 +77,10 @@ func indexHandler(root string, home HomeDeps, extras []disclosure.Disclosure) ht
 // refs as that seam's own reads (SI-301), as the in-review consultation's
 // forge reads are its own. The in-review consultation (dc-4) is
 // per-render, bounded, and non-blocking: its failure is disclosed while
-// the refs-computed directory still renders fully.
-func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclosure.Disclosure) ([]byte, error) {
+// the refs-computed directory still renders fully. view is the view the
+// request chose (indexview.go): the same DOM either way, the directory
+// carrying it as its data-view and the bar's toggle naming it current.
+func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclosure.Disclosure, view indexView) ([]byte, error) {
 	var body bytes.Buffer
 
 	body.WriteString(`<p class="store-root">Store root: <code>`)
@@ -116,7 +118,7 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	// The directory's four columns (spec/index-v2 ac-1; parent dc-12,
 	// which merged the former leading glance into them): one rendering
 	// pass over the cards above, every entry exactly once.
-	writeDirectorySection(&body, cards, indexErr, mrNotice, home.OpenMRs != nil, home.Model, now)
+	writeDirectorySection(&body, cards, indexErr, mrNotice, home.OpenMRs != nil, home.Model, now, view)
 
 	// The other-records strip below the columns (spec/index-v2 ac-5): the
 	// non-spec corpus kinds — a surviving affordance of the old home page,
@@ -135,14 +137,15 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 		Surface:     true, // the one page whose wordmark wears WORKBENCH (handoff "Global chrome")
 		BodyHTML:    template.HTML(body.String()),
 		ExtraHTML:   indexScriptTag,
-		BarControls: indexBarControls(ctx, root, extras, classWords{m: home.Model}),
+		BarControls: indexBarControls(ctx, root, extras, classWords{m: home.Model}, view),
 	})
 }
 
 // indexScriptTag loads the index's own script, /assets/index.js (the
-// filter row; spec/workbench-redesign co-1: new behaviour ships in a new
-// asset within 64 KiB), deferred, so the page — every card shown, every
-// fold a native <details> — is complete before the script enhances it.
+// filter row, the view toggle and the keyboard; spec/workbench-redesign
+// co-1: new behaviour ships in a new asset within 64 KiB), deferred, so
+// the page — every card shown, every fold a native <details>, the view
+// the query chose — is complete before the script enhances it.
 const indexScriptTag = template.HTML(`<script src="/assets/index.js" defer></script>`)
 
 // writeStripSummary opens one strip section as a collapsed <details>

@@ -18,13 +18,11 @@ import (
 )
 
 // indexBarControls renders the index's controls slot. words resolves the
-// New feature link's class word through the model's display vocabulary.
-func indexBarControls(ctx context.Context, root string, extras []disclosure.Disclosure, words classWords) template.HTML {
+// New feature link's class word through the model's display vocabulary;
+// view is the view this render draws, which the toggle names current.
+func indexBarControls(ctx context.Context, root string, extras []disclosure.Disclosure, words classWords, view indexView) template.HTML {
 	var b strings.Builder
-	// The view toggle: Pipeline is the view this page draws; List is the
-	// placeholder the list view wires (ac-6, lane F7c) — disabled and
-	// saying so until then, never a link that leads nowhere.
-	b.WriteString(`<div class="topbar-view" data-testid="index-view-toggle" role="group" aria-label="View"><span class="topbar-view-current" aria-current="page">Pipeline</span><button type="button" class="topbar-view-list" disabled title="the list view is not built yet">List</button></div>`)
+	writeViewToggle(&b, view)
 	writeDisclosuresLink(&b, ctx, root, extras)
 	// The mechanical spec importer (spec-import-contract: "The page is
 	// discoverable from home before new statements are requested"): the
@@ -35,6 +33,26 @@ func indexBarControls(ctx context.Context, root string, extras []disclosure.Disc
 	// vocab:identity — CLI verb name / usage grammar (design.go's designVerbUsage)
 	b.WriteString(` <span class="topbar-cli-hint">or <code>verdi design start --kind feature --name &lt;name&gt;</code></span></span>`)
 	return template.HTML(b.String()) //nolint:gosec // every fact is escaped above; the rest is this file's own markup
+}
+
+// writeViewToggle writes the bar's segmented view toggle (ac-6; SI-366
+// (6), (7); handoff "Screen 2 — Index", Bar): two links, Pipeline to the
+// bare route and List to `?view=list`, each a real address the server
+// honours without JavaScript, the one drawn marked current. The index's
+// script switches views in place on the same links.
+func writeViewToggle(b *strings.Builder, view indexView) {
+	b.WriteString(`<div class="topbar-view" data-testid="index-view-toggle" role="group" aria-label="View">`)
+	for _, v := range []struct {
+		view  indexView
+		label string
+	}{{viewPipeline, "Pipeline"}, {viewList, "List"}} {
+		b.WriteString(`<a class="topbar-view-` + string(v.view) + `" data-view="` + string(v.view) + `" href="` + v.view.href() + `"`)
+		if v.view == view {
+			b.WriteString(` aria-current="page"`)
+		}
+		b.WriteString(`>` + v.label + `</a>`)
+	}
+	b.WriteString(`</div>`)
 }
 
 // writeDisclosuresLink writes the bar's Disclosures link (spec/disclosures-

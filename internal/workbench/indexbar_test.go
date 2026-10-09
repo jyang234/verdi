@@ -12,7 +12,7 @@ import (
 )
 
 // TestIndexBarControls is the bar's witness (SI-366 (5), (17)): the view
-// toggle placeholder, the Disclosures link carrying the count both as its
+// toggle naming the pipeline current, the Disclosures link carrying the count both as its
 // carrier and visibly, the import link under its pinned test id and text,
 // and parent dc-9's New feature link to the import page with its CLI
 // hint — the class word through the model's vocabulary.
@@ -32,7 +32,7 @@ func TestIndexBarControls(t *testing.T) {
 			name:  "a counted enumeration, no renames",
 			count: 4,
 			want: []string{
-				`<div class="topbar-view" data-testid="index-view-toggle" role="group" aria-label="View"><span class="topbar-view-current" aria-current="page">Pipeline</span><button type="button" class="topbar-view-list" disabled title="the list view is not built yet">List</button></div>`,
+				`<div class="topbar-view" data-testid="index-view-toggle" role="group" aria-label="View"><a class="topbar-view-pipeline" data-view="pipeline" href="/" aria-current="page">Pipeline</a><a class="topbar-view-list" data-view="list" href="/?view=list">List</a></div>`,
 				`<a class="home-disclosures" data-disclosures-count="4" href="/disclosures" data-testid="home-disclosures" title="every claim this checkout is currently not proving, in one view">Disclosures <span class="count">4</span></a>`,
 				`<a class="topbar-import" href="/design/import" data-testid="home-import-link" title="`,
 				`">Import existing spec</a>`,
@@ -62,7 +62,7 @@ func TestIndexBarControls(t *testing.T) {
 				calls++
 				return tt.count, tt.err
 			}
-			got := string(indexBarControls(context.Background(), t.TempDir(), nil, classWords{m: tt.mdl}))
+			got := string(indexBarControls(context.Background(), t.TempDir(), nil, classWords{m: tt.mdl}, viewPipeline))
 			if calls != 1 {
 				t.Fatalf("countDisclosures called %d times per bar render, want 1", calls)
 			}

@@ -36,7 +36,7 @@ func TestWriteDirectorySection_FourColumns(t *testing.T) {
 		{Ref: "spec/settled-work", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupTerminal, SpecStatus: "closed", Zone: refindex.ZoneArchive, Date: daysBeforeNow(400)},
 	}
 	var buf bytes.Buffer
-	writeDirectorySection(&buf, homeCards(t.TempDir(), entries, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	writeDirectorySection(&buf, homeCards(t.TempDir(), entries, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 	body := buf.String()
 
 	if strings.Contains(body, "home-glance") || strings.Contains(body, "glance-group") {
@@ -99,7 +99,7 @@ func TestWriteDirectorySection_FourColumns(t *testing.T) {
 // state (ac-1's explicit empty state), and no card.
 func TestWriteDirectorySection_EveryColumnEmpty(t *testing.T) {
 	var buf bytes.Buffer
-	writeDirectorySection(&buf, nil, nil, "", false, nil, datesNow)
+	writeDirectorySection(&buf, nil, nil, "", false, nil, datesNow, viewPipeline)
 	body := buf.String()
 	for _, g := range statusGroupOrder {
 		block := columnBlock(t, body, g)
@@ -270,7 +270,7 @@ func TestWriteDirectoryEntry_CardFacts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			writeDirectorySection(&buf, homeCards(root, []refindex.Entry{tt.e}, cc), nil, "", true, nil, datesNow)
+			writeDirectorySection(&buf, homeCards(root, []refindex.Entry{tt.e}, cc), nil, "", true, nil, datesNow, viewPipeline)
 			block := entryBlock(t, buf.String(), strings.TrimPrefix(tt.e.Ref, "spec/"))
 			for _, w := range tt.want {
 				if !strings.Contains(block, w) {
@@ -294,7 +294,7 @@ func TestWriteDirectoryEntry_StatusBadgeThroughDisplayState(t *testing.T) {
 	mdl := &model.Model{Vocabulary: model.Vocabulary{States: map[string]string{"accepted-pending-build": "Ready to build"}}}
 	e := refindex.Entry{Ref: "spec/next-build", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupAcceptedPendingBuild, SpecStatus: "accepted-pending-build", Zone: refindex.ZoneActive, Date: daysBeforeNow(1)}
 	var buf bytes.Buffer
-	writeDirectorySection(&buf, homeCards(root, []refindex.Entry{e}, cardContext{now: datesNow, words: classWords{m: mdl}, corpus: corpusRead{links: fakeBacklinks{}}}), nil, "", false, mdl, datesNow)
+	writeDirectorySection(&buf, homeCards(root, []refindex.Entry{e}, cardContext{now: datesNow, words: classWords{m: mdl}, corpus: corpusRead{links: fakeBacklinks{}}}), nil, "", false, mdl, datesNow, viewPipeline)
 	if !strings.Contains(buf.String(), `<span class="badge badge-accepted-pending-build">Ready to build</span>`) {
 		t.Fatalf("badge does not speak the model's word; got: %s", buf.String())
 	}
@@ -308,7 +308,7 @@ func TestWriteDirectoryEntry_SuccessorUnlinkedWithoutBacklink(t *testing.T) {
 	writeActiveSpec(t, root, "old-way", "component", "superseded", "")
 	e := refindex.Entry{Ref: "spec/old-way", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupTerminal, SpecStatus: "superseded", Zone: refindex.ZoneActive, Date: daysBeforeNow(300)}
 	var buf bytes.Buffer
-	writeDirectorySection(&buf, homeCards(root, []refindex.Entry{e}, cardContext{now: datesNow, corpus: corpusRead{links: fakeBacklinks{}}}), nil, "", false, nil, datesNow)
+	writeDirectorySection(&buf, homeCards(root, []refindex.Entry{e}, cardContext{now: datesNow, corpus: corpusRead{links: fakeBacklinks{}}}), nil, "", false, nil, datesNow, viewPipeline)
 	block := entryBlock(t, buf.String(), "old-way")
 	if !strings.Contains(block, `<div class="dir-move">&rarr; see successor</div>`) {
 		t.Fatalf("unlinked successor move missing; got: %s", block)
@@ -329,7 +329,7 @@ func TestWriteDirectoryColumn_ArchivedFold(t *testing.T) {
 		{Ref: "spec/shelved-early", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupAcceptedPendingBuild, SpecStatus: "accepted-pending-build", Zone: refindex.ZoneArchive, Date: daysBeforeNow(5)},
 	}
 	var buf bytes.Buffer
-	writeDirectorySection(&buf, homeCards(t.TempDir(), entries, cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	writeDirectorySection(&buf, homeCards(t.TempDir(), entries, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 	body := buf.String()
 
 	shelf := columnBlock(t, body, refindex.StatusGroupTerminal)
@@ -365,7 +365,7 @@ func TestWriteDirectoryColumn_ArchivedFold(t *testing.T) {
 	// A shelf holding only archived entries: the fold, no empty state, no
 	// body list.
 	buf.Reset()
-	writeDirectorySection(&buf, homeCards(t.TempDir(), entries[1:2], cardContext{now: datesNow}), nil, "", false, nil, datesNow)
+	writeDirectorySection(&buf, homeCards(t.TempDir(), entries[1:2], cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 	only := columnBlock(t, buf.String(), refindex.StatusGroupTerminal)
 	if strings.Contains(only, "dir-empty") || strings.Count(only, `<ul class="dir-cards">`) != 1 || !strings.Contains(only, `<span class="count">1</span></h2>`) {
 		t.Errorf("a shelf holding only archived entries must show the fold alone with a count of 1; got: %s", only)
@@ -407,7 +407,7 @@ func TestWriteDirectoryColumn_DeskNamesUnprovenEntries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			writeDirectorySection(&buf, homeCards(root, tt.entries, cardContext{now: datesNow}), nil, "", false, tt.mdl, datesNow)
+			writeDirectorySection(&buf, homeCards(root, tt.entries, cardContext{now: datesNow}), nil, "", false, tt.mdl, datesNow, viewPipeline)
 			body := buf.String()
 			desk := columnBlock(t, body, refindex.StatusGroupDraftsInProgress)
 			if !strings.Contains(desk, `<span class="dir-group-where">`+tt.wantWhere+`</span>`) {
@@ -532,7 +532,7 @@ func TestWriteDirectoryEntry_CallToAction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cc := cardContext{corpus: tt.corpus, now: datesNow, words: classWords{m: tt.mdl}}
 			var buf bytes.Buffer
-			writeDirectorySection(&buf, homeCards(root, []refindex.Entry{tt.e}, cc), nil, "", false, tt.mdl, datesNow)
+			writeDirectorySection(&buf, homeCards(root, []refindex.Entry{tt.e}, cc), nil, "", false, tt.mdl, datesNow, viewPipeline)
 			block := entryBlock(t, buf.String(), strings.TrimPrefix(tt.e.Ref, "spec/"))
 			for _, w := range tt.want {
 				if !strings.Contains(block, w) {
