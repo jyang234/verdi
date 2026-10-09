@@ -6379,4 +6379,8 @@ body:not(.board-page) > footer.site-foot,
 .home-directory[data-view="list"] .dir-cta { margin-top: 0; }
 .home-directory[data-view="list"] .dir-cards .dir-disclosed { flex-basis: 100%; }
 .home-directory[data-view="list"] .dir-group .dir-archived { margin: 0 0.5rem 0.375rem; }
+/* The archived fold's matched mark (F7BR-1): how many folded cards the
+   pressed filter selects, written by the script beside the fold's count
+   while a filter other than everything is active. */
+.dir-archived > summary .dir-archived-matched { margin-left: 0.375rem; color: var(--st-pending); }
 /* verdi:workbench-only:end */

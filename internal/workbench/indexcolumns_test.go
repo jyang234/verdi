@@ -336,7 +336,7 @@ func TestWriteDirectoryColumn_ArchivedFold(t *testing.T) {
 	if !strings.Contains(shelf, `<h2>On the shelf <span class="count">3</span></h2>`) {
 		t.Errorf("the shelf's count must include its folded entries; got: %s", shelf)
 	}
-	fold := strings.Index(shelf, `<details class="dir-archived" data-testid="dir-archived"><summary>archived <span class="count">1</span></summary><ul class="dir-cards">`)
+	fold := strings.Index(shelf, `<details class="dir-archived" data-testid="dir-archived"><summary>archived <span class="count">1</span><span class="dir-archived-matched" data-testid="dir-archived-matched" hidden></span></summary><ul class="dir-cards">`)
 	if fold < 0 {
 		t.Fatalf("the shelf has no collapsed archived fold with its count; got: %s", shelf)
 	}

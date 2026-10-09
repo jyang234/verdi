@@ -116,6 +116,26 @@
     }
   }
 
+  // A filter's matches inside a closed archived fold would otherwise be
+  // hidden twice over, so the fold's summary says how many of its cards
+  // the pressed filter selects (F7BR-1); with everything pressed the
+  // mark is empty and hidden again, the count beside it being the whole.
+  function markFolds(filter) {
+    var folds = dir.querySelectorAll("details.dir-archived");
+    for (var i = 0; i < folds.length; i++) {
+      var mark = folds[i].querySelector("summary .dir-archived-matched");
+      if (!mark) continue;
+      if (filter === "everything") {
+        mark.textContent = "";
+        mark.hidden = true;
+        continue;
+      }
+      var n = folds[i].querySelectorAll(".dir-entry:not([hidden])").length;
+      mark.textContent = "· " + n + " match";
+      mark.hidden = false;
+    }
+  }
+
   function apply(filter) {
     dir.setAttribute("data-filter", filter);
     var cards = dir.querySelectorAll(".dir-entry");
@@ -123,6 +143,7 @@
       if (selects(filter, cards[i])) cards[i].removeAttribute("hidden");
       else cards[i].setAttribute("hidden", "");
     }
+    markFolds(filter);
     for (var j = 0; j < pills.length; j++) {
       var on = pills[j].getAttribute("data-filter") === filter;
       pills[j].setAttribute("aria-pressed", on ? "true" : "false");

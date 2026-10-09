@@ -117,9 +117,13 @@ func writeDirectoryColumn(buf *bytes.Buffer, g refindex.StatusGroup, cards []car
 		writeCardList(buf, shown, mdl, now)
 	}
 	if len(archived) > 0 {
+		// The summary's matched mark (F7BR-1; SI-366 (23)(c)) is empty and
+		// hidden until a filter other than everything is pressed; the
+		// index's script then writes how many folded cards that filter
+		// selects, so a match the closed fold hides is never silent.
 		buf.WriteString(`<details class="dir-archived" data-testid="dir-archived"><summary>archived <span class="count">`)
 		buf.WriteString(strconv.Itoa(len(archived)))
-		buf.WriteString(`</span></summary>`)
+		buf.WriteString(`</span><span class="dir-archived-matched" data-testid="dir-archived-matched" hidden></span></summary>`)
 		writeCardList(buf, archived, mdl, now)
 		buf.WriteString(`</details>`)
 	}
