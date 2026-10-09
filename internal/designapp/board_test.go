@@ -295,6 +295,124 @@ func fieldType(t *testing.T, typ reflect.Type, name string) reflect.Type {
 	return f.Type
 }
 
+// TestCloneBoardProjectionCreateCoverage is the mutate-the-clone proof for
+// the New story dialog's coverage (spec/new-story-dialog-v2): the rows,
+// and each row's Stories and Disclosed, are the clone's own copies, so a
+// write through the clone at any level leaves the original unchanged; and
+// the clone keeps the nil/empty distinction at both levels.
+// TestBoardProjectionCloneCoverage ratchets only the field inventory.
+func TestCloneBoardProjectionCreateCoverage(t *testing.T) {
+	type row struct {
+		id        string
+		stubs     int
+		stories   []string
+		disclosed []string
+		uncovered bool
+	}
+	// build makes a fresh projection from rows, copying each input slice
+	// so two builds of one case share no backing array: the second build
+	// is the expected value, which a write through an aliased clone must
+	// not reach. A nil rows leaves Criteria nil; an empty one, empty.
+	build := func(rows []row, uncovered int, unproven bool) *workbench.BoardProjection {
+		own := func(in []string) []string {
+			if in == nil {
+				return nil
+			}
+			return append(make([]string, 0, len(in)), in...)
+		}
+		p := &workbench.BoardProjection{}
+		if rows != nil {
+			p.CreateCoverage.Criteria = rowsLike(p.CreateCoverage.Criteria, len(rows))
+		}
+		for i, r := range rows {
+			c := &p.CreateCoverage.Criteria[i]
+			c.ID, c.Stubs, c.Uncovered = r.id, r.stubs, r.uncovered
+			c.Stories, c.Disclosed = own(r.stories), own(r.disclosed)
+		}
+		p.CreateCoverage.Uncovered, p.CreateCoverage.Unproven = uncovered, unproven
+		return p
+	}
+
+	for _, tc := range []struct {
+		name      string
+		rows      []row
+		uncovered int
+		unproven  bool
+	}{
+		{
+			name: "rows with stories and disclosures",
+			rows: []row{
+				{id: "ac-1", stubs: 1, stories: []string{"spec/story-a", "spec/story-b"}, disclosed: []string{"corpus unreadable"}},
+				{id: "ac-2", stubs: 2, stories: []string{"spec/story-c"}, disclosed: []string{"reason one", "reason two"}},
+			},
+			unproven: true,
+		},
+		{
+			name:      "nil row slices stay nil",
+			rows:      []row{{id: "ac-1", uncovered: true}},
+			uncovered: 1,
+		},
+		{
+			name: "empty row slices stay empty",
+			rows: []row{{id: "ac-1", stubs: 1, stories: []string{}, disclosed: []string{}}},
+		},
+		{name: "nil criteria stay nil"},
+		{name: "empty criteria stay empty", rows: []row{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := build(tc.rows, tc.uncovered, tc.unproven)
+			want := build(tc.rows, tc.uncovered, tc.unproven)
+
+			clone := cloneBoardProjection(orig)
+			got := &clone.CreateCoverage
+			if !reflect.DeepEqual(*got, want.CreateCoverage) {
+				t.Fatalf("clone's CreateCoverage = %#v, want %#v", *got, want.CreateCoverage)
+			}
+			// DeepEqual already tells nil from empty; these name the level.
+			if (got.Criteria == nil) != (want.CreateCoverage.Criteria == nil) {
+				t.Fatalf("clone's Criteria nil = %v, want %v", got.Criteria == nil, want.CreateCoverage.Criteria == nil)
+			}
+			for i := range got.Criteria {
+				w := want.CreateCoverage.Criteria[i]
+				if (got.Criteria[i].Stories == nil) != (w.Stories == nil) || (got.Criteria[i].Disclosed == nil) != (w.Disclosed == nil) {
+					t.Fatalf("clone's row %d Stories nil = %v, Disclosed nil = %v; want %v, %v", i,
+						got.Criteria[i].Stories == nil, got.Criteria[i].Disclosed == nil, w.Stories == nil, w.Disclosed == nil)
+				}
+			}
+
+			// Write through the clone at every level: each row's fields,
+			// each element of its Stories and Disclosed, the rows slice's
+			// length, and the two counts.
+			for i := range got.Criteria {
+				c := &got.Criteria[i]
+				c.ID, c.Stubs, c.Uncovered = "TAMPERED", 9999, !c.Uncovered
+				for j := range c.Stories {
+					c.Stories[j] = "TAMPERED"
+				}
+				for j := range c.Disclosed {
+					c.Disclosed[j] = "TAMPERED"
+				}
+				c.Stories = append(c.Stories, "TAMPERED")
+				c.Disclosed = append(c.Disclosed, "TAMPERED")
+			}
+			got.Criteria = append(got.Criteria, rowsLike(got.Criteria, 1)...)
+			got.Uncovered, got.Unproven = 9999, !got.Unproven
+
+			if !reflect.DeepEqual(orig.CreateCoverage, want.CreateCoverage) {
+				t.Fatalf("the original's CreateCoverage changed through the clone:\n got  %#v\n want %#v",
+					orig.CreateCoverage, want.CreateCoverage)
+			}
+		})
+	}
+}
+
+// rowsLike is n zero rows of rows' slice type. workbench's criterion view
+// type is unexported: a test here can set its exported fields but cannot
+// name it, so the slice is made by inference from an existing value.
+func rowsLike[S ~[]E, E any](_ S, n int) S {
+	return make(S, n)
+}
+
 // TestGetBoardDoesNotAliasClosedSpecSupersession is the mutate-the-clone
 // proof for the SI-278 collections (controller ruling 1): a reference
 // card's Object and a decision card's Supersessions, down to a line's
