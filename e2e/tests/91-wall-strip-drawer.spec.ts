@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator, type Request } from "@playwright/test";
 import { SHOWCASE, EDGE, CONTROL_URL, boardPath, branchBoardPath, dexSpecPath, stubCardTestId } from "./fixtures";
-import { addSticky, editCard, selectStub, stickyAction, uncommittedIndicator, wallToolbar } from "./helpers";
+import { addSticky, clearWallSelection, editCard, selectStub, stickyAction, uncommittedIndicator, wallToolbar } from "./helpers";
 
 // spec/wall-strip-and-drawer-v2 — the case-file strip (ac-1) and its chips
 // (ac-2), the branch menu, the readiness pill and the ⋯ menu's on-demand
@@ -822,6 +822,16 @@ test.describe("wall-strip-and-drawer", () => {
     await page.locator("#edge-confirm-cancel").click();
     await expect(confirm).toBeHidden();
     await expect(stub).toHaveAttribute("data-selected", "true");
+    // Its label is the one the server writes on the card in the store's
+    // words — a renamed store's is pinned in Go (vocabulary_render_test.go;
+    // SI-368 (30)) — and the toolbar shows it as written, with no class
+    // word of its own: a card that carries other words is named with them.
+    await expect(stub).toHaveAttribute("data-instantiate-label", "Instantiate story");
+    await clearWallSelection(page);
+    await expect(wallToolbar(page).locator("[data-instantiate]")).toHaveCount(0);
+    await stub.evaluate((card) => card.setAttribute("data-instantiate-label", "Instantiate Workstream"));
+    await selectStub(page, slug);
+    await expect(wallToolbar(page).getByTestId(`instantiate-${slug}`)).toHaveText("Instantiate Workstream");
 
     // The policy setup guide is in the drawer's Readiness tab, its id once
     // on the page, and nowhere on the wall.

@@ -173,9 +173,12 @@ func TestWallRail_EveryItemHasAHome(t *testing.T) {
 
 // TestWallRail_InstantiateOnTheStubsToolbar (SI-368 (5); BL-167): on the
 // sealed accepted feature wall every stub card says the toolbar may offer
-// Instantiate, and a spike stub says it is a spike, the word the toolbar's
-// button and its confirmation speak; the card itself carries no
-// Instantiate button. No other wall's stub says so.
+// Instantiate, with the label the toolbar's button shows in the store's
+// words (SI-368 (30); the renamed store's is pinned in
+// vocabulary_render_test.go), and a spike stub says it is a spike, the
+// word the button's confirmation speaks; the card itself carries no
+// Instantiate button, and no Instantiate words but that label's. No other
+// wall's stub says so.
 func TestWallRail_InstantiateOnTheStubsToolbar(t *testing.T) {
 	for _, w := range railWalls(t) {
 		t.Run(w.name, func(t *testing.T) {
@@ -188,11 +191,22 @@ func TestWallRail_InstantiateOnTheStubsToolbar(t *testing.T) {
 				if got := strings.Contains(card, `data-can-instantiate="true"`); got != offered {
 					t.Errorf("stub %s says the toolbar may offer Instantiate = %v, want %v:\n%s", sv.Slug, got, offered, card)
 				}
+				label := ` data-instantiate-label="Instantiate story"`
+				if sv.Spike {
+					label = ` data-instantiate-label="Instantiate spike"`
+				}
+				if got := strings.Contains(card, label); got != offered {
+					t.Errorf("stub %s carries the label %s = %v, want %v:\n%s", sv.Slug, label, got, offered, card)
+				}
+				if !offered && strings.Contains(card, "data-instantiate-label") {
+					t.Errorf("stub %s carries an Instantiate label where none is offered:\n%s", sv.Slug, card)
+				}
 				if got := strings.Contains(card, `data-spike="true"`); got != sv.Spike {
 					t.Errorf("stub %s carries data-spike = %v, want %v", sv.Slug, got, sv.Spike)
 				}
 			}
-			if strings.Contains(region, "Instantiate") {
+			labels := strings.NewReplacer(` data-instantiate-label="Instantiate story"`, "", ` data-instantiate-label="Instantiate spike"`, "")
+			if strings.Contains(labels.Replace(region), "Instantiate") {
 				t.Error("the region renders an Instantiate control inside a stub card")
 			}
 		})

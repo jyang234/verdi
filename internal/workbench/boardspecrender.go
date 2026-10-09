@@ -570,24 +570,27 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// card says its toolbar may offer the one live affordance a sealed
 	// record permits: Instantiate (spec/scoping-canvas ac-6), which sits
 	// on the stub's toolbar, never on the card (spec/wall-strip-and-
-	// drawer-v2 ac-6; SI-368 (5)). The toolbar reads the spike word from
-	// the card's data-spike.
+	// drawer-v2 ac-6; SI-368 (5)). The card carries the button's label in
+	// the store's words, which the toolbar shows as written (SI-368 (30)),
+	// and the spike flag in data-spike.
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
 		spikeAttr := ""
-		// The kind label's class word is display prose and resolves
-		// (vocabulary.go; "spike" resolves as the variant marker's
-		// pseudo-class word). The CSS modifier, data-spike, data-stub,
-		// and testid keep bare ids — addressing never renames.
-		kindLabel := p.words.word("story") + " stub"
+		// The kind label's and the Instantiate label's class word is
+		// display prose and resolves (vocabulary.go; "spike" resolves as
+		// the variant marker's pseudo-class word). The CSS modifier,
+		// data-spike, data-stub, and testid keep bare ids — addressing
+		// never renames.
+		classWord := p.words.word("story")
 		if sv.Spike {
 			cls += " stubcard--spike"
 			spikeAttr = ` data-spike="true"`
-			kindLabel = p.words.word("spike") + " stub"
+			classWord = p.words.word("spike")
 		}
+		kindLabel := classWord + " stub"
 		canAttr := ""
 		if instantiable {
-			canAttr = ` data-can-instantiate="true"`
+			canAttr = ` data-can-instantiate="true" data-instantiate-label="` + esc("Instantiate "+classWord) + `"`
 		}
 		title := designscaffold.HumanizeName(sv.Slug)
 		b.WriteString(`<div class="` + cls + `"` + canAttr + ` data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr +

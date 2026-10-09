@@ -59,13 +59,6 @@
   function kindWords(kind) {
     return (kind || "").replace(/-/g, " ");
   }
-  // word is a class id's display word: the page payload's renamed words,
-  // the seam boardspec.js reads for its own copy (parent co-4); the bare
-  // id when the store renames nothing.
-  function word(id) {
-    var w = state.words || {};
-    return w[id] || id;
-  }
 
   // keyOfCard is the seam's card key (wallselect.js keyOf): the one grammar
   // the chips' endpoints use, derived nowhere else.
@@ -243,13 +236,14 @@
     }
     // Instantiate, for a stub the sealed accepted feature wall's card says
     // may be instantiated (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (5)):
-    // named with the class word, its test id the stub's, and its spike
-    // word carried as data-spike, which boardspec.js's [data-instantiate]
+    // named with the label the server wrote on the card in the store's
+    // words (SI-368 (30)), its test id the stub's, and its spike word
+    // carried as data-spike, which boardspec.js's [data-instantiate]
     // handler reads when it confirms the consequence before it fires.
-    if (stub && card.hasAttribute("data-can-instantiate")) {
+    if (stub && card.hasAttribute("data-can-instantiate") && card.hasAttribute("data-instantiate-label")) {
       var slug = card.getAttribute("data-stub");
       var spike = card.getAttribute("data-spike") === "true";
-      var inst = button("instantiate", "Instantiate " + word(spike ? "spike" : "story"));
+      var inst = button("instantiate", card.getAttribute("data-instantiate-label"));
       inst.classList.add("wall-toolbar-btn--instantiate");
       inst.setAttribute("data-instantiate", slug);
       inst.setAttribute("data-testid", "instantiate-" + slug);

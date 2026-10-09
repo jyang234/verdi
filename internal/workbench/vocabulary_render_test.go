@@ -170,10 +170,11 @@ func vocabProseProjection(mode boardModeKind) *BoardProjection {
 // category sweep enumerated — yarn key, oq-claims chip, proto-sticky
 // type words) while every identity-layer string provably stays bare. Two
 // of those sites moved with the retired rail (spec/wall-strip-and-
-// drawer-v2 ac-6, dc-2): Instantiate is the stub toolbar's, which speaks
-// "Instantiate " and the page payload's renamed word for the stub's class
-// (TestBoardRender_PageWordsPayloadModelVocabulary pins the payload), and
-// the guide's note is the record drawer's Moves tab's, checked here.
+// drawer-v2 ac-6, dc-2): Instantiate is the stub toolbar's, which shows
+// the label the server writes on the instantiable stub card
+// (data-instantiate-label, pinned here with the renamed words; SI-368
+// (30)), and the guide's note is the record drawer's Moves tab's, checked
+// here.
 func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 	proj := vocabProseProjection(modeAuthoring)
 	proj.applyModelVocabulary(vocabTestModel())
@@ -196,6 +197,10 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 		// Stub-card kind labels (finding site boardspecrender.go:358).
 		`<span class="card-kind-label">Change Request stub</span>`,
 		`<span class="card-kind-label">Deep Dive stub</span>`,
+		// The sealed wall's Instantiate label, which the stub's toolbar
+		// shows as written (finding site ~:410).
+		`data-instantiate-label="Instantiate Change Request"`,
+		`data-instantiate-label="Instantiate Deep Dive"`,
 		// The yarn key's scoping meanings.
 		`a planned Change Request will deliver it`,
 		`a planned Deep Dive will answer it`,
@@ -217,7 +222,7 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 
 	// Bare class words must be gone from the display prose...
 	for _, gone := range []string{
-		`>story stub<`, `>spike stub<`, `>Instantiate story<`, `>Instantiate spike<`,
+		`>story stub<`, `>spike stub<`, `Instantiate story`, `Instantiate spike`,
 		`claimed by 2 spikes`, `a planned story will deliver it`, `a planned spike will answer it`,
 		`<span class="sticky-type">story</span>`, `>open feature board<`,
 	} {
@@ -336,6 +341,7 @@ func TestBoardRender_RegionParityNoRenames(t *testing.T) {
 	}
 	for _, want := range []string{
 		`>story stub<`, `>spike stub<`,
+		`data-instantiate-label="Instantiate story"`, `data-instantiate-label="Instantiate spike"`,
 		`claimed by 2 spikes`, `a planned story will deliver it`, `>open feature board</a>`,
 	} {
 		if !strings.Contains(plain, want) {
