@@ -81,6 +81,10 @@ async function expectBadgeChip(page: Page, chip: Locator, source: string): Promi
 // decode, so its Provenance and Review projections are unavailable.
 const DRAWER_EMPTY_WALL = "/b/design%2Fdecline-drawer-empty/board/spec/decline-drawer-empty";
 const DRAWER_UNAVAILABLE_WALL = "/b/design%2Fdecline-drawer-unavailable/board/spec/decline-drawer-unavailable";
+// And the wall whose working tree holds unclassified changes only, whose
+// spec no typed operation ever wrote, so its review packet carries an
+// unclassified edit.
+const CHANGES_UNCLASSIFIED_WALL = "/b/design%2Fdecline-changes-unclassified/board/spec/decline-changes-unclassified";
 
 // branchOf is a /b/ wall's branch, decoded from its address.
 function branchOf(wall: string): string {
@@ -100,6 +104,22 @@ function readsOf(page: Page): string[] {
     if (r.method() === "GET" && /\/board\/spec\/[^/]+\/readiness$/.test(r.url())) reads.push("readiness");
   });
   return reads;
+}
+
+// pollsOf records the status of every conditional poll the wall's
+// transport makes from now on (GET <wall>/snapshot, 304 when nothing
+// changed).
+function pollsOf(page: Page): number[] {
+  const polls: number[] = [];
+  page.on("response", (r) => {
+    if (r.request().method() === "GET" && new URL(r.url()).pathname.endsWith("/snapshot")) polls.push(r.status());
+  });
+  return polls;
+}
+
+// revisionOf reads the revision the wall's transport holds.
+function revisionOf(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { __verdiASD: { state: () => { revision: string } } }).__verdiASD.state().revision);
 }
 
 // expectProposal: the Review tab's last section names the branch and
@@ -497,6 +517,18 @@ test.describe("wall-strip-and-drawer", () => {
       await expect(count).toHaveAttribute("data-count-state", "unavailable");
       expect(await count.getAttribute("title"), `${tab}'s failure names its reason`).toMatch(/\S/);
     }
+
+    // The Review count is SI-368 (11)'s sum, the inferred or unresolved
+    // objects plus the unclassified edits (SI-368 (28)(a)), on a wall whose
+    // review packet carries unclassified edits.
+    await page.goto(CHANGES_UNCLASSIFIED_WALL);
+    const packet = await page.request.post(CHANGES_UNCLASSIFIED_WALL + "/api/prepare_design_review", { data: {} });
+    expect(packet.status(), await packet.text()).toBe(200);
+    const review = (await packet.json()) as { inferred_or_unresolved: unknown[]; unclassified_edits: unknown[] };
+    expect(review.unclassified_edits.length, "the wall's packet carries unclassified edits").toBeGreaterThan(0);
+    const sum = review.inferred_or_unresolved.length + review.unclassified_edits.length;
+    await page.getByTestId("wall-more").click();
+    await expect(page.getByTestId("wall-more-count-review"), "the Review count").toHaveText(sum === 1 ? "1 needs a human eye" : `${sum} need a human eye`, { timeout: 15_000 });
   });
 
   test("Every drawer tab renders prose and tables, never JSON", async ({ page }) => {
@@ -549,11 +581,22 @@ test.describe("wall-strip-and-drawer", () => {
       await expect(target).toHaveAttribute("data-found", "true");
       await expect(page.getByTestId("record-drawer")).toBeVisible();
 
+      // Readiness loads again only when the revision moves (SI-368 (21),
+      // (28)(a)): open across three polls that change nothing, it makes no
+      // readiness request.
+      const loads: string[] = readsOf(page);
+      const polls = pollsOf(page);
+      const revision = await revisionOf(page);
+      await expect.poll(() => polls.length, { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
+      expect(polls.every((status) => status === 304), `each poll found nothing changed: ${polls}`).toBe(true);
+      expect(await revisionOf(page), "no poll moved the revision").toBe(revision);
+      expect(loads, "no readiness request while the revision stands").toEqual([]);
+      await expect(page.getByTestId("record-tab-readiness")).toHaveAttribute("aria-selected", "true");
+
       // The drawer lives outside the swapped region (SI-368 (9)): an outside
       // write that moves the revision swaps the wall under the open tab,
       // and the drawer stays, its tab chosen, the Readiness loaded again for
       // the new revision (SI-368 (21)).
-      const loads: string[] = readsOf(page);
       const swapText = "an outside write under the open drawer [91-ac5]";
       const made = await page.request.post(wall + "/api/sticky", { data: { text: swapText, type: "comment" } });
       expect(made.status(), await made.text()).toBe(200);
