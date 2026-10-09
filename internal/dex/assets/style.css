@@ -7143,6 +7143,38 @@ body:not(.board-page) > footer.site-foot,
 .wall-more-aside[data-count-state="attention"] { color: var(--authored); font-weight: 700; }
 .wall-more-aside[data-count-state="unavailable"] { color: var(--st-pending); }
 
+/* ---- the wall's bar from 1280 up (F3a closure N1): one row of at most
+   56 px on every wall, no control clipped. From a 1200 px bar (a 1280 px
+   viewport) the row never wraps, as the 1400 px rule above has it, and
+   what gives way is reordered toward the handoff's bar, where the title
+   keeps its words and the posture text is what shrinks: the posture
+   group's share comes after the title's, so the posture words take their
+   two lines before the title ellipsizes. The posture summary's separator
+   rides the tree fact and its arrow sits out of the flow, so two lines
+   are its narrowest (never the dot or the arrow on a line of their own).
+   Up to a 1640 px bar the row's gaps draw in, the chips' tracking and
+   the index link's padding tighten, and Refresh folds to its glyph, its
+   name kept whole for the ear. ---- */
+@container topbar (min-width: 1200px) {
+  .boardv2-page .topbar-row { flex-wrap: nowrap; }
+  .boardv2-page .topbar-posture-group { flex: 1 1 0; width: auto; flex-wrap: nowrap; }
+  .boardv2-page .topbar-posture-group .asd-posture-tech { flex: 0 1 auto; }
+  .boardv2-page .topbar-posture > summary { position: relative; padding-right: 18px; }
+  .boardv2-page .topbar-posture > summary::after { position: absolute; right: 6px; bottom: 3px; }
+  .boardv2-page .topbar-posture > summary .topbar-dot { display: none; }
+  .boardv2-page .topbar-posture > summary .asd-posture-tree::before { content: "\00B7" / ""; margin-right: 6px; color: var(--rule); }
+}
+@container topbar (min-width: 1200px) and (max-width: 1640px) {
+  .boardv2-page .topbar-row { column-gap: 8px; }
+  .boardv2-page .topbar-posture-group { column-gap: 6px; }
+  .boardv2-page .topbar-posture-group .asd-refresh { font-size: 0; padding: 3px 7px; }
+  .boardv2-page .topbar-posture-group .asd-refresh::before { content: "\21BB" / ""; font-size: 13px; line-height: 1; }
+  .boardv2-page .topbar-posture-group > .board-mode-tag,
+  .boardv2-page .topbar .topbar-chip { letter-spacing: 0.06em; padding-left: 6px; padding-right: 6px; }
+  .boardv2-page .topbar-nav a { padding-left: 6px; padding-right: 6px; }
+  .boardv2-page .topbar-controls .create-spec-btn { padding-left: 8px; padding-right: 8px; }
+}
+
 /* ---- a phone's width: the drawer takes the viewport, a 16 px gutter;
    the rows stack their key over the value; the stations pair up ---- */
 @container record-drawer (max-width: 420px) {

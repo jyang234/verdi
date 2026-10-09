@@ -57,6 +57,9 @@ const TITLES = {
 // here as 92-wall-commit-changes copies it (fixtures.ts stays F7's) and
 // pinned by the harness's TestWallStripPaths.
 const UNREADABLE_CHANGES_WALL = "/b/design%2Fdecline-changes-unreadable/board/spec/decline-changes-unreadable";
+// Its sibling whose working tree holds typed changes (the same harness
+// file), whose bar carries the longest Commit and push suffix.
+const TYPED_CHANGES_WALL = "/b/design%2Fdecline-changes-typed/board/spec/decline-changes-typed";
 
 // The readiness page lives on the readiness-pilot fixture's isolated
 // serve (49-readiness-pilot.spec.ts's own path to it): started lazily by
@@ -614,13 +617,37 @@ test.describe("chrome-and-tokens", () => {
       await expectBarControlsVisible(page, `${p.name} @200%`);
     }
 
-    // The bar is one row at desktop widths (handoff "Global chrome").
-    await page.setViewportSize({ width: 1440, height: 900 });
-    for (const p of PAGES) {
-      await gotoPage(page, p);
-      const h = await bar(page).locator(".topbar-row").evaluate((el) => el.getBoundingClientRect().height);
-      console.log(`bar height: ${p.name} @1440 = ${h} px`);
-      expect(h, `${p.name} @1440: one 52 px row`).toBeLessThanOrEqual(56);
+    // The bar is one row at desktop widths (handoff "Global chrome"): at
+    // 1440 on every page, and on every wall from 1280 up (spec/wall-strip-
+    // and-drawer-v2, F3a closure N1) — the walls of this list and the
+    // other rooms' and change states' walls, the busiest bars the fixtures
+    // hold — with no bar control pushed past the viewport.
+    const walls = [
+      ...PAGES.filter((p) => p.spec && p.name !== "Document page"),
+      { name: "story wall", path: () => boardPath(SHOWCASE.EMPTY_SPEC), spec: true, title: "" },
+      { name: "sealed record wall", path: () => boardPath(SHOWCASE.READONLY_SPEC), spec: true, title: "" },
+      { name: "sealed story wall", path: () => boardPath(SHOWCASE.STORY_WITH_SPEC_STALE), spec: true, title: "" },
+      { name: "badged sealed wall", path: () => boardPath(EDGE.BADGE_SEALED_SPEC), spec: true, title: "" },
+      { name: "typed changes wall", path: () => TYPED_CHANGES_WALL, spec: true, title: "" },
+    ];
+    for (const width of [1280, 1366, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const p of width === 1440 ? [...PAGES, ...walls.slice(-5)] : walls) {
+        await gotoPage(page, p);
+        const row = await bar(page).evaluate((el) => {
+          const vw = document.documentElement.clientWidth;
+          const past = Array.from(el.querySelectorAll<HTMLElement>("a[href],button,summary"))
+            .filter((c) => {
+              const r = c.getBoundingClientRect();
+              return r.width > 0 && (r.left < -1 || r.right > vw + 1);
+            })
+            .map((c) => c.getAttribute("data-testid") || c.id || c.className);
+          return { h: el.querySelector(".topbar-row")!.getBoundingClientRect().height, past };
+        });
+        console.log(`bar height: ${p.name} @${width} = ${row.h} px`);
+        expect(row.h, `${p.name} @${width}: one 52 px row`).toBeLessThanOrEqual(56);
+        expect(row.past, `${p.name} @${width}: bar controls past the viewport`).toEqual([]);
+      }
     }
 
     // The sealed wall's New story and Revise open their dialogs from a
