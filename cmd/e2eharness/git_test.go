@@ -202,3 +202,46 @@ func TestGitSeamObservesCanceledContext(t *testing.T) {
 		t.Errorf("gitShowBytes under a canceled ctx = %v, want context.Canceled", err)
 	}
 }
+
+// TestGitRawOutput is gitOutput's untrimmed twin: stdout exactly as git
+// printed it — a porcelain line's leading status column and the final
+// newline kept — and a failure (a path absent at HEAD; a cancelled ctx)
+// as an error carrying git's own stderr. Local git only — no network.
+func TestGitRawOutput(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+	dir := t.TempDir()
+	if err := runGit(t.Context(), dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "--quiet", "--no-verify", "-m", "seed"}} {
+		if err := runGit(t.Context(), dir, nil, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := gitRawOutput(t.Context(), dir, "status", "--porcelain")
+	if err != nil || string(out) != " M f.txt\n" {
+		t.Errorf("gitRawOutput status = %q (%v), want %q", out, err, " M f.txt\n")
+	}
+	out, err = gitRawOutput(t.Context(), dir, "cat-file", "blob", "HEAD:f.txt")
+	if err != nil || string(out) != "x\n" {
+		t.Errorf("gitRawOutput cat-file = %q (%v), want %q", out, err, "x\n")
+	}
+
+	if _, err := gitRawOutput(t.Context(), dir, "cat-file", "blob", "HEAD:absent.txt"); err == nil || !strings.Contains(err.Error(), "absent.txt") {
+		t.Errorf("gitRawOutput on an absent path = %v, want an error carrying git's stderr", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := gitRawOutput(ctx, dir, "rev-parse", "HEAD"); !errors.Is(err, context.Canceled) {
+		t.Errorf("gitRawOutput under a canceled ctx = %v, want context.Canceled", err)
+	}
+}
