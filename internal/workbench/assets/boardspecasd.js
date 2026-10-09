@@ -20,7 +20,7 @@
 //   - the typed-operation dialogs (add-object and stub correction; the
 //     set-problem and set-outcome edits are the case-file strip's, in
 //     place, wallstrip.js) with field-level slug grammar validation from
-//     the server's own pattern.
+//     the server's own pattern, and Escape closing an open one.
 //
 // The on-demand application panels that printed their projections as JSON
 // left the wall with the side rail (spec/wall-strip-and-drawer-v2 ac-6,
@@ -451,6 +451,17 @@
   }
   document.addEventListener("change", function (e) {
     if (e.target && e.target.id === "asd-op-kind") updateIDPreview();
+  });
+
+  // Escape closes an open typed-operation dialog with nothing written: the
+  // modal layer's one press (spec/wall-strip-and-drawer-v2 SI-368 (17),
+  // after SI-363 (2); BL-175 (1)). boardspec.js's Escape hides the shared
+  // backdrop and the board's own dialogs; these two are this file's, and
+  // closing them ends the interaction that held the projection.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var stub = document.getElementById("asd-stub-dialog");
+    if ((opDialog && !opDialog.hidden) || (stub && !stub.hidden)) hideDialogs();
   });
 
   document.addEventListener("click", function (e) {

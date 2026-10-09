@@ -1,5 +1,6 @@
 // The wall's keyboard (spec/wall-canvas-v2 ac-6; ledger SI-350 (4),
-// SI-361 (3), SI-363; BL-173 (3); lane F2c). The arrows move the selection
+// SI-361 (3), SI-363; BL-173 (3); lane F2c; the Escape order's F3 layers,
+// spec/wall-strip-and-drawer-v2, SI-368 (17); lane F3c). The arrows move the selection
 // on the handoff's grid — within a column (up and down) and to the
 // adjacent column at the same row (left and right) — and reveal the card
 // inside the bounded canvas; Enter on a focused card edits it; Delete
@@ -15,14 +16,21 @@
 // of what may be deleted). It owns no data and holds no projection: the
 // selection is the seam's, and every write is boardspec.js's.
 //
-// The layers Escape closes, innermost first, one per press (SI-363 (2)):
-// a focused editor, slot or draft (their own listeners, which stop the
-// key); the modal layer (boardspec.js's Escape); an open slot or draft
-// whose focus has left (cancelled here through its own field); the
-// branch menu (closed here: it has no backdrop, so boardspec.js's chain
-// cannot see it); the reference peek or the pin tray (boardspec.js) and
-// the top bar's posture popover (topbar.js, whose key is not also a
-// clear); then the selection. The arrows and Delete rest while a field,
+// The layers Escape closes, one per press, in the handoff's order — the
+// picker › a menu › the drawer › the strip editor or a popover › the
+// selection (SI-368 (17), after SI-363 (2)): the modal layer, the type
+// picker among it (boardspec.js's Escape, and boardspecasd.js's for its
+// typed-operation dialogs); a focused editor, slot or draft (the key is
+// its own: their listeners cancel and stop it); a menu — the branch menu
+// or the record drawer's ⋯ menu — closed here, the focus inside it
+// returned to its button; the record drawer, closed here wherever the
+// focus is (walldrawer.js's seam); the reference peek or the pin tray
+// (boardspec.js), the top bar's posture popover (topbar.js) or Commit and
+// push's popover (wallstrip.js), each its owner's to close and none of
+// them also a clear; an open strip editor, slot or draft whose focus has
+// left (cancelled here through its own field); then the selection. A
+// layer this file closes takes the press whole: nothing behind it reads
+// it. The arrows and Delete rest while a field,
 // a control, a dialog or a menu has the focus, and under a modal, so a
 // key typed into an editor never reaches the card (ac-5; the Delete
 // mutant). Focus follows the selection the arrows move, onto the card
@@ -68,17 +76,30 @@
     var el = document.getElementById(id);
     return el && !el.hidden ? el : null;
   }
-  // openField: the field of an open add slot or sticky draft the focus
-  // has left (a focused one takes its own Escape).
+  // openField: the field of an open strip editor, add slot or sticky
+  // draft the focus has left (a focused one takes its own Escape).
   function openField() {
+    var strip = region.querySelector(".case-strip .placard[data-editing] .case-strip-editor-text");
+    if (strip) return strip;
     var c = canvas();
     return c ? c.querySelector(".wall-slot[data-open] textarea, .sticky-draft textarea") : null;
   }
   // dialogOpen: a layer another script closes on Escape — the modal layer,
   // the reference peek and the pin tray (boardspec.js's chain), the top
-  // bar's posture popover (topbar.js). While one is open, the key is its.
+  // bar's posture popover (topbar.js), Commit and push's popover
+  // (wallstrip.js). While one is open, the key is its.
   function dialogOpen() {
-    return modalOpen() || !!document.getElementById("ref-peek") || !!shown("pin-tray") || !!document.querySelector("details.topbar-posture[open]");
+    return (
+      modalOpen() ||
+      !!document.getElementById("ref-peek") ||
+      !!shown("pin-tray") ||
+      !!document.querySelector("details.topbar-posture[open], [data-testid=\"wall-commit\"] details[open]")
+    );
+  }
+  // textField: a focus whose own listener takes Escape — an editor, an
+  // open slot's or the sticky draft's field, the strip editor.
+  function textField(t) {
+    return !!t.closest("input, textarea, select, [contenteditable]");
   }
 
   // -- the cards and their geometry ----------------------------------------------------
@@ -266,7 +287,43 @@
     return true;
   }
 
-  // -- Escape: an unfocused slot or draft, the branch menu, then the selection ----------------
+  // -- Escape: a menu, the drawer, an unfocused editor, slot or draft, then the selection ----------------
+
+  function drawer() {
+    return window.__WALLDRAWER__ || null;
+  }
+
+  // closeMenu closes an open menu — the branch menu (it has no backdrop, so
+  // boardspec.js's chain cannot see it) or the record drawer's ⋯ menu — and
+  // returns a focus that was inside it to the control that opens it, which
+  // a hidden item cannot keep; false when no menu is open.
+  function closeMenu() {
+    var branch = shown("branch-menu");
+    if (branch) {
+      var inside = branch.contains(document.activeElement);
+      branch.hidden = true;
+      var switcher = inside && document.querySelector('[data-testid="branch-switcher"]');
+      if (switcher) switcher.focus({ preventScroll: true });
+      return true;
+    }
+    return !!(drawer() && drawer().closeMenu && drawer().closeMenu());
+  }
+
+  // closeDrawer closes the open record drawer, which returns the focus to
+  // what opened it; false when it is shut.
+  function closeDrawer() {
+    var d = drawer();
+    if (!d || !d.current || !d.current()) return false;
+    d.close();
+    return true;
+  }
+
+  // take marks a press as this file's whole: no layer behind the one it
+  // closed reads it.
+  function take(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
   // cancelOpen presses Escape in an open slot's or draft's own field on
   // the user's behalf: the slot closes through walltoolbar.js's handler
@@ -299,29 +356,25 @@
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       var key = e.key;
       if (key === "Escape") {
-        // SI-363 (2) as amended: the modal layer (boardspec.js); the branch
-        // menu, even with the focus inside it; a field's own key, and the
-        // peek's, the tray's (boardspec.js) or the popover's (topbar.js);
-        // an unfocused slot or draft; then the selection. One layer a press.
-        if (modalOpen()) return;
-        var menu = shown("branch-menu");
-        if (menu) {
-          // A focus inside the menu would be left on a hidden item, and
-          // the next key read as the menu's: it returns to the switcher.
-          var inside = menu.contains(document.activeElement);
-          menu.hidden = true;
-          var switcher = inside && document.querySelector('[data-testid="branch-switcher"]');
-          if (switcher) switcher.focus({ preventScroll: true });
+        // The order above, one layer a press (SI-368 (17)): the modal
+        // layer, the picker among it (boardspec.js, boardspecasd.js); a
+        // focused field's own key; a menu, even with the focus inside it;
+        // the drawer, wherever the focus is; the peek's, the tray's or a
+        // popover's own key; an unfocused editor, slot or draft; then the
+        // selection.
+        if (modalOpen() || textField(t)) return;
+        if (closeMenu() || closeDrawer()) {
+          take(e);
           return;
         }
-        if (t.closest(FIELDS) || dialogOpen()) return;
+        if (dialogOpen()) return;
         var field = openField();
         if (field) {
           cancelOpen(field);
-          e.preventDefault();
+          take(e);
           return;
         }
-        if (!seam() || !seam().selection()) return;
+        if (t.closest(FIELDS) || !seam() || !seam().selection()) return;
         clear();
         return;
       }

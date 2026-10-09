@@ -26,9 +26,12 @@
 // path, SI-368 (15)); the ⋯ menu opens the others, its counts loaded only
 // when it opens, a failed count reading "unavailable", never 0 (SI-368
 // (11)); the toolbar's Yarn key opens Keys (SI-368 (9)). The drawer is a
-// dialog without a focus trap: opening it moves the focus to its tab,
-// shutting it returns the focus to what opened it, and Escape with the
-// focus inside it shuts it (the menu likewise), one layer a press. The
+// dialog without a focus trap: opening it moves the focus to its tab, and
+// shutting it returns the focus to what opened it. Escape shuts the menu,
+// then the drawer, wherever the focus is — one layer a press, in the
+// wall's order, which wallkeys.js keeps through this file's seam (SI-368
+// (17)); the drawer's and the menu's own Escape below are the same close
+// for a focus inside them. The
 // workbench performs no forge write (co-2): the Review tab names the
 // branch and the command, and opens nothing.
 (function () {
@@ -1010,6 +1013,13 @@
     close: close,
     current: function () {
       return current;
+    },
+    // closeMenu shuts the ⋯ menu, returning the focus to ⋯ when it was in
+    // the menu (a hidden item keeps no focus); false when it was shut.
+    closeMenu: function () {
+      if (!menu || menu.hidden) return false;
+      closeMenu(menu.contains(document.activeElement));
+      return true;
     },
   };
 })();
