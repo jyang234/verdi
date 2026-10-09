@@ -506,9 +506,13 @@ func TestScopingCanvas_PayloadCarriesClass(t *testing.T) {
 }
 
 // A sealed accepted-pending-build feature wall carries the ONE live
-// affordance a sealed record permits (ac-6): Instantiate story on each
-// stub card — consequence-labeled client-side before firing — plus the
-// confirm dialog chrome it needs even though the wall is read-only.
+// affordance a sealed record permits (ac-6): Instantiate, for each stub —
+// consequence-labeled client-side before firing — plus the confirm dialog
+// chrome it needs even though the wall is read-only. The affordance is
+// the stub's toolbar's (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (5);
+// BL-167): each stub card says the toolbar may offer it, a spike stub
+// says it is a spike (the word the button and its confirmation speak),
+// and no card carries the button.
 func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
 	if p.Status != "accepted-pending-build" {
@@ -516,15 +520,18 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 	}
 	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 	for _, want := range []string{
-		`data-testid="instantiate-plain-one"`,
-		`data-instantiate="plain-one"`,
-		`>Instantiate story<`,
-		`data-testid="instantiate-spike-one"`,
-		`>Instantiate spike<`,
+		`<div class="stubcard" data-can-instantiate="true" data-testid="stub-card-plain-one" data-stub="plain-one" data-acs="ac-1" data-resolves="" style="left:952px;top:40px">`,
+		`<div class="stubcard stubcard--spike" data-can-instantiate="true" data-testid="stub-card-spike-one" data-stub="spike-one" data-spike="true"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sealed wall missing instantiate affordance %q", want)
 		}
+	}
+	if n := strings.Count(body, `data-can-instantiate="true"`); n != len(p.StubViews) {
+		t.Errorf("%d stub cards say the toolbar may offer Instantiate, want all %d", n, len(p.StubViews))
+	}
+	if strings.Contains(body, "data-instantiate") || strings.Contains(body, "Instantiate") {
+		t.Error("a stub card carries the Instantiate button the stub's toolbar offers")
 	}
 
 	page, err := renderBoardSpecPage(t.Context(), p, &boardGitState{Branch: "main"}, testASDView())
@@ -543,7 +550,7 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 	draft := scopingRenderProjection(t, modeAuthoring)
 	draft.Status = "draft"
 	draftBody := renderBoardRegion(draft, &boardGitState{}, testASDView())
-	if strings.Contains(draftBody, "data-instantiate") {
+	if strings.Contains(draftBody, "instantiate") {
 		t.Error("a draft wall offers instantiate")
 	}
 }

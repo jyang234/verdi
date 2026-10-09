@@ -264,10 +264,21 @@ func TestObligationRow_FeatureObligationOnDiskReadsPresent(t *testing.T) {
 // every wall alike; the renders of both walls with the case-file header
 // removed are byte-identical to the fifth pin's (witnessed by diffing
 // the old and new renders at da7f6262 and this commit), so every other
-// byte of the story render is as it was.
+// byte of the story render is as it was. Re-pinned a seventh time by
+// spec/wall-strip-and-drawer-v2 (lane F3c, ac-6, dc-2; SI-368 (6), (9),
+// (27)(c)): the readiness shell before `<div class="asd-main">` and the
+// side rail (`<aside class="board-side">`) leave the region; the rail's
+// three on-demand JSON panels go with it, its read-only explanation
+// moves into `<div class="board-notices">` (its `scratch-panel` class
+// becoming `board-note`, every other byte of it kept), and its yarn key
+// moves below the board layout, inside `.asd-main`, as a `hidden` source
+// — on every wall alike; applying exactly those moves to cace6cf7's
+// renders of both walls yields this commit's renders byte for byte
+// (witnessed by rendering both trees), so every other byte of the story
+// render is as it was.
 const (
-	storyWallDigestBase     = "209b00d40ae4076df912c090b439c20657abeb228542b9eeb6a6751a027504b9"
-	slotStoryWallDigestBase = "27f69c3df0b2e638de7205f9c9916fdc4ba2251b3441e1b42b36c71343febde2"
+	storyWallDigestBase     = "2079de14baa21a2750a00e89466afbaefd3fa6e049d6f6d139f497fa759d4c15"
+	slotStoryWallDigestBase = "e49541e9bd747f2edf1839eeccc06a8491ec66f015aef0c8d9804f7441704cd4"
 )
 
 func renderDigest(body string) string {

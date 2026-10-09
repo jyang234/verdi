@@ -94,10 +94,9 @@ func TestDeriveASDShell_PolicyCodeKeepsDetailBare(t *testing.T) {
 			if shell.PolicyDetail != tc.wantDetail {
 				t.Errorf("PolicyDetail = %q, want the bare detail %q", shell.PolicyDetail, tc.wantDetail)
 			}
-			// The rendered board carries the combined quote exactly once.
-			v := testASDView()
-			v.Shell = shell
-			html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, v)
+			// The rendered guide carries the combined quote exactly once,
+			// where the wall carries it: the Readiness tab (SI-368 (3)).
+			html := wallGuide(in)
 			got, n := testIDElementText(html, "asd-policy-guide-report")
 			if n != 1 || got != tc.wantCode+": "+tc.wantDetail {
 				t.Errorf("rendered report = %q (%d elements), want %q once", got, n, tc.wantCode+": "+tc.wantDetail)

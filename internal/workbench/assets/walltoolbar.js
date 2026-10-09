@@ -1,6 +1,8 @@
 // The wall's contextual toolbar, drag-to-thread, and add-in-place slots
 // (spec/wall-canvas-v2 ac-3, ac-4, ac-5, co-2; ledger SI-350 (5), (6), (7),
-// (8), (9), (13), (15), (16), SI-352 (2); lane F2b). Built on the
+// (8), (9), (13), (15), (16), SI-352 (2); lane F2b), and a stub's
+// Instantiate on the sealed accepted feature wall (spec/wall-strip-and-
+// drawer-v2 ac-6; SI-368 (5); lane F3c). Built on the
 // selection seam (wallselect.js: window.__WALLSELECT__ and the
 // `wall-selection` event) and the board's own entries (boardspec.js:
 // window.__BOARDV2API__; boardspecasd.js: window.__verdiASD), it offers
@@ -20,7 +22,9 @@
 // every selection change; with nothing to say it leaves the host empty.
 //
 // Review and read-only modes offer the yarn key and the read actions only
-// (ac-3): the Document link and the thread count. Under an authoring
+// (ac-3): the Document link and the thread count — and, for a stub the
+// sealed record's card says may be instantiated, Instantiate, whose
+// consequence boardspec.js confirms before it fires. Under an authoring
 // wall's domain refusal the typed writes are not offered either — the
 // server renders no pin, no data-can-graduate and no slot there — and the
 // scratch tier's actions remain.
@@ -54,6 +58,13 @@
 
   function kindWords(kind) {
     return (kind || "").replace(/-/g, " ");
+  }
+  // word is a class id's display word: the page payload's renamed words,
+  // the seam boardspec.js reads for its own copy (parent co-4); the bare
+  // id when the store renames nothing.
+  function word(id) {
+    var w = state.words || {};
+    return w[id] || id;
   }
 
   // keyOfCard is the seam's card key (wallselect.js keyOf): the one grammar
@@ -157,8 +168,9 @@
   }
 
   // yarnKeyAction offers the yarn key (SI-350 (9)) where the wall has
-  // one: the action opens the record drawer's Keys tab, which carries it
-  // (wall-strip-and-drawer-v2 SI-368 (9); walldrawer.js).
+  // one — the region's hidden source of its threads: the action opens the
+  // record drawer's Keys tab, which carries it (wall-strip-and-drawer-v2
+  // SI-368 (9); walldrawer.js).
   function yarnKeyAction(h) {
     if (!document.querySelector(".yarn-key")) return;
     if (h.childElementCount) h.appendChild(divider());
@@ -228,6 +240,22 @@
       var hint = node("span", "wall-toolbar-hint", "Thread \u2014 drag the pin");
       hint.insertBefore(pushpin(), hint.firstChild);
       h.appendChild(hint);
+    }
+    // Instantiate, for a stub the sealed accepted feature wall's card says
+    // may be instantiated (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (5)):
+    // named with the class word, its test id the stub's, and its spike
+    // word carried as data-spike, which boardspec.js's [data-instantiate]
+    // handler reads when it confirms the consequence before it fires.
+    if (stub && card.hasAttribute("data-can-instantiate")) {
+      var slug = card.getAttribute("data-stub");
+      var spike = card.getAttribute("data-spike") === "true";
+      var inst = button("instantiate", "Instantiate " + word(spike ? "spike" : "story"));
+      inst.classList.add("wall-toolbar-btn--instantiate");
+      inst.setAttribute("data-instantiate", slug);
+      inst.setAttribute("data-testid", "instantiate-" + slug);
+      if (spike) inst.setAttribute("data-spike", "true");
+      inst.title = "cuts a design branch with a scaffolded spec; the serving checkout never moves";
+      h.appendChild(inst);
     }
     // Graduate, for a sticky the kernel lets graduate.
     if (sticky && card.hasAttribute("data-can-graduate")) {
@@ -342,25 +370,11 @@
     if (correct) correct.click();
   }
 
+  // revealYarnKey opens the record drawer's Keys tab, the yarn key's one
+  // home since the rail that showed it is retired (SI-368 (9)).
   function revealYarnKey(actor) {
     var drawer = window.__WALLDRAWER__;
-    if (drawer && drawer.open) {
-      drawer.open("keys", actor);
-      return;
-    }
-    var key = document.querySelector(".yarn-key");
-    if (!key) return;
-    if (!key.hasAttribute("tabindex")) key.setAttribute("tabindex", "-1");
-    key.setAttribute("data-revealed", "true");
-    key.scrollIntoView({ block: "nearest" });
-    key.focus({ preventScroll: true });
-    key.addEventListener(
-      "blur",
-      function () {
-        key.removeAttribute("data-revealed");
-      },
-      { once: true }
-    );
+    if (drawer && drawer.open) drawer.open("keys", actor);
   }
 
   function pickerAtChip(chip) {
@@ -388,6 +402,8 @@
       }
       case "pin":
         return; // boardspec.js toggles the tray from the button's aria-controls
+      case "instantiate":
+        return; // boardspec.js confirms the consequence from the button's data-instantiate
       case "yarn-key":
         revealYarnKey(actor);
         return;

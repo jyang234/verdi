@@ -421,7 +421,10 @@ func TestBoardSpecPage_Authoring(t *testing.T) {
 		`data-testid="yarn-handle-dc-2"`,
 		`data-testid="uncommitted-indicator" hidden`,
 		`id="commit-push-btn"`,
-		`Add sticky`,
+		// The scratch tier's sticky action is the toolbar's (the retired
+		// rail's "Add sticky", spec/wall-strip-and-drawer-v2 ac-6): its host,
+		// which walltoolbar.js fills from the authoring mode it reads here.
+		`data-testid="wall-toolbar"`, `"mode":"authoring"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("board page missing %q", want)
@@ -1293,7 +1296,7 @@ func TestBoardSpec_ReviewMode(t *testing.T) {
 		t.Errorf("review stickies = %d, want 3 (never dropped)", got)
 	}
 	// A mirror, not an editing surface.
-	for _, absent := range []string{`id="commit-push-btn"`, "Add sticky", "yarn-handle", "graduate-btn", "data-can-", "wall-slot"} {
+	for _, absent := range []string{`id="commit-push-btn"`, `"mode":"authoring"`, "yarn-handle", "graduate-btn", "data-can-", "wall-slot"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("review mode still renders %q", absent)
 		}

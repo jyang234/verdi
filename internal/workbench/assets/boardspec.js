@@ -2776,9 +2776,6 @@
       case "branch-guard-stay":
         hideAllDialogs();
         return;
-      case "add-sticky-btn":
-        startStickyEditor();
-        return;
       case "create-spec-btn":
         openCreateDialog();
         return;
@@ -2799,12 +2796,13 @@
         return;
     }
 
-    // Instantiate (sealed accepted feature wall): consequence-labeled
-    // before it fires — a branch cut is not a hover-and-hope click.
+    // Instantiate (sealed accepted feature wall; the stub's toolbar):
+    // consequence-labeled before it fires — a branch cut is not a
+    // hover-and-hope click. The spike word rides data-spike.
     var inst = t.closest("[data-instantiate]");
     if (inst) {
       var instSlug = inst.getAttribute("data-instantiate");
-      var isSpike = !!inst.closest(".stubcard--spike");
+      var isSpike = inst.hasAttribute("data-spike");
       var instWord = classWord(isSpike ? "spike" : "story");
       pending = { instantiate: instSlug };
       openConfirm(

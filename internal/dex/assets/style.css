@@ -5400,8 +5400,7 @@ body:not(.board-page) > footer.site-foot,
 .boardv2-canvas .stubcard > .card-badges,
 .boardv2-canvas .stubcard > .stub-story-link,
 .boardv2-canvas .stubcard > .asd-stub-correct,
-.boardv2-canvas .stubcard > .stub-instantiated-notice,
-.boardv2-canvas .stubcard > .stub-instantiate {
+.boardv2-canvas .stubcard > .stub-instantiated-notice {
   grid-column: 1 / -1;
   justify-self: start;
   max-width: 100%;
@@ -5420,10 +5419,6 @@ body:not(.board-page) > footer.site-foot,
   text-overflow: ellipsis;
 }
 .boardv2-canvas .stubcard > .stub-instantiated-notice { margin: 1px 0 0; }
-.boardv2-canvas .stubcard > .stub-instantiate {
-  margin-top: 2px;
-  line-height: 1.15;
-}
 
 /* ---- reference cards ---- */
 .boardv2-canvas .refcard {
@@ -5741,15 +5736,6 @@ body:not(.board-page) > footer.site-foot,
 .wall-toolbar-key i:nth-child(3) { background: var(--yarn-depends-on); }
 .wall-toolbar-key i:nth-child(4) { background: var(--yarn-exempts); }
 .wall-toolbar-key i:nth-child(5) { background: var(--yarn-supersedes); }
-/* the existing yarn key, revealed by the toolbar's action (SI-350 (9)):
-   the rail's own section, scrolled into view and focused, wears a ring
-   while it has focus */
-.yarn-key[data-revealed] {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
 /* ---- a thread chip is the button that selects its thread (ac-2; SI-350 (5)) ---- */
 .boardv2-canvas .yarn-chip { cursor: pointer; }
 .boardv2-canvas .yarn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -7187,4 +7173,86 @@ body:not(.board-page) > footer.site-foot,
 @media (max-width: 480px) {
   .record-drawer { border-left: 0; }
 }
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == The rail's homes (spec/wall-strip-and-drawer-v2 ac-6, dc-2; ledger
+   SI-368 (5), (6), (20); lane F3c) ==
+   The side rail and the readiness shell beside it are retired: the wall
+   takes the region's whole width, the room's explanations are quiet notes
+   among the notices, the review mode's inbox tray docks below the wall
+   frame, and a stub's Instantiate is its toolbar's. The rail's and the
+   shell's own rules outside these blocks stay, unread by the wall, since
+   the docs site carries them byte for byte (chrome-and-tokens-v2 ac-4). */
+
+/* ---- one column: no column is kept for a rail or a shell ---- */
+#boardv2-region { display: block; }
+
+/* ---- the room's explanations among the notices (SI-368 (6)): a small
+   label and the sentence, in the notice line's voice — never a panel ---- */
+.board-notices > .board-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.6rem;
+  margin: 0;
+  padding: 0.1rem 0.8rem;
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-left: 3px solid var(--authored);
+  border-radius: 0 4px 4px 0;
+  color: var(--muted-solid);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.board-notices > .board-note > h2 {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+}
+.board-notices > .board-note > .ritual-note {
+  flex: 1 1 20rem;
+  min-width: 0;
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.board-notices > .board-note code { font-size: 0.7rem; }
+/* the read-only rooms speak in the frozen ink: the sealed record and its
+   actions' notes with the record's solid rule, a wall that is not the
+   sealed record with the rule dashed, so the two never read alike */
+.board-notices > .sealed-panel,
+.board-notices > .readonly-panel,
+.board-notices > .create-panel,
+.board-notices > .revise-panel { border-left-color: var(--frozen); }
+.board-notices > .readonly-panel { border-left-style: dashed; }
+.board-notices > .sealed-panel > h2,
+.board-notices > .readonly-panel > h2,
+.board-notices > .create-panel > h2,
+.board-notices > .revise-panel > h2 { color: var(--frozen); }
+
+/* ---- the review mode's inbox tray, docked below the wall frame and
+   always shown there (SI-368 (20)): the trayed comments side by side,
+   wrapping, in the wall's width ---- */
+.asd-main > .inbox-tray {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr));
+  gap: 0.6rem;
+  margin: 0.75rem 0 0;
+}
+.asd-main > .inbox-tray > h2,
+.asd-main > .inbox-tray > .empty { grid-column: 1 / -1; margin-bottom: 0; }
+.asd-main > .inbox-tray > .review-sticky { margin: 0; }
+
+/* ---- a stub's Instantiate on its toolbar (SI-368 (5)): the sealed
+   record's one live affordance, in the accent's ink ---- */
+.wall-toolbar-btn--instantiate { color: var(--accent-strong); font-weight: 600; }
 /* verdi:workbench-only:end */

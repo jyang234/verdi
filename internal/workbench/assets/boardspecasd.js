@@ -17,12 +17,15 @@
 //     exact base digest/bytes and expected identity riding every request
 //     so a stale action is refused by the application core with zero
 //     mutation and answered with a fresh projection;
-//   - the on-demand application panels (provenance / semantic review /
-//     design context) — one explicit projection each, fetched only when
-//     opened, never authority; and
-//   - the typed-operation forms (set-problem / set-outcome / add-object /
-//     stub correction) with field-level slug grammar validation from the
-//     server's own pattern.
+//   - the typed-operation dialogs (add-object and stub correction; the
+//     set-problem and set-outcome edits are the case-file strip's, in
+//     place, wallstrip.js) with field-level slug grammar validation from
+//     the server's own pattern.
+//
+// The on-demand application panels that printed their projections as JSON
+// left the wall with the side rail (spec/wall-strip-and-drawer-v2 ac-6,
+// dc-2; SI-368 (27)(c)): the record drawer's tabs render those
+// projections as prose and tables (walldrawer.js).
 //
 // No polling result ever writes; nothing here derives semantic state; the
 // DOM is always the server's own projection.
@@ -363,37 +366,6 @@
         throw err;
       });
   }
-
-  // -- on-demand application panels ----------------------------------------
-  function renderPanelJSON(bodyEl, jsonText) {
-    bodyEl.textContent = "";
-    var pre = document.createElement("pre");
-    pre.className = "asd-panel-json";
-    try {
-      pre.textContent = JSON.stringify(JSON.parse(jsonText), null, 2);
-    } catch (e) {
-      pre.textContent = jsonText;
-    }
-    bodyEl.appendChild(pre);
-  }
-  document.addEventListener("toggle", function (e) {
-    var panel = e.target;
-    if (!panel.getAttribute || !panel.getAttribute("data-asd-panel")) return;
-    if (!panel.open || panel.getAttribute("data-asd-loaded") === "1") return;
-    var op = panel.getAttribute("data-asd-panel");
-    var bodyEl = panel.querySelector("[data-asd-panel-body]");
-    if (!bodyEl) return;
-    bodyEl.textContent = "deriving…";
-    fetch(url("/api/" + op), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      .then(function (resp) { return resp.text().then(function (t) { return { status: resp.status, text: t }; }); })
-      .then(function (r) {
-        panel.setAttribute("data-asd-loaded", "1");
-        renderPanelJSON(bodyEl, r.text);
-      })
-      .catch(function (err) {
-        bodyEl.textContent = "Could not derive: " + err.message;
-      });
-  }, true);
 
   // -- typed-operation forms ------------------------------------------------
   var opDialog = document.getElementById("asd-op-dialog");

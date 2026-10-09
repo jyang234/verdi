@@ -62,9 +62,14 @@ func TestWallCanvas_PageCarriesStatusPillOutsideRegionAndAsset(t *testing.T) {
 	}
 	// The row hosts the contextual toolbar (ac-3, lane F2b) and the
 	// minimap's host (ac-6, lane F2c) and nothing else of the server's:
-	// the pill is still the asset's.
-	if !strings.Contains(region, `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div></div><aside class="board-side">`) {
-		t.Error("the status row does not follow the canvas inside the frame, before the rail")
+	// the pill is still the asset's. The frame is the board layout's last
+	// child: the side rail that followed it is retired (spec/wall-strip-
+	// and-drawer-v2 ac-6).
+	if !strings.Contains(region, `</div><div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div></div></div>`) {
+		t.Error("the status row does not follow the canvas inside the frame, the frame closing the board layout")
+	}
+	if strings.Contains(region, `board-side`) {
+		t.Error("the region renders the retired rail")
 	}
 }
 

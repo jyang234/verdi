@@ -216,8 +216,9 @@ func TestRecordDrawer_MovesAndKeys(t *testing.T) {
 // TestRecordDrawer_ImportOriginInProvenance (SI-368 (6);
 // spec-import-contract): the import origin rides the Provenance tab, once,
 // for a spec whose working tree carries an import record, with every
-// sentence that keeps it apart from ASD history and acceptance; the
-// rail's panels no longer carry it, and a never-imported spec has none.
+// sentence that keeps it apart from ASD history and acceptance; the wall's
+// region (the retired rail's panels included) never carries it, and a
+// never-imported spec has none.
 func TestRecordDrawer_ImportOriginInProvenance(t *testing.T) {
 	asd := testASDView()
 	asd.ImportRecordHref = "/design/import/record?branch=design%2Fs&spec=s"
@@ -232,10 +233,8 @@ func TestRecordDrawer_ImportOriginInProvenance(t *testing.T) {
 			t.Errorf("the import origin lacks %q:\n%s", want, origin)
 		}
 	}
-	var rail strings.Builder
-	writeASDPanels(&rail, "s", asd)
-	if strings.Contains(rail.String(), "asd-import-origin") {
-		t.Error("the rail's panels still carry the import origin")
+	if region := renderBoardRegion(&BoardProjection{Spec: "s", Mode: modeAuthoring, Problem: "p", Outcome: "o"}, &boardGitState{}, asd); strings.Contains(region, "asd-import-origin") {
+		t.Error("the wall's region carries the import origin")
 	}
 	plain := drawerPage(t, &BoardProjection{Spec: "s", Mode: modeAuthoring, Problem: "p", Outcome: "o"}, testASDView())
 	if strings.Contains(plain, "asd-import-origin") {

@@ -56,7 +56,7 @@ func TestWallMinimap_HostSitsInTheRowHiddenFromAT(t *testing.T) {
 		if n := strings.Count(region, host); n != 1 {
 			t.Errorf("%s: the region renders the minimap host %d times, want exactly 1", mode, n)
 		}
-		row := sliceBetween(region, `<div class="wall-status-row"`, `</div></div></div><aside`)
+		row := sliceBetween(region, `<div class="wall-status-row"`, `</div></div></div></div>`)
 		if row == "" {
 			t.Fatalf("%s: no status row in the region", mode)
 		}
