@@ -5400,8 +5400,7 @@ body:not(.board-page) > footer.site-foot,
 .boardv2-canvas .stubcard > .card-badges,
 .boardv2-canvas .stubcard > .stub-story-link,
 .boardv2-canvas .stubcard > .asd-stub-correct,
-.boardv2-canvas .stubcard > .stub-instantiated-notice,
-.boardv2-canvas .stubcard > .stub-instantiate {
+.boardv2-canvas .stubcard > .stub-instantiated-notice {
   grid-column: 1 / -1;
   justify-self: start;
   max-width: 100%;
@@ -5420,10 +5419,6 @@ body:not(.board-page) > footer.site-foot,
   text-overflow: ellipsis;
 }
 .boardv2-canvas .stubcard > .stub-instantiated-notice { margin: 1px 0 0; }
-.boardv2-canvas .stubcard > .stub-instantiate {
-  margin-top: 2px;
-  line-height: 1.15;
-}
 
 /* ---- reference cards ---- */
 .boardv2-canvas .refcard {
@@ -5741,15 +5736,6 @@ body:not(.board-page) > footer.site-foot,
 .wall-toolbar-key i:nth-child(3) { background: var(--yarn-depends-on); }
 .wall-toolbar-key i:nth-child(4) { background: var(--yarn-exempts); }
 .wall-toolbar-key i:nth-child(5) { background: var(--yarn-supersedes); }
-/* the existing yarn key, revealed by the toolbar's action (SI-350 (9)):
-   the rail's own section, scrolled into view and focused, wears a ring
-   while it has focus */
-.yarn-key[data-revealed] {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
 /* ---- a thread chip is the button that selects its thread (ac-2; SI-350 (5)) ---- */
 .boardv2-canvas .yarn-chip { cursor: pointer; }
 .boardv2-canvas .yarn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -5929,6 +5915,1351 @@ body:not(.board-page) > footer.site-foot,
 }
 /* verdi:workbench-only:end */
 /* verdi:workbench-only:begin */
+/* == the case-file strip and the wall's bar controls =======================
+   spec/wall-strip-and-drawer-v2 ac-1 to ac-4, ac-6; ledger SI-368 (2), (7),
+   (8), (13), (19); lane F3a. Tokens only (chrome-and-tokens-v2 ac-4). */
+
+/* ---- the strip: the problem and the outcome, one line each, with the
+   class tag and the chips beside them; the halves keep the placard hooks,
+   restyled from the card lockup into a band ---- */
+.case-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 0 0 0.9rem;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+}
+.case-strip .placard {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.case-strip .placard-tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+/* one line, measured as a clamp (the wall's own pass marks a cut line and
+   keeps the "full case file" control), ellipsized by the clamp itself */
+.case-strip .placard p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  border-bottom: 1px dotted transparent;
+}
+.case-strip .placard-text.is-clamped {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.case-strip .clamp-more { display: none; }
+/* an editable half: the hand's cursor and the dotted underline on hover
+   or focus say "click to edit" (handoff "Inline case-file edit") */
+.case-strip .placard[data-strip-op],
+.case-strip .placard[data-strip-op] .placard-text { cursor: text; }
+.case-strip .placard[data-strip-op]:hover > .placard-text,
+.case-strip .placard[data-strip-op] > .placard-text:focus-visible { border-bottom-color: var(--muted-solid); }
+.case-strip .placard[data-strip-op] > .placard-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* "full case file": the dog-ear becomes the mono text link the handoff
+   draws; a control the wall's pass adds itself (empty) says the same */
+.case-strip .placard-more {
+  position: static;
+  flex: none;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-solid);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.case-strip .placard-more::after { content: none; }
+.case-strip .placard-more:empty::after { content: "full case file"; }
+.case-strip .placard-more:hover,
+.case-strip .placard-more:focus-visible { color: var(--accent); }
+.case-strip .placard-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.case-strip .case-arrow {
+  flex: none;
+  align-self: baseline;
+  margin: 0;
+  color: var(--muted-solid);
+  font-size: 18px;
+  line-height: 1.2;
+}
+/* the chips: the class tag, the badge chips and the disclosures, one
+   row at the strip's end that wraps under the halves when it must */
+.case-strip-chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+/* the row never widens the strip: it shrinks to the chips' width and a
+   chip wider than that (a long receipt label, up to 18rem) shrinks and
+   ellipsizes with it, so a 320 px page never scrolls sideways */
+.case-strip .case-stamp-row {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.case-strip .case-class-tag { position: static; }
+.case-strip .case-stamp {
+  max-width: min(18rem, 100%);
+  border-radius: 3px;
+  transform: none;
+}
+/* a disclosed-unproven value: the disclosure chip (the bar's own
+   disclosed chip voice), never the flag's */
+.case-chip {
+  display: inline-block;
+  max-width: 24rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.case-chip--disclosed {
+  border: 1px dashed var(--st-pending);
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+}
+/* the in-place editor (handoff "Inline case-file edit"): the statement in
+   a serif textarea, Apply, Cancel and the hint, under the half's tag */
+.case-strip .placard[data-editing] > .placard-text,
+.case-strip .placard[data-editing] > .placard-more { display: none; }
+.case-strip-editor {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.case-strip-editor-text {
+  width: 100%;
+  min-height: 58px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.case-strip-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.case-strip-editor-actions button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.case-strip-editor-actions .btn-primary {
+  font-weight: 600;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+}
+@media (max-width: 40rem) {
+  .case-strip .placard { flex: 1 1 100%; }
+  .case-strip .case-arrow { display: none; }
+}
+
+/* ---- the bar: the readiness pill, Commit & push with its suffix and
+   popover, the sealed wall's actions, and the ⋯ button ---- */
+.readiness-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+  padding: 6px 12px;
+  border: 1px solid var(--st-pending);
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  text-decoration: none;
+}
+.readiness-pill::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.readiness-pill[data-state="ready"] {
+  border-color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  color: var(--st-evidenced);
+}
+.readiness-pill[data-state="unavailable"] { border-style: dashed; }
+.readiness-pill[data-state="unloaded"] {
+  border-color: var(--rule);
+  background: var(--card);
+  color: var(--muted-solid);
+}
+.readiness-pill:hover,
+.readiness-pill:focus-visible { filter: brightness(0.96); }
+.readiness-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the empty autosave status takes no room in the row (it shows while a
+   write is in flight) */
+.topbar-controls > #autosave-status:empty { display: none; }
+/* a narrow row (the handoff's 1440 bar carried no posture summary, no
+   Refresh and no index link; this one does): the pill folds its lead
+   away — the words stay in its tooltip and for the ear — and the
+   controls draw in their padding, so the row stays one row */
+@container topbar (max-width: 1640px) {
+  .readiness-pill { padding: 6px 8px; gap: 0; }
+  .readiness-pill::before { display: none; }
+  .wall-commit-popover > summary .wall-commit-count-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .readiness-pill .readiness-pill-lead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .topbar-controls .topbar-tabs a,
+  .topbar-controls .topbar-tabs .current { padding: 6px 7px; }
+  .topbar-controls { gap: 6px 6px; }
+  .topbar-controls .wall-commit-wrap #commit-push-btn { padding-left: 10px; padding-right: 10px; }
+  .topbar-controls .wall-commit-wrap #commit-push-btn .wall-commit-push {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .wall-commit-popover > summary { padding: 0 6px; }
+  .wall-more-btn { padding: 7px 5px; }
+  /* the sealed wall's actions draw in too: each folds its glyph and the
+     words after its verb away from the eye — "New", "Revise"; the full
+     words stay in the button's name — and draws in its padding */
+  .topbar-controls .create-spec-btn { padding-left: 10px; padding-right: 10px; }
+  .topbar-controls .create-spec-btn .wall-action-glyph,
+  .topbar-controls .create-spec-btn .wall-action-rest {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+/* at the handoff's desktop widths the row never wraps, and neither does
+   the posture group: what gives way is the title (ellipsized, down to
+   1ch) and then the posture words, which shrink from one line down to
+   their widest fact and lay their facts on two lines inside the 52 px
+   row, each fact whole, before the group's items could stack or the
+   controls drop to a second row (the sealed wall's bar — New story and
+   Revise beside the pill, the formal state beside the bytes word and a
+   dirty tree — was the one that did); below this width the row wraps as
+   the chrome's own rule has it */
+@container topbar (min-width: 1400px) {
+  .topbar-row { flex-wrap: nowrap; }
+  .topbar-posture-group { flex-wrap: nowrap; }
+  .topbar-posture-group .asd-posture-tech { flex: 0 1 auto; }
+}
+/* the formal state beside the bytes word, shown when it is not the word
+   itself ("accepted (accepted-pending-build)" on a sealed wall), reads at
+   the summary's own colour: dimmed to 0.7 it fell under the AA contrast
+   the bar's axe check holds every page to, once a sealed wall joined
+   87's page list */
+.topbar-posture-summary .asd-posture-formal { opacity: 1; }
+/* Commit & push and its divided suffix, the count, which is the popover's
+   summary; the indicator is a dot at the wrap's corner, its words for
+   the ear */
+.wall-commit-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+}
+.topbar-controls .wall-commit-wrap #commit-push-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* the button's inner words never take a pointer: the button itself is
+   the click's target, which the wall's script dispatches on by id */
+.topbar-controls .wall-commit-wrap #commit-push-btn .wall-commit-push { pointer-events: none; }
+.wall-commit {
+  display: inline-flex;
+  align-items: stretch;
+}
+.wall-commit .uncommitted {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--st-pending);
+  box-shadow: 0 0 0 2px var(--paper);
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+  overflow: hidden;
+}
+.wall-commit-popover { position: static; }
+.wall-commit-popover > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 0 9px;
+  border: 1px solid var(--accent);
+  border-left: 1px solid color-mix(in srgb, var(--paper) 35%, transparent);
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  color: var(--paper);
+  opacity: 0.92;
+  cursor: pointer;
+}
+.wall-commit-popover > summary::-webkit-details-marker { display: none; }
+.wall-commit-popover > summary:hover,
+.wall-commit-popover[open] > summary { background: var(--accent-strong); border-color: var(--accent-strong); opacity: 1; }
+.wall-commit-popover > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the changes body hangs from the wrap's right edge; below the bar's
+   640 px the controls wrap under the posture and Commit & push may sit at
+   its row's start, where a body hung from its right edge would open
+   off-screen — there the body is laid across the bar instead: fixed, at
+   its static top (right under the count), 16 px in from either side, so
+   at 320 px it opens inside the viewport with its every target reachable,
+   and a page zoomed to 200 % measures the same */
+.wall-commit-changes {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  overflow: auto;
+  z-index: 25;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: 0 10px 28px rgba(20, 26, 18, 0.22);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-align: left;
+}
+/* a closed popover's body takes no layout: Chromium hides a closed
+   <details>'s content from paint, not from layout, so the body, hung
+   absolute or fixed from the count, would keep its boxes over whatever
+   sits under it — the status pill among them (SI-368 (30)) */
+.wall-commit-popover:not([open]) > .wall-commit-changes { display: none; }
+.wall-commit-changes h3,
+.wall-commit-eyebrow {
+  margin: 8px 0 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.wall-commit-eyebrow { margin-top: 0; }
+.wall-commit-changes ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wall-commit-changes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1px 0;
+}
+.wall-commit-changes li > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wall-commit-badge,
+.wall-commit-reason { flex: none; }
+.wall-commit-badge[data-badge="added"] { color: var(--st-evidenced); }
+.wall-commit-badge[data-badge="edited"] { color: var(--authored); }
+.wall-commit-badge[data-badge="changed"] { color: var(--st-pending); }
+.wall-commit-reason,
+.wall-commit-more { color: var(--muted-solid); }
+.wall-commit-unreadable,
+.wall-commit-unlisted {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px dashed var(--st-pending);
+  border-radius: 3px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+}
+.wall-commit-none { margin: 0; color: var(--muted-solid); }
+.wall-commit-note {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  color: var(--muted-solid);
+}
+/* the sealed wall's actions in the bar: New story the primary, Revise
+   beside it, the rail's pill shape left behind */
+.topbar-controls .create-spec-btn {
+  flex: none;
+  align-self: auto;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+/* their glyphs and the words after their verbs never take a pointer: the
+   button itself is the click's target, which the wall's script
+   dispatches on by id (as Commit & push's folded words) */
+.topbar-controls .create-spec-btn .wall-action-glyph,
+.topbar-controls .create-spec-btn .wall-action-rest { pointer-events: none; }
+.topbar-controls #create-spec-btn {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+}
+.topbar-controls #create-spec-btn:hover,
+.topbar-controls #create-spec-btn:focus-visible { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--paper); box-shadow: none; }
+.topbar-controls .revise-spec-btn {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+}
+.topbar-controls .revise-spec-btn:hover,
+.topbar-controls .revise-spec-btn:focus-visible { color: var(--accent); border-color: var(--accent); box-shadow: none; }
+/* the ⋯ button */
+.wall-more-btn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--muted-solid);
+  cursor: pointer;
+}
+.wall-more-btn:hover,
+.wall-more-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+.wall-more-btn[aria-expanded="true"] { background: var(--panel); }
+
+/* ---- the branch switcher in the bar, and the body-level menu ---- */
+.topbar-branch > .branch-switcher {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted transparent;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  cursor: pointer;
+}
+.topbar-branch > .branch-switcher:hover,
+.topbar-branch > .branch-switcher:focus-visible { color: var(--accent); border-bottom-color: currentColor; }
+.topbar-branch > .branch-switcher:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wall-branch-menu {
+  position: fixed;
+  z-index: 30;
+  margin: 0;
+  min-width: 220px;
+  max-width: calc(100vw - 16px);
+  max-height: 60vh;
+  overflow: auto;
+  box-shadow: 0 10px 28px rgba(20, 26, 18, 0.22);
+}
+.wall-branch-menu [role="menuitem"] {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.wall-branch-menu [role="menuitem"]:hover,
+.wall-branch-menu [role="menuitem"]:focus-visible { background: var(--panel); color: var(--accent); }
+@container topbar (max-width: 600px) {
+  .wall-commit-changes {
+    position: fixed;
+    top: auto;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+  }
+}
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == the record drawer and the ⋯ menu =======================================
+   spec/wall-strip-and-drawer-v2 ac-4, ac-5, dc-2; ledger SI-368 (9) to
+   (12), (16); lane F3b. The handoff's "Record drawer" and "⋯ menu", at the
+   body level outside the swapped region. Tokens only (chrome-and-tokens-v2
+   ac-4); shadows keep their rgba(). */
+
+/* ---- the drawer: 460 px at the right, under the bar (its top follows
+   the bar's bottom, walldrawer.js), over the scrim; the whole width where
+   the viewport is narrower. It stacks over the wall and under the board's
+   dialogs and the derivation drawer (z-index 20 and 21), so a dialog the
+   bar opens — Commit & push, New story, Revise — is never hidden behind
+   it; the bar's own popovers and the menus sit over it. ---- */
+.record-drawer-scrim {
+  position: fixed;
+  inset: var(--record-drawer-top, 0px) 0 0 0;
+  z-index: 16;
+  background: var(--scrim);
+}
+.record-drawer {
+  position: fixed;
+  top: var(--record-drawer-top, 0px);
+  right: 0;
+  bottom: 0;
+  z-index: 17;
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  border-left: 1px solid var(--rule);
+  box-shadow: -14px 0 40px rgba(20, 26, 18, 0.22);
+  container-type: inline-size;
+  container-name: record-drawer;
+}
+.record-drawer-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 10px 12px 0 14px;
+  border-bottom: 1px solid var(--rule);
+}
+/* the tab strip: one row at the drawer's 460 px; at a phone's width the
+   tabs wrap rather than scroll or clip */
+.record-drawer-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.record-drawer-tab {
+  flex: none;
+  margin: 0 0 -1px;
+  padding: 8px 6px 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.record-drawer-tab:hover { color: var(--ink); }
+.record-drawer-tab[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom-color: var(--ink);
+}
+.record-drawer-close {
+  flex: none;
+  align-self: center;
+  margin: 0 0 4px auto;
+  padding: 0 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.record-drawer-close:hover { color: var(--ink); }
+.record-drawer-tab:focus-visible,
+.record-drawer-close:focus-visible,
+.record-drawer-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.record-drawer-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.record-drawer-panel { padding: 0 24px 24px; }
+
+/* ---- a tab's intro, sections, rows, badges, empty states and footer
+   (handoff "Generic panel rows") ---- */
+.record-drawer-intro { padding-top: 18px; }
+.record-drawer-eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.record-drawer-title {
+  margin: 4px 0 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.record-drawer-note {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.record-drawer-note:empty { display: none; }
+.record-section { margin-top: 20px; }
+.record-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.record-section-title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.record-section[data-tone="violated"] .record-section-title { color: var(--st-violated); }
+.record-section[data-tone="evidenced"] .record-section-title { color: var(--st-evidenced); }
+.record-section[data-tone="frozen"] .record-section-title { color: var(--frozen); }
+.record-section-aside {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-rows { margin: 0; }
+.record-row {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.record-key {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-value {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--serif);
+  overflow-wrap: anywhere;
+}
+.record-value.record-mono { font-family: var(--mono); font-size: 12px; }
+.record-note {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-solid);
+}
+.record-badge-cell { margin: 0; justify-self: end; }
+/* a badge's words carry its meaning; its colour only repeats them */
+.record-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+  white-space: nowrap;
+}
+.record-badge[data-tone="evidenced"] { color: var(--st-evidenced); }
+.record-badge[data-tone="authored"] { color: var(--authored); }
+.record-badge[data-tone="violated"] { color: var(--st-violated); }
+.record-badge[data-tone="pending"] { color: var(--st-pending); border-style: dashed; }
+.record-badge[data-tone="frozen"] { color: var(--frozen); }
+.record-empty {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-unavailable,
+.record-drawer .readiness-tab-unavailable {
+  margin: 18px 0 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--st-pending);
+  border-radius: 6px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.record-status {
+  margin: 18px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.record-prose {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.record-command {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.record-drawer-foot {
+  margin: 18px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer-foot code { font-size: inherit; }
+.record-drawer .asd-import-origin { margin: 18px 0 0; font-size: 13px; line-height: 1.5; }
+.record-drawer kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 11px;
+  text-align: center;
+}
+/* the yarn key's rows: the swatch in the thread's colour (dashed or
+   dotted as the wall draws it) beside its type's name */
+.record-yarn .record-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.record-yarn .yarn-key-swatch { transform: none; }
+.record-yarn [data-edge-type="implements"] .yarn-key-swatch { color: var(--yarn-implements); }
+.record-yarn [data-edge-type="resolves"] .yarn-key-swatch { color: var(--yarn-resolves); }
+.record-yarn [data-edge-type="depends-on"] .yarn-key-swatch { color: var(--yarn-depends-on); }
+.record-yarn [data-edge-type="supersedes"] .yarn-key-swatch { color: var(--yarn-supersedes); border-top-style: dashed; }
+.record-yarn [data-edge-type="exempts"] .yarn-key-swatch { color: var(--yarn-exempts); }
+.record-yarn [data-edge-type="relates"] .yarn-key-swatch { color: var(--yarn-relates); border-top-style: dashed; }
+.record-yarn [data-layer="scoping"] .yarn-key-swatch { border-top-style: dotted; }
+.record-yarn [data-layer="scoping"][data-edge-type="covers"] .yarn-key-swatch { color: var(--st-evidenced); }
+.record-yarn [data-layer="scoping"][data-edge-type="resolves"] .yarn-key-swatch { color: var(--st-waived); }
+.record-drawer-noscript {
+  margin: 0.9rem 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the Readiness tab: the shared readiness body in the drawer's
+   measure (handoff "Record drawer", Readiness) ---- */
+.record-drawer .readiness-tab { padding-top: 18px; }
+.record-drawer .readiness-orient { display: block; margin: 0; }
+.record-drawer .readiness-eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+.record-drawer .readiness-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-class-chip {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-refs {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-dot { margin: 0 6px; color: var(--rule); }
+.record-drawer .readiness-step {
+  margin: 8px 0 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.record-drawer .readiness-purpose { margin: 6px 0 0; font-size: 12.5px; max-width: none; }
+.record-drawer .readiness-stale {
+  display: block;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+/* the four stations: a 4-column grid, each topped by its state's colour */
+.record-drawer .readiness-rail { margin: 18px 0 0; }
+.record-drawer .readiness-rail-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 0;
+}
+.record-drawer .readiness-station + .readiness-station { border-left: 0; }
+.record-drawer .readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 100%;
+  padding: 8px 2px 0;
+  border-top: 3px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+}
+.record-drawer .readiness-station[data-state="proven"] .readiness-station-link { border-top-color: var(--st-evidenced); }
+.record-drawer .readiness-station[data-state="violated-with-witness"] .readiness-station-link { border-top-color: var(--st-violated); }
+.record-drawer .readiness-station[data-state="unproven"] .readiness-station-link { border-top-color: var(--st-pending); }
+.record-drawer .readiness-station-link:hover { background: var(--panel); }
+.record-drawer .readiness-station-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.record-drawer .readiness-station-num { font-size: 10px; color: var(--ink); }
+.record-drawer .readiness-station-label {
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.record-drawer .readiness-station-id {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-station-line {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+/* the state chip in the tab: a mono badge, bordered (dashed when there is
+   not enough evidence yet), so colour is never the only signal */
+.record-drawer .readiness-state {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.record-drawer .readiness-order {
+  margin: 14px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-columns { display: block; }
+.record-drawer .readiness-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 22px 0 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.record-drawer .readiness-queue .readiness-heading { color: var(--st-pending); }
+.record-drawer .readiness-heading--violated { color: var(--st-violated); }
+.record-drawer .readiness-heading--proven { color: var(--st-evidenced); }
+.record-drawer .readiness-queue { margin: 0; }
+.record-drawer .readiness-queue-note,
+.record-drawer .readiness-completed-note {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-queue-list { display: flex; flex-direction: column; gap: 8px; }
+/* a Focus next item: its guidance first, its target beside it; a click
+   finds the target on the wall (SI-368 (16)) */
+.record-drawer .readiness-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--st-pending);
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: none;
+  transition: background 0.15s;
+}
+.record-drawer .readiness-concern--violated-with-witness.readiness-card { border-left-color: var(--st-violated); }
+.record-drawer .readiness-card:not([data-target-kind="none"]) { cursor: pointer; }
+.record-drawer .readiness-card:not([data-target-kind="none"]):hover { background: var(--panel); }
+.record-drawer .readiness-card[data-found] { border-color: var(--ink); border-left-color: var(--ink); }
+.record-drawer .readiness-rank {
+  display: block;
+  width: auto;
+  height: auto;
+  padding-top: 2px;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.record-drawer .readiness-primary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.record-drawer .readiness-summary {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.record-drawer .readiness-target {
+  flex: none;
+  max-width: 45%;
+  padding: 1px 6px;
+  border: 1px solid var(--st-pending);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--st-pending);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+.record-drawer .readiness-target:hover,
+.record-drawer .readiness-target:focus-visible { background: var(--st-pending-tint); }
+.record-drawer .readiness-target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.record-drawer .readiness-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-when { text-transform: none; letter-spacing: 0; }
+.record-drawer .readiness-copy > .readiness-state { align-self: flex-start; }
+.record-drawer .readiness-tech { margin: 2px 0 0; }
+.record-drawer .readiness-tech summary { font-family: var(--mono); font-size: 11px; }
+.record-drawer .readiness-tech-facts { font-size: 11px; }
+.record-drawer .readiness-more-summary {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted-solid);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.record-drawer .readiness-known,
+.record-drawer .readiness-completed {
+  margin-top: 22px;
+  padding-top: 0;
+  border-top: 1px solid var(--rule);
+}
+.record-drawer .readiness-known-list { margin: 0; padding: 0; list-style: none; }
+.record-drawer .readiness-known-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 6px 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.record-drawer .readiness-known-link:hover .readiness-known-text { text-decoration: underline; }
+.record-drawer .readiness-known-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.record-drawer .readiness-known-text {
+  flex: 1 1 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.record-drawer .readiness-completed-list { margin: 0; padding: 0; list-style: none; }
+.record-drawer .readiness-row { padding: 8px 0; border-top: 1px solid var(--rule); }
+.record-drawer .readiness-row .readiness-summary { font-size: 13px; font-weight: 400; }
+.record-drawer .readiness-queue-empty,
+.record-drawer .readiness-known-empty,
+.record-drawer .readiness-completed-empty {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--muted-solid);
+}
+.record-drawer .readiness-tab-capabilities {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+
+/* ---- the ⋯ menu: 260 px under the button, its counts loaded when it
+   opens (SI-368 (11)) ---- */
+.wall-more-menu {
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  min-width: 260px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(20, 26, 18, 0.22);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.wall-more-group {
+  margin: 0;
+  padding: 6px 10px 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.wall-more-sep { height: 1px; margin: 6px 4px; background: var(--rule); }
+.wall-more-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wall-more-item:hover,
+.wall-more-item:focus-visible { background: var(--panel); }
+.wall-more-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wall-more-aside { color: var(--muted-solid); white-space: nowrap; }
+.wall-more-aside[data-count-state="attention"] { color: var(--authored); font-weight: 700; }
+.wall-more-aside[data-count-state="unavailable"] { color: var(--st-pending); }
+
+/* ---- the wall's bar from 1280 up (F3a closure N1): one row of at most
+   56 px on every wall, no control clipped. From a 1200 px bar (a 1280 px
+   viewport) the row never wraps, as the 1400 px rule above has it, and
+   what gives way is reordered toward the handoff's bar, where the title
+   keeps its words and the posture text is what shrinks: the posture
+   group's share comes after the title's, so the posture words take their
+   two lines before the title ellipsizes. The posture summary's separator
+   rides the tree fact and its arrow sits out of the flow, so two lines
+   are its narrowest (never the dot or the arrow on a line of their own).
+   Up to a 1640 px bar the row's gaps draw in, the chips' tracking and
+   the index link's padding tighten, and Refresh folds to its glyph, its
+   name kept whole for the ear. ---- */
+@container topbar (min-width: 1200px) {
+  .boardv2-page .topbar-row { flex-wrap: nowrap; }
+  .boardv2-page .topbar-posture-group { flex: 1 1 0; width: auto; flex-wrap: nowrap; }
+  .boardv2-page .topbar-posture-group .asd-posture-tech { flex: 0 1 auto; }
+  .boardv2-page .topbar-posture > summary { position: relative; padding-right: 18px; }
+  .boardv2-page .topbar-posture > summary::after { position: absolute; right: 6px; bottom: 3px; }
+  .boardv2-page .topbar-posture > summary .topbar-dot { display: none; }
+  .boardv2-page .topbar-posture > summary .asd-posture-tree::before { content: "\00B7" / ""; margin-right: 6px; color: var(--rule); }
+}
+@container topbar (min-width: 1200px) and (max-width: 1640px) {
+  .boardv2-page .topbar-row { column-gap: 8px; }
+  .boardv2-page .topbar-posture-group { column-gap: 6px; }
+  .boardv2-page .topbar-posture-group .asd-refresh { font-size: 0; padding: 3px 7px; }
+  .boardv2-page .topbar-posture-group .asd-refresh::before { content: "\21BB" / ""; font-size: 13px; line-height: 1; }
+  .boardv2-page .topbar-posture-group > .board-mode-tag,
+  .boardv2-page .topbar .topbar-chip { letter-spacing: 0.06em; padding-left: 6px; padding-right: 6px; }
+  .boardv2-page .topbar-nav a { padding-left: 6px; padding-right: 6px; }
+  .boardv2-page .topbar-controls .create-spec-btn { padding-left: 8px; padding-right: 8px; }
+}
+
+/* ---- a phone's width: the drawer takes the viewport, a 16 px gutter;
+   the rows stack their key over the value; the stations pair up ---- */
+@container record-drawer (max-width: 420px) {
+  .record-drawer-head { padding: 8px 8px 0 10px; }
+  .record-drawer-panel { padding: 0 16px 20px; }
+  .record-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .record-key { grid-column: 1 / -1; }
+  .record-drawer .readiness-rail-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .record-drawer { border-left: 0; }
+}
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* == The rail's homes (spec/wall-strip-and-drawer-v2 ac-6, dc-2; ledger
+   SI-368 (5), (6), (20); lane F3c) ==
+   The side rail and the readiness shell beside it are retired: the wall
+   takes the region's whole width, the room's explanations are quiet notes
+   among the notices, the review mode's inbox tray docks below the wall
+   frame, and a stub's Instantiate is its toolbar's. The rail's and the
+   shell's own rules outside these blocks stay, unread by the wall, since
+   the docs site carries them byte for byte (chrome-and-tokens-v2 ac-4). */
+
+/* ---- one column: no column is kept for a rail or a shell ---- */
+#boardv2-region { display: block; }
+
+/* ---- the room's explanations among the notices (SI-368 (6)): a small
+   label and the sentence, in the notice line's voice — never a panel ---- */
+.board-notices > .board-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.6rem;
+  margin: 0;
+  padding: 0.1rem 0.8rem;
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-left: 3px solid var(--authored);
+  border-radius: 0 4px 4px 0;
+  color: var(--muted-solid);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.board-notices > .board-note > h2 {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+}
+.board-notices > .board-note > .ritual-note {
+  flex: 1 1 20rem;
+  min-width: 0;
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.board-notices > .board-note code { font-size: 0.7rem; }
+/* the read-only rooms speak in the frozen ink: the sealed record and its
+   actions' notes with the record's solid rule, a wall that is not the
+   sealed record with the rule dashed, so the two never read alike */
+.board-notices > .sealed-panel,
+.board-notices > .readonly-panel,
+.board-notices > .create-panel,
+.board-notices > .revise-panel { border-left-color: var(--frozen); }
+.board-notices > .readonly-panel { border-left-style: dashed; }
+.board-notices > .sealed-panel > h2,
+.board-notices > .readonly-panel > h2,
+.board-notices > .create-panel > h2,
+.board-notices > .revise-panel > h2 { color: var(--frozen); }
+
+/* ---- the review mode's inbox tray, docked below the wall frame and
+   always shown there (SI-368 (20)): the trayed comments side by side,
+   wrapping, in the wall's width ---- */
+.asd-main > .inbox-tray {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr));
+  gap: 0.6rem;
+  margin: 0.75rem 0 0;
+}
+.asd-main > .inbox-tray > h2,
+.asd-main > .inbox-tray > .empty { grid-column: 1 / -1; margin-bottom: 0; }
+.asd-main > .inbox-tray > .review-sticky { margin: 0; }
+
+/* ---- a stub's Instantiate on its toolbar (SI-368 (5)): the sealed
+   record's one live affordance, in the accent's ink ---- */
+.wall-toolbar-btn--instantiate { color: var(--accent-strong); font-weight: 600; }
 /* ---------- the index's four columns (spec/index-v2 ac-1, ac-2; parent
    workbench-redesign dc-12; handoff README "Screen 2 — Index") ----------
    The directory's four status groups drawn side by side as columns — On

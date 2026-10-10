@@ -6,6 +6,7 @@ import {
   branchBoardPath,
   worktreeDiagramPath,
 } from "./fixtures";
+import { stickyAction } from "./helpers";
 
 // The showcase live-draft feature (public rollout design §4.3: "one live
 // draft on a design branch"). payoff-quote-portal is authored on
@@ -44,8 +45,10 @@ test("the payoff-quote-portal draft is a live authoring wall under /b/", async (
   for (const ac of SHOWCASE.SHOWCASE_DRAFT_ACS) {
     await expect(page.getByTestId(`card-${ac}`)).toBeVisible();
   }
-  // The authoring affordance is present (a draft on its design branch).
-  await expect(page.getByRole("button", { name: "Add sticky" })).toBeVisible();
+  // The authoring affordance is present (a draft on its design branch):
+  // the toolbar's Sticky, the retired rail's Add sticky (spec/wall-strip-
+  // and-drawer-v2 ac-6).
+  await expect(stickyAction(page)).toBeVisible();
 });
 
 // VL-017's TWO legal paths, both showcased on one wall: the open question

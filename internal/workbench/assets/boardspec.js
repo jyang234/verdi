@@ -178,21 +178,19 @@
     if (gesture || editing) return true;
     // An OPEN typed-operation dialog is an active interaction (Codex
     // closure round 1): its draft input is bound to the base it was
-    // opened against, so the projection swap AND the mutation-base
-    // adoption are both held until the dialog terminates — a concurrent
-    // change then surfaces as the kernel's typed STALE refusal when the
-    // preserved input is applied, never a silent overwrite riding a
-    // freshly adopted base.
+    // opened against, so the swap AND the base adoption are held until
+    // it closes — a concurrent change then surfaces as the kernel's
+    // typed STALE refusal, never a silent overwrite of a fresh base.
     var op = document.getElementById("asd-op-dialog");
     if (op && !op.hidden) return true;
     var stub = document.getElementById("asd-stub-dialog");
     if (stub && !stub.hidden) return true;
-    // The open edge type picker and an open add slot hold the swap too
-    // (spec/wall-canvas-v2 co-2; SI-350 (13)).
+    // The picker, an open slot or draft, and a strip editor hold the swap
+    // (wall-canvas-v2 co-2; SI-350 (13); SI-368 (13)).
     var picker = document.getElementById("edge-picker");
     if (picker && !picker.hidden) return true;
     var c = canvas();
-    return !!(c && c.querySelector(".sticky-draft, .wall-slot[data-open]"));
+    return !!((c && c.querySelector(".sticky-draft, .wall-slot[data-open]")) || document.querySelector("[data-holds-projection]"));
   }
 
   function applyFragment(html) {
@@ -2778,9 +2776,6 @@
       case "branch-guard-stay":
         hideAllDialogs();
         return;
-      case "add-sticky-btn":
-        startStickyEditor();
-        return;
       case "create-spec-btn":
         openCreateDialog();
         return;
@@ -2801,12 +2796,13 @@
         return;
     }
 
-    // Instantiate (sealed accepted feature wall): consequence-labeled
-    // before it fires — a branch cut is not a hover-and-hope click.
+    // Instantiate (sealed accepted feature wall; the stub's toolbar):
+    // consequence-labeled before it fires — a branch cut is not a
+    // hover-and-hope click. The spike word rides data-spike.
     var inst = t.closest("[data-instantiate]");
     if (inst) {
       var instSlug = inst.getAttribute("data-instantiate");
-      var isSpike = !!inst.closest(".stubcard--spike");
+      var isSpike = inst.hasAttribute("data-spike");
       var instWord = classWord(isSpike ? "spike" : "story");
       pending = { instantiate: instSlug };
       openConfirm(

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
+import { openStickyDraft } from "./helpers";
 
 // Owner feature request (2026-07-19): in the sticky creation surface,
 // pressing Enter creates/commits the sticky; Shift+Enter inserts a
@@ -17,7 +18,7 @@ test.describe("sticky editor keys: Enter commits, Shift+Enter breaks the line", 
   });
 
   test("Enter commits the typed sticky", async ({ page }) => {
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     await expect(draft).toBeVisible();
     await draft.getByRole("button", { name: "Comment" }).click();
@@ -45,7 +46,7 @@ test.describe("sticky editor keys: Enter commits, Shift+Enter breaks the line", 
   test("Shift+Enter writes a newline; Enter commits the multi-line sticky, which persists", async ({
     page,
   }) => {
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     await draft.getByRole("button", { name: "Question" }).click();
 
@@ -89,7 +90,7 @@ test.describe("sticky editor keys: Enter commits, Shift+Enter breaks the line", 
   test("Enter without a chosen type keeps the draft and shows the hint (no silent default)", async ({
     page,
   }) => {
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     const editor = draft.getByRole("textbox", { name: "Sticky text" });
     const text = "an untyped thought Enter must not save";

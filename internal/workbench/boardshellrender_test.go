@@ -3,49 +3,93 @@ package workbench
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
-// The wall's concern cards (spec/spec-documents ac-12, R-W4-7): the
-// guidance sentence is the primary line when the row carries one, the
-// fact stays visible as a secondary line, and timing lives in the
-// technical disclosure (plus data-timing on the article) rather than
-// inline on the stage line. Proven rows carry no timing at all.
+// The wall's concern cards (spec/spec-documents ac-12, R-W4-7), which the
+// record drawer's Readiness tab renders since the wall shell retired
+// (SI-368 (24)(a), (32) T2): the guidance sentence is the primary line
+// when the row carries one, otherwise the fact; the fact, concern id,
+// timing and blocking flag are filed in the technical disclosure, where
+// every row carries its Timing; an unresolved row's step label carries
+// its "now" or "later" mark and the article its data-timing, and a
+// proven row carries neither.
+
+// concernCardSnapshot is a snapshot whose current step is Define the
+// work: one violated row there with its guidance, one unresolved row in
+// Get approval waiting on it, and one proven row.
+func concernCardSnapshot() readinesspilot.Snapshot {
+	current := readinesspilot.Concern{
+		ID: "shape/question/oq-1", Area: readinesspilot.AreaShape, State: readinesspilot.StateViolated, Blocking: true,
+		Timing: readinesspilot.TimingCurrent, Summary: "Declared open question remains unresolved",
+		Guidance:  "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it.",
+		Witnesses: []string{"oq-1"}, Destination: readinesspilot.Destination{BoardPath: "/board/spec/x"},
+	}
+	later := readinesspilot.Concern{
+		ID: "review/action", Area: readinesspilot.AreaReview, State: readinesspilot.StateUnproven, Blocking: true,
+		Timing: readinesspilot.TimingCurrent, Summary: "Lifecycle and safe-action posture can advance review",
+		Guidance:  "Establish the facts the witnesses name, so verdi journey can offer a safe review action.",
+		Witnesses: []string{"safe review action is unavailable"}, Destination: readinesspilot.Destination{CLI: []string{"verdi", "journey"}},
+	}
+	proven := readinesspilot.Concern{
+		ID: "shape/problem", Area: readinesspilot.AreaShape, State: readinesspilot.StateProven, Blocking: true,
+		Timing: readinesspilot.TimingCurrent, Summary: "Problem statement is present", Witnesses: []string{},
+		Destination: readinesspilot.Destination{CLI: []string{}},
+	}
+	return readinesspilot.Snapshot{
+		TargetRef: "spec/x", TargetTitle: "X", TargetClass: "feature", Branch: "design/x", Head: readinessFixtureHead,
+		Areas: []readinesspilot.Area{
+			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateViolated},
+			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateUnproven},
+		},
+		CurrentFocus: readinesspilot.AreaShape,
+		Attention:    []readinesspilot.Concern{current, later},
+		AllConcerns:  []readinesspilot.Concern{proven, current, later},
+		StaleNotice:  "Derived at HEAD " + readinessFixtureHead + " for this request.",
+	}
+}
 
 func TestWriteASDConcern_GuidanceIsPrimaryFactIsSecondary(t *testing.T) {
-	asd := &asdView{Shell: asdShell{CurrentFocus: asdAreaSuccess}}
-	var b strings.Builder
-	writeASDConcern(&b, asdConcern{ID: "success/ac", Area: asdAreaSuccess, State: asdStateViolated, Blocking: true, Summary: "No acceptance criteria are declared.", Guidance: "Declare what must be true when this lands.", Witnesses: []string{"w"}}, asd, 1)
-	html := b.String()
-	primary := `<p class="readiness-summary" data-testid="asd-guidance-success/ac">Declare what must be true when this lands.</p>`
-	fact := `<p class="asd-fact" data-testid="asd-fact-success/ac">No acceptance criteria are declared.</p>`
-	if !strings.Contains(html, primary) || !strings.Contains(html, fact) || strings.Index(html, primary) > strings.Index(html, fact) {
-		t.Fatalf("guidance must lead and the fact follow:\n%s", html)
+	tab := renderReadinessTab(nil, concernCardSnapshot(), nil)
+	row := concernRow(t, tab, "shape/question/oq-1")
+	primary := `<div class="readiness-copy"><div class="readiness-primary"><p class="readiness-summary readiness-guidance">Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it.</p></div>`
+	fact := `<dt>Fact</dt><dd class="readiness-fact">Declared open question remains unresolved</dd>`
+	if !strings.Contains(row, primary) || !strings.Contains(row, fact) || strings.Index(row, primary) > strings.Index(row, fact) {
+		t.Fatalf("guidance must lead and the fact follow, filed:\n%s", row)
 	}
-	if strings.Contains(html, "asd-timing") || !strings.Contains(html, `data-timing="now"`) || !strings.Contains(html, `<dt>Timing</dt><dd><code>now</code></dd>`) {
-		t.Fatalf("timing must live in the disclosure and the data attribute:\n%s", html)
+	if !strings.Contains(row, `data-timing="now"`) || !strings.Contains(row, `<dt>Timing</dt><dd><code>current</code></dd>`) ||
+		!strings.Contains(row, `<p class="readiness-stage">Define the work <span class="readiness-when readiness-when--now">now</span></p>`) {
+		t.Fatalf("timing must ride the disclosure, the step label and the data attribute:\n%s", row)
 	}
-	for _, want := range []string{`<dt>Concern</dt><dd><code>success/ac</code></dd>`, `<dt>Blocking</dt><dd><code>true</code></dd>`, `<span class="readiness-state readiness-state--violated-with-witness">Needs attention</span>`, `<p class="readiness-stage">Define success</p>`} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("missing %q:\n%s", want, html)
+	for _, want := range []string{
+		`<dt>Concern</dt><dd><code>shape/question/oq-1</code></dd>`,
+		`<dt>Blocking</dt><dd><code>true</code></dd>`,
+		`<span class="readiness-state readiness-state--violated-with-witness">Needs attention</span>`,
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("missing %q:\n%s", want, row)
 		}
 	}
 }
 
 func TestWriteASDConcern_NoGuidanceShowsSummaryAsPrimaryAndLaterTiming(t *testing.T) {
-	asd := &asdView{Shell: asdShell{CurrentFocus: asdAreaShape}}
-	var b strings.Builder
-	writeASDConcern(&b, asdConcern{ID: "review/x", Area: asdAreaReview, State: asdStateUnproven, Summary: "Human review has not accepted this proposal yet."}, asd, 2)
-	html := b.String()
-	if !strings.Contains(html, `<p class="readiness-summary" data-testid="asd-summary-review/x">Human review has not accepted this proposal yet.</p>`) || strings.Contains(html, "asd-fact") {
-		t.Fatalf("summary must be the primary line when there is no guidance:\n%s", html)
+	tab := renderReadinessTab(nil, concernCardSnapshot(), nil)
+	// A row without guidance — a proven one, since every unresolved row
+	// carries its guidance (SI-338 (1)) — leads with its fact.
+	proven := concernRow(t, tab, "shape/problem")
+	if !strings.Contains(proven, `<div class="readiness-primary"><p class="readiness-summary">Problem statement is present</p></div>`) || strings.Contains(proven, "readiness-guidance") {
+		t.Fatalf("the fact must be the primary line when there is no guidance:\n%s", proven)
 	}
-	if !strings.Contains(html, `data-timing="later"`) || !strings.Contains(html, `<dt>Timing</dt><dd><code>later — waits on Define the work</code></dd>`) {
-		t.Fatalf("later timing:\n%s", html)
+	// A proven row is marked neither now nor later; its Timing is filed in
+	// the disclosure like every row's (SI-368 (24)(a), (32) T2).
+	if strings.Contains(proven, "data-timing") || strings.Contains(proven, "readiness-when") || !strings.Contains(proven, `<dt>Timing</dt><dd><code>current</code></dd>`) {
+		t.Fatalf("a proven row carries no timing mark, and its Timing is filed:\n%s", proven)
 	}
-	// A proven row carries no timing at all.
-	b.Reset()
-	writeASDConcern(&b, asdConcern{ID: "shape/problem", Area: asdAreaShape, State: asdStateProven, Summary: "The problem statement is present."}, asd, 0)
-	if strings.Contains(b.String(), "Timing") || strings.Contains(b.String(), "data-timing") {
-		t.Fatalf("proven rows carry no timing:\n%s", b.String())
+	later := concernRow(t, tab, "review/action")
+	if !strings.Contains(later, `data-timing="later"`) || !strings.Contains(later, `<span class="readiness-when readiness-when--later">later — waits on Define the work</span>`) {
+		t.Fatalf("later timing:\n%s", later)
 	}
 }

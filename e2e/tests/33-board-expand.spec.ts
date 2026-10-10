@@ -48,13 +48,16 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     const p = placard.locator(".placard-text");
 
     // The hint is present because the headline is measurably clamped: it
-    // wears .is-clamped, advertises itself as expandable, changes the
-    // cursor, and grows a "⋯" mark. The always-present dog-ear sits beside
-    // it (this placard is expandable regardless — see the width-independence
-    // test below).
+    // wears .is-clamped, advertises itself as expandable, and grows a "⋯"
+    // mark. The always-present "full case file" control sits beside it
+    // (this placard is expandable regardless — see the width-independence
+    // test below). AMENDED (spec/wall-strip-and-drawer-v2 ac-1; SI-368
+    // (13)): on the authoring wall the one-line strip's half edits in
+    // place, so its cursor is the text cursor and the full text is behind
+    // the "full case file" control, not a click on the line.
     await expect(p).toHaveClass(/is-clamped/);
     await expect(p).toHaveAttribute("data-expandable", "");
-    await expect(p).toHaveCSS("cursor", "zoom-in");
+    await expect(p).toHaveCSS("cursor", "text");
     await expect(placard.locator(".clamp-more")).toHaveCount(1);
     await expect(placard.locator(".placard-more")).toHaveCount(1);
 
@@ -66,9 +69,10 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     const full = (await p.textContent())!.trim();
     expect(full.length).toBeGreaterThan(200); // genuinely long
 
-    // A click opens the read-only expand dialog: header names the element
-    // ("PROBLEM"), body is the FULL headline text, in the existing chrome.
-    await p.click();
+    // The "full case file" control opens the read-only expand dialog:
+    // header names the element ("PROBLEM"), body is the FULL headline
+    // text, in the existing chrome.
+    await placard.locator(".placard-more").click();
     const dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveClass(/board-dialog/); // the shared chrome
@@ -94,10 +98,12 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     page,
   }) => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
-    const p = page.getByTestId("placard-problem").locator(".placard-text");
+    // The strip's "full case file" control (on the authoring wall a click
+    // on the line edits it in place; SI-368 (13)).
+    const more = page.getByTestId("placard-problem").locator(".placard-more");
 
     // × closes.
-    await p.click();
+    await more.click();
     let dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Close" }).click();
@@ -105,7 +111,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
 
     // The backdrop closes (a soft-scrim click, the same exit every board
     // dialog offers).
-    await p.click();
+    await more.click();
     dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     // Click the scrim at a corner clear of the centered dialog.
@@ -119,7 +125,14 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     // SHOWCASE.EMPTY_SPEC's one-line problem headline fits AND its `## Problem` body
     // section is empty — the one degenerate case: nothing more to show than
     // the three lines on its face, so the always-on dog-ear is suppressed.
-    // No clamp, no body, no affordance, and a click does nothing.
+    // No clamp, no body, no affordance, and a click does nothing. This wall
+    // is served off a branch that is not its own, so its typed writes are
+    // refused and the strip's line is not editable here either (no
+    // in-place editor, the plain cursor). The strip shows each statement
+    // on ONE line in half its width, beside the chips and the readiness
+    // shell's column (retired later in the story), so "fits" is a wider
+    // premise than the three-line placard's: this headline fits at 2560 px.
+    await page.setViewportSize({ width: 2560, height: 900 });
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const placard = page.getByTestId("placard-problem");
     const p = placard.locator(".placard-text");
@@ -129,15 +142,18 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     await expect(p).toHaveCSS("cursor", "auto");
     await expect(placard.locator(".clamp-more")).toHaveCount(0);
     // The degenerate signature: no body section, not marked expandable, no
-    // dog-ear.
+    // "full case file" control (the whole file is on its face).
     await expect(placard.getByTestId("placard-full-problem")).toHaveCount(0);
     await expect(placard).not.toHaveClass(/placard--expandable/);
     await expect(placard.locator(".placard-more")).toHaveCount(0);
+    await expect(placard).not.toHaveAttribute("data-strip-op", /./);
 
     await p.click();
-    // A generous beat past the expand delay: the dialog never appears.
+    // A generous beat past the expand delay: the dialog never appears, and
+    // no editor either.
     await page.waitForTimeout(400);
     await expect(page.getByTestId("expand-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("case-strip-editor-problem")).toHaveCount(0);
   });
 
   test("the affordance works in a non-authoring (review) room too", async ({
@@ -174,7 +190,11 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     // because it HAS a fuller file to open, not because the viewport happened
     // to clamp its headline. SHOWCASE.DESIGN_SPEC's OUTCOME headline is short — at the
     // config's wide viewport (1880px) it does NOT overflow — yet the placard
-    // carries a rendered `## Outcome` body and stays expandable.
+    // carries a rendered `## Outcome` body and stays expandable. The strip
+    // shows the outcome on ONE line in half its width (beside the chips
+    // and the readiness shell's column, retired later in the story), so
+    // the headline fits at 2560 px, where the premise holds.
+    await page.setViewportSize({ width: 2560, height: 900 });
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const placard = page.getByTestId("placard-outcome");
     const p = placard.locator(".placard-text");
@@ -184,21 +204,24 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     // wears no truncation ⋯ …
     await expect(p).not.toHaveClass(/is-clamped/);
     await expect(placard.locator(".clamp-more")).toHaveCount(0);
-    // … and yet the placard is expandable and wears its dog-ear.
+    // … and yet the placard is expandable and wears its "full case file"
+    // control. On the authoring wall the half itself edits in place, so
+    // its cursor is the text cursor (SI-368 (13)).
     await expect(placard).toHaveClass(/placard--expandable/);
     await expect(placard.locator(".placard-more")).toHaveCount(1);
-    await expect(placard).toHaveCSS("cursor", "zoom-in");
+    await expect(placard).toHaveCSS("cursor", "text");
 
     // The server rendered the body section into a hidden `.placard-full`.
     const bodyEl = placard.getByTestId("placard-full-outcome");
     await expect(bodyEl).toHaveCount(1);
     await expect(bodyEl).toBeHidden();
 
-    // A click reads the FULL case file: the dialog shows the body as rendered
-    // HTML — a distinctive phrase that lives in the `## Outcome` body but NOT
-    // in the short headline, plus real markup (a 3-item list, emphasis)
-    // proving it is the rendered section, not the headline read back.
-    await p.click();
+    // "Full case file" reads the FULL case file: the dialog shows the body
+    // as rendered HTML — a distinctive phrase that lives in the `## Outcome`
+    // body but NOT in the short headline, plus real markup (a 3-item list,
+    // emphasis) proving it is the rendered section, not the headline read
+    // back.
+    await placard.locator(".placard-more").click();
     const dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveClass(/board-dialog/);
@@ -251,8 +274,10 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   // AMENDED (spec/wall-canvas-v2 ac-2; SI-350 (4)): a single click on a
   // card SELECTS it and no longer opens the expand dialog; Enter or a
   // double click edits it, and the editor reads the whole text back. The
-  // clamp stays visible (fade and ⋯) — truncation is never silent — and
-  // the placards above keep their click-to-expand unchanged.
+  // clamp stays visible (fade and ⋯) — truncation is never silent. The
+  // strip's halves above edit in place on the authoring wall
+  // (spec/wall-strip-and-drawer-v2 ac-1; SI-368 (13)); their full text
+  // is behind the "full case file" control, as the tests above pin.
   test("a card double-click still edits; a single click selects", async ({
     page,
   }) => {

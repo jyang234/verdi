@@ -374,7 +374,7 @@ func provisionSpecImportStore(ctx context.Context, moduleRoot string) (string, e
 	if err := os.WriteFile(filepath.Join(parentDir, "spec.md"), parent, 0o644); err != nil {
 		return "", err
 	}
-	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, root, false); err != nil {
 		return "", err
 	}
 	// The board's commit affordance (the ordinary supported edit the suite
@@ -392,7 +392,7 @@ func provisionSpecImportStore(ctx context.Context, moduleRoot string) (string, e
 		return "", err
 	}
 
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {

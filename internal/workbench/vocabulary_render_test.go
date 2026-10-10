@@ -126,10 +126,12 @@ func TestBoardRender_TerminalStatusBadgeModelVocabulary(t *testing.T) {
 
 // vocabProseProjection is the vocabulary-prose closure's render fixture:
 // a feature wall exercising every class-word PROSE site the region
-// renderer owns — stub cards (story + spike), the sealed wall's
-// Instantiate affordances, the oq multi-claim chip, scoping yarn (the
+// renderer owns — stub cards (story + spike) whose toolbar may offer the
+// sealed wall's Instantiate, the oq multi-claim chip, scoping yarn (the
 // yarn key's planning meanings), a story/spike proto-sticky beside a
-// plain comment sticky, and (in authoring) the four-move guide.
+// plain comment sticky — and the record drawer's Moves tab, which carries
+// the four-move guide's class-aware note (spec/wall-strip-and-drawer-v2
+// dc-2).
 func vocabProseProjection(mode boardModeKind) *BoardProjection {
 	return &BoardProjection{
 		Spec:    "vocab-probe",
@@ -166,26 +168,39 @@ func vocabProseProjection(mode boardModeKind) *BoardProjection {
 // vocabulary-prose closure over the closure-time findings: stub-card
 // labels, Instantiate buttons, the guide note, plus the sites the same
 // category sweep enumerated — yarn key, oq-claims chip, proto-sticky
-// type words) while every identity-layer string provably stays bare.
+// type words) while every identity-layer string provably stays bare. Two
+// of those sites moved with the retired rail (spec/wall-strip-and-
+// drawer-v2 ac-6, dc-2): Instantiate is the stub toolbar's, which shows
+// the label the server writes on the instantiable stub card
+// (data-instantiate-label, pinned here with the renamed words; SI-368
+// (30)), and the guide's note is the record drawer's Moves tab's, checked
+// here.
 func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 	proj := vocabProseProjection(modeAuthoring)
 	proj.applyModelVocabulary(vocabTestModel())
 	html := renderBoardRegion(proj, &boardGitState{}, testASDView())
+	moves := renderRecordDrawer(proj, testASDView())
+	for _, want := range []string{
+		// The Moves tab's class note and criteria move (the four-move
+		// guide's finding sites, ~:845). The article agrees with the
+		// vowel-initial rename ("an Initiative") — model.Article.
+		`This is an Initiative wall: outcome ACs and Change Request stubs.`,
+		`an Initiative never lists its Change Requests.`,
+		`the first column says what must be true when the Initiative lands.`,
+	} {
+		if !strings.Contains(moves, want) {
+			t.Errorf("record drawer missing renamed prose %q", want)
+		}
+	}
 
 	for _, want := range []string{
 		// Stub-card kind labels (finding site boardspecrender.go:358).
 		`<span class="card-kind-label">Change Request stub</span>`,
 		`<span class="card-kind-label">Deep Dive stub</span>`,
-		// The sealed wall's Instantiate affordance (finding site ~:410).
-		`>Instantiate Change Request</button>`,
-		`>Instantiate Deep Dive</button>`,
-		// The feature-wall guide note (finding site ~:845). The article
-		// agrees with the vowel-initial rename ("an Initiative", never the
-		// formerly-pinned ungrammatical "a Initiative") — model.Article,
-		// judged-article-agreement-approximation-undisclosed.
-		`This is an <strong>Initiative</strong> wall: outcome ACs and Change Request stubs.`,
-		`an Initiative never lists its Change Requests.`,
-		`when the Initiative lands (outcomes, never Change Request-sized tasks)`,
+		// The sealed wall's Instantiate label, which the stub's toolbar
+		// shows as written (finding site ~:410).
+		`data-instantiate-label="Instantiate Change Request"`,
+		`data-instantiate-label="Instantiate Deep Dive"`,
 		// The yarn key's scoping meanings.
 		`a planned Change Request will deliver it`,
 		`a planned Deep Dive will answer it`,
@@ -207,7 +222,7 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 
 	// Bare class words must be gone from the display prose...
 	for _, gone := range []string{
-		`>story stub<`, `>spike stub<`, `>Instantiate story<`, `>Instantiate spike<`,
+		`>story stub<`, `>spike stub<`, `Instantiate story`, `Instantiate spike`,
 		`claimed by 2 spikes`, `a planned story will deliver it`, `a planned spike will answer it`,
 		`<span class="sticky-type">story</span>`, `>open feature board<`,
 	} {
@@ -220,7 +235,7 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 	// enumeration rule): testids, data attributes, CSS modifiers.
 	for _, keep := range []string{
 		`data-testid="stub-card-alpha"`, `data-stub="beta"`, `data-spike="true"`,
-		`stubcard--spike`, `data-instantiate="alpha"`, `data-testid="instantiate-beta"`,
+		`stubcard--spike`, `data-can-instantiate="true"`,
 		`data-annotation-type="story"`, `sticky--story`, `data-testid="oq-claims-oq-1"`,
 		`data-testid="refcard-board-link"`, `data-testid="refcard-feature-archived"`,
 		`href="/board/spec/parent-feature"`,
@@ -325,13 +340,26 @@ func TestBoardRender_RegionParityNoRenames(t *testing.T) {
 		t.Fatal("canonical model changed the rendered board region; the no-rename path must be byte-identical")
 	}
 	for _, want := range []string{
-		`>story stub<`, `>spike stub<`, `>Instantiate story<`, `>Instantiate spike<`,
-		`claimed by 2 spikes`, `a planned story will deliver it`,
-		`This is a <strong>feature</strong> wall: outcome ACs and story stubs.`,
-		`a feature never lists its stories.`, `>open feature board</a>`,
+		`>story stub<`, `>spike stub<`,
+		`data-instantiate-label="Instantiate story"`, `data-instantiate-label="Instantiate spike"`,
+		`claimed by 2 spikes`, `a planned story will deliver it`, `>open feature board</a>`,
 	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("no-rename board region missing today's literal %q", want)
+		}
+	}
+	// The guide's note moved to the record drawer's Moves tab (spec/wall-
+	// strip-and-drawer-v2 dc-2): the same parity floor holds there.
+	plainDrawer := renderRecordDrawer(vocabProseProjection(modeAuthoring), testASDView())
+	if got := renderRecordDrawer(enriched, testASDView()); got != plainDrawer {
+		t.Fatal("canonical model changed the rendered record drawer; the no-rename path must be byte-identical")
+	}
+	for _, want := range []string{
+		`This is a feature wall: outcome ACs and story stubs.`,
+		`a feature never lists its stories.`,
+	} {
+		if !strings.Contains(plainDrawer, want) {
+			t.Errorf("no-rename record drawer missing today's literal %q", want)
 		}
 	}
 }

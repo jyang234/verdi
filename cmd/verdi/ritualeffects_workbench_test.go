@@ -203,6 +203,7 @@ func workbenchRitualCases() map[ws.Verb][]ritualCase {
 		{"/b/{branch}/board/spec/{name}/fragment", http.MethodGet, draftBoard + "/fragment", ""},
 		{"/b/{branch}/board/spec/{name}/peek", http.MethodGet, draftBoard + "/peek?ref=spec/" + r3cDraftName, ""},
 		{"/b/{branch}/board/spec/{name}/pinsearch", http.MethodGet, draftBoard + "/pinsearch", ""},
+		{"/b/{branch}/board/spec/{name}/readiness", http.MethodGet, draftBoard + "/readiness", ""},
 		{"/b/{branch}/board/spec/{name}/snapshot", http.MethodGet, draftBoard + "/snapshot", ""},
 	}
 	for _, m := range managed {

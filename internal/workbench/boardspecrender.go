@@ -1,9 +1,11 @@
 package workbench
 
-// Server-side rendering for the v1 board page. The board region (canvas
-// + side rail) has ONE renderer — this file — reused by the full page
-// and by the post-mutation fragment; assets/boardspec.js only positions
-// yarn, drives dialogs, and swaps this fragment back in.
+// Server-side rendering for the v1 board page. The board region (the
+// notices, the case-file strip and the wall frame; the side rail is
+// retired, spec/wall-strip-and-drawer-v2 ac-6) has ONE renderer — this
+// file — reused by the full page and by the post-mutation fragment;
+// assets/boardspec.js only positions yarn, drives dialogs, and swaps this
+// fragment back in.
 
 import (
 	"bytes"
@@ -162,22 +164,24 @@ func readOnlyReasonAttr(p *BoardProjection) string {
 	return ` data-readonly-reason="` + string(readOnlyReasonOf(p)) + `"`
 }
 
-// writeReadOnlyPanel renders the read-only rail's explanation for p's
-// reason. Only the sealed record says it is accepted; the unproven wall
-// says what is missing and the local remedy (the board notice above it
-// carries the witness) — and, three-valued, claims neither acceptance nor
-// its opposite, since missing proof proves no negative; the
-// not-yet-accepted wall says where editing is supported.
+// writeReadOnlyPanel renders the read-only wall's explanation for p's
+// reason, among the wall's notices (spec/wall-strip-and-drawer-v2 ac-6;
+// SI-368 (6): the rail that held it is retired, its hooks kept). Only the
+// sealed record says it is accepted; the unproven wall says what is
+// missing and the local remedy (the board notice above it carries the
+// witness) — and, three-valued, claims neither acceptance nor its
+// opposite, since missing proof proves no negative; the not-yet-accepted
+// wall says where editing is supported.
 func writeReadOnlyPanel(b *strings.Builder, p *BoardProjection) {
 	esc := stdhtml.EscapeString
 	switch readOnlyReasonOf(p) {
 	case readOnlySealed:
-		b.WriteString(`<section class="scratch-panel sealed-panel"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
+		b.WriteString(`<section class="sealed-panel board-note"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
 	case readOnlyNotAccepted:
-		b.WriteString(`<section class="scratch-panel readonly-panel readonly-panel--not-accepted" data-testid="readonly-panel" data-readonly-reason="not-accepted"><h2>Not yet accepted</h2>` +
+		b.WriteString(`<section class="readonly-panel readonly-panel--not-accepted board-note" data-testid="readonly-panel" data-readonly-reason="not-accepted"><h2>Not yet accepted</h2>` +
 			`<p class="ritual-note">This revision has not been accepted onto the default branch, so this wall is not a sealed record. It is read-only here: a new spec is edited only from its own design branch checkout (` + esc("design/"+p.Spec) + `), and a modified accepted revision is never edited in place &#8212; start a successor spec instead.</p></section>`)
 	default:
-		b.WriteString(`<section class="scratch-panel readonly-panel readonly-panel--unproven" data-testid="readonly-panel" data-readonly-reason="unproven"><h2>Lifecycle unproven</h2>` +
+		b.WriteString(`<section class="readonly-panel readonly-panel--unproven board-note" data-testid="readonly-panel" data-readonly-reason="unproven"><h2>Lifecycle unproven</h2>` +
 			`<p class="ritual-note">Acceptance cannot be proven for this spec: the default branch, or the Git ancestry needed to check it, could not be resolved. The wall is read-only as a precaution &#8212; this view cannot claim acceptance or sealing. The notice above names the missing witness. Remedy: fetch the configured default branch from its remote and point origin/HEAD at it (<code>git remote set-head origin &lt;branch&gt;</code>), then reload.</p></section>`)
 	}
 }
@@ -208,6 +212,8 @@ window.__BOARDV2__ = {{.StateJSON}};
 <script src="/assets/walltoolbar.js"></script>
 <script src="/assets/wallkeys.js"></script>
 <script src="/assets/wallminimap.js"></script>
+<script src="/assets/wallstrip.js"></script>
+<script src="/assets/walldrawer.js"></script>
 <script src="/assets/wallnewstory.js"></script>
 </body>
 </html>
@@ -246,23 +252,17 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 	}
 
 	// The top bar (spec/chrome-and-tokens-v2 ac-1; SI-323 (5)): its nav
-	// keeps the index link and the Wall and Document switch; its controls
-	// slot carries Commit & push in authoring mode — the page's one write
-	// to the record, moved from the rail with its id unchanged (dc-3) —
-	// and the autosave status and live region; the last action result is
-	// the bar's trailing row, outside the swapped region.
+	// keeps the index link; its controls slot is the wall's
+	// (writeWallControls, wallbarrender.go) — the Wall and Document
+	// switch, the readiness pill, Commit & push with its changes fragment
+	// in authoring mode (the page's one write to the record, its id
+	// unchanged, dc-3), the sealed wall's actions, the ⋯ button, and the
+	// autosave status and live region; the last action result is the
+	// bar's trailing row, outside the swapped region.
 	nav := `<a href="/">index</a>`
-	controls := ""
-	if p.DocumentHref != "" {
-		// The Wall and Document switch, in the controls slot (dc-3), with
-		// the same two labels the Document page's switch carries.
-		controls += `<nav class="topbar-tabs" aria-label="Wall or Document"><span class="current" aria-current="page">Wall</span><a href="` + stdhtml.EscapeString(p.DocumentHref) + `" data-testid="board-tab-document">Document</a></nav>`
-	}
-	if p.Mode == modeAuthoring {
-		controls += `<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`
-	}
-	controls += `<div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>` +
-		`<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>`
+	dialogs, revise := renderBoardDialogs(p)
+	var controls strings.Builder
+	writeWallControls(&controls, p, asd.Pill, snap.Uncommitted, revise)
 	data := struct {
 		Name      string
 		Title     string
@@ -279,13 +279,17 @@ func renderBoardSpecPage(ctx context.Context, p *BoardProjection, git *boardGitS
 		Mode:  string(p.Mode),
 		TopBar: renderTopBar(&snap.bar, topBarOptions{
 			Heading:  true,
-			Nav:      template.HTML(nav),      //nolint:gosec // the index link
-			Controls: template.HTML(controls), //nolint:gosec // fixed control markup and the escaped document href
+			Nav:      template.HTML(nav),               //nolint:gosec // the index link
+			Controls: template.HTML(controls.String()), //nolint:gosec // the wall's own rendered controls, every value escaped
 			Tail:     `<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>`,
 			Refresh:  true,
 		}),
-		Region:    template.HTML(region),
-		Dialogs:   template.HTML(renderBoardDialogs(p)),
+		Region: template.HTML(region),
+		// The page-level dialogs, the authoring wall's branch menu at the
+		// body level beside them (SI-368 (7)), and the record drawer with
+		// its ⋯ menu, outside the swapped region in every mode (SI-368
+		// (9)).
+		Dialogs:   template.HTML(dialogs + renderBranchMenu(p, git) + "\n" + renderRecordDrawer(p, asd)),
 		StateJSON: template.JS(stateJSON),
 		Bar:       snap.bar,
 	}
@@ -316,11 +320,15 @@ func terminalStatusBadge(status string) string {
 	return ""
 }
 
-// renderBoardRegion renders the four-area shell, placards, canvas, and
-// side rail — the one projection region the page, the fragment, the
-// snapshot, and every mutation response share. The posture is not here:
-// it is the top bar's posture group, which the snapshot carries as its
-// own fragment (asdPostureHTML; SI-323 (3)).
+// renderBoardRegion renders the notices, the case-file strip and the wall
+// frame — the one projection region the page, the fragment, the snapshot,
+// and every mutation response share. The side rail and the readiness
+// shell beside it are retired (spec/wall-strip-and-drawer-v2 ac-6, dc-2):
+// the mode explanations are notices, the review-mode inbox tray docks
+// below the wall frame, the yarn key is a hidden source the record
+// drawer's Keys tab reads, and the reading aids are the drawer's tabs.
+// The posture is not here: it is the top bar's posture group, which the
+// snapshot carries as its own fragment (asdPostureHTML; SI-323 (3)).
 func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
@@ -331,6 +339,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// affordance the mutation core refuses (review fix I-1).
 	domainLive := authoring && p.DomainRefusal == ""
 	edgeFactSeen := map[string]int{}
+	// The sealed accepted feature wall: its stub cards may be instantiated
+	// (the stub's toolbar offers it, SI-368 (5)) and the bar offers Revise
+	// (spec/uat-round-1 ac-11); its notes speak both.
+	feature := p.Class == string(artifact.ClassFeature)
+	instantiable := feature && p.Status == "accepted-pending-build"
 
 	// Disclosed-unavailable notices (I-1(b)/I-2/M-4): a configured-but-
 	// unreachable review feed, or an assumed default branch. Rendered
@@ -339,7 +352,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// renders as if a skipped input were simply absent (constitution 2/10).
 	hasCaseFile := p.Problem != "" || p.Outcome != ""
 	marksNotice := asd.Marks.notice()
-	if p.DomainRefusal != "" || len(p.Notices) > 0 || marksNotice != "" || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
+	modeNote := p.Mode != modeAuthoring
+	if p.DomainRefusal != "" || len(p.Notices) > 0 || marksNotice != "" || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) || modeNote {
 		b.WriteString(`<div class="board-notices">`)
 		// The domain-refusal explanation (review fix I-1): why this live
 		// scratch wall offers no spec edits, named FIRST — before any
@@ -373,48 +387,27 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if !hasCaseFile {
 			writeCaseDisclosures(&b, p)
 		}
+		// The room's own explanation (spec/wall-strip-and-drawer-v2 ac-6;
+		// SI-368 (6)): what the retired rail said about the review mirror
+		// and the read-only wall, last, after the witnesses it refers to.
+		if modeNote {
+			writeModeNotes(&b, p, instantiable)
+		}
 		b.WriteString(`</div>`)
 	}
 
-	writeASDShell(&b, asd)
-	// .asd-main wraps the board half (case file + canvas + rail) so the
-	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside
-	// the initial viewport (adjudication 1's "beneath/alongside").
+	// .asd-main wraps the wall half (the case file and the wall frame,
+	// with the review mode's tray docked below the frame).
 	b.WriteString(`<div class="asd-main">`)
 
-	// The case file (element taxonomy row 1): the spec's problem and
-	// outcome as ONE header lockup — the folder a murder board opens
-	// with. Problem wears the violated accent, outcome the evidenced
-	// one, and the arrow between them is the whole story's arc: the
-	// wall below exists to get from the left card to the right one.
-	// A spec carrying neither attribute (grandfathered v0 artifacts)
-	// gets no header at all — never an empty folder tab.
+	// The case file (element taxonomy row 1) as the one-line strip
+	// (spec/wall-strip-and-drawer-v2 ac-1; casestriprender.go): the
+	// spec's problem and outcome, one line each, the arrow between them
+	// the whole story's arc, with the class tag and the chips beside
+	// them. A spec carrying neither attribute (grandfathered v0
+	// artifacts) gets no strip at all — never an empty one.
 	if hasCaseFile {
-		b.WriteString(`<header class="board-placards case-file">`)
-		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
-		// The class tag, wearing the spec-level badge stamps beside it when
-		// any were computed (spec/badge-computes dc-4) — badgerender.go.
-		writeCaseTopline(&b, p)
-		if p.Problem != "" {
-			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p class="placard-text">` + esc(p.Problem) + `</p>`)
-			writePlacardFull(&b, "problem", p.ProblemBodyHTML)
-			b.WriteString(`</div>`)
-		}
-		if p.Problem != "" && p.Outcome != "" {
-			b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
-		}
-		if p.Outcome != "" {
-			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p class="placard-text">` + esc(p.Outcome) + `</p>`)
-			writePlacardFull(&b, "outcome", p.OutcomeBodyHTML)
-			b.WriteString(`</div>`)
-		}
-		// The case file's disclosed-unproven lines (spec/case-file-flags
-		// dc-4): spec-level ladder state that could not be proven renders
-		// as a disclosure line on this lockup — the board's notice
-		// vocabulary, in the folder where the stamp would hang — never a
-		// stamp and never silence.
-		writeCaseDisclosures(&b, p)
-		b.WriteString(`</header>`)
+		writeCaseStrip(&b, p, asd, domainLive)
 	}
 
 	b.WriteString(`<div class="board-layout">`)
@@ -447,7 +440,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		b.WriteString(`<div class="board-empty" data-testid="board-empty">`)
 		if authoring {
 			b.WriteString(`<p class="board-empty-lead">Nothing pinned yet.</p>`)
-			b.WriteString(`<p class="board-empty-how">Pin your first fact: <strong>Add sticky</strong> (in the rail), write what you know, and graduate it into the spec when it firms up &#8212; or declare an acceptance criterion in the spec file and it lands here as a card.</p>`)
+			b.WriteString(`<p class="board-empty-how">Pin your first fact: choose <strong>Sticky</strong> in the toolbar below the wall, write what you know, and graduate it into the spec when it firms up &#8212; or declare an acceptance criterion in the spec file and it lands here as a card.</p>`)
 		} else {
 			b.WriteString(`<p class="board-empty-lead">Nothing is declared on this spec yet.</p>`)
 		}
@@ -460,7 +453,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// On a feature wall, AC cards additionally wear their computed
 	// coverage chip and OQ cards their multi-claim observation
 	// (spec/scoping-canvas ac-4/ac-5) — writeScopingReceipts.
-	feature := p.Class == string(artifact.ClassFeature)
 	for _, c := range p.Cards {
 		b.WriteString(`<div class="objcard objcard--` + esc(c.Kind) + `" id="obj-` + esc(c.ID) + `" tabindex="0" data-testid="card-` + esc(c.ID) + `" data-id="` + esc(c.ID) + `" data-object-kind="` + esc(c.Kind) + `" data-anchor="` + esc(asd.ObjectAnchors[c.ID]) + `"`)
 		if c.Kind == string(boardlayout.ZoneAC) {
@@ -576,25 +568,33 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// tab. Its AC/OQ attributions hang on the wall as scoping yarn (the
 	// owner directive: the yarn IS the representation — no chip list on
 	// the card). On a sealed accepted-pending-build feature wall each
-	// card carries the one live affordance a sealed record permits:
-	// Instantiate (ac-6). The same sealed-accepted-feature decision gates
-	// the rail's Revise affordance below (spec/uat-round-1 ac-11).
-	instantiable := feature && p.Status == "accepted-pending-build"
+	// card says its toolbar may offer the one live affordance a sealed
+	// record permits: Instantiate (spec/scoping-canvas ac-6), which sits
+	// on the stub's toolbar, never on the card (spec/wall-strip-and-
+	// drawer-v2 ac-6; SI-368 (5)). The card carries the button's label in
+	// the store's words, which the toolbar shows as written (SI-368 (30)),
+	// and the spike flag in data-spike.
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
 		spikeAttr := ""
-		// The kind label's class word is display prose and resolves
-		// (vocabulary.go; "spike" resolves as the variant marker's
-		// pseudo-class word). The CSS modifier, data-spike, data-stub,
-		// and testid keep bare ids — addressing never renames.
-		kindLabel := p.words.word("story") + " stub"
+		// The kind label's and the Instantiate label's class word is
+		// display prose and resolves (vocabulary.go; "spike" resolves as
+		// the variant marker's pseudo-class word). The CSS modifier,
+		// data-spike, data-stub, and testid keep bare ids — addressing
+		// never renames.
+		classWord := p.words.word("story")
 		if sv.Spike {
 			cls += " stubcard--spike"
 			spikeAttr = ` data-spike="true"`
-			kindLabel = p.words.word("spike") + " stub"
+			classWord = p.words.word("spike")
+		}
+		kindLabel := classWord + " stub"
+		canAttr := ""
+		if instantiable {
+			canAttr = ` data-can-instantiate="true" data-instantiate-label="` + esc("Instantiate "+classWord) + `"`
 		}
 		title := designscaffold.HumanizeName(sv.Slug)
-		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr +
+		b.WriteString(`<div class="` + cls + `"` + canAttr + ` data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr +
 			` data-acs="` + esc(strings.Join(sv.AcceptanceCriteria, ",")) + `" data-resolves="` + esc(strings.Join(sv.Resolves, ",")) + `" style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
 		// The slug is the card's first line, inside the card
 		// (spec/wall-canvas-v2 ac-1): this span's bytes are a hook the Go
@@ -615,8 +615,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		writeReadinessMark(&b, "stub-"+sv.Slug, asd.Marks.forStub(sv.Slug))
 		// A stub is a rendered board object too (spec/badge-computes dc-3:
 		// a dangling stub reference anchors to the stub's own card) — its
-		// chip row rides the card in every mode, before the sealed wall's
-		// Instantiate affordance so the receipt never displaces the action.
+		// chip row rides the card in every mode.
 		writeBadgeChips(&b, "stub-"+sv.Slug, sv.Badges)
 		// Family navigation (spec/family-board-links ac-2/ac-3): every
 		// matching story anywhere in this checkout's store links straight to
@@ -627,7 +626,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		// (ac-3, dc-3) -- ADDITIVE, alongside whatever this card already
 		// offers, never replacing it: dc-4 explicitly takes "no position on
 		// whether coverage is complete", so a match must never read as if the
-		// sealed wall's own Instantiate affordance had become unavailable.
+		// sealed wall's own Instantiate affordance (the stub's toolbar's)
+		// had become unavailable.
 		for _, sl := range sv.StoryLinks {
 			storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
 			if sl.UnservableNotice != "" {
@@ -663,15 +663,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		}
 		if sv.InstantiatedNotice != "" {
 			b.WriteString(`<p class="stub-instantiated-notice" data-testid="stub-instantiated-notice-` + esc(sv.Slug) + `">` + esc(sv.InstantiatedNotice) + `</p>`)
-		}
-		if instantiable {
-			// The verb's object is the class word — display prose,
-			// resolved; data-instantiate and the testid keep the slug.
-			verbLabel := "Instantiate " + p.words.word("story")
-			if sv.Spike {
-				verbLabel = "Instantiate " + p.words.word("spike")
-			}
-			b.WriteString(`<button type="button" class="stub-instantiate" data-instantiate="` + esc(sv.Slug) + `" data-testid="instantiate-` + esc(sv.Slug) + `" title="cuts a design branch with a scaffolded spec; the serving checkout never moves">` + esc(verbLabel) + `</button>`)
 		}
 		b.WriteString(`</div>`)
 	}
@@ -835,58 +826,61 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// is the arrows that reveal every card (Wave 6 §5.2).
 	b.WriteString(`<div class="wall-status-row" data-testid="wall-status-row"><div class="wall-toolbar" data-testid="wall-toolbar" role="toolbar" aria-label="Wall actions"></div><div class="wall-minimap" data-testid="wall-minimap" aria-hidden="true"></div></div>`)
 	b.WriteString(`</div>`) // wall-frame
-
-	// The side rail, top-down by consequence: the commit affordance (the
-	// page's one write to the record), then the scratch tools, then the
-	// reading aids (yarn key), then the learning aid (the four-move
-	// guide) — quiet last, discoverable, never front-loaded.
-	b.WriteString(`<aside class="board-side">`)
-	switch p.Mode {
-	case modeAuthoring:
-		writeGitPanel(&b, git)
-		b.WriteString(`<section class="scratch-panel"><h2>Scratch</h2>` +
-			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
-			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
-		writeASDForms(&b, p, asd)
-		writeYarnKey(&b, p)
-		writeGuide(&b, p)
-	case modeReview:
-		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
-			// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
-			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
-		writeInboxTray(&b, p.Tray)
-		writeYarnKey(&b, p)
-	default:
-		writeReadOnlyPanel(&b, p)
-		writeCreatePanel(&b, p)
-		writeRevisePanel(&b, p, instantiable)
-		writeYarnKey(&b, p)
-	}
-	writeASDPanels(&b, p.Spec, asd)
-	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
+
+	// The review mode's inbox tray, docked directly below the wall frame
+	// and always shown there (spec/wall-strip-and-drawer-v2 ac-6; SI-368
+	// (20)): every comment that names no card, never dropped.
+	if p.Mode == modeReview {
+		writeInboxTray(&b, p.Tray)
+	}
+	// The yarn key: a hidden source of this wall's threads, which the
+	// record drawer's Keys tab copies and the toolbar's Yarn key opens
+	// (SI-368 (9)); it rides the region, so it follows every swap.
+	writeYarnKey(&b, p)
 	b.WriteString(`</div>`) // asd-main
 
 	return b.String()
 }
 
-// writeCreatePanel renders the sealed feature wall's creation affordance
-// (spec/creation-form ac-3): the rail panel whose button opens the
-// template-driven creation form. Rendered ONLY when the loader attached
+// writeModeNotes writes a wall's explanation of its room among its
+// notices (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (6)), each with the
+// hooks the retired rail's panel carried: the review mirror's, or the
+// read-only wall's for its reason, with, on the sealed accepted feature
+// wall, the notes that speak the bar's New story and Revise. The
+// authoring wall needs none: its toolbar and strip say what it takes.
+func writeModeNotes(b *strings.Builder, p *BoardProjection, instantiable bool) {
+	switch p.Mode {
+	case modeReview:
+		b.WriteString(`<section class="mirror-note board-note"><h2>Review mirror</h2>` +
+			// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
+			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below the wall &#8212; nothing is dropped.</p></section>`)
+	case modeReadOnly:
+		writeReadOnlyPanel(b, p)
+		writeCreatePanel(b, p)
+		writeRevisePanel(b, p, instantiable)
+	}
+}
+
+// writeCreatePanel renders the note beside the sealed feature wall's
+// creation affordance (spec/creation-form ac-3), among the wall's notices:
+// what the bar's New story does. Rendered ONLY when the loader attached
 // enumerated field descriptors — the same sealed-accepted-feature gate
-// the create action itself enforces, so the rail never offers what the
-// server would refuse. Every spoken class word is display prose and
-// resolves (vocabulary.go); the testid and element ids stay bare.
+// the create action itself enforces, so the wall never speaks of what
+// the server would refuse. Every spoken class word is display prose and
+// resolves (vocabulary.go); the testid stays bare.
 func writeCreatePanel(b *strings.Builder, p *BoardProjection) {
 	if len(p.CreateFields) == 0 {
 		return
 	}
 	esc := stdhtml.EscapeString
 	storyWord := p.words.word("story")
-	b.WriteString(`<section class="scratch-panel create-panel" data-testid="create-panel">`)
+	// The action itself is the top bar's primary action (spec/wall-strip-
+	// and-drawer-v2 ac-6; writeSealedActions); the notices keep the note
+	// that speaks its consequence.
+	b.WriteString(`<section class="create-panel board-note" data-testid="create-panel">`)
 	b.WriteString(`<h2>New ` + esc(storyWord) + `</h2>`)
 	b.WriteString(`<p class="ritual-note">` + esc(model.Capitalize(p.words.indefinite("story"))+" this wall's stubs did not plan. The form asks exactly what the "+storyWord+" template needs, cuts a design branch, and never moves this checkout.") + `</p>`)
-	b.WriteString(`<button type="button" id="create-spec-btn" class="create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
 	b.WriteString(`</section>`)
 }
 
@@ -908,26 +902,27 @@ func reviseSuccessorDefault(pred string) string {
 	return pred + "-v2"
 }
 
-// writeRevisePanel renders the sealed accepted feature wall's Revise
-// affordance (spec/uat-round-1 ac-11, board half; PLAN.md I-129 option
-// (a)): the rail panel whose button opens the revise dialog, beside the
-// creation panel. offered is renderBoardRegion's one sealed-accepted-
-// feature decision (the same gate the stub cards' Instantiate affordance
+// writeRevisePanel renders the note beside the sealed accepted feature
+// wall's Revise affordance (spec/uat-round-1 ac-11, board half; PLAN.md
+// I-129 option (a)), among the wall's notices, beside the creation note:
+// what the bar's Revise does. offered is renderBoardRegion's one
+// sealed-accepted-feature decision (the same gate the stubs' Instantiate
 // and the create fields ride — 02 §Kind registry: supersession is the
 // only forward path after acceptance, and it is feature-only), so the
-// rail never offers what the server would refuse. Every spoken class
-// word is display prose and resolves (vocabulary.go); the testid and
-// element ids stay bare.
+// wall never speaks of what the server would refuse. Every spoken class
+// word is display prose and resolves (vocabulary.go); the testid stays
+// bare.
 func writeRevisePanel(b *strings.Builder, p *BoardProjection, offered bool) {
 	if !offered {
 		return
 	}
 	esc := stdhtml.EscapeString
 	featureWord := p.words.word("feature")
-	b.WriteString(`<section class="scratch-panel revise-panel" data-testid="revise-panel">`)
+	// The action itself is the top bar's (spec/wall-strip-and-drawer-v2
+	// ac-6; writeSealedActions); the notices keep the note.
+	b.WriteString(`<section class="revise-panel board-note" data-testid="revise-panel">`)
 	b.WriteString(`<h2>` + esc("Revise this "+featureWord) + `</h2>`)
 	b.WriteString(`<p class="ritual-note">` + esc("Supersession is the only forward path after acceptance: a superseding "+featureWord+" carries everything here verbatim, links back with a supersedes edge, and cuts its own design branch. This checkout never moves.") + `</p>`)
-	b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; ` + esc("Revise this "+featureWord) + `</button>`)
 	b.WriteString(`</section>`)
 }
 
@@ -1340,7 +1335,9 @@ var yarnKeyEntries = []yarnKeyEntry{
 // pairs present, in canonical order — a key to this board, never the
 // closed enum's vocabulary lesson. data-layer precedes data-edge-type in
 // the markup so selectors written against data-edge-type alone keep
-// matching (the selector contract extends, never breaks).
+// matching (the selector contract extends, never breaks). It is hidden:
+// the record drawer's Keys tab is where it is read (SI-368 (9)), and
+// this is the source it copies.
 func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 	present := map[yarnKeyEntry]bool{}
 	for _, e := range p.Edges {
@@ -1349,7 +1346,7 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 	if len(present) == 0 {
 		return
 	}
-	b.WriteString(`<section class="yarn-key" data-testid="yarn-key"><h2>Yarn on this wall</h2><ul>`)
+	b.WriteString(`<section class="yarn-key" data-testid="yarn-key" hidden><h2>Yarn on this wall</h2><ul>`)
 	esc := stdhtml.EscapeString
 	for _, entry := range yarnKeyEntries {
 		if !present[yarnKeyEntry{Layer: entry.Layer, Type: entry.Type}] {
@@ -1362,51 +1359,6 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 		b.WriteString(`<li data-layer="` + entry.Layer + `" data-edge-type="` + entry.Type + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + entry.Type + `</span><span class="yarn-key-what">` + esc(meaning) + `</span></li>`)
 	}
 	b.WriteString(`</ul></section>`)
-}
-
-// writeGuide renders the four-move guide (05 §Workbench "The
-// four-concept minimum path": story spec + ACs + implements + commit),
-// collapsed by default — the newcomer's whole path in one quiet
-// disclosure, everything further learned from the wall itself.
-//
-// The guide is CLASS-AWARE (owner directive: a wall must teach whether
-// it is a feature or a story). A feature wall opens with the split in
-// one breath — outcome ACs and stubs live here; each story is its own
-// spec pointing up at these ACs with implements yarn, and a feature
-// never lists its stories — and its AC move says outcome-shaped. A
-// story wall (or a class-less projection) keeps the four-move copy
-// unadorned: its spec IS the minimum path's story.
-func writeGuide(b *strings.Builder, p *BoardProjection) {
-	feature := p.Class == "feature"
-	// The guide's class words are display prose and resolve
-	// (vocabulary.go); pre-escaped once since they interpolate into
-	// hand-built HTML. With no rename they are the bare ids and every
-	// byte below matches today's copy.
-	esc := stdhtml.EscapeString
-	featureWord := esc(p.words.word("feature"))
-	storyWord := esc(p.words.word("story"))
-	// The articles agree with the class word they precede (model.Article,
-	// judged-article-agreement-approximation-undisclosed): "a feature" but
-	// "an Initiative". Always "a"/"an" — no escaping needed.
-	featureArticle := model.Article(p.words.word("feature"))
-	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>`)
-	if feature {
-		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is ` + featureArticle + ` <strong>` + featureWord + `</strong> wall: outcome ACs and ` + storyWord + ` stubs. ` +
-			`Each ` + storyWord + ` is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; ` + featureArticle + ` ` + featureWord + ` never lists its ` + esc(p.words.plural("story")) + `.</p>`)
-	}
-	b.WriteString(`<ol class="guide-moves">` +
-		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>`)
-	if feature {
-		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the ` + featureWord + ` lands (outcomes, never ` + storyWord + `-sized tasks). Drag cards anywhere; double-click one to edit its text.</li>` +
-			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself.</li>`)
-	} else {
-		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
-			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>`)
-	}
-	b.WriteString(`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
-		`</ol>` +
-		`<p class="guide-more">Everything else &#8212; stickies, graduation, exemptions &#8212; is on the wall when you need it.</p>` +
-		`</details>`)
 }
 
 func writeReviewSticky(b *strings.Builder, rs reviewStickyView) {
@@ -1441,42 +1393,25 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 	b.WriteString(`</section>`)
 }
 
-// writeGitPanel renders the board-owned git affordance (05 §Workbench:
-// the persistent uncommitted-changes indicator and the branch switcher
-// behind the guard). The commit/push button is the top bar's
-// (renderBoardSpecPage; spec/chrome-and-tokens-v2 dc-3).
-func writeGitPanel(b *strings.Builder, git *boardGitState) {
-	esc := stdhtml.EscapeString
-	b.WriteString(`<section class="git-panel" id="asd-git"><h2>Working tree</h2>`)
-	b.WriteString(`<span class="uncommitted" data-testid="uncommitted-indicator"`)
-	if !git.Dirty {
-		b.WriteString(` hidden`)
-	}
-	b.WriteString(`>uncommitted changes</span>`)
-	b.WriteString(`<div class="branch-row"><span class="branch-label">branch</span>`)
-	b.WriteString(`<button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu">` + esc(git.Branch) + `</button></div>`)
-	b.WriteString(`<div role="menu" class="branch-menu" id="branch-menu" hidden aria-label="Switch branch">`)
-	for _, br := range git.Branches {
-		b.WriteString(`<button type="button" role="menuitem" data-branch="` + esc(br) + `">` + esc(br) + `</button>`)
-	}
-	b.WriteString(`</div></section>`)
-}
-
-// renderBoardDialogs renders the page-level dialogs. Only authoring mode
-// gets the full set: review is a mirror, read-only a document (05
-// §Workbench) — EXCEPT the sealed accepted-pending-build feature wall,
-// whose one live affordance (Instantiate story, spec/scoping-canvas
-// ac-6) needs the confirmation chrome: its consequence is spoken before
-// it fires, and its receipt/refusal after, all through the same dialog.
-func renderBoardDialogs(p *BoardProjection) string {
+// renderBoardDialogs renders the page-level dialogs, and reports whether
+// the sealed wall's Revise dialog is among them — the one sealed-accepted-
+// feature decision the bar's Revise action follows (spec/wall-strip-and-
+// drawer-v2 ac-6), so the bar never offers what the dialog would not
+// serve. Only authoring mode gets the full set: review is a mirror,
+// read-only a document (05 §Workbench) — EXCEPT the sealed
+// accepted-pending-build feature wall, whose one live affordance
+// (Instantiate story, spec/scoping-canvas ac-6) needs the confirmation
+// chrome: its consequence is spoken before it fires, and its
+// receipt/refusal after, all through the same dialog.
+func renderBoardDialogs(p *BoardProjection) (string, bool) {
 	if p.Mode != modeAuthoring {
 		// The sealed wall's live affordances need the dialog chrome:
 		// stub-instantiate's confirmation (spec/scoping-canvas ac-6), the
 		// creation form (spec/creation-form ac-3 — CreateFields is only
 		// attached on the sealed accepted feature wall, the same gate the
 		// create action enforces), and the revise dialog (spec/uat-round-1
-		// ac-11). The revise dialog follows the SAME decision its panel
-		// does — renderBoardRegion renders the panel only in its read-only
+		// ac-11). The revise dialog follows the SAME decision its note
+		// does — renderBoardRegion writes the note only in its read-only
 		// room (a review-mode wall is a mirror and offers no Revise), so
 		// revise here is that room plus the wall's class and effective
 		// status, never a dead hidden dialog under review.
@@ -1498,9 +1433,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 			if revise {
 				writeReviseDialog(&b, p)
 			}
-			return b.String()
+			return b.String(), revise
 		}
-		return ""
+		return "", false
 	}
 	var b strings.Builder
 	b.WriteString(`
@@ -1553,7 +1488,7 @@ func renderBoardDialogs(p *BoardProjection) string {
 <span class="board-trash-label" aria-hidden="true"></span>
 </div>`)
 	b.WriteString(renderASDDialogs(p))
-	return b.String()
+	return b.String(), false
 }
 
 // renderASDDialogs renders the ASD typed-operation dialogs (authoring
@@ -1567,6 +1502,11 @@ func renderASDDialogs(p *BoardProjection) string {
 		return ""
 	}
 	var b strings.Builder
+	// The add-object dialog's opener (SI-368 (6)): the typed-operation
+	// forms panel left with the rail, and the opener stays here, hidden,
+	// where the toolbar's Card ▾ reaches it (walltoolbar.js) — the dialog
+	// that keyboard-only authors keep beside the add-in-place slots.
+	b.WriteString(`<button type="button" id="asd-add-object" data-asd-op="add-object" hidden>Add object&#8230;</button>`)
 	writeASDTextDialog(&b)
 	writeASDImpactDialog(&b)
 	writeASDEditStubDialog(&b, p)

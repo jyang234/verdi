@@ -240,7 +240,7 @@ func provisionUnprovenStore(ctx context.Context, moduleRoot string) (string, err
 
 	// git init on main + the manifest commit — the same deterministic-env,
 	// no-verify posture every other scratch store here uses (git.go).
-	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, root, false); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {

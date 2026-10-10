@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
-import { addSticky, drawYarn, expectAutosaved, toolbarAction } from "./helpers";
+import { addSticky, drawYarn, expectAutosaved, openStickyDraft, selectStub, stickyAction, toolbarAction, wallToolbar } from "./helpers";
 
 // The scoping canvas (spec/scoping-canvas ac-2/ac-3/ac-4/ac-5, dc-1/
 // dc-5/dc-6): story and spike proto-stickies are the stub authoring
@@ -14,6 +14,11 @@ import { addSticky, drawYarn, expectAutosaved, toolbarAction } from "./helpers";
 const confirmDialog = (page: Page) => page.locator("#edge-confirm");
 const confirmOk = (page: Page) => page.locator("#edge-confirm-ok");
 const confirmCancel = (page: Page) => page.locator("#edge-confirm-cancel");
+
+// The design wall's provisioned stub (cmd/e2eharness/provision_board.go),
+// declared before this file graduates any: the draft wall's stub whose
+// toolbar must offer no Instantiate.
+const DESIGN_STUB = "refresh-window-spike";
 
 // Draw attribution yarn from a proto-sticky's pushpin and confirm the
 // thread's stated meaning (the calm confirmation replaces the picker:
@@ -62,7 +67,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
   }) => {
     // The feature wall's draft control offers all six types.
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     await expect(draft).toBeVisible();
     for (const label of ["Story", "Spike", "Comment", "Question"]) {
@@ -74,7 +79,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     // A story-class wall never offers the proto types (the same gate
     // the server enforces — the menu mirrors the refusal).
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const storyDraft = page.locator(".sticky-draft");
     await expect(storyDraft).toBeVisible();
     await expect(storyDraft.getByRole("button", { name: "Comment" })).toBeVisible();
@@ -89,12 +94,16 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
       "data-board-mode",
       "readonly",
     );
-    await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
+    await expect(wallToolbar(page)).toBeAttached();
+    await expect(stickyAction(page)).toHaveCount(0);
 
     // And a draft wall offers no instantiate: only an accepted record
-    // cuts story branches.
+    // cuts story branches — not on a stub's toolbar (spec/wall-strip-and-
+    // drawer-v2 ac-6), and no stub card says it may.
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
-    await expect(page.locator("[data-instantiate]")).toHaveCount(0);
+    await selectStub(page, DESIGN_STUB);
+    await expect(wallToolbar(page).locator("[data-instantiate]")).toHaveCount(0);
+    await expect(page.locator("[data-instantiate], [data-can-instantiate]")).toHaveCount(0);
   });
 
   test("story sticky → coverage yarn → graduation typesets the stub in place", async ({

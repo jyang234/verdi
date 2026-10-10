@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
+import { selectStub, wallToolbar } from "./helpers";
 
 // Instantiate-story-from-stub (spec/scoping-canvas ac-6) on the sealed
 // wall: SHOWCASE.FEATURE_SPEC is escrow-autopay on main (the harness
@@ -7,6 +8,8 @@ import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtu
 // one live affordance a sealed record permits is Instantiate. The action
 // cuts design/<slug> via no-checkout plumbing: the serving checkout
 // never moves, which these journeys assert from the browser's side.
+// Instantiate is on the stub's toolbar (spec/wall-strip-and-drawer-v2
+// ac-6; SI-368 (5)): each journey selects the stub first.
 
 const confirmDialog = (page: Page) => page.locator("#edge-confirm");
 const confirmOk = (page: Page) => page.locator("#edge-confirm-ok");
@@ -52,7 +55,8 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
   test("instantiate: consequence first, then the branch — and the serving wall never moves", async ({
     page,
   }) => {
-    const button = page.getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`);
+    await selectStub(page, SHOWCASE.INSTANTIATE_SLUG);
+    const button = wallToolbar(page).getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`);
     await expect(button).toBeVisible();
 
     // Consequence-labeled before firing: the dialog names the branch
@@ -97,7 +101,8 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
   test("a second instantiate is refused plainly: the branch already exists", async ({
     page,
   }) => {
-    await page.getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`).click();
+    await selectStub(page, SHOWCASE.INSTANTIATE_SLUG);
+    await wallToolbar(page).getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`).click();
     await confirmOk(page).click();
     await expect(confirmDialog(page)).toContainText("Could not instantiate");
     await expect(confirmDialog(page)).toContainText(

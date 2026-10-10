@@ -120,7 +120,7 @@ func provisionIndexDatesStore(ctx context.Context, parent string) (string, error
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
-	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := initRepo(ctx, root, false); err != nil {
 		return "", err
 	}
 	for _, c := range indexDatesMainHistory {
@@ -132,7 +132,7 @@ func provisionIndexDatesStore(ctx context.Context, parent string) (string, error
 	// A bare local origin whose HEAD names main (emptyglance.go's
 	// load-bearing reasoning): the default branch resolves, so each draft's
 	// merged check and every landing commit are proven against it.
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {

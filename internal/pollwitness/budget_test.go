@@ -42,8 +42,12 @@ const branchWallBranch = "wall-poll-b"
 // from the serving root; the poll of a /b/ wall whose branch is not the
 // serving root's, which loads no readiness (BL-165 (4)); the Document
 // page's poll (which composes the readiness load in production, BL-158);
-// and the readiness load alone. The workbench package witnesses the
-// composition seam itself (TestProjectWallRefresh_ComposedBudget).
+// the readiness load alone; and the wall's Readiness tab, one load when
+// the tab opens on a wall served from the serving root (SI-368 (1)). The
+// workbench package witnesses the composition seam itself
+// (TestProjectWallRefresh_ComposedBudget), and that the tab of a /b/ wall
+// whose branch is not the serving root's opens no projection at all
+// (TestReadinessTab_FixedWallsLoadNothing).
 func budgetPaths() []budgetPath {
 	poll := func(prefix, route string, loads func(t *testing.T, n int)) func(*testing.T, string) projectFunc {
 		return func(_ *testing.T, root string) projectFunc {
@@ -77,6 +81,12 @@ func budgetPaths() []budgetPath {
 			t.Errorf("the serving root's wall poll loaded readiness %d times, want once (SI-360 (2))", n)
 		}
 	}
+	tabLoads := func(t *testing.T, n int) {
+		t.Helper()
+		if n != 1 {
+			t.Errorf("the serving root's Readiness tab loaded readiness %d times, want once (SI-368 (1))", n)
+		}
+	}
 	loadsNone := func(t *testing.T, n int) {
 		t.Helper()
 		if n != 0 {
@@ -95,6 +105,7 @@ func budgetPaths() []budgetPath {
 			return branchWall(t, root)
 		}},
 		{name: "document-poll", open: poll("", "/document/snapshot", nil)},
+		{name: "readiness-tab", open: poll("", "/readiness", tabLoads)},
 		{name: "readiness-load", open: func(_ *testing.T, root string) projectFunc {
 			loader := newLoader(root)
 			return func(t *testing.T, ctx context.Context, spec, _ string) string {

@@ -431,6 +431,14 @@ type mutationProjection struct {
 	BaseDigest  string `json:"base_digest"`
 	BaseSpecB64 string `json:"base_spec_b64"`
 	Dirty       bool   `json:"dirty"`
+	// Pill is the readiness pill's facts where they are fixed for the
+	// server instance (SI-364 (3)); a serving-root wall's fresh projection
+	// composes no readiness and carries none (SI-368 (2); SI-362 (2)).
+	Pill *wallPill `json:"pill,omitempty"`
+	// Uncommitted is the snapshot's Commit and push fragment (SI-368 (8)):
+	// it needs no readiness load, the revision covers it, and the write
+	// this response reports has just changed it.
+	Uncommitted string `json:"uncommitted,omitempty"`
 }
 
 // handleMutateDraft is the browser mutation adapter: ONE typed
@@ -811,6 +819,8 @@ func (s *boardSpecServer) writeMutationOutcome(w http.ResponseWriter, r *http.Re
 		BaseDigest:  snap.BaseDigest,
 		BaseSpecB64: snap.BaseSpecB64,
 		Dirty:       snap.Git.Dirty,
+		Pill:        snap.Pill,
+		Uncommitted: snap.Uncommitted,
 	}
 	projJSON, err := json.Marshal(projection)
 	if err != nil {

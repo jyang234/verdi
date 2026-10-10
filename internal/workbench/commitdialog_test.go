@@ -29,7 +29,7 @@ func TestCommitDialog_PrefillNamesSpec(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			html := renderBoardDialogs(&BoardProjection{Spec: tc.spec, Mode: modeAuthoring})
+			html, _ := renderBoardDialogs(&BoardProjection{Spec: tc.spec, Mode: modeAuthoring})
 			wantTemplate := "Propose spec/" + tc.spec + ": "
 			if got := commitMessageTemplate(tc.spec); got != wantTemplate {
 				t.Fatalf("commitMessageTemplate(%q) = %q, want %q", tc.spec, got, wantTemplate)
@@ -74,7 +74,7 @@ func TestCommitDialog_PrefillNamesSpec(t *testing.T) {
 func TestCommitDialog_AbsentOutsideAuthoring(t *testing.T) {
 	for _, mode := range []boardModeKind{modeReview, modeReadOnly} {
 		t.Run(string(mode), func(t *testing.T) {
-			html := renderBoardDialogs(&BoardProjection{Spec: "s", Mode: mode})
+			html, _ := renderBoardDialogs(&BoardProjection{Spec: "s", Mode: mode})
 			for _, absent := range []string{`id="commit-dialog"`, `id="commit-lifecycle-note"`, `data-template=`} {
 				if strings.Contains(html, absent) {
 					t.Errorf("%s: %q must not render outside authoring", mode, absent)

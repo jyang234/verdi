@@ -6,7 +6,7 @@ import {
   branchBoardPath,
   worktreeSpecPath,
 } from "./fixtures";
-import { editCard } from "./helpers";
+import { editCard, stickyAction, wallToolbar } from "./helpers";
 
 // Per-branch draft boards (spec/draft-boards): one address grammar,
 // /b/<branch-escaped>/board/spec/<name>, reaches every draft's own design
@@ -150,8 +150,11 @@ test("the same spec is sealed unprefixed and read-only-with-divergence-notice un
   await expect(page.getByTestId("board")).toHaveAttribute("data-readonly-reason", "sealed");
   await expect(page.locator(".board-mode-tag")).toHaveText("read-only · sealed record");
   await expect(page.locator("body")).not.toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
-  // No authoring affordances on the sealed record.
-  await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
+  // No authoring affordances on the sealed record: the toolbar offers no
+  // Sticky (the retired rail's Add sticky, spec/wall-strip-and-drawer-v2
+  // ac-6).
+  await expect(wallToolbar(page)).toBeAttached();
+  await expect(stickyAction(page)).toHaveCount(0);
 
   // The /b/ address renders the BRANCH's own content (the draft edition's
   // bytes), read-only, with the divergence disclosed in the chrome (I6).
@@ -166,7 +169,8 @@ test("the same spec is sealed unprefixed and read-only-with-divergence-notice un
   await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
   await expect(page.locator("body")).toContainText("diverge");
   await expect(page.locator("body")).toContainText("read-only");
-  await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
+  await expect(wallToolbar(page)).toBeAttached();
+  await expect(stickyAction(page)).toHaveCount(0);
 
   // Back at the unprefixed address: still the sealed record — two
   // simultaneous truths of one spec, not a toggle.
@@ -195,7 +199,8 @@ test("a remote-only branch renders sealed with its remoteness disclosed", async 
     `remote-tracking ref origin/design/${SHOWCASE.DB_SEALED_REMOTE}`,
   );
   await expect(page.getByTestId("placard-problem")).toContainText("sealed remote problem");
-  await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
+  await expect(wallToolbar(page)).toBeAttached();
+  await expect(stickyAction(page)).toHaveCount(0);
 });
 
 // DC-4 (no ref at all): a /b/ branch that resolves nowhere renders the

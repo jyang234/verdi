@@ -32,7 +32,8 @@ type sharedStore struct {
 // run()'s historical order: provisionStore (examples/showcase on main),
 // then afterMain, then the design-branch provisioners provisionBoard →
 // provisionDiagrams → provisionFamilyBoardLinks → provisionDirectory →
-// provisionDraftBoards → provisionShowcaseDraft → provisionReadiness.
+// provisionDraftBoards → provisionShowcaseDraft → provisionReadiness, and
+// last provisionWallStrip, which only cuts branches and worktrees.
 //
 // afterMain runs once, between the main-only base store and the first
 // design-branch provisioner, while the checkout still sits on main with
@@ -111,6 +112,14 @@ func provisionSharedStore(ctx context.Context, moduleRoot, scratch string, after
 	readinessRequestPath, err := provisionReadiness(ctx, moduleRoot, storeRoot)
 	if err != nil {
 		return sharedStore{}, fmt.Errorf("provisioning readiness fixtures: %w", err)
+	}
+
+	// The wall-strip-and-drawer fixture walls (provision_wallstrip.go):
+	// each on its own namesake branch, cut at the serving branch's final
+	// tip, with its change state in its own pre-cut worktree — so the
+	// serving checkout stays where provisionReadiness left it, clean.
+	if err := provisionWallStrip(ctx, storeRoot); err != nil {
+		return sharedStore{}, fmt.Errorf("provisioning wall-strip fixtures: %w", err)
 	}
 
 	return sharedStore{

@@ -49,7 +49,8 @@ func bodyMustLack(t *testing.T, body string, banned ...string) {
 	}
 }
 
-// readOnlyPanelOf slices the rendered read-only rail panel out of a page,
+// readOnlyPanelOf slices the rendered read-only explanation (a note among
+// the wall's notices since the rail that held it retired) out of a page,
 // or returns "" when the page carries none — so remedy assertions can be
 // scoped to the panel's OWN copy rather than the whole page.
 func readOnlyPanelOf(body string) string {
@@ -152,8 +153,12 @@ func TestBoard_UnprovenLifecycle_ReadOnlyWithoutAcceptanceClaims(t *testing.T) {
 	}
 	// No editing affordance of any tier.
 	bodyMustLack(t, body,
-		`id="add-sticky-btn"`, `id="commit-push-btn"`, `data-testid="asd-forms"`,
-		`data-testid="create-panel"`, `class="delete-btn"`, `class="graduate-btn"`, `data-retype`,
+		// The toolbar offers the scratch tier's Sticky only in authoring (the
+		// retired rail's Add sticky); the typed operations' opener lives only
+		// where the domain is live (the retired rail's forms); New story is
+		// the sealed record's (spec/wall-strip-and-drawer-v2 ac-6).
+		`"mode":"authoring"`, `id="commit-push-btn"`, `id="asd-add-object"`,
+		`data-testid="create-panel"`, `id="create-spec-btn"`, `class="delete-btn"`, `class="graduate-btn"`, `data-retype`,
 		// The toolbar's projected actions and the add slots (spec/wall-canvas-v2
 		// ac-3, ac-5) are editing affordances too.
 		`data-can-`, `wall-slot`,

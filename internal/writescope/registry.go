@@ -212,6 +212,7 @@ func Registry() []Declaration {
 				Workbench("/b/{branch}/board/spec/{name}/fragment"),
 				Workbench("/b/{branch}/board/spec/{name}/peek"),
 				Workbench("/b/{branch}/board/spec/{name}/pinsearch"),
+				Workbench("/b/{branch}/board/spec/{name}/readiness"),
 				Workbench("/b/{branch}/board/spec/{name}/snapshot"),
 			},
 			Worktrees:  []WorktreePattern{".verdi/data/worktrees/*"},

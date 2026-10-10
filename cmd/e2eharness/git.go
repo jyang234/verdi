@@ -71,6 +71,30 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 	return strings.TrimSpace(string(out)), nil
 }
 
+// initRepo creates a repository at dir on branch main, bare when bare is
+// set (a store's local origin), and switches off git's background
+// housekeeping in it: gc.autoDetach and maintenance.auto both false, as
+// internal/fixturegit sets them (D6-31). It is the harness's one `git
+// init` (BL-148; BL-113): a detached `git gc --auto`, which a commit or a
+// push into an origin can start, may otherwise still be writing into the
+// repository while whatever created it removes it — a test's TempDir
+// cleanup, or main.go's own scratch removal.
+func initRepo(ctx context.Context, dir string, bare bool) error {
+	args := []string{"init", "--quiet", "--initial-branch=main"}
+	if bare {
+		args = append(args, "--bare")
+	}
+	if err := runGit(ctx, "", nil, append(args, dir)...); err != nil {
+		return err
+	}
+	for _, key := range []string{"gc.autoDetach", "maintenance.auto"} {
+		if err := runGit(ctx, dir, nil, "config", key, "false"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // commitAt is runGit's dated-commit convenience (spec/index-data ac-3): it
 // overrides deterministicGitEnv's single fixed GIT_AUTHOR_DATE/
 // GIT_COMMITTER_DATE with date (git's "<unix-seconds> <tz-offset>" form) for

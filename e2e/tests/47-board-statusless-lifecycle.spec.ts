@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { EDGE, boardPath, dirEntryTestId } from "./fixtures";
-import { addSticky, editCard, uncommittedIndicator } from "./helpers";
+import { addSticky, editCard, stickyAction, uncommittedIndicator, wallToolbar } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE — merge-signaled spec acceptance, workbench half
 // (2026-08-01 design, Task 6 step 3): a spec's board mode and displayed
@@ -100,8 +100,11 @@ test.describe("statusless lifecycle (merge-signaled acceptance)", () => {
     );
     await expect(refusal).toContainText("state-forbidden");
 
-    // No live domain forms and no spec-edge affordances.
-    await expect(page.getByTestId("asd-forms")).toHaveCount(0);
+    // No live domain forms and no spec-edge affordances: no opener of the
+    // typed operations (the retired rail's forms; spec/wall-strip-and-
+    // drawer-v2 ac-6), so the toolbar offers no Card.
+    await expect(page.locator("#asd-add-object")).toHaveCount(0);
+    await expect(wallToolbar(page).getByRole("button", { name: /^Card/ })).toHaveCount(0);
     await expect(page.locator("[data-retype]")).toHaveCount(0);
     await expect(page.locator('[data-delete="edge"]')).toHaveCount(0);
 
@@ -171,10 +174,10 @@ test.describe("statusless lifecycle (merge-signaled acceptance)", () => {
       "data-board-mode",
       "readonly",
     );
-    // The sealed room offers no scratch tier and no commit affordance.
-    await expect(
-      page.getByRole("button", { name: "Add sticky" }),
-    ).toHaveCount(0);
+    // The sealed room offers no scratch tier and no commit affordance: the
+    // toolbar has no Sticky (the retired rail's Add sticky).
+    await expect(wallToolbar(page)).toBeAttached();
+    await expect(stickyAction(page)).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Commit & push" }),
     ).toHaveCount(0);

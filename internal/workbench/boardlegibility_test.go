@@ -142,14 +142,16 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 // An empty or sparse board is an invitation in authoring, a plain
 // statement of record everywhere else — never a bare void. Reference
 // cards don't count as pinned facts: the leanest valid story spec
-// already hangs its implements thread, and its wall still invites.
+// already hangs its implements thread, and its wall still invites. The
+// invitation names the toolbar's Sticky, the retired rail's "Add sticky"
+// home (spec/wall-strip-and-drawer-v2 ac-6).
 func TestBoardLegibility_EmptyWall(t *testing.T) {
 	empty := &BoardProjection{Spec: "fresh", Mode: modeAuthoring}
 	body := renderBoardRegion(empty, &boardGitState{Branch: "design/fresh"}, testASDView())
 	if !strings.Contains(body, `data-testid="board-empty"`) {
 		t.Fatal("empty authoring board renders no empty-wall state")
 	}
-	for _, want := range []string{"Nothing pinned yet", "Add sticky", "graduate"} {
+	for _, want := range []string{"Nothing pinned yet", "<strong>Sticky</strong> in the toolbar", "graduate"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("empty-wall invitation missing %q", want)
 		}
@@ -175,7 +177,7 @@ func TestBoardLegibility_EmptyWall(t *testing.T) {
 		if !strings.Contains(frozen, "Nothing is declared on this spec") {
 			t.Errorf("empty %s board missing the record statement", mode)
 		}
-		if strings.Contains(frozen, "Add sticky") {
+		if strings.Contains(frozen, "Sticky") || strings.Contains(frozen, "Pin your first fact") {
 			t.Errorf("empty %s board invites editing", mode)
 		}
 	}
@@ -230,60 +232,82 @@ func TestBoardLegibility_YarnKey(t *testing.T) {
 	}
 }
 
-// The four-move guide is authoring's quiet teacher: present (collapsed
-// by markup — no open attribute) in authoring, absent from the mirror
-// and the sealed record — and CLASS-AWARE (owner directive): a feature
-// wall's guide opens by teaching the feature/story split (outcome ACs +
-// stubs here; stories are their own specs pointing up with implements
-// yarn — a feature never lists its stories); a story wall keeps the
-// four-move copy unadorned.
+// The four-move guide is the wall's quiet teacher, and its home is the
+// record drawer's Moves tab (spec/wall-strip-and-drawer-v2 dc-2; the rail
+// that held it is retired, ac-6): never front-loaded — the drawer is shut
+// until asked, and the wall itself renders no guide — and CLASS-AWARE
+// (owner directive): a feature wall's moves open by teaching the
+// feature/story split (outcome ACs + stubs here; stories are their own
+// specs pointing up with implements yarn — a feature never lists its
+// stories); a story wall keeps the four moves unadorned. On the mirror
+// and the sealed record the moves say where they are made: those walls
+// take no edit.
 func TestBoardLegibility_Guide(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	if !strings.Contains(body, `data-testid="board-guide"`) {
-		t.Fatal("authoring board renders no guide")
+	moves := between(t, body, `id="record-panel-moves"`, `id="record-panel-keys"`)
+	if strings.Contains(body, `data-testid="board-guide"`) {
+		t.Error("the authoring wall still renders the rail's guide")
 	}
-	if strings.Contains(body, `<details class="board-guide" data-testid="board-guide" open`) {
-		t.Error("the guide front-loads itself (open by default)")
+	if !strings.Contains(body, `data-testid="record-drawer" role="dialog" aria-label="Record drawer" data-spec="`+boardFixtureName+`" hidden>`) {
+		t.Error("the record drawer that carries the moves front-loads itself (shown by default)")
 	}
 	for _, want := range []string{"case file", "acceptance criteria", "yarn", "Commit"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("guide missing the four-move vocabulary %q", want)
+		if !strings.Contains(moves, want) {
+			t.Errorf("the Moves tab missing the four-move vocabulary %q", want)
 		}
 	}
-	// The fixture is a feature spec: its guide teaches the split.
+	// The fixture is a feature spec: its moves teach the split.
 	for _, want := range []string{
-		`data-testid="guide-class-note"`,
 		"a feature never lists its stories",
 		"implements",
+		"what must be true when the feature lands",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("feature wall's guide missing the split lesson %q", want)
+		if !strings.Contains(moves, want) {
+			t.Errorf("feature wall's moves missing the split lesson %q", want)
 		}
 	}
 
-	// A story wall keeps the four-move copy, with no class note.
+	// A story wall keeps the four moves, with no class note. Its yarn move
+	// names the document's own implements/resolves edges: 05 §Workbench's
+	// four-concept minimum path is story spec + ACs + implements + commit,
+	// and copy never drops a concept (SI-368 (30)). Edge types are
+	// identity ids, which a vocabulary rename leaves bare.
 	story := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
-	storyBody := renderBoardRegion(story, &boardGitState{Branch: "design/s"}, testASDView())
+	storyMoves := renderRecordDrawer(story, testASDView())
+	renamed := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
+	renamed.applyModelVocabulary(vocabTestModel())
+	renamedMoves := renderRecordDrawer(renamed, testASDView())
 	for _, want := range []string{
-		`data-testid="board-guide"`,
 		"case file", "acceptance criteria", "yarn", "Commit",
-		"implements/resolves edges",
+		"the first column says what must be true.",
+		"A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).",
 	} {
-		if !strings.Contains(storyBody, want) {
-			t.Errorf("story wall's guide missing %q", want)
+		if !strings.Contains(storyMoves, want) {
+			t.Errorf("story wall's moves missing %q", want)
+		}
+		if !strings.Contains(renamedMoves, want) {
+			t.Errorf("story wall's moves under a renamed vocabulary missing %q", want)
 		}
 	}
-	if strings.Contains(storyBody, "guide-class-note") {
-		t.Error("story wall's guide carries the feature-wall class note")
+	for _, gone := range []string{"never lists its", "lands."} {
+		if strings.Contains(storyMoves, gone) {
+			t.Errorf("story wall's moves carry the feature wall's %q", gone)
+		}
+	}
+	if strings.Contains(renderBoardRegion(story, &boardGitState{Branch: "design/s"}, testASDView()), `board-guide`) {
+		t.Error("story wall still renders the rail's guide")
 	}
 
 	proj := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		proj.Mode = mode
-		if strings.Contains(renderBoardRegion(proj, &boardGitState{}, testASDView()), `data-testid="board-guide"`) {
+		if strings.Contains(renderBoardRegion(proj, &boardGitState{}, testASDView()), `board-guide`) {
 			t.Errorf("%s board renders the authoring guide", mode)
+		}
+		if !strings.Contains(renderRecordDrawer(proj, testASDView()), "this wall takes no edit") {
+			t.Errorf("%s board's moves do not say the wall takes no edit", mode)
 		}
 	}
 }
@@ -340,7 +364,7 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	for _, want := range []string{`board-placards case-file`, `case-arrow`, `placard--problem`, `placard--outcome`} {
+	for _, want := range []string{`case-strip case-file`, `case-arrow`, `placard--problem`, `placard--outcome`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("case-file header missing %q", want)
 		}
@@ -349,8 +373,8 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	// A spec carrying neither attribute (grandfathered v0 artifacts) gets
 	// no folder header at all — never an empty tab.
 	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
-	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-tab") {
-		t.Error("a spec with no problem/outcome still renders the case-file tab")
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-strip") {
+		t.Error("a spec with no problem/outcome still renders the case-file strip")
 	}
 
 	proj := &BoardProjection{

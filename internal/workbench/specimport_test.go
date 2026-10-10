@@ -603,8 +603,9 @@ func TestSpecImport_LabeledMarkdown_PreviewCorrectApplyRecord(t *testing.T) {
 	}
 
 	// The ordinary branch board renders in authoring mode and carries the
-	// adjacent source-record link beside the review panels — explaining
-	// the import origin separately from ASD history and acceptance.
+	// source-record link in the record drawer's Provenance tab, beside the
+	// Review tab (SI-368 (6)) — explaining the import origin separately
+	// from ASD history and acceptance.
 	status, board := c.get(created.BoardPath)
 	if status != http.StatusOK {
 		t.Fatalf("GET %s = %d: %s", created.BoardPath, status, board)
@@ -616,9 +617,10 @@ func TestSpecImport_LabeledMarkdown_PreviewCorrectApplyRecord(t *testing.T) {
 	if origin < 0 {
 		t.Fatalf("imported board has no source-record affordance")
 	}
-	review := strings.Index(board, `data-testid="asd-review"`)
-	if review < 0 || origin < review || origin-review > 2000 {
-		t.Fatalf("source-record affordance is not adjacent to the semantic review panel (review at %d, origin at %d)", review, origin)
+	provenance := strings.Index(board, `id="record-panel-provenance"`)
+	review := strings.Index(board, `id="record-panel-review"`)
+	if provenance < 0 || review < 0 || origin < provenance || origin > review {
+		t.Fatalf("source-record affordance is not in the record drawer's Provenance tab beside the Review tab (provenance at %d, origin at %d, review at %d)", provenance, origin, review)
 	}
 	recordHref := "/design/import/record?branch=design%2F" + slug + "&amp;spec=" + slug
 	panel := board[origin : origin+1500]

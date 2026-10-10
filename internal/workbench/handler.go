@@ -16,6 +16,9 @@ const (
 	routeBoardAPI       = "/board/spec/{name}/api/{action}"
 	routeBoardPeek      = "/board/spec/{name}/peek"
 	routeBoardPinSearch = "/board/spec/{name}/pinsearch"
+	// routeBoardReadiness is the drawer's Readiness tab body, loaded when
+	// the tab opens (spec/wall-strip-and-drawer-v2 ac-5; SI-368 (1)).
+	routeBoardReadiness = "/board/spec/{name}/readiness"
 	// routeBoardDocument and routeBoardDocumentSnapshot (the Document tab
 	// and its conditional projection) are declared in boarddocument.go.
 )
@@ -40,6 +43,7 @@ func boardSpecRoutes() []boardSpecRoute {
 		{suffix: routeBoardAPI, handler: (*boardSpecServer).boardSpecAPIHandler, json: true},
 		{suffix: routeBoardPeek, handler: (*boardSpecServer).boardPeekHandler},
 		{suffix: routeBoardPinSearch, handler: (*boardSpecServer).boardPinSearchHandler},
+		{suffix: routeBoardReadiness, handler: (*boardSpecServer).boardReadinessTabHandler},
 		{suffix: routeBoardDocument, handler: (*boardSpecServer).boardDocumentPageHandler},
 		{suffix: routeBoardDocumentSnapshot, handler: (*boardSpecServer).boardDocumentSnapshotHandler, json: true},
 	}
@@ -212,5 +216,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/walltoolbar.js", wallToolbarJSHandler())
 	mux.HandleFunc("/assets/wallkeys.js", wallKeysJSHandler())
 	mux.HandleFunc("/assets/wallminimap.js", wallMinimapJSHandler())
+	mux.HandleFunc("/assets/wallstrip.js", wallStripJSHandler())
+	mux.HandleFunc("/assets/walldrawer.js", wallDrawerJSHandler())
 	mux.HandleFunc("/assets/wallnewstory.js", wallNewStoryJSHandler())
 }

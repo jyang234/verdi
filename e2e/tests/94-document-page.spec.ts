@@ -190,12 +190,10 @@ async function expectChips(page: Page, boardHref: string, facts: Facts, what: st
 // test checks the chip it clicked against the card the wall selected.
 const ARRIVAL_KINDS = ["acceptance-criterion", "constraint", "decision", "open-question"] as const;
 
-// A viewport the wall outgrows on both axes (90-wall-keyboard's SMALL):
-// the layout stacks, so the wall frame starts far below the fold, and the
-// canvas is bounded to the viewport and scrolls inside itself, so a
-// column's lowest card starts outside the canvas's visible box as well.
-// Arrival's reveal is then a real move of the page and of the canvas,
-// never a card that was in view before the chip was clicked.
+// A viewport the wall outgrows on both axes (90-wall-keyboard's SMALL).
+// Since the case file became a one-line strip (SI-368) the bare wall's
+// canvas starts near the top of the page at SMALL, so the arrival test
+// keeps SMALL's width and shortens its height (see that test).
 const SMALL = { width: 1000, height: 640 };
 
 // cardView reports "in view" when the wall's card for `id` lies whole
@@ -530,15 +528,26 @@ test.describe("document-page", () => {
   // wallselect.js sets on .objcard[data-id]; SI-340 (11), SI-350's
   // carry-in), and that the card lies in view. The chips are read from
   // the page's own snapshot (the file's idiom); for each kind the last
-  // chip is taken, the lowest card of its column, which at SMALL starts
-  // out of view on the bare wall — proven before the click, so the
-  // reveal the test then sees is a real move.
+  // chip is taken, the lowest card of its column, which starts out of
+  // view on the bare wall at the test's viewport — proven before the
+  // click, so the reveal the test then sees is a real move.
+  //
+  // That viewport is SMALL's width at a 280 px height. At SMALL itself
+  // the bare wall's canvas starts at y 151 (the case file is a one-line
+  // strip, SI-368), and the constraint (co-1, the only one, in the top
+  // row), the last decision, and the last open question lie whole in
+  // view. At 1000 x 280 the
+  // frame's row leads the canvas (wallselect.js's ROW_FIT_HEIGHT), the
+  // canvas starts at y 213, and the nearest chosen card, co-1 at y
+  // 253-393, ends 113 px below the fold; the others start at y 429 or
+  // lower. The canvas, 200 px tall there, still holds a whole 140 px
+  // card, so the reveal stays possible.
   test("Id chips open the wall with the card selected", async ({ page }) => {
     test.setTimeout(150_000);
     const proposed = docPath(SHOWCASE.DESIGN_SPEC);
     const wall = boardPath(SHOWCASE.DESIGN_SPEC);
     const facts = (await snapshotOf(page, proposed)).facts;
-    await page.setViewportSize(SMALL);
+    await page.setViewportSize({ width: SMALL.width, height: 280 });
     const canvas = page.getByTestId("board");
     const selected = page.locator("#board-canvas [data-selected]");
     for (const kind of ARRIVAL_KINDS) {
@@ -564,6 +573,11 @@ test.describe("document-page", () => {
       await expect(page, `${what}: the wall loads at its card's hash`).toHaveURL(`${origin}${wall}#obj-${id}`);
       await page.waitForLoadState("load");
       await expect(canvas, `${what}: the wall`).toHaveAttribute("data-board-mode", "authoring");
+      // The pointer still rests where the chip was. At this viewport a
+      // revealed card can land under it and take the authoring wall's
+      // 2 px hover lift (.objcard:hover), which is the pointer's move,
+      // not arrival's, so the pointer is parked left of the canvas.
+      await page.mouse.move(0, 0);
 
       // Selected, alone, and in view.
       const card = page.getByTestId(`card-${id}`);

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
+import { stickyAction, wallToolbar } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6 (Goal: "the
 // review-mode mirror") and Phase V1-P7 (Delivers: "review-sticky forge
@@ -76,8 +77,10 @@ test.describe("V1-P6/V1-P7: review mode mirrors the MR", () => {
     await expect(
       page.getByRole("button", { name: "Commit & push" }),
     ).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(
-      0,
-    );
+    // The scratch tier's sticky action is the toolbar's (the retired
+    // rail's Add sticky, spec/wall-strip-and-drawer-v2 ac-6): offered in
+    // authoring only, so the mirror's toolbar has none.
+    await expect(wallToolbar(page)).toBeAttached();
+    await expect(stickyAction(page)).toHaveCount(0);
   });
 });
