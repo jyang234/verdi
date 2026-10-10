@@ -402,10 +402,20 @@
         sw.focus();
       }
     });
+    // Focus moving to another element outside both closes it at once, with
+    // the key that moved it, as Commit and push's popover does: a timer
+    // would run behind the keys that follow, and an Escape among them
+    // would close this menu, a layer the user has left, instead of doing
+    // the next layer's job (SI-368 (17), (33)). Focus going nowhere is
+    // settled once it lands, and closes the menu only if it lands on an
+    // element outside both.
     document.addEventListener("focusout", function (e) {
       if (menu.hidden) return;
       var to = e.relatedTarget;
-      if (to instanceof Element && (menu.contains(to) || to.closest('[data-testid="branch-switcher"]'))) return;
+      if (to instanceof Element) {
+        if (!menu.contains(to) && !to.closest('[data-testid="branch-switcher"]')) menu.hidden = true;
+        return;
+      }
       setTimeout(function () {
         var a = document.activeElement;
         if (!menu.hidden && a && a !== document.body && !menu.contains(a) && !a.closest('[data-testid="branch-switcher"]')) menu.hidden = true;

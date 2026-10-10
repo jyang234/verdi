@@ -876,6 +876,38 @@ test.describe("wall-canvas", () => {
     }
   });
 
+  test("a Shift+Tab off the branch switcher shuts its menu with the press, so the next Escape clears the selection (SI-368 (17), (33))", async ({ page }) => {
+    // The menu opens on Enter at the switcher and shuts when the focus
+    // leaves both (wallstrip.js). Shut on a timer instead, it stood open
+    // after the focus had moved on: the browser ran the timer behind the
+    // next key, so an Escape pressed right after the Shift+Tab closed the
+    // menu, a layer the user had left, and the selection survived it
+    // (F3G3R-1, 10 runs in 10). Each pass presses Shift+Tab and Escape
+    // back to back and reads the outcome once, never polled.
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const menu = page.locator("#branch-menu");
+    for (let pass = 0; pass < 5; pass++) {
+      await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+      await tabUntil(page, "Shift+Tab reaches the branch switcher", focusIs(page, "branch-switcher"), true);
+      await page.keyboard.press("Enter");
+      await expect(menu).toBeVisible();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Escape");
+      const after = await menu.evaluate((m) => {
+        const a = document.activeElement;
+        const left = !!a && a !== document.body && !m.contains(a) && !a.closest('[data-testid="branch-switcher"]');
+        return { hidden: (m as HTMLElement).hidden, left, active: a ? a.getAttribute("data-testid") || a.tagName : null };
+      });
+      expect(after.left, `pass ${pass}: the Shift+Tab moved the focus off the switcher and out of the menu (to ${after.active})`).toBe(true);
+      expect(await selectedKey(page), `pass ${pass}: the Escape after the Shift+Tab clears the selection`).toBeNull();
+      expect(after.hidden, `pass ${pass}: the menu is shut`).toBe(true);
+    }
+  });
+
   test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {
     await openWritableWall(page);
     const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));
