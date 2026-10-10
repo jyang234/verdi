@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -34,22 +35,32 @@ func resolvableDefaultBranchRoot(t *testing.T) string {
 	return repo.Dir
 }
 
-// TestForgeOpenMRs_ListsSourceBranches drives the real adapter over the
-// hermetic forge fake: every open MR targeting the resolved default branch
-// contributes its source branch, sorted.
-func TestForgeOpenMRs_ListsSourceBranches(t *testing.T) {
+// TestForgeOpenMRs_ListsRefs drives the real adapter over the hermetic
+// forge fake: every open MR targeting the resolved default branch
+// contributes its source branch and its forge-native id (forge.OpenMR.ID,
+// read as is — an empty one stays empty, never invented), sorted by branch
+// then id.
+func TestForgeOpenMRs_ListsRefs(t *testing.T) {
 	t.Parallel()
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "2", SourceBranch: "design/zeta", Title: "Zeta"})
 	f.SeedOpenMR("main", forge.OpenMR{ID: "1", SourceBranch: "design/alpha", Title: "Alpha"})
+	f.SeedOpenMR("main", forge.OpenMR{SourceBranch: "design/beta", Title: "Beta, unnumbered"})
+	f.SeedOpenMR("main", forge.OpenMR{ID: "9", SourceBranch: "design/zeta", Title: "Zeta again"})
+	f.SeedOpenMR("release", forge.OpenMR{ID: "5", SourceBranch: "design/other", Title: "Not the default branch"})
 
-	got, err := newForgeOpenMRs(f, resolvableDefaultBranchRoot(t)).OpenMRSourceBranches(context.Background())
+	got, err := newForgeOpenMRs(f, resolvableDefaultBranchRoot(t)).OpenMRRefs(context.Background())
 	if err != nil {
-		t.Fatalf("OpenMRSourceBranches: %v", err)
+		t.Fatalf("OpenMRRefs: %v", err)
 	}
-	want := []string{"design/alpha", "design/zeta"}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("branches = %v, want %v", got, want)
+	want := []workbench.OpenMRRef{
+		{Branch: "design/alpha", ID: "1"},
+		{Branch: "design/beta", ID: ""},
+		{Branch: "design/zeta", ID: "2"},
+		{Branch: "design/zeta", ID: "9"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("refs = %+v, want %+v", got, want)
 	}
 }
 
@@ -57,7 +68,7 @@ func TestForgeOpenMRs_ListsSourceBranches(t *testing.T) {
 // no default branch resolvable there is no target to list MRs against.
 func TestForgeOpenMRs_UnresolvableDefaultBranch(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "")
-	_, err := newForgeOpenMRs(fake.New(), t.TempDir()).OpenMRSourceBranches(context.Background())
+	_, err := newForgeOpenMRs(fake.New(), t.TempDir()).OpenMRRefs(context.Background())
 	if err == nil {
 		t.Fatal("want an error when the default branch cannot be resolved, got nil")
 	}
@@ -71,11 +82,13 @@ func TestHTTPOpenMRFeed_Table(t *testing.T) {
 		name    string
 		body    string
 		status  int
-		want    []string
+		want    []workbench.OpenMRRef
 		wantErr bool
 	}{
-		{"happy", `[{"id":"7","source_branch":"design/x","title":"X"}]`, http.StatusOK, []string{"design/x"}, false},
-		{"empty feed", `[]`, http.StatusOK, nil, false},
+		{"happy", `[{"id":"7","source_branch":"design/x","title":"X"}]`, http.StatusOK, []workbench.OpenMRRef{{Branch: "design/x", ID: "7"}}, false},
+		{"several, sorted by branch then id", `[{"id":"7","source_branch":"design/y","title":"Y"},{"id":"3","source_branch":"design/x","title":"X"},{"id":"1","source_branch":"design/y","title":"Y2"}]`, http.StatusOK, []workbench.OpenMRRef{{Branch: "design/x", ID: "3"}, {Branch: "design/y", ID: "1"}, {Branch: "design/y", ID: "7"}}, false},
+		{"an empty id stays empty", `[{"id":"","source_branch":"design/x","title":"X"}]`, http.StatusOK, []workbench.OpenMRRef{{Branch: "design/x"}}, false},
+		{"empty feed", `[]`, http.StatusOK, []workbench.OpenMRRef{}, false},
 		{"unknown field fails closed", `[{"id":"7","source_branch":"design/x","title":"X","extra":1}]`, http.StatusOK, nil, true},
 		{"trailing data rejected", `[] {"more":true}`, http.StatusOK, nil, true},
 		{"non-200 is an error", `outage`, http.StatusServiceUnavailable, nil, true},
@@ -88,7 +101,7 @@ func TestHTTPOpenMRFeed_Table(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			got, err := httpOpenMRFeed{url: srv.URL}.OpenMRSourceBranches(context.Background())
+			got, err := httpOpenMRFeed{url: srv.URL}.OpenMRRefs(context.Background())
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("want error, got %v", got)
@@ -96,15 +109,10 @@ func TestHTTPOpenMRFeed_Table(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("OpenMRSourceBranches: %v", err)
+				t.Fatalf("OpenMRRefs: %v", err)
 			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("branches = %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("branches = %v, want %v", got, tt.want)
-				}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("refs = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -117,7 +125,7 @@ func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
-	if _, err := (httpOpenMRFeed{url: url}).OpenMRSourceBranches(context.Background()); err == nil {
+	if _, err := (httpOpenMRFeed{url: url}).OpenMRRefs(context.Background()); err == nil {
 		t.Fatal("want error against a closed server, got nil")
 	}
 }
@@ -125,7 +133,7 @@ func TestHTTPOpenMRFeed_Unreachable(t *testing.T) {
 // TestUnavailableOpenMRs always errors with the disclosed reason.
 func TestUnavailableOpenMRs(t *testing.T) {
 	t.Parallel()
-	_, err := unavailableOpenMRs{reason: "forge \"gitlab\" is configured but unreachable"}.OpenMRSourceBranches(context.Background())
+	_, err := unavailableOpenMRs{reason: "forge \"gitlab\" is configured but unreachable"}.OpenMRRefs(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "unreachable") {
 		t.Fatalf("err = %v, want the disclosed reason", err)
 	}

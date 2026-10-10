@@ -74,7 +74,7 @@ func TestAgeOf(t *testing.T) {
 }
 
 func TestReviewOf(t *testing.T) {
-	answered := reviewConsultation{configured: true, inReview: map[string]bool{"design/in-review": true}}
+	answered := reviewConsultation{configured: true, inReview: map[string][]string{"design/in-review": {"7"}, "design/unnumbered": {""}}}
 	failed := reviewConsultation{configured: true, failed: true}
 	tests := []struct {
 		name   string
@@ -85,6 +85,7 @@ func TestReviewOf(t *testing.T) {
 	}{
 		{"a local draft with an open MR", refindex.SourceLocal, "spec/in-review", answered, reviewOpen},
 		{"a remote-only draft with an open MR", refindex.SourceRemote, "spec/in-review", answered, reviewOpen},
+		{"an open MR with no id still puts its draft in review", refindex.SourceLocal, "spec/unnumbered", answered, reviewOpen},
 		{"a local + remote draft with none", refindex.SourceBoth, "spec/quiet-one", answered, reviewNotOpen},
 		{"a draft when the forge failed: unavailable, never not open", refindex.SourceLocal, "spec/in-review", failed, reviewUnavailable},
 		{"a draft with no forge configured", refindex.SourceLocal, "spec/in-review", reviewConsultation{}, reviewUnconfigured},
@@ -282,7 +283,7 @@ func TestProjectCard(t *testing.T) {
 	unproven := disclosure.New("refindex:unproven-spec-state", "spec/unproven", "scan incomplete")
 	dateLost := disclosure.New("refindex:date-unreadable", "spec/lost", "boom")
 	cc := cardContext{
-		review: reviewConsultation{configured: true, inReview: map[string]bool{"design/drafted": true}},
+		review: reviewConsultation{configured: true, inReview: map[string][]string{"design/drafted": {"11", "4"}}},
 		corpus: corpusRead{links: fakeBacklinks{}},
 		now:    cardsNow(),
 	}

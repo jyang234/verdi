@@ -165,7 +165,7 @@ func TestWriteDirectoryEntry_CardFacts(t *testing.T) {
 	lostDate := disclosure.New("refindex:date-unreadable", "spec/lost-date", "last-change date unreadable: boom")
 	successor := fakeBacklinks{"spec/old-way": {{From: "spec/live-component", Type: "superseded-by"}}}
 	cc := cardContext{
-		review: reviewConsultation{configured: true, inReview: map[string]bool{"design/in-review": true}},
+		review: reviewConsultation{configured: true, inReview: map[string][]string{"design/in-review": {"23"}}},
 		corpus: corpusRead{links: successor},
 		now:    datesNow,
 	}

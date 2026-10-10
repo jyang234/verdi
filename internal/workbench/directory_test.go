@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -59,12 +60,12 @@ const fakeHomeGitDate = "2024-01-01T00:00:00+00:00"
 
 // fakeOpenMRs is the hermetic OpenMRLister double (co-2).
 type fakeOpenMRs struct {
-	branches []string
-	err      error
+	refs []OpenMRRef
+	err  error
 }
 
-func (f fakeOpenMRs) OpenMRSourceBranches(ctx context.Context) ([]string, error) {
-	return f.branches, f.err
+func (f fakeOpenMRs) OpenMRRefs(ctx context.Context) ([]OpenMRRef, error) {
+	return f.refs, f.err
 }
 
 // cannedIndex returns a HomeDeps.Index over fixed entries.
@@ -413,7 +414,7 @@ func TestRenderHome_InReviewChip(t *testing.T) {
 	_, body := getHome(t, root, HomeDeps{
 		Index:   cannedIndex(directoryFixtureEntries(), nil),
 		Git:     fakeHomeGit{},
-		OpenMRs: fakeOpenMRs{branches: []string{"design/both-draft"}},
+		OpenMRs: fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/both-draft", ID: "17"}}},
 	})
 
 	if got := strings.Count(body, `class="badge badge-open dir-inreview"`); got != 1 {
@@ -536,11 +537,14 @@ func TestConsultOpenMRs_Table(t *testing.T) {
 	tests := []struct {
 		name       string
 		mrs        OpenMRLister
-		wantBranch string
+		want       map[string][]string
 		wantNotice bool
 	}{
-		{"open MR reported", fakeOpenMRs{branches: []string{"design/x"}}, "design/x", false},
-		{"forge unreachable", fakeOpenMRs{err: errors.New("connection refused")}, "", true},
+		{"open MR reported", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x", ID: "7"}}}, map[string][]string{"design/x": {"7"}}, false},
+		{"several open MRs from one branch keep every id", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x", ID: "12"}, {Branch: "design/y", ID: "3"}, {Branch: "design/x", ID: "4"}}}, map[string][]string{"design/x": {"12", "4"}, "design/y": {"3"}}, false},
+		{"an open MR with no id still marks its branch", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x"}}}, map[string][]string{"design/x": {""}}, false},
+		{"no open MRs", fakeOpenMRs{}, map[string][]string{}, false},
+		{"forge unreachable", fakeOpenMRs{err: errors.New("connection refused")}, nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -557,8 +561,8 @@ func TestConsultOpenMRs_Table(t *testing.T) {
 			if notice != "" {
 				t.Fatalf("unexpected notice %q", notice)
 			}
-			if !inReview[tt.wantBranch] {
-				t.Fatalf("inReview = %v, want %s", inReview, tt.wantBranch)
+			if !reflect.DeepEqual(inReview, tt.want) {
+				t.Fatalf("inReview = %v, want %v", inReview, tt.want)
 			}
 		})
 	}

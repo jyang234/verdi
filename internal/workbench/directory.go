@@ -28,16 +28,27 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// OpenMRLister is the directory's in-review consultation port (dc-4): the
-// source branches of every open MR/PR targeting the store's default
-// branch, consulted fresh per render. It is a consumer-defined interface
-// (04 §port pattern) so this package never imports internal/forge — the
-// caller (cmd/verdi's serve.go) adapts the forge port's ListOpenMRs onto
-// it, and the hermetic harness/test doubles implement it directly (co-2).
+// OpenMRRef is one open MR/PR as the in-review consultation reads it: its
+// source (head) branch and its forge-native id (GitLab's IID, GitHub's
+// pull request number — forge.OpenMR.ID, carried as is). ID is "" when
+// the forge listed the request without one: the branch is still in
+// review, and the chip discloses the missing number rather than
+// inventing one (spec/workbench-redesign dc-4; SI-376 (2)).
+type OpenMRRef struct {
+	Branch string
+	ID     string
+}
+
+// OpenMRLister is the directory's in-review consultation port (dc-4):
+// every open MR/PR targeting the store's default branch, consulted fresh
+// per render. It is a consumer-defined interface (04 §port pattern) so
+// this package never imports internal/forge — the caller (cmd/verdi's
+// serve.go) adapts the forge port's ListOpenMRs onto it, and the
+// hermetic harness/test doubles implement it directly (co-2).
 type OpenMRLister interface {
-	// OpenMRSourceBranches returns the source (head) branch of every open
-	// merge/pull request targeting the store's default branch.
-	OpenMRSourceBranches(ctx context.Context) ([]string, error)
+	// OpenMRRefs returns the source branch and forge-native id of every
+	// open merge/pull request targeting the store's default branch.
+	OpenMRRefs(ctx context.Context) ([]OpenMRRef, error)
 }
 
 // HomeDeps carries the home page's injected collaborators. It is a
@@ -135,18 +146,19 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 const openMRConsultTimeout = 2 * time.Second
 
 // consultOpenMRs performs the per-render, non-blocking in-review
-// consultation (dc-4). It returns the set of design branches with an open
-// MR and, when the consultation failed, the disclosed notice text — the
-// caller renders the notice and the refs-computed directory in full either
-// way. A nil lister (no forge configured) is the silent, legitimate
-// absence: no chips, no notice.
-func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string]bool, notice string) {
+// consultation (dc-4). It returns each design branch with an open MR,
+// mapped to the forge-native ids of its open requests in the lister's
+// order ("" for a request listed without one), and, when the consultation
+// failed, the disclosed notice text — the caller renders the notice and
+// the refs-computed directory in full either way. A nil lister (no forge
+// configured) is the silent, legitimate absence: no chips, no notice.
+func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string][]string, notice string) {
 	if mrs == nil {
 		return nil, ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, openMRConsultTimeout)
 	defer cancel()
-	branches, err := mrs.OpenMRSourceBranches(ctx)
+	refs, err := mrs.OpenMRRefs(ctx)
 	if err != nil {
 		d := disclosure.New(
 			"workbench:mr-status",
@@ -155,9 +167,9 @@ func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string]
 		)
 		return nil, disclosure.Render(d)
 	}
-	inReview = make(map[string]bool, len(branches))
-	for _, b := range branches {
-		inReview[b] = true
+	inReview = make(map[string][]string, len(refs))
+	for _, r := range refs {
+		inReview[r.Branch] = append(inReview[r.Branch], r.ID)
 	}
 	return inReview, ""
 }

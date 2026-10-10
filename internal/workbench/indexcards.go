@@ -172,8 +172,9 @@ type reviewConsultation struct {
 	configured bool
 	// failed is whether the consultation failed (its notice disclosed).
 	failed bool
-	// inReview is the design branches with an open MR, when it succeeded.
-	inReview map[string]bool
+	// inReview maps each design branch with an open MR to its open
+	// requests' forge-native ids, when it succeeded.
+	inReview map[string][]string
 }
 
 // reviewOf is e's review state. A design-branch entry reads the
@@ -193,11 +194,17 @@ func reviewOf(e refindex.Entry, rc reviewConsultation) reviewState {
 		return reviewUnconfigured
 	case rc.failed:
 		return reviewUnavailable
-	case rc.inReview[designPrefix+strings.TrimPrefix(e.Ref, "spec/")]:
+	case len(rc.inReview[reviewBranch(e)]) > 0:
 		return reviewOpen
 	default:
 		return reviewNotOpen
 	}
+}
+
+// reviewBranch is the design branch whose open MRs put e in review: the
+// branch `verdi design start` cut for the draft (designPrefix).
+func reviewBranch(e refindex.Entry) string {
+	return designPrefix + strings.TrimPrefix(e.Ref, "spec/")
 }
 
 // moveKind names a next move (SI-366 (2)'s table) — a closed enum; the

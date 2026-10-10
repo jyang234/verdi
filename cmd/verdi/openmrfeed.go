@@ -1,6 +1,7 @@
 // The directory home's in-review feed (spec/directory-home dc-4): the
 // adapters behind workbench.OpenMRLister, the consumer-defined port the
-// home page's per-render forge consultation goes through. Three
+// home page's per-render forge consultation goes through, each listing
+// every open MR's source branch and forge-native id. Three
 // implementations, mirroring reviewfeed.go's wiring states exactly:
 //
 //   - forgeOpenMRs: the real forge adapter (forge.Forge.ListOpenMRs, the
@@ -33,8 +34,9 @@ import (
 )
 
 // forgeOpenMRs adapts forge.Forge.ListOpenMRs onto workbench.OpenMRLister:
-// the source branch of every open MR targeting the store's resolved
-// default branch, consulted fresh per call (dc-4: per-render).
+// the source branch and forge-native id (forge.OpenMR.ID, read as is) of
+// every open MR targeting the store's resolved default branch, consulted
+// fresh per call (dc-4: per-render).
 type forgeOpenMRs struct {
 	f    forge.Forge
 	root string
@@ -45,7 +47,7 @@ func newForgeOpenMRs(f forge.Forge, root string) *forgeOpenMRs {
 	return &forgeOpenMRs{f: f, root: root}
 }
 
-func (a *forgeOpenMRs) OpenMRSourceBranches(ctx context.Context) ([]string, error) {
+func (a *forgeOpenMRs) OpenMRRefs(ctx context.Context) ([]workbench.OpenMRRef, error) {
 	defaultBranch := lint.ResolveDefaultBranch(ctx, a.root)
 	if defaultBranch == "" {
 		return nil, errors.New("verdi: cannot resolve the default branch to list open MRs against (no origin/HEAD configured)")
@@ -54,15 +56,26 @@ func (a *forgeOpenMRs) OpenMRSourceBranches(ctx context.Context) ([]string, erro
 	if err != nil {
 		return nil, fmt.Errorf("verdi: listing open MRs targeting %s: %w", defaultBranch, err)
 	}
-	branches := make([]string, 0, len(mrs))
+	refs := make([]workbench.OpenMRRef, 0, len(mrs))
 	for _, mr := range mrs {
-		branches = append(branches, mr.SourceBranch)
+		refs = append(refs, workbench.OpenMRRef{Branch: mr.SourceBranch, ID: mr.ID})
 	}
-	sort.Strings(branches)
-	return branches, nil
+	sortOpenMRRefs(refs)
+	return refs, nil
 }
 
 var _ workbench.OpenMRLister = (*forgeOpenMRs)(nil)
+
+// sortOpenMRRefs orders refs by branch, then id, so every lister answers
+// in one deterministic order whatever order its source listed them in.
+func sortOpenMRRefs(refs []workbench.OpenMRRef) {
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].Branch != refs[j].Branch {
+			return refs[i].Branch < refs[j].Branch
+		}
+		return refs[i].ID < refs[j].ID
+	})
+}
 
 // openMRFeedEntry is one open MR in the canned harness feed's JSON shape —
 // the fields forge.OpenMR carries, snake-cased.
@@ -82,7 +95,7 @@ type httpOpenMRFeed struct {
 	url string
 }
 
-func (h httpOpenMRFeed) OpenMRSourceBranches(ctx context.Context) ([]string, error) {
+func (h httpOpenMRFeed) OpenMRRefs(ctx context.Context) ([]workbench.OpenMRRef, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("verdi: building open-MR feed request: %w", err)
@@ -106,12 +119,12 @@ func (h httpOpenMRFeed) OpenMRSourceBranches(ctx context.Context) ([]string, err
 		return nil, fmt.Errorf("verdi: open-MR feed carries trailing data after the entry array")
 	}
 
-	branches := make([]string, 0, len(entries))
+	refs := make([]workbench.OpenMRRef, 0, len(entries))
 	for _, e := range entries {
-		branches = append(branches, e.SourceBranch)
+		refs = append(refs, workbench.OpenMRRef{Branch: e.SourceBranch, ID: e.ID})
 	}
-	sort.Strings(branches)
-	return branches, nil
+	sortOpenMRRefs(refs)
+	return refs, nil
 }
 
 var _ workbench.OpenMRLister = httpOpenMRFeed{}
@@ -125,7 +138,7 @@ type unavailableOpenMRs struct {
 	reason string
 }
 
-func (u unavailableOpenMRs) OpenMRSourceBranches(context.Context) ([]string, error) {
+func (u unavailableOpenMRs) OpenMRRefs(context.Context) ([]workbench.OpenMRRef, error) {
 	return nil, errors.New(u.reason)
 }
 
