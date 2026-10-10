@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Request } from "@playwright/test";
 import { CONTROL_URL } from "./fixtures";
 
 // The New story dialog (spec/new-story-dialog-v2; ledger SI-369): the
@@ -42,6 +42,18 @@ const SERVER_REFUSES = [
   "quote_pricing",
   "quote\n",
 ];
+
+// The fixture's one uncovered criterion: the index's call to action names
+// it (ac-3).
+const UNCOVERED = "ac-3";
+// A valid name ac-3's test and the scans type; nothing presses Create
+// with it.
+const PREFILL_NAME = "escrow-refund-threshold";
+// ac-4's Create: a fresh name nothing else uses (SI-369 (17)), and the
+// statements it is filed with.
+const CREATE_NAME = "escrow-surplus-autorefund";
+const CREATE_PROBLEM = "a surplus over the refund threshold waits for the borrower to ask for it";
+const CREATE_OUTCOME = "a surplus over the refund threshold is refunded within one business day of the analysis";
 
 test.describe("new-story-dialog", () => {
   test("The branch preview, inline grammar report, and gated Create", async ({ page }) => {
@@ -196,6 +208,145 @@ test.describe("new-story-dialog", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
   });
+
+  // ac-3 (SI-369 (9)): the fixture's own index offers the call to action
+  // for its one uncovered criterion, and following it opens the dialog
+  // with that criterion claimed — through F7's opener, unchanged, whose
+  // check fires no event.
+  test("Opened from the index, the uncovered criterion starts claimed", async ({ page }) => {
+    const base = await fixtureBase(page);
+    const dialog = page.locator("#create-dialog");
+    const name = page.getByTestId("create-name");
+    const create = page.getByTestId("create-ok");
+    const status = page.getByTestId("create-status");
+    const cta = page.getByTestId(`dir-entry-${FEATURE}`).getByTestId("dir-cta");
+    const ready = `cuts design/${PREFILL_NAME} · claims ${UNCOVERED} · Problem and Outcome are required`;
+
+    // The index card's call to action names the one criterion no stub
+    // lists and no story implements, in the store's story word.
+    await page.goto(base);
+    await expect(cta).toHaveCount(1);
+    await expect(cta).toHaveText(`1 AC unclaimed · ${UNCOVERED} · New ${STORY_WORD}`);
+    await expect(cta).toHaveAttribute("data-cta-ac", UNCOVERED);
+
+    // Following it opens the wall with the dialog open, exactly that
+    // criterion claimed and the covered ones not.
+    await cta.click();
+    await expect(page).toHaveURL(`${base}board/spec/${FEATURE}?new-story=${UNCOVERED}`);
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId(`create-ac-${UNCOVERED}`)).toBeChecked();
+    for (const ac of CRITERIA.filter((c) => c !== UNCOVERED)) {
+      await expect(page.getByTestId(`create-ac-${ac}`)).not.toBeChecked();
+    }
+    await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(1);
+    await expect(page.getByTestId("create-error")).toBeHidden();
+
+    // The claim is already made, so the gate waits for the name alone, and
+    // a valid name enables Create with no further click.
+    await expect(create).toBeDisabled();
+    await expect(status).toHaveText(`name the ${STORY_WORD} to continue`);
+    await name.fill(PREFILL_NAME);
+    await expect(create).toBeEnabled();
+    await expect(status).toHaveText(ready);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
+    // The same, when the name is valid before the opener checks the box:
+    // a reader who types while the opener's script is still on its way.
+    // Above, the keystrokes after the opener recounted the boxes, so they
+    // would have counted the claim on their own. Here no keystroke follows
+    // the opener's event-less check, and only the dialog's own recount
+    // after the opener's click (SI-369 (9)) lets the gate see it. The
+    // opener's script is held until the name is typed, then released.
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/assets/wallnewstory.js", async (route) => {
+      await held;
+      await route.continue();
+    });
+    try {
+      await page.goto(base);
+      await cta.click();
+      await expect(page.getByTestId("create-spec-btn")).toBeVisible();
+      await page.getByTestId("create-spec-btn").click();
+      await expect(dialog).toBeVisible();
+      await name.fill(PREFILL_NAME);
+      await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(0);
+      await expect(create).toBeDisabled();
+      await expect(status).toHaveText("claim at least one acceptance criterion");
+      release();
+      await expect(page.getByTestId(`create-ac-${UNCOVERED}`)).toBeChecked();
+      await expect(dialog.locator("[data-create-ac]:checked")).toHaveCount(1);
+      await expect(create).toBeEnabled();
+      await expect(status).toHaveText(ready);
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+
+  // ac-4. LAST in this file (SI-369 (17)): the fixture starts once per
+  // harness run and is never reset, and this is the one test that presses
+  // Create, under a name nothing else uses. Every snapshot is this test's
+  // own and is compared only with the one taken before it; absence (no
+  // branch, file or ref) is read from /refs, and /show proves only that
+  // the scaffold is present. The three rounds share one page: a navigation
+  // between them would abort a write Cancel or Escape set off, and the
+  // server would cancel it unwritten, so a stray write could pass unseen.
+  // Each snapshot waits for the page's writes in flight to settle, and
+  // all three rounds use Create's name, so a stray write that slipped past
+  // a snapshot would still refuse Create as a collision.
+  test("Nothing written until Create", async ({ page }) => {
+    const dialog = page.locator("#create-dialog");
+    const settled = writesSettled(page);
+    await openFeatureWall(page);
+    const before = await storeSnapshot(page);
+    expect(before.refs.map(refName), "the name is unused").not.toContain(`refs/heads/design/${CREATE_NAME}`);
+
+    // Cancel: a filled dialog, ready to create, leaves the store as it was.
+    await fillReadyDialog(page);
+    await page.getByTestId("create-cancel").click();
+    await expect(dialog).toBeHidden();
+    await settled();
+    expect(await storeSnapshot(page), "after Cancel").toEqual(before);
+
+    // Escape: the same, reopened on the same page.
+    await fillReadyDialog(page);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await settled();
+    expect(await storeSnapshot(page), "after Escape").toEqual(before);
+
+    // Create: the receipt, then exactly one new ref — the design branch —
+    // with the serving checkout untouched, and the scaffold on it.
+    await fillReadyDialog(page);
+    await page.getByTestId("create-ok").click();
+    const receipt = page.locator("#edge-confirm");
+    await expect(receipt).toBeVisible();
+    await expect(receipt.locator("h2")).toHaveText("Planned story created");
+    await expect(receipt).toContainText(`Branch design/${CREATE_NAME} now carries spec/${CREATE_NAME}`);
+    await expect(dialog).toBeHidden();
+
+    const after = await storeSnapshot(page);
+    expect(after.porcelain, "the serving checkout").toEqual(before.porcelain);
+    expect(before.refs.filter((r) => !after.refs.includes(r)), "refs gone or moved").toEqual([]);
+    expect(after.refs.filter((r) => !before.refs.includes(r)).map(refName), "new refs").toEqual([
+      `refs/heads/design/${CREATE_NAME}`,
+    ]);
+
+    const res = await page.request.get(
+      `${NEW_STORY_FIXTURE_URL}/show?ref=design/${CREATE_NAME}&path=.verdi/specs/active/${CREATE_NAME}/spec.md`,
+    );
+    expect(res.status()).toBe(200);
+    const spec = await res.text();
+    expect(spec).toContain(`id: spec/${CREATE_NAME}`);
+    expect(spec).toContain("class: story");
+    expect(spec).toContain(`problem: { text: "${CREATE_PROBLEM}", anchor: problem }`);
+    expect(spec).toContain(`outcome: { text: "${CREATE_OUTCOME}", anchor: outcome }`);
+    expect(spec).toContain(`- { type: implements, ref: "spec/${FEATURE}#${UNCOVERED}" }`);
+  });
 });
 
 // openFeatureWall opens the fixture feature's sealed wall, discovering the
@@ -212,4 +363,55 @@ async function openFeatureWall(page: Page): Promise<void> {
 // criterionRow is the dialog row whose checkbox claims ac.
 function criterionRow(page: Page, ac: string) {
   return page.locator("#create-dialog label.create-ac", { has: page.getByTestId(`create-ac-${ac}`) });
+}
+
+// fixtureBase is the isolated workbench's base URL (its index), from the
+// control server, which starts the fixture on first use.
+async function fixtureBase(page: Page): Promise<string> {
+  const res = await page.request.get(NEW_STORY_FIXTURE_URL);
+  expect(res.ok()).toBeTruthy();
+  return (await res.text()).trim();
+}
+
+// storeSnapshot is GET /newstory-fixture/refs: the store's refs and
+// porcelain, read without writing (SI-369 (11)).
+async function storeSnapshot(page: Page): Promise<{ porcelain: string[]; refs: string[] }> {
+  const res = await page.request.get(`${NEW_STORY_FIXTURE_URL}/refs`);
+  expect(res.status()).toBe(200);
+  return (await res.json()) as { porcelain: string[]; refs: string[] };
+}
+
+// refName is a /refs line's ref name ("<objectname> <refname>").
+function refName(line: string): string {
+  return line.slice(line.indexOf(" ") + 1);
+}
+
+// writesSettled watches the page's requests from now on and returns a
+// wait for every one that is not a GET to finish or fail: the wall's
+// polls are GETs, and a write is not.
+function writesSettled(page: Page): () => Promise<void> {
+  const pending = new Set<Request>();
+  page.on("request", (r) => {
+    if (r.method() !== "GET") pending.add(r);
+  });
+  page.on("requestfinished", (r) => pending.delete(r));
+  page.on("requestfailed", (r) => pending.delete(r));
+  return async () => {
+    await expect.poll(() => [...pending].map((r) => `${r.method()} ${r.url()}`), { message: "writes in flight" }).toEqual([]);
+  };
+}
+
+// fillReadyDialog opens the wall's dialog and fills it until Create is
+// enabled: ac-4's name, the uncovered criterion claimed, and both
+// statements. Values typed before a Cancel or Escape are kept, so a
+// reopened dialog is filled over what it holds.
+async function fillReadyDialog(page: Page): Promise<void> {
+  await page.getByTestId("create-spec-btn").click();
+  await expect(page.locator("#create-dialog")).toBeVisible();
+  await page.getByTestId("create-name").fill(CREATE_NAME);
+  await page.getByTestId(`create-ac-${UNCOVERED}`).check();
+  await page.getByTestId("create-field-Problem").fill(CREATE_PROBLEM);
+  await page.getByTestId("create-field-Outcome").fill(CREATE_OUTCOME);
+  await expect(page.getByTestId("create-ok")).toBeEnabled();
+  await expect(page.getByTestId("create-status")).toHaveText(`cuts design/${CREATE_NAME} · claims ${UNCOVERED}`);
 }
