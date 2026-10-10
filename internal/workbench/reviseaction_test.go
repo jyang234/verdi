@@ -564,7 +564,9 @@ func TestBoardRender_ReviseVocabulary(t *testing.T) {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
 	body := string(page)
-	if !strings.Contains(body, `data-testid="revise-spec-btn">`) || !strings.Contains(body, "Revise this Initiative") {
+	// The affordance's words, with the tail the narrow bar folds away from
+	// the eye in its own span (spec/wall-strip-and-drawer-v2; F3a).
+	if !strings.Contains(body, `data-testid="revise-spec-btn">`) || !strings.Contains(body, `Revise<span class="wall-action-rest"> this Initiative</span>`) {
 		t.Errorf("revise affordance does not speak the renamed class word:\n%s", body)
 	}
 	start := strings.Index(body, `id="revise-dialog"`)

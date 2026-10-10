@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
-import { expectAutosaved, dragToTrash, grabPoint } from "./helpers";
+import { expectAutosaved, dragToTrash, grabPoint, openRecordTab } from "./helpers";
 
 // The scoping yarn (owner directive, verbatim: "the yarn should be used
 // to consistently represent the UI element. Story stubs are associated
@@ -70,16 +70,18 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     );
 
     // The yarn key names the planning thread present on this wall —
-    // covers only: no spike stub, no scoping resolves row.
-    const key = page.getByTestId("yarn-key");
+    // covers only: no spike stub, no scoping resolves row. It is read in
+    // the record drawer's Keys tab (spec/wall-strip-and-drawer-v2 ac-6,
+    // dc-2; SI-368 (9)).
+    const key = (await openRecordTab(page, "keys")).getByTestId("record-yarn-key");
     await expect(
-      key.locator('li[data-layer="scoping"][data-edge-type="covers"]'),
+      key.locator('.record-row[data-layer="scoping"][data-edge-type="covers"]'),
     ).toBeVisible();
     await expect(
-      key.locator('li[data-layer="scoping"][data-edge-type="covers"]'),
+      key.locator('.record-row[data-layer="scoping"][data-edge-type="covers"]'),
     ).toContainText("a planned story will deliver it");
     await expect(
-      key.locator('li[data-layer="scoping"][data-edge-type="resolves"]'),
+      key.locator('.record-row[data-layer="scoping"][data-edge-type="resolves"]'),
     ).toHaveCount(0);
   });
 
@@ -116,12 +118,12 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
       "claimed by 2 spikes",
     );
 
-    const key = page.getByTestId("yarn-key");
+    const key = (await openRecordTab(page, "keys")).getByTestId("record-yarn-key");
     await expect(
-      key.locator('li[data-layer="scoping"][data-edge-type="covers"]'),
+      key.locator('.record-row[data-layer="scoping"][data-edge-type="covers"]'),
     ).toBeVisible();
     await expect(
-      key.locator('li[data-layer="scoping"][data-edge-type="resolves"]'),
+      key.locator('.record-row[data-layer="scoping"][data-edge-type="resolves"]'),
     ).toContainText("a planned spike will answer it");
   });
 

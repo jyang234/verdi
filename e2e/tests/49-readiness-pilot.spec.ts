@@ -511,7 +511,7 @@ test("board destination opens the editable board in a new tab and both tabs keep
   expect(popup.url()).toContain(
     branchBoardPath(SHOWCASE.DESIGN_BRANCH, SHOWCASE.DESIGN_SPEC),
   );
-  await expect(popup.getByRole("button", { name: "Add sticky" })).toBeVisible();
+  await expect(popup.getByTestId("wall-toolbar").getByRole("button", { name: "Sticky", exact: true })).toBeVisible();
 
   // The source tab is preserved and the primary click appended EXACTLY
   // ONE event — the expected board-link-followed and nothing else.

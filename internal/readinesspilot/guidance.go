@@ -3,9 +3,10 @@ package readinesspilot
 // guidance.go carries every unresolved concern's source-derived corrective
 // guidance (SI-338 (1); Wave 6 §3.1: "source-derived corrective guidance
 // for every violated or unproven row"). Guidance holds the sentences the
-// wall shell and this derivation share — moved here from the wall's own
-// derivation (internal/workbench's deriveASDShell), which now calls it,
-// so no sentence exists twice. guidanceFor attaches one sentence to every
+// wall shell and this derivation shared — moved here from the wall's own
+// derivation (internal/workbench's deriveASDShell, since retired: the
+// wall's Readiness tab renders this derivation's facts), so no sentence
+// exists twice. guidanceFor attaches one sentence to every
 // unresolved row of the closed vocabulary: the shared sentence where the
 // wall had one, the journey blocker's own clearing condition for blocker
 // rows, and one template per remaining family that names the corrective

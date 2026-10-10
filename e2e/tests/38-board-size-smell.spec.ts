@@ -164,12 +164,15 @@ test.describe("case-file flags: disclosed-unproven is a line, never a stamp", ()
     // exactly what a reader who learned the seam recognizes.
     await expect(line).toContainText("disclosed-unproven");
     await expect(line).toContainText("[gate:pending-supersession]");
-    // The line sits INSIDE the case-file lockup and speaks the board's
-    // notice vocabulary (the disclosed board-notice voice).
+    // The disclosure sits INSIDE the case-file strip as a chip in the
+    // disclosure style (spec/wall-strip-and-drawer-v2 ac-1, ac-2, dc-1:
+    // the strip's chips replace the stamps; a disclosed-unproven value is
+    // drawn with the disclosure class, never the flag class).
     await expect(
       page.locator(".case-file [data-testid='case-file-disclosure']"),
     ).toBeVisible();
-    await expect(line).toHaveClass(/board-notice/);
+    await expect(line).toHaveClass(/case-chip--disclosed/);
+    await expect(line).not.toHaveClass(/case-stamp/);
     // Never a stamp: unproven must not dress as a verdict.
     await expect(
       page.locator('.case-stamp[data-badge-source="ladder:pending-supersession"]'),

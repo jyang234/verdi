@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { CONTROL_URL } from "./fixtures";
-import { drawYarn, expectAutosaved } from "./helpers";
+import { drawYarn, expectAutosaved, openStickyDraft } from "./helpers";
 
 // Vocabulary surfaces (spec/vocabulary-surfaces ac-2): a store carrying a
 // vocab-rename model.yaml renders the model's display names in a REAL
@@ -99,7 +99,7 @@ test.describe("vocabulary surfaces (spec/vocabulary-surfaces)", () => {
     // (startStickyEditor over STICKY_TYPES): its story/spike labels are
     // classWordCap over the embedded words payload — the client-side
     // words seam, executed by a real browser here.
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const picker = page.locator(".sticky-draft .sticky-type-picker");
     await expect(picker).toBeVisible();
     const storyBtn = picker.locator('[data-sticky-type="story"]');
@@ -133,7 +133,7 @@ test.describe("vocabulary surfaces (spec/vocabulary-surfaces)", () => {
     // VALUE sent to the server is the bare enum id (data-sticky-type),
     // and the committed sticky's data-annotation-type stays bare too —
     // ids never move while the visible words rename.
-    await page.getByRole("button", { name: "Add sticky" }).click();
+    await openStickyDraft(page);
     const draft = page.locator(".sticky-draft");
     await expect(draft).toBeVisible();
     await draft.locator('[data-sticky-type="spike"]').click();

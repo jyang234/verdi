@@ -17,12 +17,15 @@
 //     exact base digest/bytes and expected identity riding every request
 //     so a stale action is refused by the application core with zero
 //     mutation and answered with a fresh projection;
-//   - the on-demand application panels (provenance / semantic review /
-//     design context) — one explicit projection each, fetched only when
-//     opened, never authority; and
-//   - the typed-operation forms (set-problem / set-outcome / add-object /
-//     stub correction) with field-level slug grammar validation from the
-//     server's own pattern.
+//   - the typed-operation dialogs (add-object and stub correction; the
+//     set-problem and set-outcome edits are the case-file strip's, in
+//     place, wallstrip.js) with field-level slug grammar validation from
+//     the server's own pattern, and Escape closing an open one.
+//
+// The on-demand application panels that printed their projections as JSON
+// left the wall with the side rail (spec/wall-strip-and-drawer-v2 ac-6,
+// dc-2; SI-368 (27)(c)): the record drawer's tabs render those
+// projections as prose and tables (walldrawer.js).
 //
 // No polling result ever writes; nothing here derives semantic state; the
 // DOM is always the server's own projection.
@@ -182,6 +185,12 @@
     adoptProjection(p);
     if (typeof p.html === "string" && p.html) applyRegion(p.html);
     if (typeof p.posture === "string" && p.posture) applyPosture(p.posture);
+    // The bar's fragments ride the same projection (spec/wall-strip-and-
+    // drawer-v2; SI-368 (2), (7), (8)): the strip's script applies the
+    // Commit and push fragment, the pill's facts and the branch list it
+    // carries, and leaves the bar as it was for the ones it does not.
+    var strip = window.__WALLSTRIP__;
+    if (strip && strip.apply) strip.apply(p);
     if (announceText) announce(announceText);
   }
 
@@ -216,7 +225,7 @@
       })
       .then(function (snap) {
         if (force && snap && mutationSeq === mutationsAtStart) {
-          applyProjection({ html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined });
+          applyProjection({ html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined, uncommitted: snap.uncommitted, pill: snap.pill, branches: snap.git ? snap.git.branches : undefined });
           return undefined;
         }
         if (seq !== refreshSeq) {
@@ -229,7 +238,7 @@
         if (snap) {
           var changed = snap.revision !== revision;
           applyProjection(
-            { html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined },
+            { html: snap.html, posture: snap.posture, revision: snap.revision, base_digest: snap.base_digest, base_spec_b64: snap.base_spec_b64, expected: snap.expected, dirty: snap.git ? snap.git.dirty : undefined, uncommitted: snap.uncommitted, pill: snap.pill, branches: snap.git ? snap.git.branches : undefined },
             changed ? "Board updated" : null
           );
         }
@@ -358,37 +367,6 @@
       });
   }
 
-  // -- on-demand application panels ----------------------------------------
-  function renderPanelJSON(bodyEl, jsonText) {
-    bodyEl.textContent = "";
-    var pre = document.createElement("pre");
-    pre.className = "asd-panel-json";
-    try {
-      pre.textContent = JSON.stringify(JSON.parse(jsonText), null, 2);
-    } catch (e) {
-      pre.textContent = jsonText;
-    }
-    bodyEl.appendChild(pre);
-  }
-  document.addEventListener("toggle", function (e) {
-    var panel = e.target;
-    if (!panel.getAttribute || !panel.getAttribute("data-asd-panel")) return;
-    if (!panel.open || panel.getAttribute("data-asd-loaded") === "1") return;
-    var op = panel.getAttribute("data-asd-panel");
-    var bodyEl = panel.querySelector("[data-asd-panel-body]");
-    if (!bodyEl) return;
-    bodyEl.textContent = "deriving…";
-    fetch(url("/api/" + op), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      .then(function (resp) { return resp.text().then(function (t) { return { status: resp.status, text: t }; }); })
-      .then(function (r) {
-        panel.setAttribute("data-asd-loaded", "1");
-        renderPanelJSON(bodyEl, r.text);
-      })
-      .catch(function (err) {
-        bodyEl.textContent = "Could not derive: " + err.message;
-      });
-  }, true);
-
   // -- typed-operation forms ------------------------------------------------
   var opDialog = document.getElementById("asd-op-dialog");
   var opState = null;
@@ -473,6 +451,17 @@
   }
   document.addEventListener("change", function (e) {
     if (e.target && e.target.id === "asd-op-kind") updateIDPreview();
+  });
+
+  // Escape closes an open typed-operation dialog with nothing written: the
+  // modal layer's one press (spec/wall-strip-and-drawer-v2 SI-368 (17),
+  // after SI-363 (2); BL-175 (1)). boardspec.js's Escape hides the shared
+  // backdrop and the board's own dialogs; these two are this file's, and
+  // closing them ends the interaction that held the projection.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var stub = document.getElementById("asd-stub-dialog");
+    if ((opDialog && !opDialog.hidden) || (stub && !stub.hidden)) hideDialogs();
   });
 
   document.addEventListener("click", function (e) {

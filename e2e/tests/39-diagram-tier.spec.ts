@@ -172,8 +172,10 @@ test("board placard body dialog: the outcome section's body figure renders badge
   // expand dialog injects the server-rendered body — the badge arrived in
   // that HTML from internal/render's seam; the client only hands the pre
   // to the lazily-loaded vendored asset (dc-1: no client-side badge
-  // computation).
-  await page.getByTestId("placard-outcome").locator(".placard-text").click();
+  // computation). AMENDED (spec/wall-strip-and-drawer-v2 ac-1; SI-368
+  // (13)): on the authoring wall a click on the strip's line edits it in
+  // place, so the dialog opens through the "full case file" control.
+  await page.getByTestId("placard-outcome").locator(".placard-more").click();
   const dialog = page.getByTestId("expand-dialog");
   await expect(dialog).toBeVisible();
   await expectIllustrativeFigure(dialog);

@@ -187,7 +187,7 @@ func TestCaseFileDisclosure_UnprovenIsALineNeverAStamp(t *testing.T) {
 	root := newCaseFlagsStoryFixture(t, nil)
 	proj, html := renderCaseFlagsBoard(t, root, caseFlagsStoryName, nil)
 
-	header := extractElement(t, html, `class="board-placards case-file"`)
+	header := extractElement(t, html, `class="case-strip case-file"`)
 	if !strings.Contains(header, `data-testid="case-file-disclosure"`) {
 		t.Fatalf("case-file lockup carries no disclosure line:\n%s", header)
 	}
@@ -195,8 +195,8 @@ func TestCaseFileDisclosure_UnprovenIsALineNeverAStamp(t *testing.T) {
 		t.Errorf("the disclosure line does not name the unproven state:\n%s", header)
 	}
 	// The line speaks the board's notice vocabulary (dc-4).
-	if !strings.Contains(header, `class="board-notice case-disclosure"`) {
-		t.Errorf("the disclosure line does not wear the board-notice vocabulary:\n%s", header)
+	if !strings.Contains(header, `class="case-chip case-chip--disclosed case-disclosure"`) {
+		t.Errorf("the disclosure line is not drawn in the disclosure style (case-chip--disclosed):\n%s", header)
 	}
 	// Never a stamp — in either direction.
 	if strings.Contains(html, `data-badge-source="ladder:pending-supersession"`) {
@@ -205,7 +205,7 @@ func TestCaseFileDisclosure_UnprovenIsALineNeverAStamp(t *testing.T) {
 	// The disclosure lives on the case file, not in the generic top-of-
 	// board notice chrome.
 	if i := strings.Index(html, "disclosed-unproven [gate:pending-supersession]"); i >= 0 {
-		if j := strings.Index(html, `class="board-placards case-file"`); j < 0 || i < j {
+		if j := strings.Index(html, `class="case-strip case-file"`); j < 0 || i < j {
 			t.Errorf("the disclosure renders before the case-file lockup (in the generic chrome), want it on the case file itself")
 		}
 	}
@@ -366,8 +366,8 @@ func TestRenderCaseDisclosures_NoHeaderFallsBackToNotices(t *testing.T) {
 		CaseFileDisclosures: []string{disclosure.Render(disclosure.PendingSupersessionNoForge())},
 	}
 	html := renderBoardRegion(p, &boardGitState{}, testASDView())
-	if strings.Contains(html, "board-placards") {
-		t.Fatalf("fixture grew a case-file header; the fallback path is untested:\n%s", html)
+	if strings.Contains(html, "case-strip") {
+		t.Fatalf("fixture grew a case-file strip; the fallback path is untested:\n%s", html)
 	}
 	if !strings.Contains(html, `data-testid="case-file-disclosure"`) {
 		t.Fatalf("headerless wall dropped the disclosure line (silence is never a pass):\n%s", html)

@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { EDGE, SHOWCASE, boardPath, coverageChipTestId, refCardTestId, slotChipTestId, stubCardTestId } from "./fixtures";
-import { expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
+import { clearWallSelection, expectAutosaved, toolbarAction, transformRotates, wallToolbar } from "./helpers";
 
 // spec/wall-canvas-v2 ac-1 and ac-2 (lane F2a): every card renders at the
 // design's footprint, unrotated, keeping its receipts' exact texts; the
@@ -258,7 +258,10 @@ function contrastIn(fg: string, bg: string): number {
 // intersect the pill's (SI-358 (4)): the pill must cover none of them. An
 // element's visible box is its own, clipped by every ancestor that clips
 // its overflow (the canvas scrolls: a paper past its foot is not on
-// screen), so what is counted is what a reader could see.
+// screen), so what is counted is what a reader could see. The content of
+// a closed <details> — everything but its summary — is not on screen
+// either, though Chromium may lay it out, so it is skipped as display:
+// none is (SI-368 (30)).
 async function overlapsOf(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const pillEl = document.querySelector('[data-testid="wall-status"]');
@@ -282,6 +285,15 @@ async function overlapsOf(page: Page): Promise<string[]> {
       }
       return b;
     };
+    // inClosedDetails: the element sits in a closed <details>'s content,
+    // outside that details' own summary.
+    const inClosedDetails = (el: Element) => {
+      for (let p: Element | null = el; p && p.parentElement; p = p.parentElement) {
+        const d = p.parentElement;
+        if (d instanceof HTMLDetailsElement && !d.open && p !== d.querySelector(":scope > summary")) return true;
+      }
+      return false;
+    };
     const sel =
       "h1, h2, h3, h4, p, span, a, button, input, textarea, select, summary, li, td, th, label, " +
       ".objcard, .stubcard, .refcard, .sticky, .yarn-chip, .zone-label, .board-notice, .placard";
@@ -290,6 +302,7 @@ async function overlapsOf(page: Page): Promise<string[]> {
       if (pillEl.contains(el) || el.contains(pillEl)) continue;
       const cs = getComputedStyle(el);
       if (cs.display === "none" || cs.visibility === "hidden") continue;
+      if (inClosedDetails(el)) continue;
       // An element drawn at opacity 0 by itself or an ancestor (the idle
       // trash target) is not on screen either.
       let transparent = false;
@@ -718,8 +731,11 @@ test.describe("wall-canvas", () => {
     // The canvas is bounded to the viewport, so on a short window it
     // scrolls vertically as well as horizontally. The sticky is parked far
     // down and right first, so both axes have room whatever the file's
-    // earlier tests left.
-    await page.setViewportSize({ width: 1440, height: 600 });
+    // earlier tests left. The window is 1280 wide: with the side rail
+    // retired (spec/wall-strip-and-drawer-v2 ac-6) the canvas takes the
+    // region's whole width, and at 1440 it no longer leaves the 240 px of
+    // horizontal room this premise needs.
+    await page.setViewportSize({ width: 1280, height: 600 });
     await openWall(page);
     await parkSticky(page, 1408, 900);
     const room = await canvas(page).evaluate((el) => ({ x: el.scrollWidth - el.clientWidth, y: el.scrollHeight - el.clientHeight }));
@@ -895,6 +911,75 @@ test.describe("wall-canvas", () => {
     }
   });
 
+  test("the pill covers nothing while another wall's uncommitted edit fills the closed Commit popover (SI-368 (30))", async ({ page }) => {
+    // The state the e2e shard reaches in its real order (F3CR-1): another
+    // wall of this checkout carries an uncommitted typed edit — 50's typed
+    // forms leave theirs behind — so this wall's Commit popover lists it,
+    // and the popover stays closed. Chromium lays out the content of a
+    // closed <details>, so a list that kept its layout boxes would sit
+    // under the pill on the short zoomed viewport. The edit is made here,
+    // so the test reaches the state alone.
+    const other = boardPath(SHOWCASE.DESIGN_SPEC);
+    await page.goto(other);
+    const snapResp = await page.request.get(other + "/snapshot");
+    expect(snapResp.status()).toBe(200);
+    const snap = await snapResp.json();
+    const id = (await page.getByTestId("board").getAttribute("data-next-id-oq"))!;
+    const made = await page.request.post(other + "/api/mutate_draft", {
+      data: {
+        request: {
+          schema: "verdi.draftmutation/v1",
+          spec: "spec/" + SHOWCASE.DESIGN_SPEC,
+          base_digest: snap.base_digest,
+          base_spec_b64: snap.base_spec_b64,
+          expected: snap.expected,
+          operations: [{ op: "add-question", id, text: "an uncommitted question on another wall [89-pill]", anchor: "#" + id }],
+        },
+      },
+      headers: { "Content-Type": "application/json" },
+    });
+    const madeBody = await made.json();
+    expect(madeBody.result, JSON.stringify(madeBody)).toBeTruthy();
+
+    await page.setViewportSize({ width: 720, height: 450 });
+    await page.goto(boardPath(WALL.SPEC));
+    await expect(canvas(page)).toHaveAttribute("data-board-mode", "authoring");
+    await page.evaluate(() => {
+      (document.body.style as unknown as { zoom: string }).zoom = "200%";
+    });
+    await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+    // This wall's popover names the other wall's edit, and is closed.
+    await expect(page.getByTestId("wall-commit")).toHaveAttribute("data-changes", /^(unclassified|mixed)$/);
+    const changes = page.getByTestId("wall-commit-changes");
+    await expect(changes.locator(".wall-commit-reason")).not.toHaveCount(0);
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", false);
+    // A closed popover's list takes no layout: no box anywhere, under the
+    // pill or not.
+    const boxes = await changes.evaluate((el) =>
+      [el, ...Array.from(el.querySelectorAll("*"))].map((n) => {
+        const r = n.getBoundingClientRect();
+        return r.width * r.height;
+      }),
+    );
+    expect(boxes.filter((a) => a > 0), "the closed popover's list draws no box").toEqual([]);
+    // And the pill covers nothing, with a card selected, as the pill test
+    // asks, and with the frame in view.
+    await page.evaluate(() => {
+      (window as unknown as { __WALLSELECT__: { select: (s: unknown) => void } }).__WALLSELECT__.select({ kind: "card", key: "dc-1" });
+    });
+    await expect(page.getByTestId("card-dc-1")).toHaveAttribute("data-selected", "true");
+    expect(await overlapsOf(page), "the pill covers nothing beside the closed popover").toEqual([]);
+    await frameIntoView(page);
+    expect(await overlapsOf(page), "the pill covers nothing with the frame in view").toEqual([]);
+    // Opened, the list is drawn — the rule hides only the closed state.
+    await page.getByTestId("wall-commit-count").click();
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", true);
+    await expect(changes).toBeVisible();
+    await expect(changes.locator(".wall-commit-reason").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("wall-commit-popover")).toHaveJSProperty("open", false);
+  });
+
   test("the pill's summary is readable at 320 px in authoring (ac-2; SI-358 (4))", async ({ page }) => {
     // At 320 px the row is 256 px wide; beside the toolbar (lane F2b put
     // it in the row, where the pin toolbox's fixed tab used to hold a
@@ -1046,11 +1131,16 @@ test.describe("wall-canvas", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Pin an artifact" })).toBeHidden();
     await expect(pin).toHaveAttribute("aria-expanded", "false");
-    // The yarn key action opens the existing yarn key (SI-350 (9)): the
-    // rail's section, brought into view and focused.
+    // The yarn key action opens the yarn key (SI-350 (9)): the record
+    // drawer's Keys tab, which carries it (spec/wall-strip-and-drawer-v2,
+    // SI-368 (9)), focused on its tab, the key in view; the drawer shut
+    // gives the focus back to the action.
     await toolbar.getByRole("button", { name: "Yarn key", exact: true }).click();
-    await expect(page.getByTestId("yarn-key")).toBeFocused();
-    await expect(page.getByTestId("yarn-key")).toBeInViewport();
+    await expect(page.getByTestId("record-tab-keys")).toBeFocused();
+    await expect(page.getByTestId("record-panel-keys").getByTestId("record-yarn-key")).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
+    await expect(toolbar.getByRole("button", { name: "Yarn key", exact: true })).toBeFocused();
 
     // An object card: edit, the thread hint, read in document, the thread
     // count, and delete — and nothing else.
@@ -1389,8 +1479,12 @@ test.describe("wall-canvas", () => {
     expect(posted.length).toBe(beforeEscape);
     await expect(page.locator("#board-canvas .objcard").filter({ hasText: "never declared" })).toHaveCount(0);
 
-    // The existing add-object dialog stays for keyboard-only use.
-    await page.locator("#asd-add-object").focus();
+    // The existing add-object dialog stays for keyboard-only use: its one
+    // visible opener is the toolbar's Card, with nothing selected (the
+    // rail's forms that opened it are retired; spec/wall-strip-and-
+    // drawer-v2 ac-6; SI-368 (6)).
+    await clearWallSelection(page);
+    await wallToolbar(page).getByRole("button", { name: "Card", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.locator("#asd-op-dialog")).toBeVisible();
     await expect(page.getByTestId("asd-op-text")).toBeFocused();

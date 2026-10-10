@@ -90,7 +90,8 @@ export function uncommittedIndicator(page: Page): Locator {
 // Create a free-floating scratch sticky (05 §Workbench, "The scratch
 // tier": "free-floating stickies ... mutable-zone, never entering the spec
 // document"). Contract (AMENDED, owner UAT round 6 item 2 — choosing the
-// type is part of creating the sticky): "Add sticky" opens a draft with
+// type is part of creating the sticky): the toolbar's "Sticky" (the
+// retired rail's "Add sticky", spec/wall-strip-and-drawer-v2 ac-6) opens a draft with
 // an inline type control (one button per creatable annotation type) and
 // a "Sticky text" textbox; the author picks a type, writes the text, and
 // the sticky commits when focus leaves the draft.
@@ -128,6 +129,83 @@ export async function clearWallSelection(page: Page): Promise<void> {
     const w = window as unknown as { __WALLSELECT__?: { clear: () => void } };
     w.__WALLSELECT__?.clear();
   });
+}
+
+// The toolbar's sticky action with nothing selected (spec/wall-canvas-v2
+// ac-3; SI-350 (16)), the home of the retired rail's "Add sticky"
+// (spec/wall-strip-and-drawer-v2 ac-6). Exact: "Sticky" names the action,
+// never a sticky's own controls. A count of 0 is meaningful wherever the
+// toolbar renders: it offers the action in authoring mode only.
+export function stickyAction(page: Page): Locator {
+  return wallToolbar(page).getByRole("button", { name: "Sticky", exact: true });
+}
+
+// Open the inline sticky draft through the toolbar's sticky action, with
+// the selection cleared first (the action is offered with nothing
+// selected), and return the draft.
+export async function openStickyDraft(page: Page): Promise<Locator> {
+  await clearWallSelection(page);
+  await stickyAction(page).click();
+  const draft = page.locator(".sticky-draft");
+  await expect(draft).toBeVisible();
+  return draft;
+}
+
+// The toolbar's Card action with nothing selected (spec/wall-canvas-v2
+// ac-3): the add-object dialog's one visible opener since the retired
+// rail's typed-operation forms left the wall (spec/wall-strip-and-
+// drawer-v2 ac-6; SI-368 (6): #asd-add-object survives hidden in the
+// dialog layer, which the action presses).
+export function cardAction(page: Page): Locator {
+  return wallToolbar(page).getByRole("button", { name: "Card", exact: true });
+}
+
+// Open the add-object dialog through the toolbar's Card action, with the
+// selection cleared first, and return the dialog.
+export async function openAddObjectDialog(page: Page): Promise<Locator> {
+  await clearWallSelection(page);
+  await cardAction(page).click();
+  const dialog = page.locator("#asd-op-dialog");
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+// Open one of the record drawer's tabs (spec/wall-strip-and-drawer-v2
+// ac-4, ac-5) — the home of the retired rail's reading aids (ac-6, dc-2):
+// Readiness through the readiness pill, every other tab through the ⋯
+// menu, or, with the drawer already open, its own tab; and return its
+// panel once its body has settled.
+export async function openRecordTab(page: Page, tab: string): Promise<Locator> {
+  const drawer = page.getByTestId("record-drawer");
+  if (await drawer.isHidden()) {
+    if (tab === "readiness") {
+      await page.getByTestId("readiness-pill").click();
+    } else {
+      await page.getByTestId("wall-more").click();
+      await page.getByTestId(`wall-more-${tab}`).click();
+    }
+  } else {
+    await page.getByTestId(`record-tab-${tab}`).click();
+  }
+  await expect(page.getByTestId(`record-tab-${tab}`)).toHaveAttribute("aria-selected", "true");
+  const panel = page.getByTestId(`record-panel-${tab}`);
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('[data-record-body][aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 });
+  return panel;
+}
+
+// Select a stub card by a press on its kind line (the card's own controls
+// — its badge chips, its story links — keep their own meaning, and a
+// dense stub's title track can be empty, SI-365 (6)), so the toolbar
+// offers the stub's actions (spec/wall-canvas-v2 ac-3; spec/wall-strip-
+// and-drawer-v2 ac-6: Instantiate is on the stub's toolbar). Returns the
+// stub card.
+export async function selectStub(page: Page, slug: string): Promise<Locator> {
+  const stub = page.getByTestId(`stub-card-${slug}`);
+  await stub.scrollIntoViewIfNeeded();
+  await stub.locator(".card-kind").click();
+  await expect(stub).toHaveAttribute("data-selected", "true");
+  return stub;
 }
 
 // Select a card or a thread chip on the wall and press one of the
@@ -275,17 +353,14 @@ export function transformRotates(transform: string): boolean {
 
 // The sticky action is the contextual toolbar's "Sticky" button with
 // nothing selected (spec/wall-canvas-v2 ac-3; SI-350 (16): it opens the
-// same inline draft the rail's "Add sticky" did), so the selection is
-// cleared first. Exact: "Sticky" must not match the rail's "Add sticky".
+// same inline draft the retired rail's "Add sticky" did), so the
+// selection is cleared first (stickyAction, openStickyDraft).
 export async function addSticky(
   page: Page,
   text: string,
   type: StickyType = "question",
 ): Promise<Locator> {
-  await clearWallSelection(page);
-  await wallToolbar(page).getByRole("button", { name: "Sticky", exact: true }).click();
-  const draft = page.locator(".sticky-draft");
-  await expect(draft).toBeVisible();
+  const draft = await openStickyDraft(page);
   await draft.getByRole("button", { name: stickyTypeLabels[type] }).click();
   const editor = draft.getByRole("textbox", { name: "Sticky text" });
   await editor.fill(text); // fill focuses the editor…

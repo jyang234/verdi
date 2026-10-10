@@ -107,6 +107,12 @@ func TestAssetBudgetError(t *testing.T) {
 		{"boardspec.js", 1, true},
 		{"wallselect.js", 64 * 1024, true},
 		{"wallselect.js", 64*1024 + 1, false},
+		// The strip's and the drawer's new assets (spec/wall-strip-and-
+		// drawer-v2; SI-368): the 64 KiB ceiling, never a grandfathered one.
+		{"wallstrip.js", 64 * 1024, true},
+		{"wallstrip.js", 64*1024 + 1, false},
+		{"walldrawer.js", 64 * 1024, true},
+		{"walldrawer.js", 64*1024 + 1, false},
 		{"newstorydialog.js", 64 * 1024, true}, // the New story dialog's script (SI-369 (9))
 		{"newstorydialog.js", 64*1024 + 1, false},
 		{"specimport.js", 96 * 1024, true},

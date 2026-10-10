@@ -30,7 +30,8 @@ func neutralizeCIEnvForTest(t *testing.T) {
 	}
 }
 
-// readOnlyPanelOf slices the rendered read-only rail panel out of a page,
+// readOnlyPanelOf slices the rendered read-only explanation (a note among
+// the wall's notices since the rail that held it retired) out of a page,
 // or returns "" when the page carries none.
 func readOnlyPanelOf(page string) string {
 	start := strings.Index(page, `data-testid="readonly-panel"`)
@@ -131,9 +132,13 @@ func TestUnprovenBoardFixture_Handler_Happy(t *testing.T) {
 		"read-only · sealed record",
 		"This spec is accepted",
 		`sealed-panel`,
-		`id="add-sticky-btn"`,
+		// No editing affordance: the toolbar offers the scratch tier's
+		// Sticky only in authoring (the retired rail's Add sticky), and the
+		// typed operations' opener lives only where the domain is live
+		// (the retired rail's forms; spec/wall-strip-and-drawer-v2 ac-6).
+		`"mode":"authoring"`,
 		`id="commit-push-btn"`,
-		`data-testid="asd-forms"`,
+		`id="asd-add-object"`,
 		"set CI_DEFAULT_BRANCH",
 	} {
 		if strings.Contains(page, banned) {

@@ -8,23 +8,33 @@ import (
 )
 
 // The policy setup guide: when a wall reports policy-forbidden ("project
-// has not adopted policy authority"), the board's context/policy notice
-// must lead somewhere usable — an inline, read-only guide on the same
-// board naming the one verb that performs initial setup (verdi policy
-// adopt --starter), the four files it writes — which a project may
-// instead author by hand, the fallback rather than the route
+// has not adopted policy authority"), the wall must lead somewhere usable
+// — an inline, read-only guide naming the one verb that performs initial
+// setup (verdi policy adopt --starter), the four files it writes — which a
+// project may instead author by hand, the fallback rather than the route
 // (constitution, profile, policy, consumer inventory) — and the existing
 // read-only CLI inspection requests with their real operand shape and
 // result fields. It adopts nothing, mutates nothing, and never presents
 // proposed/validated as accepted.
+//
+// The guide is the home of the retired wall shell's context/policy row
+// (spec/wall-strip-and-drawer-v2 ac-7, dc-4; SI-368 (3), (32) B1): the
+// record drawer's Readiness tab carries it under its capabilities label,
+// chosen by policyGuideFor from the capabilities consultation alone and
+// scoped, in its editing line, to the wall's mode. Every claim the row
+// carried is asserted here on the guide.
 
 const policyGuideID = "asd-policy-guide"
 
 // policyGuideScopedWording is the truthful, mode-independent line the
-// guide must carry; policyGuideFalseWording is the unconditional claim it
-// must never make (false on a frozen/read-only wall).
+// guide must carry — humans edit without policy, delegated agents stay
+// restricted — beside the mode-scoped editing line, which it never
+// contradicts (SI-368 (33)(c): "this board's read-only restrictions"
+// before "On this authoring board, browser editing proceeds" read as one);
+// policyGuideFalseWording is the unconditional claim it must never make
+// (false on a frozen/read-only wall).
 const (
-	policyGuideScopedWording = "Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply."
+	policyGuideScopedWording = "Ordinary human editing does not require policy; delegated agents&#39; restrictions still apply."
 	policyGuideFalseWording  = "Human editing on this wall continues"
 )
 
@@ -36,22 +46,26 @@ func policyGuideHereDoc(command, escapedJSON string) string {
 	return command + " &lt;&lt;&#39;JSON&#39;\n" + escapedJSON + "\nJSON</code></pre>"
 }
 
-func policyForbiddenInput() asdShellInput {
-	return asdShellInput{
-		ProblemPresent: true,
-		OutcomePresent: true,
-		ACs:            []asdACFact{{ID: "ac-1", EvidenceCount: 1}},
-		Mode:           "authoring",
-		Branch:         "design/x",
-		StateFormal:    "proposed",
-		DesignWired:    true,
+// policyCaps is one capabilities consultation's outcome as the wall reads
+// it: whether the design application service is wired, the view it
+// derived, or its refusal — everything policyGuideFor chooses the guide
+// from (SI-368 (3): the guide is capabilities, not readiness).
+type policyCaps struct {
+	Wired   bool
+	Caps    *DesignCapabilitiesView
+	Failure *DesignFailure
+}
+
+func policyForbiddenInput() policyCaps {
+	return policyCaps{
+		Wired: true,
 		// designapp forwards draftmutation's own BARE Detail here, never its
 		// Error() form ("<code>: <detail>") — Code already carries
 		// "policy-forbidden" separately, so embedding it again in Detail
 		// would double the prefix once a caller renders "Code: Detail"
 		// (ac-5, spec/uat-round-1; internal/designapp/outcome.go's
 		// translateDraftmutationError).
-		CapsFailure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: "project has not adopted policy authority"},
+		Failure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: "project has not adopted policy authority"},
 	}
 }
 
@@ -63,24 +77,62 @@ func policyForbiddenInput() asdShellInput {
 // prefixed Error() form.
 const noDesignAssistanceDetail = "effective policy has no design_assistance authority"
 
-func noDesignAssistanceView() *asdView {
-	v := testASDView()
+func noDesignAssistanceInput() policyCaps {
 	in := policyForbiddenInput()
-	in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: noDesignAssistanceDetail}
-	v.Shell = deriveASDShell(in)
-	return v
+	in.Failure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: noDesignAssistanceDetail}
+	return in
+}
+
+func adoptedPolicyInput() policyCaps {
+	return policyCaps{Wired: true, Caps: &DesignCapabilitiesView{PolicyMode: "proposal-only", PolicyDigest: "sha256:abc", RefusalPrecondition: "policy-mode", RefusalDetail: "mode forbids agent writes"}}
+}
+
+// wallGuide renders the wall's policy setup guide where it lives: the
+// record drawer's Readiness tab, under its capabilities label
+// (renderReadinessTabGuide; SI-368 (3), (27)(c)), chosen by
+// policyGuideFor from in's capabilities consultation, on a wall in mode.
+func wallGuide(in policyCaps, mode boardModeKind) string {
+	return renderReadinessTabGuide(policyGuideFor(in.Wired, in.Caps, in.Failure), mode)
+}
+
+// guideModes is every wall mode the guide is rendered in.
+func guideModes() []boardModeKind {
+	return []boardModeKind{modeAuthoring, modeReview, modeReadOnly}
+}
+
+// expectNoGuideOnTheWall fails when a wall's region in mode carries the
+// policy setup guide or a link to it: the guide is the Readiness tab's,
+// never the wall's (SI-368 (27)(c)).
+func expectNoGuideOnTheWall(t *testing.T, mode boardModeKind) {
+	t.Helper()
+	html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, testASDView())
+	if strings.Contains(html, policyGuideID) {
+		t.Errorf("%s: the wall's region carries the policy guide or a link to it", mode)
+	}
+}
+
+// expectNoReadinessState fails when the guide carries a readiness state
+// chip: the policy refusal is capabilities, never a readiness verdict, so
+// the guide neither blocks nor reads as violated — the retired
+// context/policy row's non-blocking, unproven posture (SI-368 (3)).
+func expectNoReadinessState(t *testing.T, label, guide string) {
+	t.Helper()
+	if strings.Contains(guide, "readiness-state--") || strings.Contains(guide, "readiness-concern--") {
+		t.Errorf("%s: the guide carries a readiness state:\n%s", label, guide)
+	}
 }
 
 // TestPolicyConcern_WitnessCarriesSinglePrefix is the exact regression for
-// the UAT-observed board readiness panel defect (ac-5, spec/uat-round-1,
-// co-1): the context/policy concern's Witnesses entry is Code + ": " +
-// Detail, rendered verbatim into the board's readiness panel
-// (boardshellrender.go's "Witnesses" list). Before the fix, designapp
-// forwarded draftmutation's own Error() form as Detail, so this
+// the UAT-observed readiness panel defect (ac-5, spec/uat-round-1, co-1):
+// the refusal is quoted as Code + ": " + Detail. Before the fix, designapp
+// forwarded draftmutation's own Error() form as Detail, so the
 // concatenation doubled the prefix to "policy-forbidden: policy-forbidden:
-// ...". Both policy-forbidden discriminants (genuine non-adoption and
-// adopted-but-no-design_assistance) are pinned to their single-prefix
-// exact string, not merely a substring match.
+// ...". The context/policy row that quoted it is retired; its home is the
+// policy guide (SI-368 (3), (32)), whose quote, chosen through
+// policyGuideFor from the consultation's own failure, is pinned to its
+// single-prefix exact string for both policy-forbidden discriminants
+// (genuine non-adoption and adopted-but-no-design_assistance), not merely
+// a substring.
 func TestPolicyConcern_WitnessCarriesSinglePrefix(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -100,19 +152,12 @@ func TestPolicyConcern_WitnessCarriesSinglePrefix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := policyForbiddenInput()
-			in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: tc.detail}
-			shell := deriveASDShell(in)
-			var row *asdConcern
-			for i := range shell.All {
-				if shell.All[i].ID == "context/policy" {
-					row = &shell.All[i]
+			in.Failure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: tc.detail}
+			for _, mode := range guideModes() {
+				got, n := testIDElementText(wallGuide(in, mode), "asd-policy-guide-report")
+				if n != 1 || got != tc.want {
+					t.Fatalf("%s: quoted refusal = %q (%d elements), want exactly [%q] (single package prefix)", mode, got, n, tc.want)
 				}
-			}
-			if row == nil {
-				t.Fatal("no context/policy concern")
-			}
-			if len(row.Witnesses) != 1 || row.Witnesses[0] != tc.want {
-				t.Fatalf("Witnesses = %v, want exactly [%q] (single package prefix)", row.Witnesses, tc.want)
 			}
 		})
 	}
@@ -121,54 +166,28 @@ func TestPolicyConcern_WitnessCarriesSinglePrefix(t *testing.T) {
 // TestPolicyGuide_AdoptedPolicyWithoutDesignAssistance_NeverDescribedAsAbsent
 // is the negative regression: policy-forbidden with the
 // no-design_assistance detail must NOT be rendered as "no policy is
-// adopted" — neither in the concern nor in the guide. The refusal detail
-// is carried verbatim; the guide is the general variant (no initial-setup
-// file list, no "no accepted .verdi/policy" claim), still read-only, still
-// carrying the complete here-document checks, in draft and read-only
-// modes alike.
+// adopted". The refusal detail is carried verbatim; the guide is the
+// general variant (no initial-setup file list, no "no accepted
+// .verdi/policy" claim), still read-only, still carrying the complete
+// here-document checks, and never a readiness verdict, in every mode.
 func TestPolicyGuide_AdoptedPolicyWithoutDesignAssistance_NeverDescribedAsAbsent(t *testing.T) {
-	shell := deriveASDShell(func() asdShellInput {
-		in := policyForbiddenInput()
-		in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: noDesignAssistanceDetail}
-		return in
-	}())
-	var found bool
-	for _, c := range shell.All {
-		if c.ID != "context/policy" {
-			continue
-		}
-		found = true
-		if c.State != asdStateUnproven || c.Blocking {
-			t.Fatalf("context/policy = %+v, want nonblocking unproven", c)
-		}
-		for _, bad := range []string{"No policy authority is adopted", "not-applicable", "has not adopted"} {
-			if strings.Contains(c.Summary, bad) || strings.Contains(c.Guidance, bad) {
-				t.Fatalf("context/policy describes an adopted policy as absent (%q): %+v", bad, c)
-			}
-		}
-		if !strings.Contains(c.Summary, "effective policy has no design_assistance authority") {
-			t.Fatalf("context/policy summary %q does not carry the refusal detail verbatim", c.Summary)
-		}
-		if c.Dest != "#"+policyGuideID {
-			t.Fatalf("context/policy Dest = %q, want %q", c.Dest, "#"+policyGuideID)
-		}
+	in := noDesignAssistanceInput()
+	if g := policyGuideFor(in.Wired, in.Caps, in.Failure); g.Kind != policyGuideNoDesignAssistance {
+		t.Fatalf("policyGuideFor kind = %q, want %q", g.Kind, policyGuideNoDesignAssistance)
 	}
-	if !found {
-		t.Fatal("no context/policy concern")
-	}
-	if shell.PolicySetupGuide != policyGuideNoDesignAssistance {
-		t.Fatalf("PolicySetupGuide = %q, want %q", shell.PolicySetupGuide, policyGuideNoDesignAssistance)
-	}
-
-	for _, mode := range []boardModeKind{modeAuthoring, modeReadOnly} {
+	for _, mode := range guideModes() {
 		t.Run(string(mode), func(t *testing.T) {
-			html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, noDesignAssistanceView())
+			expectNoGuideOnTheWall(t, mode)
+			html := wallGuide(in, mode)
 			guide := policyGuideSection(t, html)
+			expectNoReadinessState(t, string(mode), html)
 			if !strings.Contains(guide, `data-policy-guide="no-design-assistance"`) {
 				t.Fatalf("%s: guide is not the no-design-assistance variant; got: %s", mode, guide)
 			}
 			for _, bad := range []string{
 				"has not adopted policy authority",
+				"No policy authority is adopted",
+				"not-applicable",
 				"there is no accepted <code>.verdi/policy</code>",
 				"Files to author",
 				"Files the starter writes",
@@ -201,38 +220,26 @@ func TestPolicyGuide_AdoptedPolicyWithoutDesignAssistance_NeverDescribedAsAbsent
 	}
 }
 
-func policyForbiddenView() *asdView {
-	v := testASDView()
-	v.Shell = deriveASDShell(policyForbiddenInput())
-	return v
-}
-
-func adoptedPolicyView() *asdView {
-	v := testASDView()
-	in := policyForbiddenInput()
-	in.CapsFailure = nil
-	in.Caps = &DesignCapabilitiesView{PolicyMode: "proposal-only", PolicyDigest: "sha256:abc", RefusalPrecondition: "policy-mode", RefusalDetail: "mode forbids agent writes"}
-	v.Shell = deriveASDShell(in)
-	return v
-}
-
-// TestPolicyGuide_NoticeLinksToInlineGuide: the policy-forbidden
-// context/policy concern carries a destination on the board itself.
+// TestPolicyGuide_NoticeLinksToInlineGuide: the policy-forbidden notice's
+// destination is the inline guide itself. The context/policy row that
+// linked to it is retired (SI-368 (3), (32)): the Readiness tab carries
+// the guide, under its capabilities label and its own id, and it reads
+// as no readiness verdict — the row's non-blocking, unproven posture.
 func TestPolicyGuide_NoticeLinksToInlineGuide(t *testing.T) {
-	shell := deriveASDShell(policyForbiddenInput())
-	for _, c := range shell.All {
-		if c.ID != "context/policy" {
-			continue
-		}
-		if c.Dest != "#"+policyGuideID {
-			t.Fatalf("context/policy Dest = %q, want %q (the notice must reach the inline guide)", c.Dest, "#"+policyGuideID)
-		}
-		if c.State != asdStateUnproven || c.Blocking {
-			t.Fatalf("context/policy = %+v, want nonblocking unproven (unchanged posture)", c)
-		}
-		return
+	in := policyForbiddenInput()
+	if g := policyGuideFor(in.Wired, in.Caps, in.Failure); g.Kind != policyGuideNotAdopted {
+		t.Fatalf("policyGuideFor kind = %q, want %q", g.Kind, policyGuideNotAdopted)
 	}
-	t.Fatal("no context/policy concern")
+	for _, mode := range guideModes() {
+		html := wallGuide(in, mode)
+		if !strings.HasPrefix(html, `<section class="readiness-tab-capabilities" data-testid="readiness-tab-capabilities" aria-label="Capabilities">`) {
+			t.Fatalf("%s: the guide is not under the Readiness tab's capabilities label; got: %s", mode, html)
+		}
+		if !strings.Contains(html, `id="`+policyGuideID+`"`) {
+			t.Fatalf("%s: the guide does not carry its own id %q; got: %s", mode, policyGuideID, html)
+		}
+		expectNoReadinessState(t, string(mode), html)
+	}
 }
 
 // policyGuideSection extracts the rendered guide's markup.
@@ -240,7 +247,7 @@ func policyGuideSection(t *testing.T, html string) string {
 	t.Helper()
 	start := strings.Index(html, `id="`+policyGuideID+`"`)
 	if start < 0 {
-		t.Fatalf("board region has no element with id=%q; got: %s", policyGuideID, html)
+		t.Fatalf("no element with id=%q; got: %s", policyGuideID, html)
 	}
 	end := strings.Index(html[start:], `data-policy-guide-end`)
 	if end < 0 {
@@ -257,7 +264,7 @@ func policyGuideSection(t *testing.T, html string) string {
 // the proposed/validated-is-not-accepted line — with no control that
 // could mutate anything.
 func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
-	html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
+	html := wallGuide(policyForbiddenInput(), modeAuthoring)
 	guide := policyGuideSection(t, html)
 
 	for _, want := range []string{
@@ -315,10 +322,13 @@ func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
 	if m := regexp.MustCompile(`<(form|button|input|select|textarea)\b|data-asd-panel=`).FindString(guide); m != "" {
 		t.Fatalf("policy guide carries a control %q — it must be read-only markup", m)
 	}
-	// The concern row's destination link resolves to the guide.
-	if !strings.Contains(html, `<a class="asd-dest-link" href="#`+policyGuideID+`">`) {
-		t.Fatalf("context/policy row has no destination link to #%s; got: %s", policyGuideID, html)
+	// The context/policy row's home is the guide itself, labelled as
+	// capabilities in the Readiness tab (SI-368 (3)); the wall carries no
+	// row and no link to a guide it does not render.
+	if !strings.HasPrefix(html, `<section class="readiness-tab-capabilities" data-testid="readiness-tab-capabilities" aria-label="Capabilities">`) {
+		t.Fatalf("the guide is not under the Readiness tab's capabilities label; got: %s", html)
 	}
+	expectNoGuideOnTheWall(t, modeAuthoring)
 }
 
 // visibleText approximates what a browser shows for a markup fragment:
@@ -336,16 +346,15 @@ func visibleText(html string) string {
 func TestPolicyGuide_PlaceholderPathsSurviveRendering(t *testing.T) {
 	cases := []struct {
 		name  string
-		view  *asdView
+		in    policyCaps
 		paths []string
 	}{
-		{"not-adopted", policyForbiddenView(), []string{".verdi/policy/profiles/<profile-id>.md", ".verdi/policy/policies/<name>.md"}},
-		{"no-design-assistance", noDesignAssistanceView(), []string{".verdi/policy/policies/<name>.md"}},
+		{"not-adopted", policyForbiddenInput(), []string{".verdi/policy/profiles/<profile-id>.md", ".verdi/policy/policies/<name>.md"}},
+		{"no-design-assistance", noDesignAssistanceInput(), []string{".verdi/policy/policies/<name>.md"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, tc.view)
-			guide := policyGuideSection(t, html)
+			guide := policyGuideSection(t, wallGuide(tc.in, modeAuthoring))
 			text := visibleText(guide)
 			for _, p := range tc.paths {
 				if !strings.Contains(guide, "<dt>"+stdhtml.EscapeString(p)+"</dt>") {
@@ -376,56 +385,27 @@ var policyGuideDefaultBranchAbsence = regexp.MustCompile(`(?i)\b(no|not|never|wi
 var policyGuideSyncRitual = regexp.MustCompile(`git (pull|merge|rebase|fetch)`)
 
 // TestPolicyGuide_PolicyLessCheckoutIsInspectFirst (F2): the not-adopted
-// refusal proves absence in the SERVING CHECKOUT only. The guide and the
-// concern row must say so, direct the reader to inspect the accepted and
-// proposed snapshots FIRST, keep the initial-setup files conditional on
-// confirmed absence, and never assert absence on the default branch or
-// prescribe an auto pull/merge.
+// refusal proves absence in the SERVING CHECKOUT only. The guide — the
+// home of the retired context/policy row, which said the same (SI-368
+// (3), (32)) — must say so, direct the reader to inspect the accepted and
+// proposed snapshots FIRST, before any adoption step, keep the
+// initial-setup files conditional on confirmed absence, ask why the
+// checkout lacks the policy without inferring a cause, and never assert
+// absence on the default branch, state project-wide non-adoption as its
+// own fact, or prescribe an auto pull/merge — in every mode.
 func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
-	shell := deriveASDShell(policyForbiddenInput())
-	var row *asdConcern
-	for i := range shell.All {
-		if shell.All[i].ID == "context/policy" {
-			row = &shell.All[i]
-		}
-	}
-	if row == nil {
-		t.Fatal("no context/policy concern")
-	}
-	for _, s := range []string{row.Summary, row.Guidance} {
-		if m := policyGuideDefaultBranchAbsence.FindString(s); m != "" {
-			t.Errorf("context/policy asserts default-branch absence (%q) in %q", m, s)
-		}
-		if strings.Contains(s, "No policy authority is adopted") || strings.Contains(s, "project has not adopted") {
-			t.Errorf("context/policy states project-wide non-adoption the checkout refusal cannot prove: %q", s)
-		}
-		if policyGuideSyncRitual.MatchString(s) {
-			t.Errorf("context/policy prescribes a synchronization command: %q", s)
-		}
-	}
-	if !strings.Contains(row.Summary, "checkout") {
-		t.Errorf("context/policy summary %q is not scoped to the serving checkout", row.Summary)
-	}
-	inspect, adopt := strings.Index(row.Guidance, "Inspect"), strings.Index(row.Guidance, "adopt")
-	if inspect < 0 || (adopt >= 0 && adopt < inspect) {
-		t.Errorf("context/policy guidance %q must direct inspection before any adoption step", row.Guidance)
-	}
-	// accepted.adopted alone proves neither branch lag nor deletion: the
-	// row asks why the checkout lacks the policy and infers no cause.
-	if !strings.Contains(row.Guidance, "inspect why this checkout lacks") || strings.Contains(row.Guidance, "branch lags") || strings.Contains(row.Guidance, "branch may lag") {
-		t.Errorf("context/policy guidance %q must ask why the checkout lacks accepted policy without inferring a cause", row.Guidance)
-	}
-
-	for _, mode := range []boardModeKind{modeAuthoring, modeReadOnly} {
+	for _, mode := range guideModes() {
 		t.Run(string(mode), func(t *testing.T) {
-			html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
-			guide := policyGuideSection(t, html)
+			expectNoGuideOnTheWall(t, mode)
+			guide := policyGuideSection(t, wallGuide(policyForbiddenInput(), mode))
 			text := visibleText(guide)
 			if m := policyGuideDefaultBranchAbsence.FindString(text); m != "" {
 				t.Errorf("%s: guide asserts default-branch absence: %q", mode, m)
 			}
-			if strings.Contains(text, "This project has not adopted policy authority") {
-				t.Errorf("%s: guide states project-wide non-adoption as its own fact", mode)
+			for _, claim := range []string{"This project has not adopted policy authority", "No policy authority is adopted"} {
+				if strings.Contains(text, claim) {
+					t.Errorf("%s: guide states project-wide non-adoption the checkout refusal cannot prove: %q", mode, claim)
+				}
 			}
 			if policyGuideSyncRitual.MatchString(text) {
 				t.Errorf("%s: guide prescribes a synchronization command: %q", mode, policyGuideSyncRitual.FindString(text))
@@ -445,13 +425,21 @@ func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
 			if filesAt < 0 || inspectAt < 0 || filesAt < inspectAt {
 				t.Errorf("%s: inspect-first (%d) must precede the conditional file list (%d)", mode, inspectAt, filesAt)
 			}
+			if adoptAt := strings.Index(text, "verdi policy adopt"); adoptAt < 0 || adoptAt < inspectAt {
+				t.Errorf("%s: inspect-first (%d) must precede any adoption step (%d)", mode, inspectAt, adoptAt)
+			}
 			// Lagging-branch case: existing project process, never a ritual,
 			// and never an inferred cause.
 			if !strings.Contains(text, "project's own process") {
 				t.Errorf("%s: guide does not defer branch synchronization to the project's own process", mode)
 			}
-			if !strings.Contains(text, "inspect why this checkout lacks the accepted policy") || strings.Contains(text, "this branch lags") {
-				t.Errorf("%s: guide must ask why the checkout lacks accepted policy without inferring a cause; got: %s", mode, text)
+			if !strings.Contains(text, "inspect why this checkout lacks the accepted policy") {
+				t.Errorf("%s: guide must ask why the checkout lacks accepted policy; got: %s", mode, text)
+			}
+			for _, cause := range []string{"this branch lags", "branch lags", "branch may lag"} {
+				if strings.Contains(text, cause) {
+					t.Errorf("%s: guide infers a cause (%q) for the checkout's missing policy", mode, cause)
+				}
 			}
 			// Review's refusal is tied to this checkout RESOLVING governing
 			// policy; loading or editing proposed files is not acceptance.
@@ -465,71 +453,82 @@ func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
 	}
 }
 
-// TestPolicyConcern_RowsHonorBoardMode (F3): BOTH policy-forbidden concern
-// summaries must scope their editing claim to the board's mode. On a
-// read-only or review board no browser edit proceeds, so the row must not
-// say editing "proceeds"; on an authoring board the row names what a write
-// records. The no-design-assistance row keeps the refusal detail verbatim
-// and never describes the adopted policy as absent, in every mode.
+// TestPolicyConcern_RowsHonorBoardMode (F3; SI-368 (32) B1): BOTH
+// policy-forbidden variants scope their editing claim to the board's
+// mode, now in the policy guide, the retired context/policy row's home.
+// On a read-only or review board no browser edit proceeds, so the guide
+// never says editing "proceeds" there and says the board refuses browser
+// writes; on an authoring board it says browser editing proceeds and
+// names what a write records — the explicit not-applicable posture, or
+// the resolved policy's sealed digest — and nothing beside it speaks of
+// this board's read-only restrictions. On a wall whose board could not be
+// loaded (SI-368 (33)(c)) the mode is unproven, and the line says so in
+// the bar's words, asserting neither that editing proceeds nor that the
+// board refuses it. The discriminating detail stays, and the
+// no-design-assistance guide never describes the adopted policy as
+// absent, in every mode.
 func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 	kinds := []struct {
-		name   string
-		detail string
-		keep   string
+		name      string
+		detail    string
+		keep      string
+		authoring string
 	}{
-		{"not-adopted", "project has not adopted policy authority", "no adopted policy authority"},
-		{"no-design-assistance", noDesignAssistanceDetail, "effective policy has no design_assistance authority"},
+		{"not-adopted", "project has not adopted policy authority", "no adopted policy authority",
+			"On this authoring board, browser editing proceeds and records the explicit not-applicable policy posture."},
+		{"no-design-assistance", noDesignAssistanceDetail, "effective policy has no design_assistance authority",
+			"On this authoring board, browser editing proceeds under that policy's sealed digest."},
+	}
+	lines := map[boardModeKind]string{
+		modeReview:   "This review board refuses browser writes regardless.",
+		modeReadOnly: "This read-only board refuses browser writes regardless.",
+		modeUnproven: "This board's mode is unproven: the wall could not be loaded.",
 	}
 	for _, k := range kinds {
-		for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+		for _, mode := range append(guideModes(), modeUnproven) {
 			t.Run(k.name+"/"+string(mode), func(t *testing.T) {
 				in := policyForbiddenInput()
-				in.Mode = string(mode)
-				in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: k.detail}
-				shell := deriveASDShell(in)
-				var row *asdConcern
-				for i := range shell.All {
-					if shell.All[i].ID == "context/policy" {
-						row = &shell.All[i]
-					}
-				}
-				if row == nil {
-					t.Fatal("no context/policy concern")
-				}
-				if !strings.Contains(row.Summary, k.keep) {
-					t.Errorf("summary %q lost its discriminating detail %q", row.Summary, k.keep)
+				in.Failure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: k.detail}
+				guide := policyGuideSection(t, wallGuide(in, mode))
+				text := visibleText(guide)
+				if !strings.Contains(text, k.keep) {
+					t.Errorf("guide lost its discriminating detail %q: %s", k.keep, text)
 				}
 				if k.name == "no-design-assistance" {
 					for _, bad := range []string{"No policy authority is adopted", "has not adopted", "not-applicable"} {
-						if strings.Contains(row.Summary, bad) {
-							t.Errorf("summary %q describes an adopted policy as absent (%q)", row.Summary, bad)
+						if strings.Contains(text, bad) {
+							t.Errorf("guide describes an adopted policy as absent (%q): %s", bad, text)
 						}
 					}
 				}
-				proceeds := strings.Contains(row.Summary, "policy, so browser editing proceeds")
-				refuses := strings.Contains(row.Summary, "policy, but this ") && strings.Contains(row.Summary, "board refuses browser writes")
+				line, n := testIDElementText(guide, "asd-policy-guide-editing")
+				if n != 1 {
+					t.Fatalf("guide carries %d editing lines, want exactly 1: %s", n, guide)
+				}
+				if !strings.Contains(guide, `data-testid="asd-policy-guide-editing" data-board-mode="`+string(mode)+`"`) {
+					t.Errorf("the editing line does not name the board's mode %s: %s", mode, guide)
+				}
 				if mode == modeAuthoring {
-					if !proceeds || refuses {
-						t.Errorf("authoring summary %q must state that browser editing proceeds here", row.Summary)
+					if line != k.authoring {
+						t.Errorf("authoring editing line = %q, want %q", line, k.authoring)
 					}
-				} else if proceeds || !refuses {
-					t.Errorf("%s summary %q claims editing proceeds on a board that refuses writes", mode, row.Summary)
+					if strings.Contains(text, "read-only restrictions") {
+						t.Errorf("the authoring guide speaks of this board's read-only restrictions beside its editing line: %s", text)
+					}
+					return
 				}
-				// The rendered row, not only the struct.
-				v := testASDView()
-				v.Shell = shell
-				html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, v)
-				start := strings.Index(html, `data-concern-id="context/policy"`)
-				if start < 0 {
-					t.Fatalf("no rendered context/policy row; got: %s", html)
+				if line != lines[mode] {
+					t.Errorf("%s editing line = %q, want %q", mode, line, lines[mode])
 				}
-				rowHTML := html[start:]
-				rowHTML = rowHTML[:strings.Index(rowHTML, "</article>")]
-				if mode != modeAuthoring && strings.Contains(rowHTML, "editing proceeds") {
-					t.Errorf("%s: rendered row still claims editing proceeds: %s", mode, rowHTML)
+				if strings.Contains(text, "proceeds") {
+					t.Errorf("%s: the guide claims editing proceeds on a board that refuses writes or whose mode is unproven: %s", mode, text)
 				}
-				if !strings.Contains(rowHTML, stdhtml.EscapeString(k.keep)) {
-					t.Errorf("%s: rendered row lost detail %q: %s", mode, k.keep, rowHTML)
+				if mode == modeUnproven {
+					for _, asserted := range []string{"read-only board", "review board", "refuses browser writes"} {
+						if strings.Contains(text, asserted) {
+							t.Errorf("the guide asserts a mode it could not read (%q): %s", asserted, text)
+						}
+					}
 				}
 			})
 		}
@@ -537,22 +536,28 @@ func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 }
 
 // TestPolicyGuide_AbsentWhenPolicyAdopted: a wall with adopted policy
-// authority renders no setup guide.
+// authority renders no setup guide, on the wall or in its Readiness tab,
+// in any mode.
 func TestPolicyGuide_AbsentWhenPolicyAdopted(t *testing.T) {
-	html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, adoptedPolicyView())
-	if strings.Contains(html, `id="`+policyGuideID+`"`) {
-		t.Fatalf("policy guide rendered on an adopted-policy wall; got: %s", html)
+	for _, mode := range guideModes() {
+		if html := wallGuide(adoptedPolicyInput(), mode); html != "" {
+			t.Fatalf("%s: policy guide rendered on an adopted-policy wall; got: %s", mode, html)
+		}
+		expectNoGuideOnTheWall(t, mode)
 	}
 }
 
 // TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions: the guide is
-// the same read-only markup on a read-only or review board — it adds no
-// control there either.
+// read-only markup on a read-only or review board, and on a wall whose
+// board could not be loaded (its mode unproven, SI-368 (33)(c)) — it adds
+// no control there either, and never says editing proceeds.
 func TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions(t *testing.T) {
-	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
+	for _, mode := range []boardModeKind{modeReadOnly, modeReview, modeUnproven} {
 		t.Run(string(mode), func(t *testing.T) {
-			html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
-			guide := policyGuideSection(t, html)
+			if mode != modeUnproven { // no wall region renders without its board
+				expectNoGuideOnTheWall(t, mode)
+			}
+			guide := policyGuideSection(t, wallGuide(policyForbiddenInput(), mode))
 			if m := regexp.MustCompile(`<(form|button|input|select|textarea)\b`).FindString(guide); m != "" {
 				t.Fatalf("%s: policy guide carries a control %q", mode, m)
 			}
@@ -564,8 +569,8 @@ func TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions(t *testing.T) {
 			if !strings.Contains(guide, policyGuideScopedWording) {
 				t.Fatalf("%s: policy guide lacks the mode-scoped wording %q", mode, policyGuideScopedWording)
 			}
-			if strings.Contains(guide, policyGuideFalseWording) {
-				t.Fatalf("%s: policy guide claims %q on a %s board", mode, policyGuideFalseWording, mode)
+			if strings.Contains(guide, policyGuideFalseWording) || strings.Contains(visibleText(guide), "proceeds") {
+				t.Fatalf("%s: policy guide claims editing continues on a %s board", mode, mode)
 			}
 			if n := strings.Count(guide, "\nJSON</code></pre>"); n != 4 {
 				t.Fatalf("%s: policy guide closes %d here-documents, want 4", mode, n)
@@ -580,8 +585,7 @@ func TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions(t *testing.T) {
 // read-only markup with its four read-only check blocks; the verb is a
 // pointer, not a fifth here-document.
 func TestPolicyGuide_NamesTheAdoptVerb(t *testing.T) {
-	html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
-	guide := policyGuideSection(t, html)
+	guide := policyGuideSection(t, wallGuide(policyForbiddenInput(), modeAuthoring))
 	for _, want := range []string{"verdi policy adopt --starter [--profile solo|team]", "policy/adopt", "no adoption control", "not accepted"} {
 		if !strings.Contains(guide, want) {
 			t.Fatalf("guide missing %q", want)
@@ -592,5 +596,55 @@ func TestPolicyGuide_NamesTheAdoptVerb(t *testing.T) {
 	}
 	if n := strings.Count(guide, `<pre class="asd-policy-guide-cmd">`); n != 4 {
 		t.Fatalf("read-only check blocks = %d, want 4 (adopt is a pointer, not a here-doc)", n)
+	}
+}
+
+// TestPolicyGuideFor (SI-368 (3); F3 survey §2 (d)): the policy setup
+// guide's variant is a function of the capabilities consultation alone —
+// none when the design service is unwired or capabilities were derived,
+// not-adopted only for draftmutation's own not-adopted discriminant,
+// no-design-assistance for every other policy-forbidden refusal, and
+// none for any other failure — quoting the refusal's code and bare
+// detail; and the guide the Readiness tab renders is that function's,
+// the variant and the quote, in every mode.
+func TestPolicyGuideFor(t *testing.T) {
+	notAdopted := &DesignFailure{Code: "policy-forbidden", Detail: "the " + policyNotAdoptedDetail + " for this checkout"}
+	noDA := &DesignFailure{Code: "policy-forbidden", Detail: "the sealed effective policy carries no design_assistance payload"}
+	other := &DesignFailure{Code: "operational", Detail: "capabilities unavailable"}
+	for _, tc := range []struct {
+		name    string
+		wired   bool
+		caps    *DesignCapabilitiesView
+		failure *DesignFailure
+		want    policyGuide
+	}{
+		{"unwired", false, nil, notAdopted, policyGuide{}},
+		{"capabilities derived", true, &DesignCapabilitiesView{PolicyMode: "assist"}, nil, policyGuide{}},
+		{"not adopted", true, nil, notAdopted, policyGuide{Kind: policyGuideNotAdopted, Code: notAdopted.Code, Detail: notAdopted.Detail}},
+		{"no design assistance", true, nil, noDA, policyGuide{Kind: policyGuideNoDesignAssistance, Code: noDA.Code, Detail: noDA.Detail}},
+		{"another failure", true, nil, other, policyGuide{}},
+		{"no consultation at all", true, nil, nil, policyGuide{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := policyGuideFor(tc.wired, tc.caps, tc.failure)
+			if got != tc.want {
+				t.Fatalf("policyGuideFor = %+v, want %+v", got, tc.want)
+			}
+			for _, mode := range guideModes() {
+				html := wallGuide(policyCaps{Wired: tc.wired, Caps: tc.caps, Failure: tc.failure}, mode)
+				if tc.want.Kind == policyGuideNone {
+					if html != "" {
+						t.Fatalf("%s: the tab renders a guide the function did not choose: %s", mode, html)
+					}
+					continue
+				}
+				if !strings.Contains(html, `data-policy-guide="`+string(tc.want.Kind)+`"`) {
+					t.Fatalf("%s: the tab's guide is not the function's %s variant: %s", mode, tc.want.Kind, html)
+				}
+				if quote, n := testIDElementText(html, "asd-policy-guide-report"); n != 1 || quote != tc.want.Code+": "+tc.want.Detail {
+					t.Fatalf("%s: the tab's guide quotes %q (%d), want the function's %q", mode, quote, n, tc.want.Code+": "+tc.want.Detail)
+				}
+			}
+		})
 	}
 }

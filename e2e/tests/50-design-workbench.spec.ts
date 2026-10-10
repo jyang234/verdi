@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, dragToTrash, toolbarAction, uncommittedIndicator } from "./helpers";
+import { addSticky, dragToTrash, openAddObjectDialog, openRecordTab, toolbarAction, uncommittedIndicator } from "./helpers";
 
 // Wave 6 Task 2 — the ASD synchronized workbench (design §§3-6, SI-163/
 // SI-165/SI-167/SI-168; ASD AC-2/AC-4..AC-8, CO-9 §Browser behavior).
@@ -90,25 +90,30 @@ async function addFreshQuestion(page: Page, marker: string): Promise<string> {
 // Shell, posture, and the closed action surface
 // ---------------------------------------------------------------------------
 test.describe("shell and posture", () => {
-  test("the board page presents the four-area shell and posture header", async ({ page }) => {
+  test("the board page presents the four areas in its Readiness tab, and the posture header", async ({ page }) => {
     await page.goto(DESIGN());
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
     await expect(page.getByTestId("asd-posture")).toBeVisible();
-    await expect(page.getByTestId("asd-shell")).toBeVisible();
-    const stations = page.locator('[data-testid="asd-shell"] .readiness-station');
+    // The wall's readiness is the record drawer's Readiness tab: the
+    // four-area shell beside the canvas is retired (spec/wall-strip-and-
+    // drawer-v2 ac-5, ac-6, dc-2).
+    await expect(page.getByTestId("asd-shell")).toHaveCount(0);
+    const tab = (await openRecordTab(page, "readiness")).getByTestId("readiness-tab");
+    const stations = tab.locator(".readiness-station");
     await expect(stations).toHaveCount(4);
     // One deterministic focus, spoken as Step N of 4 (SI-125).
-    await expect(page.locator(".readiness-station--focus")).toHaveCount(1);
-    await expect(page.getByTestId("asd-step")).toContainText("of 4");
-    // Exactly-three preview: never more than three ranked cards outside
-    // the inline remainder.
-    const preview = page.locator(".asd-focus > ol.readiness-queue-list > li");
-    expect(await preview.count()).toBeLessThanOrEqual(3);
-    // Explicit sequencing note (F-04) and downstream count (F-02).
-    await expect(page.getByTestId("asd-sequence-note")).toBeVisible();
-    await expect(page.getByTestId("asd-downstream")).toBeVisible();
+    await expect(tab.locator(".readiness-station--focus")).toHaveCount(1);
+    await expect(tab.locator(".readiness-step")).toContainText("of 4");
+    // The current step's items are all listed (readiness-page-v2's rule,
+    // SI-339 (4)); the later steps' wait behind one inline disclosure.
+    expect(await tab.locator("#readiness-focus > ol.readiness-queue-list > li").count()).toBeGreaterThan(0);
+    // Explicit sequencing note (F-04) and the later steps' known problems
+    // (F-02).
+    await expect(tab.getByTestId("readiness-order")).toBeVisible();
+    await expect(tab.locator("#readiness-known")).toBeVisible();
     // States speak through chip classes; the formal state rides data-state.
-    expect(await page.locator(".readiness-station[data-state]").count()).toBe(4);
+    expect(await tab.locator(".readiness-station[data-state]").count()).toBe(4);
+    await page.getByTestId("record-drawer-close").click();
     // Repository posture facts (design §4.2).
     await page.locator(".asd-posture-tech > summary").click();
     const tech = page.locator(".asd-posture-tech");
@@ -131,16 +136,19 @@ test.describe("shell and posture", () => {
     // isolated run of this file and a full-suite run. Both branches —
     // claimed and unclaimed — are pinned deterministically in
     // internal/workbench's TestBuildASDView_SpikeClaimedQuestions.
+    // The wall's readiness is the record drawer's Readiness tab (spec/
+    // wall-strip-and-drawer-v2 ac-5, ac-7): its rows are the shared
+    // readiness facts, the machine facts in each row's technical details.
     await page.goto(DESIGN());
-    // A busy wall ranks this non-blocking row below the three-item
-    // preview: expand the exact-count remainder inline (SI-125).
-    const more = page.locator('[data-testid="asd-more"] > summary');
-    if (await more.count()) await more.click();
+    const tab = (await openRecordTab(page, "readiness")).getByTestId("readiness-tab");
+    // A row of a later step waits behind the inline disclosure: open it.
+    const later = tab.locator('[data-testid="readiness-later"] > summary');
+    if (await later.count()) await later.click();
 
-    const claimed = page.locator('[data-concern-id="shape/question/oq-2"]');
+    const claimed = tab.locator('[data-concern-id="shape/question/oq-2"]');
     await expect(claimed).toHaveCount(1);
     await expect(
-      claimed.getByTestId("asd-guidance-shape/question/oq-2"),
+      claimed.locator(".readiness-primary > p.readiness-summary"),
     ).toHaveText(
       "No wall edit is required to accept: the claiming spike stub answers it after acceptance.",
     );
@@ -149,13 +157,13 @@ test.describe("shell and posture", () => {
       "false",
     );
     await expect(claimed.locator(".readiness-witnesses code")).toHaveText([
-      "declared open question oq-2",
+      "oq-2",
       "refresh-window-spike",
     ]);
 
     // Nothing is suppressed: the other question keeps its own row.
     await expect(
-      page.locator('[data-concern-id="shape/question/oq-1"]'),
+      tab.locator('[data-concern-id="shape/question/oq-1"]'),
     ).toHaveCount(1);
   });
 
@@ -163,15 +171,20 @@ test.describe("shell and posture", () => {
     await page.goto(DESIGN());
     // The human-review row is a plain label with formal secondary
     // evidence — never an accept/approve/merge control (DC-4, §4.2: "no
-    // action button changes accepted state by itself"). On a busy wall it
-    // may rank below the three-item preview: expand the exact-count
-    // remainder inline first (SI-125 keeps it lossless).
-    const more = page.locator('[data-testid="asd-more"] > summary');
-    if (await more.count()) await more.click();
-    await expect(page.getByTestId("asd-human-review").first()).toBeVisible();
+    // action button changes accepted state by itself"). The wall's
+    // readiness is the record drawer's Readiness tab (spec/wall-strip-and-
+    // drawer-v2 ac-5); a row of a later step waits behind the inline
+    // disclosure, opened first (nothing is dropped).
+    const tab = (await openRecordTab(page, "readiness")).getByTestId("readiness-tab");
+    const later = tab.locator('[data-testid="readiness-later"] > summary');
+    if (await later.count()) await later.click();
+    await expect(tab.getByTestId("readiness-human-review").first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept|approve|merge/i })).toHaveCount(0);
-    const guidance = page.locator('[data-testid="asd-guidance-review/acceptance"]');
-    await expect(guidance).toContainText("owner's merge");
+    // Acceptance is the owner's merge: the review/acceptance row's home is
+    // the Review tab, which says so and opens nothing (SI-368 (3), (12)).
+    const review = await openRecordTab(page, "review");
+    await expect(review.locator(".record-drawer-note")).toContainText(/owner.s merge/);
+    await expect(page.getByRole("button", { name: /accept|approve|merge/i })).toHaveCount(0);
   });
 
   test("unknown actions and malformed bodies fail before any application call", async ({ page }) => {
@@ -297,19 +310,37 @@ test.describe("the six application operations", () => {
   });
 
   test("provenance and semantic review are on-demand panels, collapsed by default", async ({ page }) => {
+    // The record drawer's Provenance and Review tabs (spec/wall-strip-and-
+    // drawer-v2 ac-5; SI-368 (10)): shut by default, nothing derived until
+    // a tab opens (AC-4/DC-7 — provenance stays off the main board), then
+    // one on-demand read each, rendered as prose and rows, never JSON.
+    const reads: string[] = [];
+    page.on("request", (r) => {
+      const op = /\/api\/(get_design_provenance|prepare_design_review)$/.exec(r.url());
+      if (op && r.method() === "POST") reads.push(op[1]);
+    });
     await page.goto(DESIGN());
-    const prov = page.getByTestId("asd-provenance");
-    const review = page.getByTestId("asd-review");
+    const drawer = page.getByTestId("record-drawer");
+    await expect(drawer).toBeHidden();
+    await page.waitForTimeout(500);
+    expect(reads, "nothing derived before a tab opens").toEqual([]);
+    await page.getByTestId("wall-more").click();
+    await page.getByTestId("wall-more-provenance").click();
+    const prov = page.getByTestId("record-panel-provenance");
     await expect(prov).toBeVisible();
-    await expect(review).toBeVisible();
-    // Collapsed by default: no derived content until opened (AC-4/DC-7 —
-    // provenance stays off the main board).
-    await expect(prov.locator(".asd-panel-json")).toHaveCount(0);
-    await prov.locator("summary").click();
-    await expect(prov.locator(".asd-panel-json")).toBeVisible();
+    await expect(prov.getByRole("heading", { name: "Typed operations" })).toBeVisible();
     await expect(prov).toContainText("never evidence");
-    await review.locator("summary").click();
-    await expect(review.locator(".asd-panel-json")).toBeVisible();
+    await page.getByTestId("record-tab-review").click();
+    const review = page.getByTestId("record-panel-review");
+    await expect(review.getByRole("heading", { name: "Needs a human eye" })).toBeVisible();
+    await page.getByTestId("record-tab-provenance").click();
+    await expect(prov.getByRole("heading", { name: "Typed operations" })).toBeVisible();
+    expect(await prov.innerText(), "provenance prints no JSON").not.toMatch(/[{}]|"schema"|"entries"/);
+    await page.getByTestId("record-tab-review").click();
+    await expect(review.getByRole("heading", { name: "Needs a human eye" })).toBeVisible();
+    expect(await review.innerText(), "the review packet prints no JSON").not.toMatch(/[{}]|"schema"|"baseline"/);
+    expect(reads).toContain("get_design_provenance");
+    expect(reads).toContain("prepare_design_review");
   });
 });
 
@@ -413,7 +444,7 @@ test.describe("failure classes", () => {
         body: JSON.stringify(body),
       });
     });
-    await page.locator("#asd-add-object").click();
+    await openAddObjectDialog(page);
     await page.locator("#asd-op-kind").selectOption("add-question");
     const preview = await page.getByTestId("asd-op-id-preview").textContent();
     const newID = preview!.replace("will be declared as ", "").trim();
@@ -482,16 +513,17 @@ test.describe("posture and policy", () => {
     // browser-human path proceeds and records {"state":"not-applicable"}.
     await page.goto(DRAFT_B());
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
-    // The shell's check-context area discloses the absence honestly —
-    // an unproven chip, never a violation, never silence.
-    // The nonblocking policy disclosure ranks below the three-item
-    // preview: expand the exact-count remainder inline (SI-125), then
-    // assert the honest unproven chip.
-    const more = page.locator('[data-testid="asd-more"] > summary');
-    if (await more.count()) await more.click();
-    const policyRow = page.locator('[data-concern-id="context/policy"]').first();
-    await expect(policyRow).toBeVisible();
-    await expect(policyRow.locator(".readiness-state--unproven")).toBeVisible();
+    // The wall discloses the absence honestly — never a violation, never
+    // silence: the context/policy row's home is the policy setup guide in
+    // the Readiness tab, under its Capabilities label (spec/wall-strip-
+    // and-drawer-v2 ac-6; SI-368 (3)), stating this checkout's not-adopted
+    // policy.
+    const capabilities = (await openRecordTab(page, "readiness")).getByTestId("readiness-tab-capabilities");
+    await expect(capabilities).toBeVisible();
+    await expect(capabilities.getByTestId("asd-policy-guide")).toHaveAttribute("data-policy-guide", "not-adopted");
+    await expect(capabilities).toContainText("This checkout carries no adopted policy authority");
+    await expect(capabilities.locator(".readiness-state--violated-with-witness")).toHaveCount(0);
+    await page.getByTestId("record-drawer-close").click();
 
     const marker = "not-applicable posture probe [50-na]";
     const resp = await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
@@ -517,29 +549,19 @@ test.describe("posture and policy", () => {
     // detail — with no control that could adopt, propose, or mutate.
     await page.goto(DRAFT_B());
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
-    const more = page.locator('[data-testid="asd-more"] > summary');
-    if (await more.count()) await more.click();
-    const policyRow = page.locator('[data-concern-id="context/policy"]').first();
-    await expect(policyRow).toBeVisible();
-    // F2/F3: the row states the SERVING-CHECKOUT fact (this branch was cut
-    // before main's policy fixtures landed, so the refusal proves nothing
-    // about the default branch), scopes its editing claim to this
-    // authoring board, and sends the reader to inspect the accepted and
-    // proposed snapshots before any initial setup.
-    // ac-12: the guidance leads the card as its primary line and the
-    // checkout fact stays visible as the secondary .asd-fact line.
-    const rowSummary = policyRow.getByTestId("asd-fact-context/policy");
-    await expect(rowSummary).toContainText("This checkout carries no adopted policy authority");
-    await expect(rowSummary).toContainText("browser editing proceeds");
-    await expect(rowSummary).not.toContainText("default branch");
-    const rowGuidance = policyRow.getByTestId("asd-guidance-context/policy");
-    await expect(rowGuidance).toContainText("Inspect the accepted and proposed policy snapshots first");
-    await expect(rowGuidance).not.toContainText("git pull");
-    const dest = policyRow.locator("a.asd-dest-link");
-    await expect(dest).toHaveAttribute("href", "#asd-policy-guide");
-    await dest.click();
+    // The notice and its guide are one since the wall shell retired: the
+    // context/policy row's home is the policy setup guide itself, in the
+    // record drawer's Readiness tab under its Capabilities label, which
+    // the readiness pill opens (spec/wall-strip-and-drawer-v2 ac-6; SI-368
+    // (3), (27)(c)). The row's words moved into the guide with it (SI-368
+    // (32)): the serving-checkout fact, the inspect-first step, and the
+    // editing line scoped to the wall's mode, which Go pins in every mode
+    // (TestPolicyConcern_RowsHonorBoardMode) and this authoring wall shows.
+    const readiness = await openRecordTab(page, "readiness");
+    await expect(readiness.getByTestId("readiness-tab-capabilities")).toContainText("Capabilities");
+    await expect(page.locator("#boardv2-region").getByTestId("asd-policy-guide")).toHaveCount(0);
 
-    const guide = page.getByTestId("asd-policy-guide");
+    const guide = readiness.getByTestId("asd-policy-guide");
     await expect(guide).toBeVisible();
     // This draft's branch tree carries no .verdi/policy at all: the
     // refusal detail is draftmutation's exact not-adopted discriminant, so
@@ -587,10 +609,16 @@ test.describe("posture and policy", () => {
     expect((await inspect.innerText()).trim().endsWith("\nJSON")).toBe(true);
     await expect(guide.locator("pre.asd-policy-guide-cmd")).toHaveCount(4);
     // Truthful, mode-scoped wording — never "editing continues" as an
-    // unconditional claim a read-only wall would belie.
+    // unconditional claim a read-only wall would belie — and, on this
+    // authoring wall, what a browser write records (SI-368 (32)), with
+    // nothing beside it that reads as a contradiction (SI-368 (33)(c)).
     await expect(summaries.first()).toContainText(
-      "Ordinary human editing does not require policy; this board's read-only restrictions still apply.",
+      "Ordinary human editing does not require policy; delegated agents' restrictions still apply.",
     );
+    await expect(summaries.first()).not.toContainText("read-only restrictions");
+    const editing = summaries.first().getByTestId("asd-policy-guide-editing");
+    await expect(editing).toHaveAttribute("data-board-mode", "authoring");
+    await expect(editing).toHaveText("On this authoring board, browser editing proceeds and records the explicit not-applicable policy posture.");
     // Read-only by construction: no form, button, input, or fetch panel.
     await expect(guide.locator("form, button, input, select, textarea, [data-asd-panel]")).toHaveCount(0);
   });
@@ -688,9 +716,14 @@ test.describe("conditional refresh", () => {
 
   test("background refresh preserves unsaved edits, expansion, and the last result", async ({ page }) => {
     await page.goto(DESIGN());
-    // Expand a shell disclosure and record the last action result.
-    await page.locator('[data-testid="board-guide"] > summary').click();
-    await expect(page.locator('[data-testid="board-guide"]')).toHaveAttribute("open", "");
+    // Expand a disclosure the refresh swaps and record the last action
+    // result. The rail's guide this test once expanded is retired and the
+    // region carries no disclosure of its own (spec/wall-strip-and-
+    // drawer-v2 ac-6, dc-2): the disclosure is the bar's posture popover,
+    // whose group rides every snapshot (SI-323 (3)).
+    const posture = page.getByTestId("asd-posture-tech");
+    await page.getByTestId("topbar-posture").click();
+    await expect(posture).toHaveAttribute("open", "");
     const targetID = await addFreshQuestion(page, "preservation case seed [50-pres-1]");
     // Force the changed projection to land in the pre-editor window. This
     // proves expansion survives the region swap itself instead of relying on
@@ -699,9 +732,11 @@ test.describe("conditional refresh", () => {
     await expect(page.getByTestId("card-" + targetID)).toContainText("[50-pres-1]", {
       timeout: 5_000,
     });
-    await expect(page.locator('[data-testid="board-guide"]')).toHaveAttribute("open", "");
-    // Open the inline editor and type WITHOUT saving.
-    await page.getByTestId("card-" + SHOWCASE.AC_IDS[0]).dblclick();
+    await expect(posture).toHaveAttribute("open", "");
+    // Open the inline editor from the keyboard — a pointer press outside
+    // the popover would close it, its own rule — and type WITHOUT saving.
+    await page.getByTestId("card-" + SHOWCASE.AC_IDS[0]).focus();
+    await page.keyboard.press("Enter");
     const editor = page.getByRole("textbox", { name: "Card text" });
     await expect(editor).toBeVisible();
     await editor.fill("unsaved human bytes that must survive [50-unsaved]");
@@ -721,7 +756,7 @@ test.describe("conditional refresh", () => {
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue("unsaved human bytes that must survive [50-unsaved]");
     // The expanded disclosure is still expanded.
-    await expect(page.locator('[data-testid="board-guide"]')).toHaveAttribute("open", "");
+    await expect(posture).toHaveAttribute("open", "");
     // Saving now is a STALE write: the kernel refuses it, the conflict is
     // visible, and the user's bytes are preserved in the disclosure.
     await editor.blur();
@@ -901,7 +936,7 @@ test.describe("typed forms", () => {
 
     // (a) An AC added on the SAME page via the typed form is offered and
     // bindable.
-    await page.locator("#asd-add-object").click();
+    await openAddObjectDialog(page);
     await page.locator("#asd-op-kind").selectOption("add-ac");
     const preview = await page.getByTestId("asd-op-id-preview").textContent();
     const newAC = preview!.replace("will be declared as ", "").trim();
@@ -1018,15 +1053,18 @@ test.describe("typed forms", () => {
     // change. The honest outcome is the kernel's typed stale refusal
     // against the base the dialog was drafted on, with the external
     // value surviving.
+    // The typed-operation dialog is the add-object dialog, opened from the
+    // toolbar's Card: the set-problem dialog's opener left with the
+    // rail's forms, its edit now the case-file strip's, in place
+    // (spec/wall-strip-and-drawer-v2 ac-1, ac-6; SI-368 (6)).
     await page.goto(DESIGN());
     const placard = page.locator('[data-testid="placard-problem"] .placard-text');
     const original = (await placard.textContent())!.trim();
-    const anchorBtn = page.locator("#asd-set-problem");
-    const anchor = (await anchorBtn.getAttribute("data-anchor")) || "#problem";
-    await anchorBtn.click();
-    const dialog = page.locator("#asd-op-dialog");
-    await expect(dialog).toBeVisible();
-    await page.getByTestId("asd-op-text").fill("dialog-stale problem text [c3-op]");
+    const anchor = (await page.getByTestId("placard-problem").getAttribute("data-strip-anchor")) || "#problem";
+    const dialog = await openAddObjectDialog(page);
+    await page.locator("#asd-op-kind").selectOption("add-question");
+    const drafted = (await page.getByTestId("asd-op-id-preview").textContent())!.replace("will be declared as ", "").trim();
+    await page.getByTestId("asd-op-text").fill("dialog-stale question text [c3-op]");
     // An external typed mutation lands while the dialog is open…
     await expectClean(
       await postMutate(page, DESIGN(), SHOWCASE.DESIGN_SPEC, [
@@ -1042,8 +1080,11 @@ test.describe("typed forms", () => {
     await expect(page.getByTestId("asd-last-result")).toHaveAttribute("data-result-kind", "stale", {
       timeout: 10_000,
     });
-    // The external value survives on the reconciled wall.
+    // The external value survives on the reconciled wall, and the
+    // dialog's declaration was never applied over it.
     await expect(placard).toContainText("[c3-external]", { timeout: 10_000 });
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId("card-" + drafted)).toHaveCount(0);
     // Cleanup: restore the provisioned problem statement.
     await expectClean(
       await postMutate(page, DESIGN(), SHOWCASE.DESIGN_SPEC, [
@@ -1132,9 +1173,7 @@ test.describe("typed forms", () => {
 
   test("the add-object form declares through one typed operation", async ({ page }) => {
     await page.goto(DESIGN());
-    await page.locator("#asd-add-object").click();
-    const dialog = page.locator("#asd-op-dialog");
-    await expect(dialog).toBeVisible();
+    await openAddObjectDialog(page);
     await expect(page.getByTestId("asd-op-id-preview")).toContainText("will be declared as");
     await page.locator("#asd-op-kind").selectOption("add-decision");
     const preview = await page.getByTestId("asd-op-id-preview").textContent();
@@ -1155,13 +1194,25 @@ test.describe("typed forms", () => {
 // Keyboard, accessibility, responsiveness, reduced motion
 // ---------------------------------------------------------------------------
 test.describe("accessibility and responsiveness", () => {
-  test("a keyboard-only journey reaches the shell, refresh, and card editing", async ({ page }) => {
+  test("a keyboard-only journey reaches the readiness, refresh, and card editing", async ({ page }) => {
     await page.goto(DESIGN());
     // Skip link first.
     await page.keyboard.press("Tab");
     const skip = page.locator(".skip-link");
     await expect(skip).toBeFocused();
     await page.keyboard.press("Enter");
+    // The wall's readiness — the record drawer's Readiness tab since the
+    // shell retired (spec/wall-strip-and-drawer-v2 ac-5, ac-6) — opens
+    // from the readiness pill with the keyboard, its tab focused, and
+    // Escape shuts it, the focus back on the pill.
+    const pill = page.getByTestId("readiness-pill");
+    await pill.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("record-panel-readiness")).toBeVisible();
+    await expect(page.getByTestId("record-tab-readiness")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("record-drawer")).toBeHidden();
+    await expect(pill).toBeFocused();
     // Shell disclosures toggle with the keyboard.
     const summary = page.locator(".asd-posture-tech > summary");
     await summary.focus();
@@ -1204,7 +1255,9 @@ test.describe("accessibility and responsiveness", () => {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto(DESIGN());
     await expect(page.getByTestId("asd-posture")).toBeVisible();
-    await expect(page.getByTestId("asd-shell")).toBeVisible();
+    // The wall's readiness opener (the shell's home is the record
+    // drawer's Readiness tab, spec/wall-strip-and-drawer-v2 ac-5, ac-6).
+    await expect(page.getByTestId("readiness-pill")).toBeVisible();
     // The page body never scrolls horizontally; the intrinsically wide
     // canvas scrolls inside its own container.
     const overflow = await page.evaluate(() => {
@@ -1219,15 +1272,20 @@ test.describe("accessibility and responsiveness", () => {
     expect(canvasScrolls).toBe(true);
   });
 
-  test("200% zoom keeps the shell and posture usable", async ({ page }) => {
+  test("200% zoom keeps the readiness and posture usable", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(DESIGN());
     await page.evaluate(() => {
       (document.body.style as unknown as { zoom: string }).zoom = "200%";
     });
     await expect(page.getByTestId("asd-posture")).toBeVisible();
-    await expect(page.getByTestId("asd-shell")).toBeVisible();
     await expect(page.getByTestId("asd-refresh")).toBeVisible();
+    // The wall's readiness (the record drawer's Readiness tab since the
+    // shell retired, spec/wall-strip-and-drawer-v2 ac-5, ac-6) opens and
+    // reads at 200 %.
+    await expect(page.getByTestId("readiness-pill")).toBeVisible();
+    await page.getByTestId("readiness-pill").click();
+    await expect(page.getByTestId("record-panel-readiness").getByTestId("readiness-tab")).toBeVisible({ timeout: 15_000 });
     const overflow = await page.evaluate(() => {
       const el = document.scrollingElement!;
       return el.scrollWidth - el.clientWidth;
@@ -1238,7 +1296,7 @@ test.describe("accessibility and responsiveness", () => {
   test("reduced motion leaves the live projection fully functional", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(DESIGN());
-    await expect(page.getByTestId("asd-shell")).toBeVisible();
+    await expect(page.getByTestId("readiness-pill")).toBeVisible();
     const motionID = await addFreshQuestion(page, "reduced motion refresh [50-motion]");
     await expect(page.getByTestId("card-" + motionID)).toContainText("[50-motion]", {
       timeout: 8_000,
@@ -1246,16 +1304,24 @@ test.describe("accessibility and responsiveness", () => {
   });
 
   test("the initial HTML is complete before JavaScript and inside the size budget", async ({ page }) => {
-    // SI-168: the server response alone carries every fact (shell,
-    // posture, canvas) and stays under the 512 KiB structural ceiling.
+    // SI-168: the server response alone carries every fact (posture,
+    // canvas, and the readiness and the record drawer's reading aids'
+    // no-JavaScript paths) and stays under the 512 KiB structural
+    // ceiling. The shell and the rail's panels are retired: their homes'
+    // markers stand in (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (15),
+    // (27)(c)) — the readiness pill, a link to the readiness page; the
+    // record drawer with its Provenance panel; and its no-JavaScript
+    // command-line hints.
     const resp = await page.request.get(DESIGN());
     const body = await resp.text();
     expect(body.length).toBeLessThanOrEqual(512 * 1024);
     for (const marker of [
       'data-testid="asd-posture"',
-      'data-testid="asd-shell"',
+      `data-testid="readiness-pill" data-drawer-tab="readiness"`,
+      `href="/readiness?spec=${SHOWCASE.DESIGN_SPEC}"`,
       'data-testid="board"',
-      'data-testid="asd-provenance"',
+      'data-testid="record-panel-provenance"',
+      'data-testid="record-drawer-noscript"',
     ]) {
       expect(body).toContain(marker);
     }

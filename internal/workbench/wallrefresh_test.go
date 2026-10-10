@@ -113,13 +113,16 @@ func TestProjectWallRefresh_ComposedBudget(t *testing.T) {
 				t.Fatalf("the composed snapshot carries marks %+v and revision %s (an unscoped load's: %s)", refresh.snap.Marks, refresh.snap.Revision, alone.Revision)
 			}
 			// The marks reach the region's markup (lane M-ui): the composed
-			// snapshot is an unscoped load rendered with the refresh's marks,
-			// but for the revision covering them.
+			// snapshot is an unscoped load rendered with the refresh's marks
+			// and pill (SI-368 (2)), but for the revision covering them.
 			proj, git, asd, err := s.loadASD(context.Background(), wall.name)
 			if err != nil {
 				t.Fatal(err)
 			}
-			asd.Marks = refresh.snap.Marks
+			if refresh.snap.Pill == nil || refresh.snap.Pill.Unavailable != "" {
+				t.Fatalf("the composed snapshot carries pill %+v, want readable facts", refresh.snap.Pill)
+			}
+			asd.Marks, asd.Pill = refresh.snap.Marks, refresh.snap.Pill
 			marked := newASDSnapshot(proj, git, asd)
 			bare := *refresh.snap
 			bare.Revision = marked.Revision

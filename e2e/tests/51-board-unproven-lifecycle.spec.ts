@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { SHOWCASE, EDGE, CONTROL_URL, boardPath } from "./fixtures";
+import { stickyAction, wallToolbar } from "./helpers";
 
 // MVP release amendment R2 (docs/superpowers/plans/2026-08-29-wave-6-
 // workbench-presentation.md, 2026-09-13) under merge-signaled acceptance
@@ -42,7 +43,7 @@ test.describe("board lifecycle labels: unproven is never the sealed record", () 
     await expect(board).toHaveAttribute("data-readonly-reason", "unproven");
     await expect(page.locator("body")).toHaveClass(/mode-readonly/);
 
-    // The stamp and the rail name the unproven lifecycle — never sealed.
+    // The stamp and the notices name the unproven lifecycle — never sealed.
     await expect(page.locator(".board-mode-tag")).toHaveText("read-only · lifecycle unproven");
     await expect(page.locator(".sealed-panel")).toHaveCount(0);
     const panel = page.getByTestId("readonly-panel");
@@ -68,11 +69,16 @@ test.describe("board lifecycle labels: unproven is never the sealed record", () 
     await expect(bytes).toHaveAttribute("data-state", "unproven");
     await expect(bytes).toContainText("displayed bytes: unproven");
 
-    // No editing affordance of any tier.
-    await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
+    // No editing affordance of any tier: the toolbar offers no Sticky and
+    // there is no opener of the typed operations (the retired rail's Add
+    // sticky and forms; spec/wall-strip-and-drawer-v2 ac-6), and no New
+    // story.
+    await expect(wallToolbar(page)).toBeAttached();
+    await expect(stickyAction(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Commit & push" })).toHaveCount(0);
-    await expect(page.getByTestId("asd-forms")).toHaveCount(0);
+    await expect(page.locator("#asd-add-object")).toHaveCount(0);
     await expect(page.getByTestId("create-panel")).toHaveCount(0);
+    await expect(page.getByTestId("create-spec-btn")).toHaveCount(0);
     await expect(page.locator(".delete-btn")).toHaveCount(0);
 
     // A drag is refused visibly, in the unproven wall's own words — never

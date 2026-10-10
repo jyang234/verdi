@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { addSticky } from "./helpers";
+import { addSticky, selectStub, wallToolbar } from "./helpers";
 import { EDGE, boardPath, stubCardTestId } from "./fixtures";
 
 // spec/badge-computes ac-5 (the ac-5--behavioral obligation): badges render
@@ -107,11 +107,15 @@ test.describe("wall badges render in every board mode and never block", () => {
     await assertBadgedWall(page);
 
     // The sealed accepted-pending-build wall's one live affordance
-    // (Instantiate, spec/scoping-canvas ac-6) sits on the SAME stub card
-    // that wears the VL-006 chip — and stays enabled: a badge never
-    // disables an action (co-2's disclosure-not-refusal, on the exact
-    // card where receipt and affordance meet).
-    const instantiate = page.getByTestId(`instantiate-${EDGE.BADGE_STUB_SLUG}`);
+    // (Instantiate, spec/scoping-canvas ac-6) is offered for the SAME stub
+    // card that wears the VL-006 chip — on its toolbar since the button
+    // left the card (spec/wall-strip-and-drawer-v2 ac-6; SI-368 (5)) —
+    // and stays enabled: a badge never disables an action (co-2's
+    // disclosure-not-refusal, on the exact stub where receipt and
+    // affordance meet).
+    const stub = await selectStub(page, EDGE.BADGE_STUB_SLUG);
+    await expect(stub.locator(".badge-chip")).not.toHaveCount(0);
+    const instantiate = wallToolbar(page).getByTestId(`instantiate-${EDGE.BADGE_STUB_SLUG}`);
     await expect(instantiate).toBeVisible();
     await expect(instantiate).toBeEnabled();
   });

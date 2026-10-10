@@ -46,7 +46,20 @@ const TITLES = {
   design: "Refinancing decline flow",
   draft: "Payoff quote portal",
   diagram: "Editor proposal",
+  // The sealed accepted feature (examples/showcase's escrow-autopay) and
+  // the never-committed changes wall (cmd/e2eharness/provision_wallstrip.go).
+  feature: "Escrow autopay enrollment",
+  unreadable: "Decline retraction (decline-changes-unreadable)",
 };
+
+// The changes wall whose comparison with HEAD is unreadable: F3-go2's
+// harness wall (provision_wallstrip.go), on its namesake branch, copied
+// here as 92-wall-commit-changes copies it (fixtures.ts stays F7's) and
+// pinned by the harness's TestWallStripPaths.
+const UNREADABLE_CHANGES_WALL = "/b/design%2Fdecline-changes-unreadable/board/spec/decline-changes-unreadable";
+// Its sibling whose working tree holds typed changes (the same harness
+// file), whose bar carries the longest Commit and push suffix.
+const TYPED_CHANGES_WALL = "/b/design%2Fdecline-changes-typed/board/spec/decline-changes-typed";
 
 // The readiness page lives on the readiness-pilot fixture's isolated
 // serve (49-readiness-pilot.spec.ts's own path to it): started lazily by
@@ -101,6 +114,24 @@ const PAGES: WorkbenchPage[] = [
     path: () => branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC),
     spec: true,
     title: TITLES.draft,
+  },
+  {
+    // spec/wall-strip-and-drawer-v2 (SI-368 (26)(a), F3AR-1 and F3AR-3):
+    // the sealed accepted feature's wall, whose bar carries New story and
+    // Revise as its primary actions and whose strip wears a long badge
+    // chip — the widest bar and the widest chips row the fixtures hold.
+    name: "sealed feature wall",
+    path: () => boardPath(SHOWCASE.FEATURE_SPEC),
+    spec: true,
+    title: TITLES.feature,
+  },
+  {
+    // The authoring wall with the long title and the pill that reads
+    // "readiness unavailable" (its comparison with HEAD is unreadable).
+    name: "unreadable changes wall",
+    path: () => UNREADABLE_CHANGES_WALL,
+    spec: true,
+    title: TITLES.unreadable,
   },
   {
     // spec/document-page-v2 ac-4 fixed the Document body's own overflow
@@ -586,14 +617,91 @@ test.describe("chrome-and-tokens", () => {
       await expectBarControlsVisible(page, `${p.name} @200%`);
     }
 
-    // The bar is one row at desktop widths (handoff "Global chrome").
-    await page.setViewportSize({ width: 1440, height: 900 });
-    for (const p of PAGES) {
-      await gotoPage(page, p);
-      const h = await bar(page).locator(".topbar-row").evaluate((el) => el.getBoundingClientRect().height);
-      console.log(`bar height: ${p.name} @1440 = ${h} px`);
-      expect(h, `${p.name} @1440: one 52 px row`).toBeLessThanOrEqual(56);
+    // The bar is one row at desktop widths (handoff "Global chrome"): at
+    // 1440 on every page, and on every wall from 1280 up (spec/wall-strip-
+    // and-drawer-v2, F3a closure N1) — the walls of this list and the
+    // other rooms' and change states' walls, the busiest bars the fixtures
+    // hold — with no bar control pushed past the viewport.
+    const walls = [
+      ...PAGES.filter((p) => p.spec && p.name !== "Document page"),
+      { name: "story wall", path: () => boardPath(SHOWCASE.EMPTY_SPEC), spec: true, title: "" },
+      { name: "sealed record wall", path: () => boardPath(SHOWCASE.READONLY_SPEC), spec: true, title: "" },
+      { name: "sealed story wall", path: () => boardPath(SHOWCASE.STORY_WITH_SPEC_STALE), spec: true, title: "" },
+      { name: "badged sealed wall", path: () => boardPath(EDGE.BADGE_SEALED_SPEC), spec: true, title: "" },
+      { name: "typed changes wall", path: () => TYPED_CHANGES_WALL, spec: true, title: "" },
+    ];
+    for (const width of [1280, 1366, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const p of width === 1440 ? [...PAGES, ...walls.slice(-5)] : walls) {
+        await gotoPage(page, p);
+        const row = await bar(page).evaluate((el) => {
+          const vw = document.documentElement.clientWidth;
+          const past = Array.from(el.querySelectorAll<HTMLElement>("a[href],button,summary"))
+            .filter((c) => {
+              const r = c.getBoundingClientRect();
+              return r.width > 0 && (r.left < -1 || r.right > vw + 1);
+            })
+            .map((c) => c.getAttribute("data-testid") || c.id || c.className);
+          return { h: el.querySelector(".topbar-row")!.getBoundingClientRect().height, past };
+        });
+        console.log(`bar height: ${p.name} @${width} = ${row.h} px`);
+        expect(row.h, `${p.name} @${width}: one 52 px row`).toBeLessThanOrEqual(56);
+        expect(row.past, `${p.name} @${width}: bar controls past the viewport`).toEqual([]);
+      }
     }
+
+    // The sealed wall's New story and Revise open their dialogs from a
+    // press anywhere on them: the wall's script dispatches on the pressed
+    // element's id, so the glyph and the words after the verb, each in its
+    // own span, never take the pointer. At 1440 those spans are folded
+    // away from the eye, the names stay whole, and the press lands on the
+    // visible verb; at the project's 1880 px they show, and the press
+    // lands on each of them.
+    const sealedWall = PAGES.find((p) => p.name === "sealed feature wall")!;
+    const sealedActions = [
+      { testid: "create-spec-btn", dialog: "#create-dialog", cancel: "#create-cancel", name: "New story", verb: "New" },
+      { testid: "revise-spec-btn", dialog: "#revise-dialog", cancel: "#revise-cancel", name: "Revise this feature", verb: "Revise" },
+    ];
+    const pressAt = async (at: { x: number; y: number }, a: (typeof sealedActions)[number], where: string) => {
+      await page.mouse.click(at.x, at.y);
+      await expect(page.locator(a.dialog), `${a.name}: a press on ${where} opens its dialog`).toBeVisible();
+      await page.locator(a.cancel).click();
+      await expect(page.locator(a.dialog)).toBeHidden();
+    };
+    await gotoPage(page, sealedWall);
+    for (const a of sealedActions) {
+      const btn = bar(page).getByTestId(a.testid);
+      await expect(btn).toHaveAccessibleName(a.name);
+      for (const part of [".wall-action-glyph", ".wall-action-rest"]) {
+        const w = await btn.locator(part).evaluate((el) => el.getBoundingClientRect().width);
+        expect(w, `${a.name} @1440: ${part} folded away from the eye`).toBeLessThanOrEqual(1);
+      }
+      const verbAt = await btn.evaluate((el, verb) => {
+        const node = Array.from(el.childNodes).find((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim() === verb);
+        if (!node) return null;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const r = range.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, a.verb);
+      expect(verbAt, `${a.name} @1440: the visible verb "${a.verb}"`).not.toBeNull();
+      await pressAt(verbAt!, a, `its visible verb @1440`);
+    }
+    await page.setViewportSize({ width: 1880, height: 1000 });
+    await gotoPage(page, sealedWall);
+    for (const a of sealedActions) {
+      const btn = bar(page).getByTestId(a.testid);
+      await expect(btn).toHaveAccessibleName(a.name);
+      for (const part of [".wall-action-glyph", ".wall-action-rest"]) {
+        const r = await btn.locator(part).evaluate((el) => {
+          const b = el.getBoundingClientRect();
+          return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width };
+        });
+        expect(r.w, `${a.name} @1880: ${part} shows`).toBeGreaterThan(1);
+        await pressAt(r, a, `${part} @1880`);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // Without JavaScript: the bar is in the initial server response, and a
     // script-less browser renders it.
@@ -727,31 +835,43 @@ test.describe("chrome-and-tokens", () => {
 
     // An outside press on something that is not focusable closes it and
     // returns focus to the summary, and the page does not scroll for it
-    // (SI-331): the shell's step text, in view, on a scrolled page.
+    // (SI-331): the wall's bare cork, in view, on a scrolled page (the
+    // shell's step text this test pressed is retired with the shell,
+    // spec/wall-strip-and-drawer-v2 ac-6).
     await summary.click();
     await expect(details).toHaveAttribute("open", "");
     await page.evaluate(() => window.scrollTo(0, 200));
     const y0 = await page.evaluate(() => window.scrollY);
-    const step = page.getByTestId("asd-step");
-    const box = await step.boundingBox();
-    expect(box, "the shell's step text is on screen").not.toBeNull();
-    await page.mouse.click(box!.x + 4, box!.y + box!.height / 2);
+    const cork = await page.evaluate(() => {
+      const c = document.getElementById("board-canvas")!;
+      const r = c.getBoundingClientRect();
+      const top = Math.max(r.top, 0) + 4;
+      const bottom = Math.min(r.bottom, window.innerHeight) - 4;
+      for (let y = top; y < bottom; y += 12) {
+        for (let x = r.left + 4; x < Math.min(r.right, window.innerWidth) - 4; x += 12) {
+          if (document.elementFromPoint(x, y) === c) return { x, y };
+        }
+      }
+      return null;
+    });
+    expect(cork, "the wall's bare cork is on screen").not.toBeNull();
+    await page.mouse.click(cork!.x, cork!.y);
     await expect(details).not.toHaveAttribute("open", "");
     await expect.poll(() => activeKey(page)).toBe("topbar-posture");
     expect(Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThanOrEqual(1);
 
     // A press on a focusable control closes it and keeps that control's
-    // focus: a disclosure summary in the shell (focusable, and its press
-    // navigates nowhere).
+    // focus: an object card on the wall (focusable, and its press selects
+    // it and navigates nowhere; the shell's disclosure this test pressed
+    // is retired with the shell, spec/wall-strip-and-drawer-v2 ac-6).
     await summary.click();
     await expect(details).toHaveAttribute("open", "");
-    const control = page.locator("#asd-shell details > summary").first();
+    const control = page.getByTestId("card-" + SHOWCASE.AC_IDS[0]);
+    await control.scrollIntoViewIfNeeded();
     await expect(control).toBeVisible();
     await control.click();
     await expect(details).not.toHaveAttribute("open", "");
-    await expect
-      .poll(() => page.evaluate(() => document.activeElement?.tagName + "." + (document.activeElement?.closest("#asd-shell") ? "shell" : "")))
-      .toBe("SUMMARY.shell");
+    await expect.poll(() => activeKey(page)).toBe("card-" + SHOWCASE.AC_IDS[0]);
 
     // On the diagram editor, whose page-level Escape is its exit
     // (tool-view-exit ac-1), the first Escape closes only the popover and

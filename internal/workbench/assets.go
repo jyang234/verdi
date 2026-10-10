@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js assets/wallnewstory.js
+//go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js assets/wallnewstory.js assets/wallstrip.js assets/walldrawer.js
 //go:embed assets/newstorydialog.js
 var embeddedAssets embed.FS
 
@@ -151,6 +151,25 @@ func wallKeysJSHandler() http.HandlerFunc {
 // uncompressed (TestWallKeysAssets_ServedWithinBudget).
 func wallMinimapJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/wallminimap.js")
+}
+
+// wallStripJSHandler serves the wall's strip script
+// (spec/wall-strip-and-drawer-v2 ac-1 to ac-4; lane F3a): the case-file
+// strip, Commit and push's changes popover, and the branch menu — a new
+// asset for the new behaviour (parent co-1: boardspec.js does not grow),
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (TestWallStripDrawerAssets_ServedWithinBudget).
+func wallStripJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/wallstrip.js")
+}
+
+// wallDrawerJSHandler serves the wall's record drawer script
+// (spec/wall-strip-and-drawer-v2 ac-4, ac-5; lane F3b): the drawer, its
+// tabs, and the menu that opens them — a new asset for the new behaviour
+// (parent co-1), dependency-free, and structurally capped at 64 KiB
+// uncompressed (TestWallStripDrawerAssets_ServedWithinBudget).
+func wallDrawerJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/walldrawer.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {
