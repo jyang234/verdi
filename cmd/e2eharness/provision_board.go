@@ -621,11 +621,10 @@ func writeSlotWallDerived(storeRoot, commit string) error {
 //     policies/go-toolchain.md, overlays/frontend-go-version.md,
 //     exemptions/legacy-service-go.md, profiles/solo-default.md and
 //     projections/codex.json, with AGENTS.md and context-request.json at
-//     the root. With no policy adopted on the branch, the writable page
-//     shows the "policy not adopted" posture (asd-policy-guide,
-//     asd-policy-guide-report, asd-fact-context/policy,
-//     asd-guidance-context/policy) where the serving page shows
-//     asd-summary-context/policy and asd-summary-context/draft-writes.
+//     the root. With no policy adopted on the branch, the writable page's
+//     Readiness tab carries the "policy not adopted" setup guide
+//     (asd-policy-guide, asd-policy-guide-report), where the serving
+//     page's carries none.
 //
 // The readiness marks are also never drawn on the writable path. The
 // readiness snapshot derives from the serving checkout, so its branch is

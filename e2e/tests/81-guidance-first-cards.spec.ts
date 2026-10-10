@@ -80,8 +80,8 @@ async function formalState(row: ReturnType<Page["locator"]>) {
 }
 
 // cardShape reports the child order inside one card's .readiness-copy as
-// indexes: the first primary line, the state chip, the secondary fact,
-// and which testid the primary line carries.
+// indexes — the step label, the first primary line and the state chip —
+// and how many primary lines the card carries.
 async function cardShape(row: ReturnType<Page["locator"]>) {
   return row.locator(".readiness-copy").evaluate((copy) => {
     const kids = Array.from(copy.children);
@@ -89,10 +89,7 @@ async function cardShape(row: ReturnType<Page["locator"]>) {
     return {
       stage: idx("p.readiness-stage"),
       primary: idx("p.readiness-summary"),
-      guidance: idx('p.readiness-summary[data-testid^="asd-guidance-"]'),
-      summary: idx('p.readiness-summary[data-testid^="asd-summary-"]'),
       chip: idx(".readiness-state"),
-      fact: idx('p.asd-fact[data-testid^="asd-fact-"]'),
       summaries: kids.filter((k) => k.matches("p.readiness-summary")).length,
     };
   });
