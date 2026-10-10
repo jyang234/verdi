@@ -155,6 +155,9 @@ func run() error {
 	// The index-failure fixture (indexfailure.go) serves its own failing
 	// store in-process; close it, and remove the store, with the harness too.
 	defer ctrl.indexFailure.stop()
+	// The new-story fixture (newstoryfixture.go) serves its own store
+	// in-process; close it, and remove the store, with the harness too.
+	defer ctrl.newStory.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),

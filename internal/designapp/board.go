@@ -183,6 +183,14 @@ func cloneBoardProjection(p *workbench.BoardProjection) *workbench.BoardProjecti
 	clone.ACCoverage = cloneMap(p.ACCoverage)
 	clone.OQClaims = cloneMap(p.OQClaims)
 	clone.CreateFields = cloneSlice(p.CreateFields)
+	// CreateCoverage (spec/new-story-dialog-v2): its rows, and each row's
+	// story refs and disclosures; the counts are value-copied above.
+	clone.CreateCoverage.Criteria = cloneSlice(p.CreateCoverage.Criteria)
+	for i := range clone.CreateCoverage.Criteria {
+		src := p.CreateCoverage.Criteria[i]
+		clone.CreateCoverage.Criteria[i].Stories = cloneSlice(src.Stories)
+		clone.CreateCoverage.Criteria[i].Disclosed = cloneSlice(src.Disclosed)
+	}
 	clone.Notices = cloneSlice(p.Notices)
 	clone.CaseFileBadges = cloneSlice(p.CaseFileBadges)
 	for j := range clone.CaseFileBadges {

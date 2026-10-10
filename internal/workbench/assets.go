@@ -8,6 +8,7 @@ import (
 )
 
 //go:embed assets/index.js assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js assets/specdocument.js assets/documentpage.js assets/topbar.js assets/wallselect.js assets/walltoolbar.js assets/wallkeys.js assets/wallminimap.js assets/wallnewstory.js assets/wallstrip.js assets/walldrawer.js
+//go:embed assets/newstorydialog.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -204,4 +205,14 @@ func indexJSHandler() http.HandlerFunc {
 // (TestWallNewStoryAsset_ServedWithinBudget).
 func wallNewStoryJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/wallnewstory.js")
+}
+
+// newStoryDialogJSHandler serves the New story dialog's own script
+// (spec/new-story-dialog-v2; SI-369 (9)): the branch preview, the inline
+// grammar report, the gated Create and the criterion rows — a new asset
+// for the new behaviour (parent co-1: boardspec.js does not grow),
+// dependency-free, and structurally capped at 64 KiB uncompressed
+// (TestNewStoryDialogAsset_ServedWithinBudget).
+func newStoryDialogJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/newstorydialog.js")
 }

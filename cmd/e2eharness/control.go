@@ -51,6 +51,16 @@ package main
 //     directory index computation fails on an undecodable default-branch
 //     spec (spec/index-v2 ac-6; SI-366 (15)) — see indexfailure.go. main.go
 //     stops it (and removes its store) with the harness.
+//   - GET  /newstory-fixture returns the base URL of a separate, in-process
+//     workbench instance over an ISOLATED store whose sealed feature has a
+//     criterion covered by a stub, one covered only by an accepted story,
+//     and one uncovered, under the plain vocabulary preset
+//     (spec/new-story-dialog-v2; SI-369 (10)). Its two read-only witnesses
+//     (SI-369 (11)): GET /newstory-fixture/refs, the store's for-each-ref
+//     and porcelain as one canonical JSON object, and GET
+//     /newstory-fixture/show?ref=&path=, a file's bytes at a ref or 404 —
+//     see newstoryfixture.go. main.go stops it (and removes its store) with
+//     the harness.
 //   - GET  /objsupersede-fixture returns JSON describing EIGHT isolated
 //     stores, one per closed-spec object supersession scenario (design
 //     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
@@ -100,6 +110,7 @@ type controlServer struct {
 	objSupersede       *objSupersedeFixture
 	indexDates         *indexDatesFixture
 	indexFailure       *indexFailureFixture
+	newStory           *newStoryFixture
 }
 
 // newControlServer wires the fixtures. openMRFeedURL is this server's own
@@ -119,6 +130,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		objSupersede:       newObjSupersedeFixture(moduleRoot),
 		indexDates:         newIndexDatesFixture(moduleRoot),
 		indexFailure:       newIndexFailureFixture(),
+		newStory:           newNewStoryFixture(),
 	}
 }
 
@@ -176,6 +188,15 @@ func (c *controlServer) handler() http.Handler {
 	// computed — the failure path the shared store can never show without
 	// breaking every other suite (spec/index-v2 ac-6; SI-366 (15)).
 	mux.HandleFunc("/index-failure-fixture", c.indexFailure.handler)
+	// The isolated new-story store (newstoryfixture.go): the production
+	// workbench handler over a sealed feature whose criteria are covered by
+	// a stub, by a story only, and not at all, under the plain vocabulary
+	// preset (spec/new-story-dialog-v2; SI-369 (10)), with its two
+	// read-only witnesses of the store's refs, porcelain, and files
+	// (SI-369 (11)).
+	mux.HandleFunc("/newstory-fixture", c.newStory.handler)
+	mux.HandleFunc("/newstory-fixture/refs", c.newStory.refsHandler)
+	mux.HandleFunc("/newstory-fixture/show", c.newStory.showHandler)
 	return mux
 }
 

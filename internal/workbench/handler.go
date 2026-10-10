@@ -219,4 +219,5 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/wallstrip.js", wallStripJSHandler())
 	mux.HandleFunc("/assets/walldrawer.js", wallDrawerJSHandler())
 	mux.HandleFunc("/assets/wallnewstory.js", wallNewStoryJSHandler())
+	mux.HandleFunc("/assets/newstorydialog.js", newStoryDialogJSHandler())
 }

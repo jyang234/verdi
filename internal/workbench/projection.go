@@ -501,6 +501,12 @@ type BoardProjection struct {
 	// empty everywhere else, so no other wall renders the affordance.
 	// Excluded from JSON: get_board's payload is unchanged.
 	CreateFields []designscaffold.Field `json:"-"`
+	// CreateCoverage is the New story dialog's criterion coverage
+	// (spec/new-story-dialog-v2 ac-2, dc-2; createcoverage.go): attached by
+	// loadBoard only when CreateFields is, from the render's one corpus
+	// index; the zero value everywhere else. Excluded from JSON, like
+	// CreateFields: get_board's payload is unchanged.
+	CreateCoverage createCoverageView `json:"-"`
 	// Notices are disclosed-unavailable banners rendered in the board
 	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
 	// review feed, or an unresolvable default branch (the honest unproven

@@ -1,9 +1,10 @@
 package main
 
 // The single git-invocation seam (file-topics ac-4): every scratch-store git
-// call in this package goes through runGit (command) or gitOutput (query)
-// — the corpus seed commit, the bare local origin init, the design branch's
-// fixture commit, and every provisioner's reads. Each used to run through
+// call in this package goes through runGit (command) or gitOutput (query;
+// gitRawOutput is its untrimmed form) — the corpus seed commit, the bare
+// local origin init, the design branch's fixture commit, and every
+// provisioner's reads. Each used to run through
 // its own hand-typed closure carrying its own env, and only one of them
 // pinned the deterministic dates; the seam is why every commit e2eharness
 // produces now has a fixed SHA (nothing here asserts a specific hash — this
@@ -59,14 +60,9 @@ func runGit(ctx context.Context, dir string, extraEnv []string, args ...string) 
 // sealed badge fixture's frozen stamp pins) and for the loopback inspection
 // routes, which pass their request's ctx. On failure the error wraps stderr.
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), deterministicGitEnv...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := gitRawOutput(ctx, dir, args...)
 	if err != nil {
-		return "", fmt.Errorf("git %v: %w\n%s", args, err, stderr.String())
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -136,4 +132,22 @@ func gitEnvKey(kv string) string {
 		return kv[:i]
 	}
 	return kv
+}
+
+// gitRawOutput is gitOutput untrimmed: git's stdout exactly as printed,
+// for an answer that must stay byte-exact — a porcelain line's leading
+// status column, a file's final newline (the new-story fixture's
+// read-only routes). Same env pinning and ctx honouring as gitOutput; on
+// failure the error wraps stderr.
+func gitRawOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), deterministicGitEnv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %v: %w\n%s", args, err, stderr.String())
+	}
+	return out, nil
 }
