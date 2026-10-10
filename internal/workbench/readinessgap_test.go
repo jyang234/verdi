@@ -122,11 +122,17 @@ func renderReadinessParity(sections []paritySection) string {
 	return b.String()
 }
 
-// tabParity compares one tab body with the loader's snapshot it rendered:
-// the same concerns, each exactly once and no other, each row's facts the
-// loader's own — state, step, primary line, fact, blocking flag, timing
-// and witnesses — and the same steps, states and focus; then it reduces
-// both to families for the gap lists.
+// tabParity compares one tab body with snap, an independent copy of the
+// loader's facts the tab rendered — never the object it rendered from
+// (F3G3R-2): the same concerns, each exactly once and no other, each
+// row's facts the loader's own — state, step, the step's label and the
+// label of the step a later row waits on, the Human-review label with its
+// formal id and work class, primary line, fact, blocking flag, timing,
+// work class, witnesses and destination — and the same steps, with their
+// states and labels, and focus; then it reduces both to families for the
+// gap lists. A row's wall target is the wall's own mapping (SI-368 (16)),
+// not a loader fact, so it is carried over from the row, not compared
+// here; the target tests pin it.
 func tabParity(t *testing.T, fixture, tab string, snap readinesspilot.Snapshot) paritySection {
 	t.Helper()
 	loaderIDs := map[string]bool{}
@@ -143,6 +149,11 @@ func tabParity(t *testing.T, fixture, tab string, snap readinesspilot.Snapshot) 
 		t.Errorf("%s: the tab renders %d concern rows, the loader's snapshot has %d", fixture, len(tabIDs), len(snap.AllConcerns))
 	}
 
+	labels, order := map[readinesspilot.AreaID]string{}, map[readinesspilot.AreaID]int{}
+	for i, area := range snap.Areas {
+		labels[area.ID], order[area.ID] = area.Label, i
+	}
+	focus, focused := order[snap.CurrentFocus]
 	wallFamilies, wallBlocking := map[string]bool{}, map[string]bool{}
 	for _, c := range snap.AllConcerns {
 		row := readTabRow(t, tab, c.ID)
@@ -150,11 +161,31 @@ func tabParity(t *testing.T, fixture, tab string, snap readinesspilot.Snapshot) 
 		if primary == "" {
 			primary = c.Summary
 		}
+		waitsOn := ""
+		if c.State != readinesspilot.StateProven && focused && order[c.Area] > focus {
+			waitsOn = labels[snap.CurrentFocus]
+		}
+		review, mark := "", "false"
+		if c.HumanReview() {
+			review, mark = "Human review · "+c.ID, "true"
+			if c.WorkClass != "" {
+				review += " · " + string(c.WorkClass)
+			}
+		}
+		var destination, cli []string
+		switch {
+		case c.Destination.BoardPath != "":
+			destination = []string{c.Destination.BoardPath}
+		case len(c.Destination.CLI) > 0:
+			destination = append([]string(nil), c.Destination.CLI...)
+			cli = append([]string(nil), c.Destination.CLI...)
+		}
 		witnesses := append([]string(nil), c.Witnesses...)
 		want := tabRow{
-			State: string(c.State), Area: string(c.Area), Primary: primary, Fact: c.Summary,
-			Blocking: strconv.FormatBool(c.Blocking), Timing: string(c.Timing),
-			TargetKind: row.TargetKind, Target: row.Target, Witnesses: witnesses,
+			State: string(c.State), Area: string(c.Area), Stage: labels[c.Area], WaitsOn: waitsOn,
+			HumanReview: review, ReviewMark: mark, Primary: primary, Fact: c.Summary,
+			Blocking: strconv.FormatBool(c.Blocking), Timing: string(c.Timing), WorkClass: string(c.WorkClass),
+			TargetKind: row.TargetKind, Target: row.Target, Witnesses: witnesses, Destination: destination, CLI: cli,
 		}
 		if len(want.Witnesses) == 0 {
 			want.Witnesses = nil
@@ -169,13 +200,14 @@ func tabParity(t *testing.T, fixture, tab string, snap readinesspilot.Snapshot) 
 		}
 	}
 
-	stations := regexp.MustCompile(`<li class="readiness-station[^"]*" data-area-id="([^"]+)" data-state="([^"]+)"`).FindAllStringSubmatch(tab, -1)
+	stations := regexp.MustCompile(`<li class="readiness-station[^"]*" data-area-id="([^"]+)" data-state="([^"]+)"[^>]*>.*?<span class="readiness-station-label">([^<]*)</span>`).FindAllStringSubmatch(tab, -1)
 	if len(stations) != len(snap.Areas) {
 		t.Errorf("%s: the tab's stepper has %d steps, the loader's %d", fixture, len(stations), len(snap.Areas))
 	}
 	for i := 0; i < len(stations) && i < len(snap.Areas); i++ {
-		if stations[i][1] != string(snap.Areas[i].ID) || stations[i][2] != string(snap.Areas[i].State) {
-			t.Errorf("%s: step %d is %s %s, the loader's %s %s", fixture, i+1, stations[i][1], stations[i][2], snap.Areas[i].ID, snap.Areas[i].State)
+		area, label := snap.Areas[i], stdhtml.UnescapeString(stations[i][3])
+		if stations[i][1] != string(area.ID) || stations[i][2] != string(area.State) || label != area.Label {
+			t.Errorf("%s: step %d is %s %s %q, the loader's %s %s %q", fixture, i+1, stations[i][1], stations[i][2], label, area.ID, area.State, area.Label)
 		}
 	}
 	if got := tabFocus(t, tab); got != string(snap.CurrentFocus) {
@@ -320,7 +352,10 @@ func TestReadinessTab_LoaderParityNoGaps(t *testing.T) {
 	var sections []paritySection
 
 	// The claim wall, through the production loader: the tab's facts are
-	// the loader's facts for the same spec and the same head.
+	// the loader's facts for the same spec and the same head, compared
+	// with the tee's independent copy of that one load's snapshot, taken
+	// before the tab rendered it (teeLoader), never the object the tab
+	// rendered from.
 	claim := newTabWall(t, claimWallName, claimWallSpec, nil)
 	tab, snap := claim.tab(t)
 	head := gitOut(t, claim.root, "rev-parse", "HEAD")

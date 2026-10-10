@@ -9,10 +9,15 @@ package workbench
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,9 +26,11 @@ import (
 	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
-// teeLoader passes every load to the production loader and records the
-// snapshot each returned, so a test compares the tab with the exact value
-// its one load produced.
+// teeLoader passes every load to the production loader and records an
+// independent copy of the snapshot each returned, taken before the tab
+// renders it, so a test compares the tab with the exact value its one
+// load produced and never with the object the tab rendered from: a tab
+// that rewrote that object in place cannot rewrite the copy (F3G3R-2).
 type teeLoader struct {
 	mu    sync.Mutex
 	inner ReadinessLoader
@@ -33,11 +40,31 @@ type teeLoader struct {
 
 func (l *teeLoader) Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error) {
 	snap, err := l.inner.Load(ctx, ref)
+	kept, copyErr := independentSnapshot(snap)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.snaps = append(l.snaps, snap)
-	l.errs = append(l.errs, err)
+	l.snaps = append(l.snaps, kept)
+	l.errs = append(l.errs, errors.Join(err, copyErr))
 	return snap, err
+}
+
+// independentSnapshot is a deep copy of snap that shares no memory with
+// it: a JSON round trip, which every field of the snapshot survives — the
+// copy is checked equal to snap on the spot, so a field the round trip
+// lost would fail the load rather than drop out of the comparison.
+func independentSnapshot(snap readinesspilot.Snapshot) (readinesspilot.Snapshot, error) {
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("copying the snapshot: %w", err)
+	}
+	var kept readinesspilot.Snapshot
+	if err := json.Unmarshal(raw, &kept); err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("copying the snapshot: %w", err)
+	}
+	if !reflect.DeepEqual(kept, snap) {
+		return readinesspilot.Snapshot{}, errors.New("copying the snapshot: the JSON round trip changed it")
+	}
+	return kept, nil
 }
 
 // loads is how many loads the tee has recorded.
@@ -78,9 +105,9 @@ func newTabWall(t *testing.T, name, spec string, extra map[string]string) *tabWa
 	return &tabWall{name: name, root: root, h: NewHandlerWith(root, Deps{Design: readinessGapCapsBridge(), ReadinessLoader: tee}), loader: tee}
 }
 
-// tab GETs the wall's Readiness tab and returns its body and the snapshot
-// its one readiness load returned; a tab that is unavailable, or that
-// loads other than once, fails the test.
+// tab GETs the wall's Readiness tab and returns its body and the tee's
+// independent copy of the snapshot its one readiness load returned; a tab
+// that is unavailable, or that loads other than once, fails the test.
 func (w *tabWall) tab(t *testing.T) (string, readinesspilot.Snapshot) {
 	t.Helper()
 	before := w.loader.loads()
@@ -113,23 +140,46 @@ func (w *tabWall) postSticky(t *testing.T, kind, text string) {
 	}
 }
 
-// tabRow is one concern row's facts as the Readiness tab renders them.
+// tabRow is one concern row's facts as the Readiness tab renders them:
+// its state and step, the step's label (Stage) and, on a row that waits,
+// the label of the step it waits on (WaitsOn); the plain Human-review
+// label with its formal id and work class ("" on a row without one) and
+// the row's human-review mark; the primary line, the formal facts, the
+// work class, the wall target, the witnesses, the destination as the
+// Technical details list it, and the CLI fallback's tokens.
 type tabRow struct {
-	State, Area, Primary, Fact, Blocking, Timing, TargetKind, Target string
-	Witnesses                                                        []string
+	State, Area, Stage, WaitsOn, HumanReview, ReviewMark           string
+	Primary, Fact, Blocking, Timing, WorkClass, TargetKind, Target string
+	Witnesses, Destination, CLI                                    []string
 }
 
 var (
-	tabRowState     = regexp.MustCompile(`readiness-concern--(proven|violated-with-witness|unproven)`)
-	tabRowArea      = regexp.MustCompile(`data-area-id="([^"]*)"`)
-	tabRowPrimary   = regexp.MustCompile(`<div class="readiness-primary"><p class="readiness-summary[^"]*">(.*?)</p>`)
-	tabRowFact      = regexp.MustCompile(`<dd class="readiness-fact">(.*?)</dd>`)
-	tabRowBlocking  = regexp.MustCompile(`<dt>Blocking</dt><dd><code>(.*?)</code></dd>`)
-	tabRowTiming    = regexp.MustCompile(`<dt>Timing</dt><dd><code>(.*?)</code></dd>`)
-	tabRowTarget    = regexp.MustCompile(`data-target-kind="([^"]*)"(?: data-target="([^"]*)")?`)
-	tabRowWitnesses = regexp.MustCompile(`<ul class="readiness-witnesses">(.*?)</ul>`)
-	tabRowWitness   = regexp.MustCompile(`<li><code>(.*?)</code></li>`)
+	tabRowState       = regexp.MustCompile(`readiness-concern--(proven|violated-with-witness|unproven)`)
+	tabRowArea        = regexp.MustCompile(`data-area-id="([^"]*)"`)
+	tabRowStage       = regexp.MustCompile(`<p class="readiness-stage">([^<]*?)(?: <span class="readiness-when readiness-when--(?:now|later)">(?:now|later — waits on ([^<]*))</span>)?</p>`)
+	tabRowHumanReview = regexp.MustCompile(`<p class="readiness-human-review" data-testid="readiness-human-review">Human review<span class="readiness-human-review-formal"> · <code>([^<]*)</code>(?: · <code>([^<]*)</code>)?</span></p>`)
+	tabRowPrimary     = regexp.MustCompile(`<div class="readiness-primary"><p class="readiness-summary[^"]*">(.*?)</p>`)
+	tabRowFact        = regexp.MustCompile(`<dd class="readiness-fact">(.*?)</dd>`)
+	tabRowBlocking    = regexp.MustCompile(`<dt>Blocking</dt><dd><code>(.*?)</code></dd>`)
+	tabRowTiming      = regexp.MustCompile(`<dt>Timing</dt><dd><code>(.*?)</code></dd>`)
+	tabRowWorkClass   = regexp.MustCompile(`<dt>Work class</dt><dd><code>(.*?)</code></dd>`)
+	tabRowTarget      = regexp.MustCompile(`data-target-kind="([^"]*)"(?: data-target="([^"]*)")?`)
+	tabRowWitnesses   = regexp.MustCompile(`<ul class="readiness-witnesses">(.*?)</ul>`)
+	tabRowWitness     = regexp.MustCompile(`<li><code>(.*?)</code></li>`)
+	tabRowDestination = regexp.MustCompile(`<dt>Destination</dt><dd>(.*?)</dd>`)
+	tabRowCode        = regexp.MustCompile(`<code>(.*?)</code>`)
+	tabRowCLI         = regexp.MustCompile(`<p class="readiness-dest readiness-cli"[^>]*>(.*?)</p>`)
+	tabRowCLIToken    = regexp.MustCompile(`<code class="readiness-cli-token">(.*?)</code>`)
 )
+
+// tabRowTexts is every first group re finds in s, unescaped; nil for none.
+func tabRowTexts(re *regexp.Regexp, s string) []string {
+	var out []string
+	for _, m := range re.FindAllStringSubmatch(s, -1) {
+		out = append(out, stdhtml.UnescapeString(m[1]))
+	}
+	return out
+}
 
 // readTabRow parses concern id's one row out of the tab body.
 func readTabRow(t *testing.T, tab, id string) tabRow {
@@ -147,15 +197,32 @@ func readTabRow(t *testing.T, tab, id string) tabRow {
 	}
 	r := tabRow{
 		State: first(tabRowState), Area: first(tabRowArea), Primary: first(tabRowPrimary), Fact: first(tabRowFact),
-		Blocking: first(tabRowBlocking), Timing: first(tabRowTiming),
+		Blocking: first(tabRowBlocking), Timing: first(tabRowTiming), WorkClass: first(tabRowWorkClass),
 	}
+	if m := tabRowStage.FindStringSubmatch(row); m != nil {
+		r.Stage, r.WaitsOn = stdhtml.UnescapeString(m[1]), stdhtml.UnescapeString(m[2])
+	}
+	switch m := tabRowHumanReview.FindStringSubmatch(row); {
+	case m != nil:
+		r.HumanReview = "Human review · " + stdhtml.UnescapeString(m[1])
+		if m[2] != "" {
+			r.HumanReview += " · " + stdhtml.UnescapeString(m[2])
+		}
+	case strings.Contains(row, `data-testid="readiness-human-review"`):
+		r.HumanReview = "(a Human-review label this parser cannot read)"
+	}
+	r.ReviewMark = strconv.FormatBool(strings.Contains(row[:strings.Index(row, ">")], " readiness-concern--human-review"))
 	if m := tabRowTarget.FindStringSubmatch(row); m != nil {
 		r.TargetKind, r.Target = m[1], stdhtml.UnescapeString(m[2])
 	}
 	if m := tabRowWitnesses.FindStringSubmatch(row); m != nil {
-		for _, w := range tabRowWitness.FindAllStringSubmatch(m[1], -1) {
-			r.Witnesses = append(r.Witnesses, stdhtml.UnescapeString(w[1]))
-		}
+		r.Witnesses = tabRowTexts(tabRowWitness, m[1])
+	}
+	if m := tabRowDestination.FindStringSubmatch(row); m != nil {
+		r.Destination = tabRowTexts(tabRowCode, m[1])
+	}
+	if m := tabRowCLI.FindStringSubmatch(row); m != nil {
+		r.CLI = tabRowTexts(tabRowCLIToken, m[1])
 	}
 	return r
 }
