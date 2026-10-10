@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -59,12 +60,12 @@ const fakeHomeGitDate = "2024-01-01T00:00:00+00:00"
 
 // fakeOpenMRs is the hermetic OpenMRLister double (co-2).
 type fakeOpenMRs struct {
-	branches []string
-	err      error
+	refs []OpenMRRef
+	err  error
 }
 
-func (f fakeOpenMRs) OpenMRSourceBranches(ctx context.Context) ([]string, error) {
-	return f.branches, f.err
+func (f fakeOpenMRs) OpenMRRefs(ctx context.Context) ([]OpenMRRef, error) {
+	return f.refs, f.err
 }
 
 // cannedIndex returns a HomeDeps.Index over fixed entries.
@@ -411,22 +412,70 @@ func TestRenderHome_ProvenTerminalEntry_CompatibilityNoteBesideBadge(t *testing.
 func TestRenderHome_InReviewChip(t *testing.T) {
 	root := t.TempDir()
 	_, body := getHome(t, root, HomeDeps{
-		Index:   cannedIndex(directoryFixtureEntries(), nil),
-		Git:     fakeHomeGit{},
-		OpenMRs: fakeOpenMRs{branches: []string{"design/both-draft"}},
+		Index:     cannedIndex(directoryFixtureEntries(), nil),
+		Git:       fakeHomeGit{},
+		OpenMRs:   fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/both-draft", ID: "17"}}},
+		ForgeKind: ForgeGitHub,
 	})
 
 	if got := strings.Count(body, `class="badge badge-open dir-inreview"`); got != 1 {
 		t.Fatalf("in-review chip count = %d, want exactly 1; body: %s", got, body)
 	}
-	if !strings.Contains(entryBlock(t, body, "both-draft"), "in review") {
-		t.Fatalf("the open-MR branch's entry is not the chipped one")
+	if !strings.Contains(entryBlock(t, body, "both-draft"), `<span class="badge badge-open dir-inreview">PR #17 open</span>`) {
+		t.Fatalf("the open-MR branch's entry is not the chipped one, or its chip does not name the pull request; got: %s", entryBlock(t, body, "both-draft"))
 	}
 	if !strings.Contains(body, "a second source beside the refs") {
 		t.Fatalf("the forge consultation is not disclosed as a second source; got: %s", body)
 	}
 	if strings.Contains(body, "MR status unavailable") {
 		t.Fatalf("healthy consultation must not render the unavailable notice")
+	}
+}
+
+// TestRenderHome_InReviewChipNamesTheRequest is dc-4's number (SI-376 (2);
+// BL-177) through the whole home render: the chip names the open
+// request's number in the store's forge notation, the lowest of several
+// with the rest counted, and discloses a number it cannot state — while
+// the card stays in review and the filter pill keeps its label and count.
+func TestRenderHome_InReviewChipNamesTheRequest(t *testing.T) {
+	const disclosedChip = `<span class="badge badge-open dir-inreview" title="`
+	tests := []struct {
+		name     string
+		kind     ForgeKind
+		refs     []OpenMRRef
+		wantChip string
+	}{
+		{"one pull request on GitHub", ForgeGitHub, []OpenMRRef{{Branch: "design/both-draft", ID: "17"}}, `<span class="badge badge-open dir-inreview">PR #17 open</span>`},
+		{"one merge request on GitLab", ForgeGitLab, []OpenMRRef{{Branch: "design/both-draft", ID: "17"}}, `<span class="badge badge-open dir-inreview">MR !17 open</span>`},
+		{"several from one branch: the lowest, then the rest counted", ForgeGitLab, []OpenMRRef{{Branch: "design/both-draft", ID: "21"}, {Branch: "design/both-draft", ID: "8"}, {Branch: "design/both-draft", ID: "13"}}, `<span class="badge badge-open dir-inreview">MR !8 open · +2</span>`},
+		{"an empty id: still in review, the number disclosed", ForgeGitHub, []OpenMRRef{{Branch: "design/both-draft"}}, disclosedChip},
+		{"no forge kind: still in review, the number disclosed", "", []OpenMRRef{{Branch: "design/both-draft", ID: "17"}}, disclosedChip},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, body := getHome(t, t.TempDir(), HomeDeps{
+				Index:     cannedIndex(directoryFixtureEntries(), nil),
+				Git:       fakeHomeGit{},
+				OpenMRs:   fakeOpenMRs{refs: tt.refs},
+				ForgeKind: tt.kind,
+			})
+			block := entryBlock(t, body, "both-draft")
+			if !strings.Contains(block, tt.wantChip) {
+				t.Fatalf("chip: want %q in the open request's card; got: %s", tt.wantChip, block)
+			}
+			if tt.wantChip == disclosedChip && !strings.Contains(block, `">in review · number unavailable</span>`) {
+				t.Fatalf("an unstatable number must be disclosed on the chip; got: %s", block)
+			}
+			if got := strings.Count(body, `dir-inreview`); got != 1 {
+				t.Fatalf("in-review chips = %d, want exactly 1", got)
+			}
+			if !strings.Contains(block, `data-review="open"`) {
+				t.Fatalf("the card must stay in review; got: %s", block)
+			}
+			if !strings.Contains(body, `title="the forge lists an open merge request from the branch">in review <span class="count">1</span></button>`) {
+				t.Fatalf("the in-review filter pill must keep its label and count; got: %s", body)
+			}
+		})
 	}
 }
 
@@ -536,11 +585,14 @@ func TestConsultOpenMRs_Table(t *testing.T) {
 	tests := []struct {
 		name       string
 		mrs        OpenMRLister
-		wantBranch string
+		want       map[string][]string
 		wantNotice bool
 	}{
-		{"open MR reported", fakeOpenMRs{branches: []string{"design/x"}}, "design/x", false},
-		{"forge unreachable", fakeOpenMRs{err: errors.New("connection refused")}, "", true},
+		{"open MR reported", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x", ID: "7"}}}, map[string][]string{"design/x": {"7"}}, false},
+		{"several open MRs from one branch keep every id", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x", ID: "12"}, {Branch: "design/y", ID: "3"}, {Branch: "design/x", ID: "4"}}}, map[string][]string{"design/x": {"12", "4"}, "design/y": {"3"}}, false},
+		{"an open MR with no id still marks its branch", fakeOpenMRs{refs: []OpenMRRef{{Branch: "design/x"}}}, map[string][]string{"design/x": {""}}, false},
+		{"no open MRs", fakeOpenMRs{}, map[string][]string{}, false},
+		{"forge unreachable", fakeOpenMRs{err: errors.New("connection refused")}, nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -557,8 +609,8 @@ func TestConsultOpenMRs_Table(t *testing.T) {
 			if notice != "" {
 				t.Fatalf("unexpected notice %q", notice)
 			}
-			if !inReview[tt.wantBranch] {
-				t.Fatalf("inReview = %v, want %s", inReview, tt.wantBranch)
+			if !reflect.DeepEqual(inReview, tt.want) {
+				t.Fatalf("inReview = %v, want %v", inReview, tt.want)
 			}
 		})
 	}

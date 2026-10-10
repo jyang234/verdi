@@ -4,8 +4,10 @@
 // status per spec/workbench-directory dc-2, every entry status-chipped and
 // linked per the ratified address grammars (dc-3), disclosed by source, and
 // chipped "in review" from a per-render, non-blocking forge consultation
-// (dc-4). The index itself is CONSUMED through the sibling ref-index
-// story's seam (refindex.ComputeIndex) — this file performs no git ref
+// (dc-4), the chip naming the open request's number
+// (spec/workbench-redesign dc-4; indexreviewchip.go). The index itself is
+// CONSUMED through the sibling ref-index story's seam
+// (refindex.ComputeIndex) — this file performs no git ref
 // enumeration of its own and holds no second copy of the grouping rules
 // (dc-2): grouping keys off each entry's StatusGroup field, never its
 // address or on-disk path.
@@ -28,16 +30,27 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// OpenMRLister is the directory's in-review consultation port (dc-4): the
-// source branches of every open MR/PR targeting the store's default
-// branch, consulted fresh per render. It is a consumer-defined interface
-// (04 §port pattern) so this package never imports internal/forge — the
-// caller (cmd/verdi's serve.go) adapts the forge port's ListOpenMRs onto
-// it, and the hermetic harness/test doubles implement it directly (co-2).
+// OpenMRRef is one open MR/PR as the in-review consultation reads it: its
+// source (head) branch and its forge-native id (GitLab's IID, GitHub's
+// pull request number — forge.OpenMR.ID, carried as is). ID is "" when
+// the forge listed the request without one: the branch is still in
+// review, and the chip discloses the missing number rather than
+// inventing one (spec/workbench-redesign dc-4; SI-376 (2)).
+type OpenMRRef struct {
+	Branch string
+	ID     string
+}
+
+// OpenMRLister is the directory's in-review consultation port (dc-4):
+// every open MR/PR targeting the store's default branch, consulted fresh
+// per render. It is a consumer-defined interface (04 §port pattern) so
+// this package never imports internal/forge — the caller (cmd/verdi's
+// serve.go) adapts the forge port's ListOpenMRs onto it, and the
+// hermetic harness/test doubles implement it directly (co-2).
 type OpenMRLister interface {
-	// OpenMRSourceBranches returns the source (head) branch of every open
-	// merge/pull request targeting the store's default branch.
-	OpenMRSourceBranches(ctx context.Context) ([]string, error)
+	// OpenMRRefs returns the source branch and forge-native id of every
+	// open merge/pull request targeting the store's default branch.
+	OpenMRRefs(ctx context.Context) ([]OpenMRRef, error)
 }
 
 // HomeDeps carries the home page's injected collaborators. It is a
@@ -65,6 +78,14 @@ type HomeDeps struct {
 	// to the disclosed "MR status unavailable" notice, never a blocked or
 	// partial directory.
 	OpenMRs OpenMRLister
+
+	// ForgeKind is the store's configured forge (indexreviewchip.go), as
+	// `verdi serve`'s forge wiring resolves it: the notation the
+	// in-review chip writes an open request's number in (dc-4). The zero
+	// value, like any kind the chip has no notation for, still chips the
+	// draft in review and discloses the number instead of guessing a
+	// notation. It is read only beside a non-nil OpenMRs.
+	ForgeKind ForgeKind
 
 	// Model is the store's resolved operating model
 	// (spec/vocabulary-surfaces ac-2): the status chips this page renders
@@ -135,18 +156,19 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 const openMRConsultTimeout = 2 * time.Second
 
 // consultOpenMRs performs the per-render, non-blocking in-review
-// consultation (dc-4). It returns the set of design branches with an open
-// MR and, when the consultation failed, the disclosed notice text — the
-// caller renders the notice and the refs-computed directory in full either
-// way. A nil lister (no forge configured) is the silent, legitimate
-// absence: no chips, no notice.
-func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string]bool, notice string) {
+// consultation (dc-4). It returns each design branch with an open MR,
+// mapped to the forge-native ids of its open requests in the lister's
+// order ("" for a request listed without one), and, when the consultation
+// failed, the disclosed notice text — the caller renders the notice and
+// the refs-computed directory in full either way. A nil lister (no forge
+// configured) is the silent, legitimate absence: no chips, no notice.
+func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string][]string, notice string) {
 	if mrs == nil {
 		return nil, ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, openMRConsultTimeout)
 	defer cancel()
-	branches, err := mrs.OpenMRSourceBranches(ctx)
+	refs, err := mrs.OpenMRRefs(ctx)
 	if err != nil {
 		d := disclosure.New(
 			"workbench:mr-status",
@@ -155,9 +177,9 @@ func consultOpenMRs(ctx context.Context, mrs OpenMRLister) (inReview map[string]
 		)
 		return nil, disclosure.Render(d)
 	}
-	inReview = make(map[string]bool, len(branches))
-	for _, b := range branches {
-		inReview[b] = true
+	inReview = make(map[string][]string, len(refs))
+	for _, r := range refs {
+		inReview[r.Branch] = append(inReview[r.Branch], r.ID)
 	}
 	return inReview, ""
 }
@@ -314,7 +336,8 @@ func writeNoticeEntry(buf *bytes.Buffer, c cardFacts) {
 // writeCardMeta renders the card's chip row: the status badge (label is
 // the model's display word for it, "" when no rename differs), the source
 // chip, the age chip (SI-366 (13)), and the in-review chip when the forge
-// lists an open MR from the draft's branch (dc-4; SI-366 (3)).
+// lists an open MR from the draft's branch (dc-4; SI-366 (3)), naming the
+// request's number (SI-376 (2); indexreviewchip.go).
 func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
 	buf.WriteString(`<div class="dir-meta">`)
 	if c.entry.SpecStatus != "" {
@@ -328,7 +351,17 @@ func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
 	case reviewOpen:
 		// dc-4: chipped from the forge port's open-MR listing — the
 		// disclosed second source, never part of the index computation.
-		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
+		// The chip names the open request and no review state; a number it
+		// cannot state is disclosed in its text and its title.
+		buf.WriteString(` <span class="badge badge-open dir-inreview"`)
+		if c.reviewChip.title != "" {
+			buf.WriteString(` title="`)
+			buf.WriteString(stdhtml.EscapeString(c.reviewChip.title))
+			buf.WriteString(`"`)
+		}
+		buf.WriteString(`>`)
+		buf.WriteString(stdhtml.EscapeString(c.reviewChip.text))
+		buf.WriteString(`</span>`)
 	case reviewUnavailable:
 		// SI-366 (4): the forge could not be consulted this render, so
 		// whether this branch is in review is unknown — said on the card

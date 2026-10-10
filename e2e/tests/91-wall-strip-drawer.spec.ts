@@ -418,6 +418,29 @@ test.describe("wall-strip-and-drawer", () => {
     await page.goto(dexSpecPath(SHOWCASE.STORY_WITH_SPEC_STALE));
     await expect(page.getByTestId("badge-spec-stale")).toContainText(flagName);
 
+    // A story wall in authoring mode (WRF-4; SI-376 (3)): the dangling
+    // story, a draft on the design branch whose implements edge names a
+    // feature the store does not hold, wears that finding as a spec-level
+    // VL-003 chip. The chip keeps the same properties there, and a scratch
+    // write on the story wall succeeds with the chip still in the strip
+    // after the swap. This story wears no ladder flag, and the dex has no
+    // page for this draft, so the flag names are matched against the dex
+    // on the read-only story above. No story wall in review mode exists in
+    // the harness (SI-368 (26)(b)), so the story wall's review mode stays
+    // disclosed unproven.
+    const story = boardPath(EDGE.FL_DANGLING_STORY);
+    await page.goto(story);
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+    await expect(page.getByTestId("case-strip").getByTestId("case-class-tag")).toHaveText(/^story · /);
+    await expect(page.getByTestId("case-strip").getByTestId("case-file-badges")).toBeVisible();
+    await expectBadgeChip(page, chipOf(page, "lint:VL-003"), "lint:VL-003");
+    await expect(page.getByTestId("case-file-badges").locator('.case-stamp[data-badge-source^="ladder:"]'), "the story wears no ladder flag").toHaveCount(0);
+    const storySticky = await addSticky(page, "a chip never blocks a write on a story wall [91]");
+    await expect(chipOf(page, "lint:VL-003")).toBeVisible();
+    const storyStickyID = (await storySticky.getAttribute("data-id"))!;
+    const storyGone = await page.request.post(story + "/api/annotation-delete", { data: { ids: [storyStickyID] } });
+    expect(storyGone.status(), await storyGone.text()).toBe(200);
+
     // Size-smell on a wall declaring acceptance criteria, as a chip in
     // the strip, named as its compute names it.
     await page.goto(boardPath(EDGE.SIZE_SMELL_SPEC));

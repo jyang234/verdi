@@ -74,7 +74,7 @@ func TestAgeOf(t *testing.T) {
 }
 
 func TestReviewOf(t *testing.T) {
-	answered := reviewConsultation{configured: true, inReview: map[string]bool{"design/in-review": true}}
+	answered := reviewConsultation{configured: true, inReview: map[string][]string{"design/in-review": {"7"}, "design/unnumbered": {""}}}
 	failed := reviewConsultation{configured: true, failed: true}
 	tests := []struct {
 		name   string
@@ -85,6 +85,7 @@ func TestReviewOf(t *testing.T) {
 	}{
 		{"a local draft with an open MR", refindex.SourceLocal, "spec/in-review", answered, reviewOpen},
 		{"a remote-only draft with an open MR", refindex.SourceRemote, "spec/in-review", answered, reviewOpen},
+		{"an open MR with no id still puts its draft in review", refindex.SourceLocal, "spec/unnumbered", answered, reviewOpen},
 		{"a local + remote draft with none", refindex.SourceBoth, "spec/quiet-one", answered, reviewNotOpen},
 		{"a draft when the forge failed: unavailable, never not open", refindex.SourceLocal, "spec/in-review", failed, reviewUnavailable},
 		{"a draft with no forge configured", refindex.SourceLocal, "spec/in-review", reviewConsultation{}, reviewUnconfigured},
@@ -282,7 +283,7 @@ func TestProjectCard(t *testing.T) {
 	unproven := disclosure.New("refindex:unproven-spec-state", "spec/unproven", "scan incomplete")
 	dateLost := disclosure.New("refindex:date-unreadable", "spec/lost", "boom")
 	cc := cardContext{
-		review: reviewConsultation{configured: true, inReview: map[string]bool{"design/drafted": true}},
+		review: reviewConsultation{configured: true, kind: ForgeGitLab, inReview: map[string][]string{"design/drafted": {"11", "4"}, "design/unnumbered": {""}}},
 		corpus: corpusRead{links: fakeBacklinks{}},
 		now:    cardsNow(),
 	}
@@ -295,7 +296,12 @@ func TestProjectCard(t *testing.T) {
 		{
 			name: "a design draft: its decoded title, its review state, its move",
 			e:    refindex.Entry{Ref: "spec/drafted", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Date: before(3 * day), Title: "A drafted thing"},
-			want: cardFacts{name: "drafted", title: "A drafted thing", age: ageFact{text: "3 d ago", days: 3}, review: reviewOpen, move: nextMove{kind: moveAwaitingMerge, text: "awaiting merge"}},
+			want: cardFacts{name: "drafted", title: "A drafted thing", age: ageFact{text: "3 d ago", days: 3}, review: reviewOpen, reviewChip: reviewChip{text: "MR !4 open · +1"}, move: nextMove{kind: moveAwaitingMerge, text: "awaiting merge"}},
+		},
+		{
+			name: "a design draft whose open request has no id: in review, the number disclosed",
+			e:    refindex.Entry{Ref: "spec/unnumbered", Source: refindex.SourceBoth, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft", Zone: refindex.ZoneActive, Date: before(3 * day), Title: "Unnumbered"},
+			want: cardFacts{name: "unnumbered", title: "Unnumbered", age: ageFact{text: "3 d ago", days: 3}, review: reviewOpen, reviewChip: inReviewChip(ForgeGitLab, []string{""}), move: nextMove{kind: moveAwaitingMerge, text: "awaiting merge"}},
 		},
 		{
 			name: "a design draft with no decoded title: empty and disclosed, never its ref",

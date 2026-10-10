@@ -361,24 +361,20 @@ func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readi
 	}
 
 	// The directory home's in-review consultation (spec/directory-home
-	// dc-4), wired in the same precedence order as the review feed above:
-	// the live forge, else the hermetic harness feed (VERDI_OPENMR_FEED, a
-	// loopback URL), else — when a forge IS configured but unreachable —
-	// the always-erroring lister whose disclosed reason the home page
-	// renders as its "MR status unavailable" notice (I-1(b)). With none of
-	// the three, no forge is configured and the chips are silently,
-	// legitimately absent (home.OpenMRs nil).
+	// dc-4), wired in the same precedence order as the review feed above
+	// (openmrfeed.go's homeOpenMRs): the live forge, else the hermetic
+	// harness feed (VERDI_OPENMR_FEED, a loopback URL), else — when a
+	// forge IS configured but unreachable — the always-erroring lister
+	// whose disclosed reason the home page renders as its "MR status
+	// unavailable" notice (I-1(b)). With none of the three, no forge is
+	// configured and the chips are silently, legitimately absent
+	// (home.OpenMRs nil). The configured forge kind rides beside it: the
+	// notation the in-review chip names an open request's number in
+	// (spec/workbench-redesign dc-4; SI-376 (2)).
 	// The index's clock (SI-296): VERDI_NOW's fixed instant when set; nil
 	// otherwise, which HomeDeps resolves to the wall clock at render time.
 	home := workbench.HomeDeps{Clock: clock.now}
-	switch {
-	case forgePort != nil:
-		home.OpenMRs = newForgeOpenMRs(forgePort, root)
-	case os.Getenv("VERDI_OPENMR_FEED") != "":
-		home.OpenMRs = httpOpenMRFeed{url: os.Getenv("VERDI_OPENMR_FEED")}
-	case configuredKind != "":
-		home.OpenMRs = unavailableOpenMRs{reason: reviewUnavailableReason(configuredKind)}
-	}
+	home.OpenMRs, home.ForgeKind = homeOpenMRs(forgePort, configuredKind, root, os.Getenv("VERDI_OPENMR_FEED"))
 
 	// The diagram editor's verification rail (spec/board-editor dc-4): the
 	// canned-file verifier is the hermetic e2e harness's injection

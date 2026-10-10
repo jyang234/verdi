@@ -108,7 +108,7 @@ func renderHome(ctx context.Context, root string, home HomeDeps, extras []disclo
 	var cards []cardFacts
 	if indexErr == nil {
 		cards = homeCards(root, entries, cardContext{
-			review: reviewConsultation{configured: home.OpenMRs != nil, failed: mrNotice != "", inReview: inReview},
+			review: reviewConsultation{configured: home.OpenMRs != nil, failed: mrNotice != "", inReview: inReview, kind: home.ForgeKind},
 			corpus: corpus,
 			now:    now,
 			words:  classWords{m: home.Model},

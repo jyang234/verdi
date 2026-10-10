@@ -77,6 +77,7 @@
 // | OQ_ID, STUB_SLUGS, INSTANTIATE_SLUG                                | SHOWCASE | scoping-canvas happy path on real/committed stub content |
 // | SUPERSEDED_FEATURE_SPEC, SUPERSEDED_STORY_SPEC                    | SHOWCASE | committed supersession chains (rate-lock, escrow-notify) |
 // | DIR_LOCAL_DRAFT, DIR_REMOTE_DRAFT, DIR_INREVIEW_SPEC               | SHOWCASE | directory-home happy path: grouped listing, source disclosure, in-review chip |
+// | DIR_INREVIEW_CHIP                                                  | SHOWCASE | the in-review chip naming the feed's open request (spec/workbench-redesign dc-4; SI-376 (2)) |
 // | DIR_INREVIEW_TITLE, DIR_ARCHIVED_SPEC, DIR_ARCHIVED_TITLE,         | SHOWCASE | index-v2 cards (96-index-pipeline): the titles, the archived card, and the superseded card's successor on the committed corpus |
 // |   DIR_TERMINAL_SPEC, DIR_TERMINAL_SUCCESSOR, READONLY_SPEC_TITLE,  |          | |
 // |   NO_CASEFILE_SPEC_TITLE                                           |          | |
@@ -469,6 +470,11 @@ export const SHOWCASE = {
   // The entry the control server's open-MR feed chips "in review": the board
   // suite's design branch (DESIGN_SPEC), which exists locally AND pushed.
   DIR_INREVIEW_SPEC: designSpecName,
+  // Its chip's text: the feed's one open request (control.go's
+  // openMRFeedJSON, id "9") in the showcase store's GitLab notation
+  // (forge: gitlab), with no review state (spec/workbench-redesign dc-4;
+  // SI-376 (2)).
+  DIR_INREVIEW_CHIP: "MR !9 open",
 
   // -------------------------------------------------------------------------
   // Index (spec/index-v2) — the four columns and their cards at GET /
