@@ -908,6 +908,47 @@ test.describe("wall-canvas", () => {
     }
   });
 
+  test("a Tab out of an unchanged strip editor shuts it with the press, so the next Escape clears the selection (SI-368 (17), (33))", async ({ page }) => {
+    // An unchanged strip editor shuts when the focus leaves its half
+    // (wallstrip.js). Shut on a timer instead, it stood open after the
+    // focus had moved on, and an Escape pressed right after the Tab
+    // cancelled it (wallkeys.js's unfocused-editor layer), a layer the
+    // user had left, instead of clearing the selection (F3G3R-9). Each
+    // pass Tabs past Apply and Cancel out of the half and presses Escape
+    // back to back, and reads the outcome once, never polled.
+    await openWritableWall(page);
+    const ac1 = page.getByTestId("card-ac-1");
+    const writes: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && /\/api\//.test(r.url()) && !/\/api\/(get_design_|prepare_design_review|get_board)/.test(r.url())) writes.push(r.url());
+    });
+    const onProblemHeadline = async () =>
+      page.evaluate(() => !!document.activeElement?.matches('[data-testid="placard-problem"] > .placard-text'));
+    for (let pass = 0; pass < 5; pass++) {
+      await tabUntil(page, "Tab reaches ac-1", focusIs(page, "card-ac-1"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      await expect(ac1).toHaveAttribute("data-selected", "true");
+      await tabUntil(page, "Shift+Tab reaches the problem's headline", onProblemHeadline, true);
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("case-strip-text-problem")).toBeFocused();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Escape");
+      const after = await page.evaluate(() => {
+        const a = document.activeElement;
+        const half = document.querySelector('[data-testid="placard-problem"]');
+        const left = !!a && a !== document.body && !!half && !half.contains(a);
+        return { left, editors: document.querySelectorAll('[data-testid="case-strip-editor-problem"]').length, active: a ? a.getAttribute("data-testid") || a.className || a.tagName : null };
+      });
+      expect(after.left, `pass ${pass}: the Tabs moved the focus out of the problem's half (to ${after.active})`).toBe(true);
+      expect(await selectedKey(page), `pass ${pass}: the Escape after the Tab clears the selection`).toBeNull();
+      expect(after.editors, `pass ${pass}: the unchanged editor is shut`).toBe(0);
+    }
+    expect(writes, "an unchanged editor that shut wrote nothing").toEqual([]);
+  });
+
   test("after Escape clears the selection, the focused card survives a region swap (Wave 6 §5.1)", async ({ page }) => {
     await openWritableWall(page);
     const stub = page.getByTestId(stubCardTestId(WALL.STUB_SLUG));

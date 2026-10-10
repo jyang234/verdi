@@ -188,16 +188,29 @@
 
   // Leaving an editor whose statement is unchanged closes it (nothing to
   // keep, nothing written); one with changes stays open, so nothing typed
-  // is silently lost and nothing is silently written.
+  // is silently lost and nothing is silently written. Focus moving to an
+  // element outside the half closes it at once, with the key that moved
+  // it, as Commit and push's popover does: a timer would run behind the
+  // keys that follow, and an Escape among them would cancel this editor,
+  // a layer the user has left, instead of doing the next layer's job
+  // (SI-368 (17), (33)). Focus going nowhere is settled once it lands.
+  function closeIfUnchanged(half) {
+    var form = half.querySelector(".case-strip-editor");
+    var area = half.querySelector(".case-strip-editor-text");
+    if (form && area && area.value.trim() === (form.getAttribute("data-original") || "").trim()) closeEditor(half);
+  }
   document.addEventListener("focusout", function (e) {
     var t = e.target;
     var half = t instanceof Element ? t.closest(".case-strip .placard[data-editing]") : null;
     if (!half) return;
+    var to = e.relatedTarget;
+    if (to instanceof Element) {
+      if (!half.contains(to)) closeIfUnchanged(half);
+      return;
+    }
     setTimeout(function () {
       if (!half.isConnected || !half.hasAttribute("data-editing") || half.contains(document.activeElement)) return;
-      var form = half.querySelector(".case-strip-editor");
-      var area = half.querySelector(".case-strip-editor-text");
-      if (form && area && area.value.trim() === (form.getAttribute("data-original") || "").trim()) closeEditor(half);
+      closeIfUnchanged(half);
     }, 0);
   });
 
