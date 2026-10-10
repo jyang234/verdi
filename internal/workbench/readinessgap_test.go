@@ -11,11 +11,16 @@ package workbench
 // claim-wall fixture through the production loader and over the
 // readiness page's fixtures through the tab's route; the committed
 // golden's gap lists are empty; and a static check over this package's
-// production sources proves the shell's derivation, its renderers and the
-// capabilities consultation that fed it (F3CR-7) are gone, with no
-// declaration and no caller left. ac-7's "for the e2e harness fixture" is
-// proven structurally (SI-368 (4)): the harness provisioner is
-// cmd/e2eharness's package main, which a Go test cannot import (SI-209).
+// production sources proves the retired names of the shell's derivation,
+// its renderers and the capabilities consultation that fed it (F3CR-7)
+// are gone, with no declaration and no reference left, and holds a
+// ratchet: no production source builds a readinesspilot.Concern literal
+// or uses readinesspilot.Guidance (a call or any other reference), which
+// a derivation under a new name would need to speak the loader's rows or
+// sentences (F3G3R-3). It does not prove that no derivation of any other
+// form exists. ac-7's "for the e2e harness fixture" is proven
+// structurally (SI-368 (4)): the harness provisioner is cmd/e2eharness's
+// package main, which a Go test cannot import (SI-209).
 
 import (
 	"context"
@@ -106,7 +111,7 @@ func renderReadinessParity(sections []paritySection) string {
 	b.WriteString("# readiness parity — the record drawer's Readiness tab versus the per-request loader (spec/wall-strip-and-drawer-v2 ac-7, dc-4), closing readiness-recovery ac-5's gap list\n")
 	b.WriteString("# This is PARITY: every list below is empty. The tab renders the loader's snapshot from one load (SI-368 (4)), so a family listed here is a gap, and a change here must be deliberate.\n")
 	b.WriteString("# Fixtures: the claim-wall Go fixture through the production loader, and the readiness page's fixtures through the tab's route. ac-7's \"for the e2e harness fixture\" is proven structurally (SI-368 (4)): the harness provisioner is cmd/e2eharness's package main and unimportable from a Go test (SI-209).\n")
-	b.WriteString("# The wall shell's own derivation is retired: TestReadinessTab_LoaderParityNoGaps proves no production source declares or calls it. Each family only it produced has a home (SI-368 (3), (32)); success/evidence/<ac> cannot arise on a decoded spec, so its disclosed loss is vacuous.\n")
+	b.WriteString("# The wall shell's own derivation is retired: TestReadinessTab_LoaderParityNoGaps proves its retired names are gone from every production source, and holds a ratchet: no production source builds a readinesspilot.Concern literal or uses readinesspilot.Guidance. Each family only it produced has a home (SI-368 (3), (32)); success/evidence/<ac> cannot arise on a decoded spec, so its disclosed loss is vacuous.\n")
 	for _, s := range sections {
 		fmt.Fprintf(&b, "%s:\n", s.Fixture)
 		for _, list := range []struct {
@@ -274,11 +279,62 @@ func retiredShellFields() map[string][]string {
 	}
 }
 
+// readinesspilotPath is the import path of the loader's derivation, whose
+// rows and sentences the ratchet keeps out of the workbench's production
+// sources (F3G3R-3).
+const readinesspilotPath = "github.com/jyang234/verdi/internal/readinesspilot"
+
+// readinesspilotNames is every name file f refers to readinesspilot by —
+// its import's own name, or the package's when the import has none — and
+// whether f dot-imports it, which would hide its names from the ratchet.
+func readinesspilotNames(f *ast.File) (map[string]bool, bool) {
+	names, dot := map[string]bool{}, false
+	for _, imp := range f.Imports {
+		if path, err := strconv.Unquote(imp.Path.Value); err != nil || path != readinesspilotPath {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			names["readinesspilot"] = true
+		case imp.Name.Name == ".":
+			dot = true
+		default:
+			names[imp.Name.Name] = true
+		}
+	}
+	return names, dot
+}
+
+// isPilotConcern reports whether a composite literal of type expr builds
+// readinesspilot.Concern values, as the type itself or as the element of
+// a slice, array, map or pointer, with readinesspilot known in the file
+// by names.
+func isPilotConcern(expr ast.Expr, names map[string]bool) bool {
+	for {
+		switch e := expr.(type) {
+		case *ast.ArrayType:
+			expr = e.Elt
+		case *ast.MapType:
+			expr = e.Value
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.SelectorExpr:
+			x, ok := e.X.(*ast.Ident)
+			return ok && names[x.Name] && e.Sel.Name == "Concern"
+		default:
+			return false
+		}
+	}
+}
+
 // shellDerivationLeftovers parses every production .go file in dir and
-// returns each retired symbol it declares or references and each retired
-// field its structs still declare, by position, and how many files it
-// read; live names the declarations the scan must find, so a scan that
-// reads nothing cannot pass.
+// returns, by position, each retired symbol it declares or references,
+// each retired field its structs still declare, and each breach of the
+// ratchet a derivation under a new name would need (F3G3R-3): a
+// readinesspilot.Concern composite literal, a use of
+// readinesspilot.Guidance, or a dot import of readinesspilot that would
+// hide both; and how many files it read. live names the declarations the
+// scan must find, so a scan that reads nothing cannot pass.
 func shellDerivationLeftovers(t *testing.T, dir string, live []string) ([]string, int) {
 	t.Helper()
 	retired := map[string]bool{}
@@ -302,6 +358,10 @@ func shellDerivationLeftovers(t *testing.T, dir string, live []string) ([]string
 			t.Fatalf("parsing %s: %v", name, err)
 		}
 		parsed++
+		pilot, dot := readinesspilotNames(f)
+		if dot {
+			found = append(found, fset.Position(f.Package).String()+": dot-imports readinesspilot")
+		}
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
@@ -321,6 +381,14 @@ func shellDerivationLeftovers(t *testing.T, dir string, live []string) ([]string
 			case *ast.Ident:
 				if retired[n.Name] {
 					found = append(found, fset.Position(n.Pos()).String()+": "+n.Name)
+				}
+			case *ast.CompositeLit:
+				if isPilotConcern(n.Type, pilot) {
+					found = append(found, fset.Position(n.Pos()).String()+": builds a readinesspilot.Concern literal")
+				}
+			case *ast.SelectorExpr:
+				if x, ok := n.X.(*ast.Ident); ok && pilot[x.Name] && n.Sel.Name == "Guidance" {
+					found = append(found, fset.Position(n.Pos()).String()+": uses readinesspilot.Guidance")
 				}
 			case *ast.TypeSpec:
 				st, ok := n.Type.(*ast.StructType)
@@ -399,13 +467,13 @@ func TestReadinessTab_LoaderParityNoGaps(t *testing.T) {
 		}
 	}
 
-	t.Run("the wall shell's own derivation is gone", func(t *testing.T) {
+	t.Run("the wall shell's retired names are gone and the ratchet holds", func(t *testing.T) {
 		found, parsed := shellDerivationLeftovers(t, ".", []string{"policyGuideFor", "renderReadinessTab", "reviewAcceptanceFor", "asdView"})
 		if parsed == 0 {
 			t.Fatal("scanned no production source; the static check would vacuously pass")
 		}
 		for _, f := range found {
-			t.Errorf("the retired wall shell derivation survives at %s", f)
+			t.Errorf("the retired wall shell derivation, or one under a new name, survives at %s", f)
 		}
 	})
 
