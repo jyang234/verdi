@@ -610,10 +610,12 @@ test.describe("posture and policy", () => {
     await expect(guide.locator("pre.asd-policy-guide-cmd")).toHaveCount(4);
     // Truthful, mode-scoped wording — never "editing continues" as an
     // unconditional claim a read-only wall would belie — and, on this
-    // authoring wall, what a browser write records (SI-368 (32)).
+    // authoring wall, what a browser write records (SI-368 (32)), with
+    // nothing beside it that reads as a contradiction (SI-368 (33)(c)).
     await expect(summaries.first()).toContainText(
-      "Ordinary human editing does not require policy; this board's read-only restrictions still apply.",
+      "Ordinary human editing does not require policy; delegated agents' restrictions still apply.",
     );
+    await expect(summaries.first()).not.toContainText("read-only restrictions");
     const editing = summaries.first().getByTestId("asd-policy-guide-editing");
     await expect(editing).toHaveAttribute("data-board-mode", "authoring");
     await expect(editing).toHaveText("On this authoring board, browser editing proceeds and records the explicit not-applicable policy posture.");

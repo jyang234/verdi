@@ -27,10 +27,14 @@ import (
 const policyGuideID = "asd-policy-guide"
 
 // policyGuideScopedWording is the truthful, mode-independent line the
-// guide must carry; policyGuideFalseWording is the unconditional claim it
-// must never make (false on a frozen/read-only wall).
+// guide must carry — humans edit without policy, delegated agents stay
+// restricted — beside the mode-scoped editing line, which it never
+// contradicts (SI-368 (33)(c): "this board's read-only restrictions"
+// before "On this authoring board, browser editing proceeds" read as one);
+// policyGuideFalseWording is the unconditional claim it must never make
+// (false on a frozen/read-only wall).
 const (
-	policyGuideScopedWording = "Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply."
+	policyGuideScopedWording = "Ordinary human editing does not require policy; delegated agents&#39; restrictions still apply."
 	policyGuideFalseWording  = "Human editing on this wall continues"
 )
 
@@ -456,9 +460,13 @@ func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
 // never says editing "proceeds" there and says the board refuses browser
 // writes; on an authoring board it says browser editing proceeds and
 // names what a write records — the explicit not-applicable posture, or
-// the resolved policy's sealed digest. The discriminating detail stays,
-// and the no-design-assistance guide never describes the adopted policy
-// as absent, in every mode.
+// the resolved policy's sealed digest — and nothing beside it speaks of
+// this board's read-only restrictions. On a wall whose board could not be
+// loaded (SI-368 (33)(c)) the mode is unproven, and the line says so in
+// the bar's words, asserting neither that editing proceeds nor that the
+// board refuses it. The discriminating detail stays, and the
+// no-design-assistance guide never describes the adopted policy as
+// absent, in every mode.
 func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 	kinds := []struct {
 		name      string
@@ -471,12 +479,13 @@ func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 		{"no-design-assistance", noDesignAssistanceDetail, "effective policy has no design_assistance authority",
 			"On this authoring board, browser editing proceeds under that policy's sealed digest."},
 	}
-	refusals := map[boardModeKind]string{
+	lines := map[boardModeKind]string{
 		modeReview:   "This review board refuses browser writes regardless.",
 		modeReadOnly: "This read-only board refuses browser writes regardless.",
+		modeUnproven: "This board's mode is unproven: the wall could not be loaded.",
 	}
 	for _, k := range kinds {
-		for _, mode := range guideModes() {
+		for _, mode := range append(guideModes(), modeUnproven) {
 			t.Run(k.name+"/"+string(mode), func(t *testing.T) {
 				in := policyForbiddenInput()
 				in.Failure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: k.detail}
@@ -503,13 +512,23 @@ func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 					if line != k.authoring {
 						t.Errorf("authoring editing line = %q, want %q", line, k.authoring)
 					}
+					if strings.Contains(text, "read-only restrictions") {
+						t.Errorf("the authoring guide speaks of this board's read-only restrictions beside its editing line: %s", text)
+					}
 					return
 				}
-				if line != refusals[mode] {
-					t.Errorf("%s editing line = %q, want %q", mode, line, refusals[mode])
+				if line != lines[mode] {
+					t.Errorf("%s editing line = %q, want %q", mode, line, lines[mode])
 				}
 				if strings.Contains(text, "proceeds") {
-					t.Errorf("%s: the guide claims editing proceeds on a board that refuses writes: %s", mode, text)
+					t.Errorf("%s: the guide claims editing proceeds on a board that refuses writes or whose mode is unproven: %s", mode, text)
+				}
+				if mode == modeUnproven {
+					for _, asserted := range []string{"read-only board", "review board", "refuses browser writes"} {
+						if strings.Contains(text, asserted) {
+							t.Errorf("the guide asserts a mode it could not read (%q): %s", asserted, text)
+						}
+					}
 				}
 			})
 		}
@@ -529,12 +548,15 @@ func TestPolicyGuide_AbsentWhenPolicyAdopted(t *testing.T) {
 }
 
 // TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions: the guide is
-// read-only markup on a read-only or review board — it adds no control
-// there either, and never says editing proceeds.
+// read-only markup on a read-only or review board, and on a wall whose
+// board could not be loaded (its mode unproven, SI-368 (33)(c)) — it adds
+// no control there either, and never says editing proceeds.
 func TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions(t *testing.T) {
-	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
+	for _, mode := range []boardModeKind{modeReadOnly, modeReview, modeUnproven} {
 		t.Run(string(mode), func(t *testing.T) {
-			expectNoGuideOnTheWall(t, mode)
+			if mode != modeUnproven { // no wall region renders without its board
+				expectNoGuideOnTheWall(t, mode)
+			}
 			guide := policyGuideSection(t, wallGuide(policyForbiddenInput(), mode))
 			if m := regexp.MustCompile(`<(form|button|input|select|textarea)\b`).FindString(guide); m != "" {
 				t.Fatalf("%s: policy guide carries a control %q", mode, m)

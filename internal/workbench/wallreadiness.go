@@ -222,13 +222,19 @@ func readinessTabSlots(p *BoardProjection) map[string]bool {
 	return slotKindsDrawn(p)
 }
 
+// modeUnproven is not a board mode: it is the policy guide's reading of a
+// wall whose board could not be loaded, whose mode the guide therefore
+// says is unproven rather than asserting one (SI-368 (33)(c); the bar's
+// precedent, "Unproven: the wall could not be loaded").
+const modeUnproven boardModeKind = "unproven"
+
 // readinessTabMode is the wall p's mode for the policy guide's editing
-// line (SI-368 (32) B1): read-only when the board could not be loaded,
-// so the guide never says that editing proceeds on a wall whose mode it
-// cannot read.
+// line (SI-368 (32) B1): modeUnproven when the board could not be loaded
+// (SI-368 (33)(c)), so the guide neither says that editing proceeds on a
+// wall whose mode it cannot read nor asserts that the wall refuses it.
 func readinessTabMode(p *BoardProjection) boardModeKind {
 	if p == nil {
-		return modeReadOnly
+		return modeUnproven
 	}
 	return p.Mode
 }

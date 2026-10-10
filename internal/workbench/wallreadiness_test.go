@@ -579,10 +579,11 @@ func TestReadinessTab_OneProjectionAndTheMarksTargets(t *testing.T) {
 	}
 }
 
-// TestReadinessTabMode (SI-368 (32) B1): the policy guide's editing line
-// reads the wall's own mode from its load, and a wall whose board could
-// not be loaded reads as read-only, so the guide never says that editing
-// proceeds on a wall whose mode it cannot read.
+// TestReadinessTabMode (SI-368 (32) B1, (33)(c)): the policy guide's
+// editing line reads the wall's own mode from its load, and a wall whose
+// board could not be loaded reads as unproven — never as read-only, a
+// mode the guide cannot read — so the guide neither says that editing
+// proceeds there nor asserts that it is refused.
 func TestReadinessTabMode(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -592,7 +593,7 @@ func TestReadinessTabMode(t *testing.T) {
 		{"an authoring wall", &BoardProjection{Mode: modeAuthoring}, modeAuthoring},
 		{"a review wall", &BoardProjection{Mode: modeReview}, modeReview},
 		{"a read-only wall", &BoardProjection{Mode: modeReadOnly}, modeReadOnly},
-		{"a board that could not be loaded", nil, modeReadOnly},
+		{"a board that could not be loaded", nil, modeUnproven},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := readinessTabMode(tc.p); got != tc.want {
