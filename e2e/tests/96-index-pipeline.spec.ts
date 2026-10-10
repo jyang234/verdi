@@ -290,7 +290,7 @@ test("index › Each card's facts, links, and test ids", async ({ page }) => {
   await expect(inReview.locator("a.dir-board")).toHaveText(SHOWCASE.DIR_INREVIEW_TITLE);
   await expect(inReview.locator("a.dir-board")).toHaveAttribute("href", draftBoardHref(SHOWCASE.DIR_INREVIEW_SPEC));
   await expect(inReview.locator(".badge-src")).toHaveText("local + remote");
-  await expect(inReview.locator(".dir-inreview")).toHaveText("in review");
+  await expect(inReview.locator(".dir-inreview")).toHaveText(SHOWCASE.DIR_INREVIEW_CHIP);
   await expect(inReview.locator(".dir-move")).toHaveText("→ awaiting merge");
   await expect(inReview).toHaveAttribute("data-review", "open");
   await expect(page.locator(".dir-inreview")).toHaveCount(1);
@@ -752,6 +752,6 @@ test("index › Filters, and review status disclosed when the forge is unreachab
   // back, so the file leaves the store as it found it.
   await page.goto("/");
   await expect(page.getByTestId("mr-status-unavailable")).toHaveCount(0);
-  await expect(card(page, SHOWCASE.DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText("in review");
+  await expect(card(page, SHOWCASE.DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText(SHOWCASE.DIR_INREVIEW_CHIP);
   await expect(pill(page, "in-review").locator(".count")).toHaveText(String(await page.locator('.dir-entry[data-review="open"]').count()));
 });

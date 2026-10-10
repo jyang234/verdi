@@ -142,12 +142,15 @@ test("entries are disclosed by source: local, remote-tracking, both, default", a
 });
 
 // AC-2 (chip): the branch with an open MR — and only that one — is chipped
-// "in review" from the forge feed, and the second source is disclosed.
+// in review from the forge feed, the chip naming the open request's number
+// in the showcase store's GitLab notation and no review state
+// (spec/workbench-redesign dc-4; SI-376 (2)), and the second source is
+// disclosed.
 test("an open MR chips its entry in review, and only that entry", async ({ page }) => {
   await page.goto("/");
 
   await expect(entry(page, SHOWCASE.DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText(
-    "in review",
+    SHOWCASE.DIR_INREVIEW_CHIP,
   );
   await expect(page.locator(".dir-inreview")).toHaveCount(1);
   await expect(page.locator(".dir-provenance")).toContainText(
