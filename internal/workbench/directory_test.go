@@ -455,6 +455,27 @@ func TestRenderHome_MRStatusUnavailable_DirectoryStillFull(t *testing.T) {
 	if strings.Contains(body, "dir-inreview") {
 		t.Fatalf("degraded render must not fabricate in-review chips")
 	}
+	// SI-366 (4): every design-branch card says its review status is
+	// unavailable — in a class the in-review pins never count — and the
+	// filter pill says so with no number; a default-branch card, which has
+	// no branch to be in review, carries no such chip.
+	const chip = `<span class="dir-unproven dir-review-unavailable" title="the forge could not be consulted this render, so whether this branch is in review is unknown">review status unavailable</span>`
+	for _, draft := range []string{"local-draft", "remote-draft", "both-draft", "uncharted-idea"} {
+		if !strings.Contains(entryBlock(t, body, draft), chip) {
+			t.Errorf("draft %s must say its review status is unavailable; got: %s", draft, entryBlock(t, body, draft))
+		}
+	}
+	for _, def := range []string{"settled-work", "live-component", "next-build"} {
+		if strings.Contains(entryBlock(t, body, def), "dir-review-unavailable") {
+			t.Errorf("default-branch entry %s has no branch to be in review; got: %s", def, entryBlock(t, body, def))
+		}
+	}
+	if got := strings.Count(body, "dir-review-unavailable"); got != 4 {
+		t.Errorf("unavailable chips = %d, want one per design-branch entry (4)", got)
+	}
+	if !strings.Contains(body, `disabled title="the forge could not be consulted this render, so no review state is known for any branch">in review · unavailable</button>`) {
+		t.Errorf("the in-review filter must read unavailable with no number; got: %s", body)
+	}
 }
 
 // TestRenderHome_NoForgeConfigured_SilentAbsence: a nil OpenMRs lister is
@@ -471,6 +492,14 @@ func TestRenderHome_NoForgeConfigured_SilentAbsence(t *testing.T) {
 	}
 	if strings.Contains(body, "a second source beside the refs") {
 		t.Fatalf("unconfigured forge must not disclose a second source that is not consulted")
+	}
+	// SI-366 (4): no chips at all, and the filter says no forge is
+	// configured — never a zero.
+	if strings.Contains(body, "dir-review-unavailable") {
+		t.Fatalf("unconfigured forge must draw no unavailable chip; got: %s", body)
+	}
+	if !strings.Contains(body, `disabled title="no forge is configured to consult, so no review state is known for any branch">in review · no forge configured</button>`) {
+		t.Fatalf("the in-review filter must say no forge is configured; got: %s", body)
 	}
 }
 

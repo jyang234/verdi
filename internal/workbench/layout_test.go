@@ -99,12 +99,18 @@ func TestRenderPage_BarSlotsRenderInTheBar(t *testing.T) {
 }
 
 // TestSharedLayoutRoutesFillNoBarSlot drives the shared-layout routes
-// through the real handler: none of them fills a bar slot today, so none
+// through the real handler: of them only the index fills a bar slot — its
+// own controls (spec/index-v2; SI-366 (17); indexbar.go) — so no other
 // carries the bar's controls slot (a slot leaking from one page into
 // another would show here).
 func TestSharedLayoutRoutesFillNoBarSlot(t *testing.T) {
 	h := NewHandlerWith(t.TempDir(), Deps{})
-	for _, path := range []string{"/", "/disclosures", "/readiness", "/a/spec/absent", "/verdict/absent", "/matrix/absent", "/no-such-page"} {
+	index := httptest.NewRecorder()
+	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	if body := index.Body.String(); !strings.Contains(body, `<div class="topbar-controls" data-testid="topbar-controls"><div class="topbar-view" data-testid="index-view-toggle"`) {
+		t.Fatalf("/ must fill the bar's controls slot with the index's own controls:\n%s", body)
+	}
+	for _, path := range []string{"/disclosures", "/readiness", "/a/spec/absent", "/verdict/absent", "/matrix/absent", "/no-such-page"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		body, err := io.ReadAll(rec.Result().Body)

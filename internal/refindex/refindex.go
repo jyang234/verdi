@@ -233,6 +233,7 @@ type pendingDesignEntry struct {
 	ref      string
 	source   Source
 	revision string
+	title    string // the draft's decoded title (SI-366 (1))
 }
 
 // computeDesignBranchEntries enumerates every UNMERGED design branch's
@@ -351,11 +352,11 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 			}
 		}
 
-		candidate, err := readOrdinaryDesignCandidate(ctx, root, deps, revision, specPath)
+		candidate, title, err := readOrdinaryDesignCandidate(ctx, root, deps, revision, specPath)
 		if err != nil {
 			return nil, err
 		}
-		pending = append(pending, pendingDesignEntry{ref: ref, source: src, revision: revision})
+		pending = append(pending, pendingDesignEntry{ref: ref, source: src, revision: revision, title: title})
 		candidates = append(candidates, candidate)
 	}
 
@@ -386,7 +387,8 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				// Unconditional per the Zone type's own doc comment:
 				// specPath (the caller's existence probe, above) is always
 				// under the active zone for a design-branch entry.
-				Zone: ZoneActive,
+				Zone:  ZoneActive,
+				Title: pe.title,
 			})
 			tips = append(tips, pe.revision)
 		}
@@ -426,19 +428,22 @@ func mergeDesignSources(local, remote []string) map[string]Source {
 // call. Strict-decoding through the same internal/artifact seam every
 // other spec read in this store uses still runs here (never skipped) so a
 // genuinely malformed draft still surfaces as an operational error exactly
-// as before Task 6a — only the DECODED value's raw status field is no
-// longer read; SpecStatus now comes from the resolver's Result instead.
-func readOrdinaryDesignCandidate(ctx context.Context, root string, deps GitRunner, revision, specPath string) (specstate.Candidate, error) {
+// as before Task 6a — the DECODED value's raw status field is no longer
+// read (SpecStatus comes from the resolver's Result instead), and its
+// title is returned for the entry (SI-366 (1)): the same decode, no second
+// read. On error the title is empty, never invented.
+func readOrdinaryDesignCandidate(ctx context.Context, root string, deps GitRunner, revision, specPath string) (specstate.Candidate, string, error) {
 	content, err := deps.Show(ctx, root, revision, specPath)
 	if err != nil {
-		return specstate.Candidate{}, err
+		return specstate.Candidate{}, "", err
 	}
 	fm, _, err := artifact.SplitFrontmatter(content)
 	if err != nil {
-		return specstate.Candidate{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
+		return specstate.Candidate{}, "", fmt.Errorf("%s at %s: %w", specPath, revision, err)
 	}
-	if _, err := artifact.DecodeSpec(fm); err != nil {
-		return specstate.Candidate{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		return specstate.Candidate{}, "", fmt.Errorf("%s at %s: %w", specPath, revision, err)
 	}
-	return specstate.Candidate{Path: specPath, Content: content}, nil
+	return specstate.Candidate{Path: specPath, Content: content}, spec.Title, nil
 }

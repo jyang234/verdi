@@ -283,3 +283,32 @@ func workbenchAssets(fsys fs.FS) ([]workbenchAsset, error) {
 	}
 	return out, nil
 }
+
+// TestIndexAsset_ServedWithinBudget: the index's filter script ships as
+// its own JavaScript asset (spec/workbench-redesign co-1; spec/index-v2
+// ac-3), embedded, non-empty, within the 64 KiB ceiling, and served at
+// /assets/index.js with the method guard every asset carries.
+func TestIndexAsset_ServedWithinBudget(t *testing.T) {
+	const ceiling = 64 * 1024
+	data, err := os.ReadFile("assets/index.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || len(data) > ceiling {
+		t.Fatalf("assets/index.js is %d bytes; want 1..%d", len(data), ceiling)
+	}
+	h := NewHandler(t.TempDir())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/index.js", nil))
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/javascript") {
+		t.Fatalf("GET /assets/index.js = %d (%s), want 200 JavaScript", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if !bytes.Equal(rec.Body.Bytes(), data) {
+		t.Fatal("/assets/index.js does not serve the embedded assets/index.js bytes")
+	}
+	post := httptest.NewRecorder()
+	h.ServeHTTP(post, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/assets/index.js", nil))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /assets/index.js = %d, want 405", post.Code)
+	}
+}

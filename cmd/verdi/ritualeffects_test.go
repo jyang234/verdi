@@ -214,7 +214,10 @@ func (c ritualCase) states() []ritualwitness.SeedState {
 // (backlog BL-156), and each case asserts its own surface's exit.
 //
 // Disclosed, not driven (SI-341 (4)): the sealed origin-only /b/ refusal,
-// and close's non-unwinding failure paths. Disclosed as unproven, each row
+// and close's non-unwinding failure paths. Disclosed, not judged (backlog
+// BL-171): a worktree-own ref created in a worktree the ritual added. Each
+// of the three is a named gap of the abstain decision (undrivenGaps, ledger
+// SI-367 (4)). Disclosed as unproven, each row
 // asserting its refusal in its own words with nothing remaining and never
 // reading as completed: close's completion and so its failure unwind,
 // since every hermetic close refuses at the closure gate's countersign
@@ -232,9 +235,11 @@ func (c ritualCase) states() []ritualwitness.SeedState {
 // So the producer abstains (SI-354 (3)). It runs and asserts every case,
 // and any failure fails it; then, while the run itself shows a disclosed
 // gap — a refusal standing in for a completion the ritual is declared to
-// make, or a run whose driver failed to supply its command log — it ends
-// with t.Skip naming each gap, which the go-test producer reads as abstain
-// (testproducer.go's verdictForOutcome), never pass.
+// make, or a run whose driver failed to supply its command log — or a path
+// the table does not drive or the witness does not judge stays open
+// (SI-367 (4)), it ends with t.Skip naming each gap, which the go-test
+// producer reads as abstain (testproducer.go's verdictForOutcome), never
+// pass.
 func TestRitualEffects_EveryDeclaredRitual(t *testing.T) {
 	if awaiting := ws.AwaitingFixes(); len(awaiting) != 0 {
 		t.Fatalf("the registry's awaiting-fix list holds %d path(s), want none: %+v", len(awaiting), awaiting)
@@ -265,7 +270,7 @@ func TestRitualEffects_EveryDeclaredRitual(t *testing.T) {
 		t.Log(line)
 	}
 	if open := gaps.open(); len(open) > 0 {
-		t.Skipf("ac-2 abstains while the run shows its disclosed gaps (ledger SI-354 (3)); every case ran and was asserted, and none of the gaps is a pass: %s", strings.Join(open, "; "))
+		t.Skipf("ac-2 abstains while its disclosed gaps are open (ledger SI-354 (3), SI-367 (4)); every case ran and was asserted, and none of the gaps is a pass: %s", strings.Join(open, "; "))
 	}
 }
 
@@ -348,6 +353,29 @@ const (
 	executionCompletionGap = "the execution rituals' completion: their rows assert a mismatched input binding's refusal (ledger SI-348 (1), SI-351 (1); backlog BL-155)"
 )
 
+// The gaps no run can close, because the table does not drive or the
+// witness does not judge the path (ledger SI-367 (4)): each stays open
+// until a row drives it or the witness judges it, so the producer cannot
+// pass once BL-44 and BL-155 lift while any remains (story dc-3: an
+// undriven path never passes).
+const (
+	// sealedOriginOnlyGap is the /b/ dispatch's sealed refusal for a
+	// branch that resolves only to a remote-tracking ref (SI-341 (4)).
+	sealedOriginOnlyGap = "the sealed origin-only /b/ refusal: every route but the page and fragment of a branch that resolves only to a remote-tracking ref refuses with 403 (internal/workbench/branchboard.go, serveSealed), and no row drives it, so its effects are unobserved (ledger SI-341 (4))"
+	// closeNonUnwindingGap is close's failure paths after the freeze,
+	// designed without rollback (SI-341 (4)).
+	closeNonUnwindingGap = "close's non-unwinding failure paths: a failure after the freeze, in writeRollup, flipSpecStatusToClosed or store.ArchiveMove, leaves its in-place, uncommitted state by design and does not unwind (cmd/verdi/close.go), and no row drives one, so their effects are unobserved (ledger SI-341 (4))"
+	// worktreeOwnRefsGap is a worktree-own ref created in a worktree the
+	// ritual added, which gets no verdict (BL-171).
+	worktreeOwnRefsGap = "a worktree-own ref (refs/worktree/*, refs/bisect/*) created in a worktree the ritual added: the witness judges only that the worktree was added (internal/ritualwitness/evaluate_worktrees.go, worktrees), so such a change gets no verdict (backlog BL-171; ledger SI-359 (16))"
+)
+
+// undrivenGaps is every gap no run can close, in a fixed order. A fixed
+// table, so a function.
+func undrivenGaps() []string {
+	return []string{sealedOriginOnlyGap, closeNonUnwindingGap, worktreeOwnRefsGap}
+}
+
 // ritualEffectsGaps gathers, from every run of the producer, the disclosed
 // gaps that run shows (ledger SI-354 (3)). Its zero value is ready; the
 // parallel cases record into it concurrently.
@@ -377,10 +405,12 @@ func (g *ritualEffectsGaps) record(want ritualRun, res ritualwitness.Result) {
 
 // open is the abstain decision: every gap the recorded runs show, the
 // missing command log first and then each completion a refusal stood in
-// for, sorted. The command-log gap stays open while any run (or, with no
-// run at all, every run) lacked the log: an unlogged run's effects are
-// unobserved whatever another run supplied. None open means the producer
-// may pass.
+// for, sorted, and then every gap no run can close (undrivenGaps, ledger
+// SI-367 (4)), in its fixed order. The command-log gap stays open while any
+// run (or, with no run at all, every run) lacked the log: an unlogged run's
+// effects are unobserved whatever another run supplied. None open means
+// the producer may pass, which the undriven gaps rule out until a row
+// drives each path or the witness judges it.
 func (g *ritualEffectsGaps) open() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -393,7 +423,7 @@ func (g *ritualEffectsGaps) open() []string {
 		unproven = append(unproven, gap)
 	}
 	sort.Strings(unproven)
-	return append(out, unproven...)
+	return append(append(out, unproven...), undrivenGaps()...)
 }
 
 // sortedVerbs returns table's keys in a stable order.

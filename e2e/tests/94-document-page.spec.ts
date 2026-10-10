@@ -11,11 +11,12 @@ import { SHOWCASE, boardPath } from "./fixtures";
 // and at 200 % zoom with no horizontal scroll, and before JavaScript runs
 // the stamp, the rail, and the body read while no id chip is drawn.
 //
-// The two tests are the producers their obligations name
-// (.verdi/obligations/document-page-v2/ac-1--behavioral.md and
-// ac-4--behavioral.md), titled exactly as each claim spells it; the ac-2
-// producer (the chips' arrival on the wall) lands with the wall's
-// selection lane. The file passes when run alone (BL-98): every count
+// The three tests are the producers their obligations name
+// (.verdi/obligations/document-page-v2/ac-1--behavioral.md,
+// ac-2--behavioral.md, and ac-4--behavioral.md), titled exactly as each
+// claim spells it; the ac-2 producer (the chips' arrival on the wall)
+// landed once the wall's selection lane had (SI-340 (11), SI-350's
+// carry-in). The file passes when run alone (BL-98): every count
 // and fact it asserts is read from the page's own /snapshot at run time,
 // because other suites mutate the shared store, and each is then checked
 // against the body the reader sees. State rides test ids, data
@@ -182,6 +183,46 @@ async function expectChips(page: Page, boardHref: string, facts: Facts, what: st
     expect(await chip.evaluate((el) => el.nextElementSibling?.id ?? ""), `${what}: chip ${c.id} sits at its anchor`).toBe(c.id);
   }
   return chips;
+}
+
+// The four object kinds ac-2's producer clicks a chip for, in the kind
+// words the chips and the wall's cards share (boardlayout.ZoneKind): the
+// test checks the chip it clicked against the card the wall selected.
+const ARRIVAL_KINDS = ["acceptance-criterion", "constraint", "decision", "open-question"] as const;
+
+// A viewport the wall outgrows on both axes (90-wall-keyboard's SMALL):
+// the layout stacks, so the wall frame starts far below the fold, and the
+// canvas is bounded to the viewport and scrolls inside itself, so a
+// column's lowest card starts outside the canvas's visible box as well.
+// Arrival's reveal is then a real move of the page and of the canvas,
+// never a card that was in view before the chip was clicked.
+const SMALL = { width: 1000, height: 640 };
+
+// cardView reports "in view" when the wall's card for `id` lies whole
+// inside the canvas's visible box (its scrollport, not its content) and
+// inside the viewport — 90-wall-keyboard's expectRevealed, read in one
+// evaluate so it can be polled — or says where the card is instead.
+async function cardView(page: Page, id: string): Promise<string> {
+  return page.evaluate((cardID) => {
+    const c = document.getElementById("board-canvas");
+    const el = c && c.querySelector(`.objcard[data-id="${CSS.escape(cardID)}"]`);
+    if (!c || !el) return "no card";
+    const r = c.getBoundingClientRect();
+    const port = {
+      left: r.left + c.clientLeft,
+      top: r.top + c.clientTop,
+      right: r.left + c.clientLeft + c.clientWidth,
+      bottom: r.top + c.clientTop + c.clientHeight,
+    };
+    const vp = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    const b = el.getBoundingClientRect();
+    const inside = (box: { left: number; top: number; right: number; bottom: number }) =>
+      b.left >= box.left - 0.5 && b.right <= box.right + 0.5 && b.top >= box.top - 0.5 && b.bottom <= box.bottom + 0.5;
+    if (inside(port) && inside(vp)) return "in view";
+    const show = (box: { left: number; top: number; right: number; bottom: number }) =>
+      `${Math.round(box.left)},${Math.round(box.top)}–${Math.round(box.right)},${Math.round(box.bottom)}`;
+    return `card at ${show(b)}; canvas box ${show(port)}; viewport ${show(vp)}`;
+  }, id);
 }
 
 // postTypedEdit posts one typed edit-ac on the design wall from outside
@@ -477,6 +518,60 @@ test.describe("document-page", () => {
       expect(await pageOverflow(quiet), "no JS @320: horizontal overflow").toBeLessThanOrEqual(1);
     } finally {
       await noJS.close();
+    }
+  });
+
+  // ac-2: each object's id chip opens the wall with that card selected,
+  // and the wall selects and reveals the card on arrival. For an
+  // acceptance criterion, a constraint, a decision, and an open question
+  // the test clicks the chip the Document page drew — a real click on the
+  // link, never a goto — and asserts the wall loads at <wall>#obj-<id>,
+  // that this card alone is selected (data-selected="true", the mark
+  // wallselect.js sets on .objcard[data-id]; SI-340 (11), SI-350's
+  // carry-in), and that the card lies in view. The chips are read from
+  // the page's own snapshot (the file's idiom); for each kind the last
+  // chip is taken, the lowest card of its column, which at SMALL starts
+  // out of view on the bare wall — proven before the click, so the
+  // reveal the test then sees is a real move.
+  test("Id chips open the wall with the card selected", async ({ page }) => {
+    test.setTimeout(150_000);
+    const proposed = docPath(SHOWCASE.DESIGN_SPEC);
+    const wall = boardPath(SHOWCASE.DESIGN_SPEC);
+    const facts = (await snapshotOf(page, proposed)).facts;
+    await page.setViewportSize(SMALL);
+    const canvas = page.getByTestId("board");
+    const selected = page.locator("#board-canvas [data-selected]");
+    for (const kind of ARRIVAL_KINDS) {
+      const chips = facts.chips.filter((c) => c.kind === kind);
+      expect(chips.length, `${kind}: the document lists a chip of this kind`).toBeGreaterThan(0);
+      const id = chips[chips.length - 1].id;
+      const what = `${kind} ${id}`;
+
+      // The bare wall, page at its top: nothing selected, the card out of
+      // view, so what follows is arrival's doing.
+      await page.goto(wall);
+      await expect(canvas, `${what}: the wall`).toHaveAttribute("data-board-mode", "authoring");
+      await expect(page.getByTestId(`card-${id}`), `${what}: the wall's card is of the chip's kind`).toHaveAttribute("data-object-kind", kind);
+      await expect(selected, `${what}: nothing is selected before arrival`).toHaveCount(0);
+      expect(await cardView(page, id), `${what}: starts out of view`).not.toBe("in view");
+
+      // The real click on the chip.
+      await page.goto(proposed);
+      const chip = page.getByTestId(`document-chip-${id}`);
+      await expect(chip, `${what}: chip href`).toHaveAttribute("href", `${wall}#obj-${id}`);
+      const origin = new URL(page.url()).origin;
+      await chip.click();
+      await expect(page, `${what}: the wall loads at its card's hash`).toHaveURL(`${origin}${wall}#obj-${id}`);
+      await page.waitForLoadState("load");
+      await expect(canvas, `${what}: the wall`).toHaveAttribute("data-board-mode", "authoring");
+
+      // Selected, alone, and in view.
+      const card = page.getByTestId(`card-${id}`);
+      await expect(card, `${what}: the card is selected`).toHaveAttribute("data-selected", "true");
+      await expect(selected, `${what}: no other card or thread is selected`).toHaveCount(1);
+      await expect(selected, `${what}: the one selection is this card`).toHaveAttribute("data-id", id);
+      await expect(canvas, `${what}: the canvas carries a card selection`).toHaveAttribute("data-selection", "card");
+      await expect.poll(() => cardView(page, id), { message: `${what}: the card is revealed` }).toBe("in view");
     }
   });
 });

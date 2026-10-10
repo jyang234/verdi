@@ -203,6 +203,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// two board scripts (v0 board.js, v1 boardspec.js).
 	mux.HandleFunc("/assets/style.css", styleCSSHandler())
 	mux.HandleFunc("/assets/mermaid.min.js", mermaidHandler())
+	mux.HandleFunc("/assets/index.js", indexJSHandler())
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
 	mux.HandleFunc("/assets/boardspecasd.js", boardSpecASDJSHandler())
@@ -217,4 +218,5 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/wallminimap.js", wallMinimapJSHandler())
 	mux.HandleFunc("/assets/wallstrip.js", wallStripJSHandler())
 	mux.HandleFunc("/assets/walldrawer.js", wallDrawerJSHandler())
+	mux.HandleFunc("/assets/wallnewstory.js", wallNewStoryJSHandler())
 }

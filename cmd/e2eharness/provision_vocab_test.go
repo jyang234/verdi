@@ -43,8 +43,8 @@ func TestVocabFixture_Handler_Happy(t *testing.T) {
 	}
 	page := string(body)
 
-	if !strings.Contains(page, `data-testid="glance-entry-vocab-probe"`) {
-		t.Fatalf("home page missing the vocab-probe glance entry (the bare-origin default-branch walk must list it); got: %s", page)
+	if !strings.Contains(page, `data-testid="dir-entry-vocab-probe"`) {
+		t.Fatalf("home page missing the vocab-probe card (the bare-origin default-branch walk must list it); got: %s", page)
 	}
 	if !strings.Contains(page, `<span class="badge badge-accepted-pending-build">Ready to build</span>`) {
 		t.Fatalf("home page missing the renamed status chip (id-bearing class, renamed text); got: %s", page)

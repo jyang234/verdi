@@ -152,6 +152,9 @@ func run() error {
 	// The index-dates fixture (indexdates.go) spawns its own serve over its
 	// own dated store; reap it, and remove the store, with the harness too.
 	defer ctrl.indexDates.stop()
+	// The index-failure fixture (indexfailure.go) serves its own failing
+	// store in-process; close it, and remove the store, with the harness too.
+	defer ctrl.indexFailure.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),

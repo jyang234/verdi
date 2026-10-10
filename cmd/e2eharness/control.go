@@ -8,8 +8,11 @@ package main
 //     per render (VERDI_OPENMR_FEED): one open MR whose source branch is
 //     design/refi-decline-flow, so exactly that directory entry chips
 //     "in review" (ac-2). Strict JSON, the httpOpenMRFeed shape.
-//   - POST /outage         flips the feed to 503 for the rest of the run —
-//     the "forge unreachable" degradation (ac-2's disclosed absence).
+//   - POST /outage         flips the feed to 503 until reset — the "forge
+//     unreachable" degradation (ac-2's disclosed absence).
+//   - POST /outage/reset   restores the canned feed (spec/index-v2, ledger
+//     SI-366 (16)), so a suite that ran after an outage reads the forge as
+//     reachable again; idempotent.
 //   - POST /delete-branch  ?branch=design/<name> deletes that local design
 //     branch from the scratch store — the deleted-mid-session shape whose
 //     stale directory link must resolve to the disclosed 404 (ac-3).
@@ -43,6 +46,11 @@ package main
 //     date and quiet mark (SI-297's carriers) and the fixed clock is
 //     disclosed; see indexdates.go for the entries and their dates.
 //     main.go stops it (and removes its store) with the harness.
+//   - GET  /index-failure-fixture returns the base URL of a separate,
+//     in-process workbench instance over an ISOLATED real store whose
+//     directory index computation fails on an undecodable default-branch
+//     spec (spec/index-v2 ac-6; SI-366 (15)) — see indexfailure.go. main.go
+//     stops it (and removes its store) with the harness.
 //   - GET  /objsupersede-fixture returns JSON describing EIGHT isolated
 //     stores, one per closed-spec object supersession scenario (design
 //     docs/superpowers/specs/2026-09-24-closed-spec-object-supersession-
@@ -91,6 +99,7 @@ type controlServer struct {
 	readinessPilot     *readinessPilotFixture
 	objSupersede       *objSupersedeFixture
 	indexDates         *indexDatesFixture
+	indexFailure       *indexFailureFixture
 }
 
 // newControlServer wires the fixtures. openMRFeedURL is this server's own
@@ -109,6 +118,7 @@ func newControlServer(storeRoot, moduleRoot, openMRFeedURL string) *controlServe
 		readinessPilot:     newReadinessPilotFixture(moduleRoot, openMRFeedURL),
 		objSupersede:       newObjSupersedeFixture(moduleRoot),
 		indexDates:         newIndexDatesFixture(moduleRoot),
+		indexFailure:       newIndexFailureFixture(),
 	}
 }
 
@@ -117,6 +127,7 @@ func (c *controlServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/openmrs", c.openMRs)
 	mux.HandleFunc("/outage", c.triggerOutage)
+	mux.HandleFunc("/outage/reset", c.resetOutage)
 	mux.HandleFunc("/delete-branch", c.deleteBranch)
 	mux.HandleFunc("/empty-glance-fixture", c.emptyGlance.handler)
 	mux.HandleFunc("/vocab-fixture", c.vocab.handler)
@@ -160,6 +171,11 @@ func (c *controlServer) handler() http.Handler {
 	// of it — the served index page is the one source of every age and
 	// quiet mark (spec/index-data ac-3; SI-296, SI-297).
 	mux.HandleFunc("/index-dates-fixture", c.indexDates.handler)
+	// The isolated failing store (indexfailure.go): the production
+	// workbench handler over a real store whose directory index cannot be
+	// computed — the failure path the shared store can never show without
+	// breaking every other suite (spec/index-v2 ac-6; SI-366 (15)).
+	mux.HandleFunc("/index-failure-fixture", c.indexFailure.handler)
 	return mux
 }
 
@@ -188,6 +204,20 @@ func (c *controlServer) triggerOutage(w http.ResponseWriter, r *http.Request) {
 	c.outage = true
 	c.mu.Unlock()
 	log.Println("e2eharness: control — open-MR feed outage enabled")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// resetOutage ends a POST /outage: the feed answers the canned open MR
+// again (SI-366 (16)). Resetting with no outage in place is a no-op.
+func (c *controlServer) resetOutage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c.mu.Lock()
+	c.outage = false
+	c.mu.Unlock()
+	log.Println("e2eharness: control — open-MR feed outage reset")
 	w.WriteHeader(http.StatusNoContent)
 }
 

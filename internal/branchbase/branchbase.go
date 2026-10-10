@@ -2,7 +2,10 @@
 // ritual branch cut from" resolution rule (dc-7/I-130), shared so
 // cmd/verdi's design start and policy adopt and internal/recovery's
 // fact-gathering (R-RR3-5) can never diverge (CLAUDE.md: "anything used
-// by two or more packages lives in a shared internal/ package").
+// by two or more packages lives in a shared internal/ package"), and the
+// one rule for whether that fresh branch's name already exists where it
+// would be cut from (Collision, collision.go), shared by build start and
+// constitution propose for the same reason.
 //
 // It is a pure move of cmd/verdi's own resolveBranchBaseResolution's
 // resolution logic (cmd/verdi/design.go), split from its own disclosure

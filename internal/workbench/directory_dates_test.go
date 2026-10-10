@@ -130,7 +130,7 @@ func TestWriteDirectorySection_DateCarriers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			writeDirectorySection(&buf, t.TempDir(), []refindex.Entry{tt.e}, nil, nil, "", false, nil, datesNow)
+			writeDirectorySection(&buf, homeCards(t.TempDir(), []refindex.Entry{tt.e}, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 			attrs := dirEntryAttrs(t, buf.String(), strings.TrimPrefix(tt.e.Ref, "spec/"))
 			for attr, want := range map[string]string{
 				"data-last-change":   tt.wantLastChange,
@@ -151,10 +151,20 @@ func TestWriteDirectorySection_DateCarriers(t *testing.T) {
 	}
 }
 
-// TestWriteDirectorySection_DateCarriersAddNothingVisible: the carriers are
-// the ONLY difference dates make to the directory's markup — no visible
-// text, class, or element changes (SI-297's non-visible carrier; the index
-// story renders ages later).
+// ageChipRe matches every rendered age chip (spec/index-v2 ac-2; SI-366
+// (13)) — the one visible mark the dates make on a card.
+var ageChipRe = regexp.MustCompile(`<span class="dir-age[^"]*"(?: title="[^"]*")?>[^<]*</span>`)
+
+// filterCountRe matches the quiet and disclosed pills' counts, which the
+// dates decide (spec/index-v2 ac-3; indexfilters.go).
+var filterCountRe = regexp.MustCompile(`(data-testid="dir-filter-(?:quiet|disclosed)"[^>]*>[a-z ]+<span class="count">)[0-9]+`)
+
+// TestWriteDirectorySection_DateCarriersAddNothingVisible: the carriers,
+// the age chip, the disclosed flag and the two filter counts over them
+// (quiet and disclosed; spec/index-v2 ac-3) are the ONLY differences
+// dates make to the directory's markup — no other text, class, or
+// element changes (SI-297's carrier; spec/index-v2 ac-2's age, read from
+// it and from nothing else).
 func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	dated := directoryFixtureEntries()
 	for i := range dated {
@@ -164,16 +174,27 @@ func TestWriteDirectorySection_DateCarriersAddNothingVisible(t *testing.T) {
 	root := t.TempDir()
 
 	var withDates, withoutDates bytes.Buffer
-	writeDirectorySection(&withDates, root, dated, nil, nil, "", false, nil, datesNow)
-	writeDirectorySection(&withoutDates, root, undated, nil, nil, "", false, nil, datesNow)
+	writeDirectorySection(&withDates, homeCards(root, dated, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
+	writeDirectorySection(&withoutDates, homeCards(root, undated, cardContext{now: datesNow}), nil, "", false, nil, datesNow, viewPipeline)
 
 	if !strings.Contains(withDates.String(), `data-last-change="`) || !strings.Contains(withDates.String(), `data-quiet="`) {
 		t.Fatalf("the dated render carries no date carriers at all: %s", withDates.String())
 	}
-	stripped := dateCarrierRe.ReplaceAllString(withDates.String(), "")
-	strippedUndated := dateCarrierRe.ReplaceAllString(withoutDates.String(), "")
+	if !strings.Contains(withDates.String(), `<span class="dir-age">today</span>`) || !strings.Contains(withDates.String(), `<span class="dir-age dir-age-quiet">quiet 21 d</span>`) {
+		t.Fatalf("the dated render shows no ages: %s", withDates.String())
+	}
+	if !strings.Contains(withoutDates.String(), `>age unproven</span>`) {
+		t.Fatalf("the undated render does not disclose its ages unproven: %s", withoutDates.String())
+	}
+	strip := func(s string) string {
+		s = dateCarrierRe.ReplaceAllString(s, "")
+		s = ageChipRe.ReplaceAllString(s, "")
+		s = filterCountRe.ReplaceAllString(s, `${1}n`)
+		return strings.ReplaceAll(s, ` data-disclosed="true"`, ` data-disclosed="false"`)
+	}
+	stripped, strippedUndated := strip(withDates.String()), strip(withoutDates.String())
 	if stripped != strippedUndated {
-		t.Fatalf("dates changed more than the carrier attributes:\nwith dates (carriers stripped): %s\nwithout:                        %s", stripped, strippedUndated)
+		t.Fatalf("dates changed more than the carriers and the age chip:\nwith dates (stripped): %s\nwithout:               %s", stripped, strippedUndated)
 	}
 }
 

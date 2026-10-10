@@ -17,14 +17,12 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/url"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/refindex"
 	"github.com/jyang234/verdi/internal/store"
@@ -91,6 +89,14 @@ type HomeDeps struct {
 	// (SI-296) — so no quiet decision ever depends on when a test
 	// happened to run. renderHome reads it once per render.
 	Clock func() time.Time
+
+	// Corpus builds the working tree's corpus index: the other-records
+	// listing and the index cards' backlinks (the New story call to
+	// action's implementing stories, a superseded spec's successor). nil
+	// means production: index.Build. renderHome calls it exactly once per
+	// render (spec/index-v2 ac-4; SI-366 (12)), before the directory, so a
+	// test counts its calls here.
+	Corpus func(root string) (*index.Index, error)
 }
 
 // resolve fills production defaults for any nil field, rooted at root.
@@ -116,6 +122,9 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 	}
 	if h.Clock == nil {
 		h.Clock = time.Now
+	}
+	if h.Corpus == nil {
+		h.Corpus = index.Build
 	}
 	return h
 }
@@ -164,29 +173,32 @@ var statusGroupOrder = []refindex.StatusGroup{
 	refindex.StatusGroupTerminal,
 }
 
-// statusGroupLabels are the four groups' human headings.
-var statusGroupLabels = map[refindex.StatusGroup]string{
-	refindex.StatusGroupDraftsInProgress:     "Drafts in progress",
-	refindex.StatusGroupAcceptedPendingBuild: "Accepted, pending build",
-	refindex.StatusGroupActiveComponents:     "Active components",
-	refindex.StatusGroupTerminal:             "Terminal",
-}
-
 // designPrefix is the branch-namespace convention `verdi design start`
 // cuts every design branch under (cmd/verdi/design.go) — the same
 // derivation refindex uses to name a design-branch entry, applied in
 // reverse here to address the entry's branch.
 const designPrefix = "design/"
 
-// writeDirectorySection renders the whole-store directory. indexErr is the
+// writeDirectorySection renders the whole-store directory from the
+// entries' card facts (indexcards.go: homeCards, index-aligned with the
+// computed index; nil when indexErr is set) as the index's four columns
+// (indexcolumns.go; spec/index-v2 ac-1, parent dc-12). indexErr is the
 // index-computation failure, if any (dc-5: it renders as a disclosed
-// inline notice in a still-served page, never a dead-end); inReview and
-// mrNotice come from consultOpenMRs; mrConfigured gates the second-source
-// provenance line. now is the render's one clock reading (HomeDeps.Clock,
-// read once per render by the caller): every entry's quiet carrier is
-// decided against it (spec/index-data ac-2, dc-3; SI-297).
-func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model, now time.Time) {
-	buf.WriteString(`<section class="home-directory"><h2>Directory</h2>`)
+// inline notice in a still-served page, never a dead-end — and no column,
+// heading or count beside it, since there is no computed population to
+// draw); mrNotice comes from consultOpenMRs, whose in-review answer each
+// card carries; mrConfigured gates the second-source provenance line. now
+// is the render's one clock reading (HomeDeps.Clock, read once per render
+// by the caller): every entry's quiet carrier is decided against it
+// (spec/index-data ac-2, dc-3; SI-297). view is the view drawn (ac-6;
+// SI-366 (7)): the section carries it as data-view and the stylesheet
+// lays the same sections out as columns or as rows — one DOM, so every
+// card renders exactly once in either, and an index failure reads the
+// same in both.
+func writeDirectorySection(buf *bytes.Buffer, cards []cardFacts, indexErr error, mrNotice string, mrConfigured bool, mdl *model.Model, now time.Time, view indexView) {
+	buf.WriteString(`<section class="home-directory" data-view="`)
+	buf.WriteString(string(view))
+	buf.WriteString(`">`)
 	// vocab:identity — the directory's own StatusGroup taxonomy word (L-M8 genus), not the lifecycle state
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
 	if mrConfigured {
@@ -213,31 +225,20 @@ func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.En
 		return
 	}
 
-	byGroup := map[refindex.StatusGroup][]refindex.Entry{}
-	for _, e := range entries {
-		byGroup[e.StatusGroup] = append(byGroup[e.StatusGroup], e)
+	byGroup := map[refindex.StatusGroup][]cardFacts{}
+	for _, c := range cards {
+		byGroup[c.entry.StatusGroup] = append(byGroup[c.entry.StatusGroup], c)
 	}
 
+	// The filter row (ac-3; indexfilters.go) sits above the columns and
+	// only exists over a computed population.
+	writeFilterRow(buf, cards, mrConfigured, mrNotice != "")
+
+	buf.WriteString(`<div class="dir-columns">`)
 	for _, g := range statusGroupOrder {
-		group := byGroup[g]
-		buf.WriteString(`<section class="dir-group" data-testid="dir-group-`)
-		buf.WriteString(string(g))
-		buf.WriteString(`"><h3>`)
-		buf.WriteString(stdhtml.EscapeString(statusGroupLabels[g]))
-		buf.WriteString(` <span class="count">(`)
-		fmt.Fprintf(buf, "%d", len(group))
-		buf.WriteString(`)</span></h3>`)
-		if len(group) == 0 {
-			buf.WriteString(`<p class="empty">None.</p></section>`)
-			continue
-		}
-		buf.WriteString(`<ul>`)
-		for _, e := range group {
-			writeDirectoryEntry(buf, root, e, inReview, mdl, now)
-		}
-		buf.WriteString(`</ul></section>`)
+		writeDirectoryColumn(buf, g, byGroup[g], mdl, now)
 	}
-	buf.WriteString(`</section>`)
+	buf.WriteString(`</div></section>`)
 }
 
 // sourceChipLabels render each entry's ref source (feature dc-5 via
@@ -249,13 +250,17 @@ var sourceChipLabels = map[refindex.Source]string{
 	refindex.SourceBoth:    "local + remote",
 }
 
-// writeDirectoryEntry renders one index entry: a disclosed notice entry
-// (ac-3's no-draft-spec shape — listed and explained, never linked as if a
-// board existed), a default-branch spec (today's unprefixed addresses,
-// dc-3), or a design-branch draft (the draft-boards story's per-branch
-// address grammar, dc-3 — emitted, never invented).
-func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inReview map[string]bool, mdl *model.Model, now time.Time) {
-	name := strings.TrimPrefix(e.Ref, "spec/")
+// writeDirectoryEntry renders one index entry as a card (spec/index-v2
+// ac-2; the card stays the li.dir-entry root, SI-366 (14)): a disclosed
+// notice entry (ac-3's no-draft-spec shape — listed and explained, never
+// linked as if a board existed), a default-branch spec (today's
+// unprefixed addresses, dc-3), or a design-branch draft (the draft-boards
+// story's per-branch address grammar, dc-3 — emitted, never invented).
+// The open tag keeps its pinned attribute order — class, data-testid,
+// data-source, the date carriers — then carries the card's review state
+// and disclosed fact (indexcards.go) for the filters to read.
+func writeDirectoryEntry(buf *bytes.Buffer, c cardFacts, mdl *model.Model, now time.Time) {
+	e, name := c.entry, c.name
 
 	buf.WriteString(`<li class="dir-entry`)
 	if e.Disclosed != nil {
@@ -267,7 +272,11 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 	buf.WriteString(string(e.Source))
 	buf.WriteString(`"`)
 	writeDateCarriers(buf, e, now)
-	buf.WriteString(`>`)
+	buf.WriteString(` data-review="`)
+	buf.WriteString(string(c.review))
+	buf.WriteString(`" data-disclosed="`)
+	buf.WriteString(strconv.FormatBool(c.disclosed))
+	buf.WriteString(`">`)
 
 	switch {
 	// A DEFAULT-BRANCH entry keeps its full identity even when its
@@ -280,24 +289,103 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 	// the row — and one malformed corpus spec makes EVERY default entry
 	// unproven at once.
 	case e.Source == refindex.SourceDefault:
-		writeDefaultEntry(buf, root, e, name, mdl)
-
+		writeDefaultEntry(buf, c, mdl)
 	case e.Disclosed != nil:
-		// ac-3: a design branch with no draft spec is a notice entry — it
-		// names the branch and states the absence, and carries no link
-		// (there is genuinely no content to title or address).
-		buf.WriteString(`<span class="dir-ref">`)
-		buf.WriteString(stdhtml.EscapeString(e.Ref))
-		buf.WriteString(`</span> `)
-		writeSourceChip(buf, e.Source)
-		buf.WriteString(` <span class="dir-disclosed">`)
-		buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
-		buf.WriteString(`</span>`)
-
+		writeNoticeEntry(buf, c)
 	default:
-		writeDesignEntry(buf, e, name, inReview, mdl)
+		writeDesignEntry(buf, c, mdl)
 	}
 	buf.WriteString(`</li>`)
+}
+
+// writeNoticeEntry renders ac-3's no-draft-spec card: it names the branch
+// in the title position (there is genuinely no content to title), states
+// the absence through the shared disclosure vocabulary, and carries no
+// link — its next move, inspect the branch, is text alone.
+func writeNoticeEntry(buf *bytes.Buffer, c cardFacts) {
+	buf.WriteString(`<div class="dir-card-title"><span class="dir-ref">`)
+	buf.WriteString(stdhtml.EscapeString(c.entry.Ref))
+	buf.WriteString(`</span></div>`)
+	writeCardMeta(buf, c, "")
+	writeCardMove(buf, c.move)
+	writeCardDisclosure(buf, c.entry)
+}
+
+// writeCardMeta renders the card's chip row: the status badge (label is
+// the model's display word for it, "" when no rename differs), the source
+// chip, the age chip (SI-366 (13)), and the in-review chip when the forge
+// lists an open MR from the draft's branch (dc-4; SI-366 (3)).
+func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
+	buf.WriteString(`<div class="dir-meta">`)
+	if c.entry.SpecStatus != "" {
+		writeStatusChip(buf, c.entry.SpecStatus, statusLabel)
+		buf.WriteString(` `)
+	}
+	writeSourceChip(buf, c.entry.Source)
+	buf.WriteString(` `)
+	writeAgeChip(buf, c.age)
+	switch c.review {
+	case reviewOpen:
+		// dc-4: chipped from the forge port's open-MR listing — the
+		// disclosed second source, never part of the index computation.
+		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
+	case reviewUnavailable:
+		// SI-366 (4): the forge could not be consulted this render, so
+		// whether this branch is in review is unknown — said on the card
+		// itself, in a class the in-review pins never count.
+		buf.WriteString(` <span class="dir-unproven dir-review-unavailable" title="the forge could not be consulted this render, so whether this branch is in review is unknown">review status unavailable</span>`)
+	}
+	buf.WriteString(`</div>`)
+}
+
+// writeAgeChip renders the age fact: its text, the quiet modifier when
+// index-data's IsQuiet says so, and — when no age can be stated — the
+// disclosed unproven treatment carrying the reason.
+func writeAgeChip(buf *bytes.Buffer, a ageFact) {
+	switch {
+	case a.unproven != "":
+		buf.WriteString(`<span class="dir-age dir-age-unproven dir-unproven" title="`)
+		buf.WriteString(stdhtml.EscapeString(a.unproven))
+		buf.WriteString(`">`)
+	case a.quiet:
+		buf.WriteString(`<span class="dir-age dir-age-quiet">`)
+	default:
+		buf.WriteString(`<span class="dir-age">`)
+	}
+	buf.WriteString(stdhtml.EscapeString(a.text))
+	buf.WriteString(`</span>`)
+}
+
+// writeCardMove renders the next move (SI-366 (2)): nothing when the table
+// names none, a link only for a successor the corpus names.
+func writeCardMove(buf *bytes.Buffer, m nextMove) {
+	if m.kind == "" {
+		return
+	}
+	buf.WriteString(`<div class="dir-move">`)
+	if m.href != "" {
+		buf.WriteString(`<a href="`)
+		buf.WriteString(stdhtml.EscapeString(m.href))
+		buf.WriteString(`">&rarr; `)
+		buf.WriteString(stdhtml.EscapeString(m.text))
+		buf.WriteString(`</a>`)
+	} else {
+		buf.WriteString(`&rarr; `)
+		buf.WriteString(stdhtml.EscapeString(m.text))
+	}
+	buf.WriteString(`</div>`)
+}
+
+// writeCardDisclosure renders the entry's own disclosure, when it carries
+// one, in the shared disclosure vocabulary — beside the card's facts,
+// never replacing them.
+func writeCardDisclosure(buf *bytes.Buffer, e refindex.Entry) {
+	if e.Disclosed == nil {
+		return
+	}
+	buf.WriteString(`<span class="dir-disclosed">`)
+	buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
+	buf.WriteString(`</span>`)
 }
 
 // writeDateCarriers writes SI-297's non-visible date carriers onto an
@@ -346,35 +434,35 @@ func dateUnprovenReason(e refindex.Entry) string {
 	return disclosure.Render(disclosure.New("workbench:date-unproven", e.Ref, text))
 }
 
-// writeDefaultEntry renders a default-branch entry: title linked to its
-// corpus page, status and source chips, and the unprefixed board address
-// (dc-3) — plus the feature spec's matrix/verdict links, the same
-// affordances the pre-directory home carried. Title/class/story are
-// PRESENTATION enrichment read from the serving working tree (the same
-// artifactview seam the old home used); the entry's existence, grouping,
-// and status all come from the computed index alone, so a missing or
-// undecodable working-tree file degrades the trimmings, never the entry.
-func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name string, mdl *model.Model) {
-	title, class, story, boardServable := specWorkingTreeMeta(root, name)
-	if title == "" {
-		title = e.Ref
-	}
+// writeDefaultEntry renders a default-branch card: its title linked to its
+// corpus page (the card's first link), its ref, the chip row, and — only
+// where the routing serves it — the unprefixed board address (dc-3) plus
+// the feature spec's matrix and verdict links for a `story:` tracker
+// field (SI-366 (20)), the same affordances the pre-directory home
+// carried; then its next move and any disclosure. Title/class/story are
+// PRESENTATION enrichment read from the serving working tree (the card's
+// one working-tree read, readSpecTreeMeta — the same artifactview seam
+// the old home used); the entry's existence, grouping, and status all
+// come from the computed index alone, so a missing or undecodable
+// working-tree file degrades the trimmings, never the entry.
+func writeDefaultEntry(buf *bytes.Buffer, c cardFacts, mdl *model.Model) {
+	e, name, title, class, story, boardServable := c.entry, c.name, c.title, c.class, c.story, c.boardServable
 
-	buf.WriteString(`<a href="`)
+	buf.WriteString(`<div class="dir-card-title"><a class="dir-title" href="`)
 	buf.WriteString(stdhtml.EscapeString(defaultCorpusHref(name)))
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
-	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, string(class), e.SpecStatus))
-	buf.WriteString(` `)
-	writeSourceChip(buf, e.Source)
+	buf.WriteString(`</a></div><span class="dir-ref">`)
+	buf.WriteString(stdhtml.EscapeString(e.Ref))
+	buf.WriteString(`</span>`)
+	writeCardMeta(buf, c, statusChipLabel(mdl, string(class), e.SpecStatus))
 
 	if boardServable {
 		// The board route serves the working tree's active zone only; an
 		// archive-zone (or working-tree-absent) spec gets no board link —
 		// dc-3: the directory emits only addresses the routing serves, so
 		// a link on this page is live by construction.
-		buf.WriteString(` &middot; <a class="dir-board" href="`)
+		buf.WriteString(`<div class="dir-links"><a class="dir-board" href="`)
 		buf.WriteString(stdhtml.EscapeString(defaultBoardHref(name)))
 		buf.WriteString(`">board</a>`)
 		if class == artifact.ClassFeature && story != "" {
@@ -384,30 +472,62 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 			buf.WriteString(stdhtml.EscapeString(verdictHref(story)))
 			buf.WriteString(`">verdict</a>`)
 		}
+		buf.WriteString(`</div>`)
 	}
 
-	if e.Disclosed != nil {
-		// An unproven default-branch entry's disclosure rides beside the
-		// full identity render, in the shared disclosure vocabulary —
-		// never a replacement for it (fix round 2, finding 1).
-		buf.WriteString(` <span class="dir-disclosed">`)
-		buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
-		buf.WriteString(`</span>`)
+	writeCardMove(buf, c.move)
+	writeCardCTA(buf, c.cta)
+	// An unproven default-branch entry's disclosure rides beside the full
+	// identity render, in the shared disclosure vocabulary — never a
+	// replacement for it (fix round 2, finding 1).
+	writeCardDisclosure(buf, e)
+}
+
+// writeCardCTA renders the call to action beside an accepted feature's
+// move (spec/index-v2 ac-4; SI-366 (2), (10), (11)): the link into the
+// feature's wall that opens the existing create dialog with the first
+// uncovered criterion claimed (/board/spec/<feature>?new-story=<ac>, the
+// contract the wall's opener asset honours), carrying the unclaimed count
+// and the criterion as attributes; or, when coverage could not be read,
+// the disclosed unproven form naming why — never a zero count. Nothing
+// for a card whose every criterion is claimed, or that is not an accepted
+// feature. The text itself is the card facts' (ctaFrom), the class word
+// already through the model's vocabulary.
+func writeCardCTA(buf *bytes.Buffer, cta *callToAction) {
+	if cta == nil {
+		return
 	}
+	buf.WriteString(`<div class="dir-cta">`)
+	if cta.unproven != "" {
+		buf.WriteString(`<span class="dir-cta-unproven dir-unproven" data-testid="dir-cta-unproven" title="`)
+		buf.WriteString(stdhtml.EscapeString(cta.unproven))
+		buf.WriteString(`">`)
+		buf.WriteString(stdhtml.EscapeString(cta.text))
+		buf.WriteString(`</span></div>`)
+		return
+	}
+	buf.WriteString(`<a class="dir-cta-link" data-testid="dir-cta" data-cta-ac="`)
+	buf.WriteString(stdhtml.EscapeString(cta.criterion))
+	buf.WriteString(`" data-cta-unclaimed="`)
+	buf.WriteString(strconv.Itoa(cta.unclaimed))
+	buf.WriteString(`" href="`)
+	buf.WriteString(stdhtml.EscapeString(cta.href))
+	buf.WriteString(`">`)
+	buf.WriteString(stdhtml.EscapeString(cta.text))
+	buf.WriteString(`</a></div>`)
 }
 
 // defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here),
 // BranchBoardHref (the shared per-branch constructor below) and
 // designBoardHref (below writeDesignEntry) are the directory's address
-// grammar, each computed in exactly one place and shared verbatim with the
-// home-status-glance leading section (glance.go) — the "mirrors exactly,
-// never a third grammar" bar spec/home-status-glance dc-3 sets. Extracting
-// them changes no rendered byte here (each is a pure string join of the
-// same literals/escapes writeDefaultEntry/writeDesignEntry always wrote
-// inline; stdhtml.EscapeString is a per-rune, context-free replacement, so
-// escaping the whole joined string equals escaping its parts and
-// concatenating — proven by TestRenderHome_DirectoryGroupsChipsAndLinks
-// and friends continuing to assert the identical literal hrefs unchanged).
+// grammar, each computed in exactly one place (the "never a third
+// grammar" bar the retired home-status-glance set, kept by parent dc-12).
+// Each is a pure string join of the same literals/escapes the entry
+// writers always wrote inline; stdhtml.EscapeString is a per-rune,
+// context-free replacement, so escaping the whole joined string equals
+// escaping its parts and concatenating — proven by
+// TestRenderHome_DirectoryGroupsChipsAndLinks and friends asserting the
+// literal hrefs.
 func defaultCorpusHref(name string) string { return "/a/spec/" + name }
 func defaultBoardHref(name string) string  { return boardSpecPrefix + name }
 func matrixHref(story string) string       { return "/matrix/" + story }
@@ -435,30 +555,37 @@ func BranchBoardHref(branch, name string) string {
 	return branchBoardPrefix + url.PathEscape(branch) + boardSpecPrefix + name
 }
 
-// writeDesignEntry renders a design-branch draft: the entry links to its
-// per-branch board address under the sibling draft-boards story's ratified
-// grammar — /b/<branch-escaped>/board/spec/<name>, the branch riding one
-// path segment with its slashes percent-encoded (draft-boards dc-1) — one
+// writeDesignEntry renders a design-branch draft's card: its one link is
+// its board, under the sibling draft-boards story's ratified grammar —
+// /b/<branch-escaped>/board/spec/<name>, the branch riding one path
+// segment with its slashes percent-encoded (draft-boards dc-1) — one
 // grammar for local and remote-tracking entries alike; the routing story
 // behind it enforces feature dc-5's authoring/sealed split, never this
-// page's link shapes (dc-3).
-func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview map[string]bool, mdl *model.Model) {
-	branch := designPrefix + name
+// page's link shapes (dc-3). The link reads the draft's decoded title
+// (SI-366 (1)); when none was decoded it reads the ref, the only identity
+// the entry has, beside the disclosed title-unproven chip.
+func writeDesignEntry(buf *bytes.Buffer, c cardFacts, mdl *model.Model) {
+	e, name := c.entry, c.name
 
-	buf.WriteString(`<a class="dir-board" href="`)
+	buf.WriteString(`<div class="dir-card-title"><a class="dir-board dir-title" href="`)
 	buf.WriteString(stdhtml.EscapeString(designBoardHref(name)))
 	buf.WriteString(`">`)
-	buf.WriteString(stdhtml.EscapeString(e.Ref))
-	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, "", e.SpecStatus))
-	buf.WriteString(` `)
-	writeSourceChip(buf, e.Source)
-
-	if inReview[branch] {
-		// dc-4: chipped from the forge port's open-MR listing — the
-		// disclosed second source, never part of the index computation.
-		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
+	if c.title != "" {
+		buf.WriteString(stdhtml.EscapeString(c.title))
+	} else {
+		buf.WriteString(stdhtml.EscapeString(e.Ref))
 	}
+	buf.WriteString(`</a>`)
+	if c.titleUnproven != "" {
+		buf.WriteString(` <span class="dir-unproven dir-title-unproven" title="`)
+		buf.WriteString(stdhtml.EscapeString(c.titleUnproven))
+		buf.WriteString(`">title unproven</span>`)
+	}
+	buf.WriteString(`</div><span class="dir-ref">`)
+	buf.WriteString(stdhtml.EscapeString(e.Ref))
+	buf.WriteString(`</span>`)
+	writeCardMeta(buf, c, statusChipLabel(mdl, "", e.SpecStatus))
+	writeCardMove(buf, c.move)
 }
 
 // designBoardHref is the directory's per-branch board address for a design
@@ -524,25 +651,9 @@ func writeSourceChip(buf *bytes.Buffer, src refindex.Source) {
 // the ACTIVE-zone file exists, which is what makes /board/spec/<name>
 // servable. Every failure degrades to zero values: the directory entry
 // itself never depends on the working tree (dc-2 — the index is computed
-// from refs; this is trim, not truth).
+// from refs; this is trim, not truth). It is readSpecTreeMeta's trim
+// (indexcardsread.go), the one working-tree read the index cards share.
 func specWorkingTreeMeta(root, name string) (title string, class artifact.SpecClass, story string, boardServable bool) {
-	path := store.ActiveSpecPath(root, name)
-	data, err := os.ReadFile(path)
-	if err == nil {
-		boardServable = true
-	} else {
-		path = store.ArchiveSpecPath(root, name)
-		if data, err = os.ReadFile(path); err != nil {
-			return "", "", "", false
-		}
-	}
-	fm, _, err := artifact.SplitFrontmatter(data)
-	if err != nil {
-		return "", "", "", boardServable
-	}
-	m, err := artifactview.DecodeMeta("spec", fm)
-	if err != nil {
-		return "", "", "", boardServable
-	}
-	return m.Base.Title, m.Class, m.Story, boardServable
+	m := readSpecTreeMeta(root, name)
+	return m.title, m.class, m.story, m.boardServable
 }

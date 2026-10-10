@@ -72,6 +72,10 @@ test("home renders the four status groups, each entry once, chipped and linked",
       page.getByTestId(dirGroupTestId("drafts-in-progress")).getByTestId(dirEntryTestId(name)),
     ).toBeVisible();
   }
+  // The archive-zone entry sits in the shelf's collapsed archived fold
+  // (spec/index-v2 ac-5; parent dc-12; SI-366 (8)): open it so the entry
+  // can be seen — its group and its chip are unchanged.
+  await page.getByTestId(dirGroupTestId("terminal")).locator("details.dir-archived > summary").click();
   for (const [name, group] of [
     [ACCEPTED_SPEC, "accepted-pending-build"],
     [ACTIVE_SPEC, "active-components"],
@@ -233,6 +237,9 @@ test("an unreachable forge degrades to a disclosed notice while the directory re
   ]) {
     await expect(page.getByTestId(dirGroupTestId(g))).toBeVisible();
   }
+  // The archived entry is folded on the shelf (spec/index-v2 ac-5; SI-366
+  // (8)): open the fold so it can be seen like the rest.
+  await page.getByTestId(dirGroupTestId("terminal")).locator("details.dir-archived > summary").click();
   for (const name of [
     SHOWCASE.DESIGN_SPEC,
     SHOWCASE.DIR_LOCAL_DRAFT,

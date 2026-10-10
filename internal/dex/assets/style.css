@@ -7260,4 +7260,458 @@ body:not(.board-page) > footer.site-foot,
 /* ---- a stub's Instantiate on its toolbar (SI-368 (5)): the sealed
    record's one live affordance, in the accent's ink ---- */
 .wall-toolbar-btn--instantiate { color: var(--accent-strong); font-weight: 600; }
+/* ---------- the index's four columns (spec/index-v2 ac-1, ac-2; parent
+   workbench-redesign dc-12; handoff README "Screen 2 — Index") ----------
+   The directory's four status groups drawn side by side as columns — On
+   the desk, Accepted, Active components, On the shelf — each a panel with
+   a coloured top rule, its heading and count, a "where" line and a move
+   line, and either its cards or an explicit empty state. A card is the
+   li.dir-entry root (SI-366 (14)): title, ref, a chip row (status,
+   source, age, in review), its working links, its next move and any
+   disclosure. Every rule below overrides the legacy directory-home rules
+   above, which the docs site still carries unchanged; tokens only. The
+   grid folds by itself: four columns at a laptop width, two at 200 %
+   zoom, one at 320 px, with no horizontal overflow. Meaning is never
+   carried by colour alone (Wave 6 §5.2): the column's name, the age's
+   words, the chips' text and the disclosure's text say what the colours
+   echo. */
+.content:has(> .home-directory) { max-width: none; }
+.home-directory { margin: 0.6rem 0 1.6rem; }
+.dir-provenance { margin: 0 0 0.75rem; }
+.dir-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+  min-width: 0;
+}
+.dir-group {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--st-pending);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.dir-group--accepted-pending-build,
+.dir-group--active-components { border-top-color: var(--st-evidenced); }
+.dir-group--terminal { border-top-color: var(--st-nosignal); }
+.dir-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  padding: 0.625rem 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+.dir-group-head h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.dir-group-head .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted-solid);
+}
+.dir-group-where {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--st-pending);
+}
+.dir-group--accepted-pending-build .dir-group-where,
+.dir-group--active-components .dir-group-where { color: var(--st-evidenced); }
+.dir-group--terminal .dir-group-where { color: var(--st-nosignal); }
+.dir-group-move {
+  margin: 0;
+  padding: 0.375rem 0.75rem 0;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+  color: var(--muted-solid);
+}
+.dir-group .dir-empty {
+  margin: 0.75rem;
+  padding: 0.875rem 0.75rem;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: none;
+  font-size: 0.8125rem;
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--muted-solid);
+}
+.dir-group .dir-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0.5rem;
+  list-style: none;
+}
+.dir-cards .dir-entry,
+.dir-cards .dir-entry:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.5625rem 0.6875rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--st-pending);
+  border-radius: 5px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(20, 26, 18, 0.06);
+  font-size: 0.84375rem;
+  line-height: 1.35;
+}
+.dir-cards .dir-entry:hover { box-shadow: 0 4px 12px rgba(20, 26, 18, 0.16); }
+.dir-group--accepted-pending-build .dir-entry,
+.dir-group--active-components .dir-entry { border-left-color: var(--st-evidenced); }
+.dir-group--terminal .dir-entry { border-left-color: var(--st-nosignal); }
+.dir-cards .dir-entry[data-disclosed="true"] { border-style: dashed; border-color: var(--st-pending); }
+.dir-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.dir-card-title .dir-title { color: var(--ink); }
+.dir-card-title .dir-title:hover { color: var(--accent-strong); }
+.dir-cards .dir-ref {
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.dir-card-title .dir-ref { font-size: 0.84375rem; color: var(--ink); }
+.dir-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.125rem;
+}
+.dir-age,
+.dir-unproven {
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--muted-solid);
+}
+.dir-age-quiet { color: var(--st-pending); }
+.dir-unproven {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--st-pending);
+  border: 1px dashed var(--st-pending);
+  border-radius: 3px;
+  padding: 0 0.375rem;
+  cursor: help;
+}
+.dir-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.625rem;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+}
+.dir-move {
+  margin-top: 0.1875rem;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--accent);
+}
+.dir-move a { color: inherit; }
+.dir-cards .dir-disclosed { display: block; font-size: 0.75rem; overflow-wrap: anywhere; }
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* ---------- the index's filters, folds, strip and bar (spec/index-v2
+   ac-3, ac-5; SI-366 (4), (5), (6), (8), (17); handoff README "Screen 2
+   — Index") ----------
+   The filter row above the columns: four mono pills, the pressed one in
+   ink, a disabled one dashed and pending-coloured because its answer is
+   unknown. A card a filter does not select carries the hidden attribute,
+   which the stylesheet's shared [hidden] rule (display: none
+   !important, far above) already hides, so no rule here repeats it. On
+   the shelf, the
+   archived fold is a native <details> at the column's foot; below the
+   columns, the other-records strip is three collapsed <details> under
+   one small heading. The bar's index controls — the view toggle, the
+   Disclosures link with its count, the import link and New feature with
+   its CLI hint — wrap with the bar's controls slot below 640 px, so every
+   control stays visible at 320 px. Tokens only; meaning never by colour
+   alone (Wave 6 §5.2): every pill, chip and fold says its state in words. */
+.dir-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0 0 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+}
+.dir-filters-label {
+  font-size: 0.59375rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.dir-filter {
+  font: inherit;
+  padding: 0.1875rem 0.5625rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.dir-filter .count { margin-left: 0.125rem; color: var(--muted-solid); }
+.dir-filter:hover:not([disabled]) { border-color: var(--accent); }
+.dir-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dir-filter[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.dir-filter[aria-pressed="true"] .count { color: inherit; opacity: 0.8; }
+.dir-filter[disabled] {
+  cursor: not-allowed;
+  border-style: dashed;
+  border-color: var(--st-pending);
+  background: none;
+  color: var(--st-pending);
+}
+.dir-review-unavailable { white-space: normal; }
+.dir-group-note {
+  margin: 0;
+  padding: 0.375rem 0.75rem 0;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+  color: var(--st-pending);
+}
+.dir-group .dir-archived {
+  margin: 0 0.5rem 0.5rem;
+  border-top: 1px dashed var(--rule);
+}
+.dir-archived > summary {
+  padding: 0.5rem 0.1875rem 0.25rem;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.65625rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+}
+.dir-archived > summary:hover { color: var(--ink); }
+.dir-archived > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dir-archived > summary .count { color: var(--muted-solid); }
+.dir-group .dir-archived > .dir-cards { padding: 0.25rem 0 0; }
+.home-strip { margin: 0 0 1.6rem; }
+.home-strip > h2 {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 0.59375rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-solid);
+}
+.home-strip > details,
+.home-strip > details.home-kinds,
+.home-strip > details.home-services,
+.home-strip > details.home-boards {
+  margin: 0 0 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.home-strip > details > summary {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.home-strip > details > summary:hover { color: var(--accent-strong); }
+.home-strip > details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.home-strip > details > summary .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted-solid);
+}
+.home-strip > details[open] > summary { border-bottom: 1px solid var(--rule); }
+.home-strip > details > h3,
+.home-strip > details > ul,
+.home-strip > details > p { margin-left: 0.75rem; margin-right: 0.75rem; }
+.home-strip > details > h3 { margin-top: 0.75rem; }
+.home-strip > details > h3 .count { font-family: var(--mono); font-size: 0.6875rem; font-weight: 400; color: var(--muted-solid); }
+.home-strip > details > p { padding: 0.5rem 0; }
+.home-strip > details > ul { margin-bottom: 0.5rem; }
+.home-strip > details > ul > li:last-child { border-bottom: 0; }
+.topbar-view {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--rule);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+}
+.topbar-view > * {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--muted-solid);
+  font: inherit;
+  white-space: nowrap;
+}
+.topbar-view > a { color: var(--muted-solid); text-decoration: none; }
+.topbar-view > a:hover { color: var(--ink); }
+.topbar-view > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.topbar-view > a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+.topbar-controls .home-disclosures {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px dashed var(--st-pending);
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar-controls .home-disclosures:hover { color: var(--accent-strong); }
+.topbar-controls .home-disclosures .count { font-weight: 700; color: var(--st-pending); }
+.topbar-controls .topbar-import {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+.topbar-new-feature {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.topbar-controls .home-new-feature {
+  display: inline-block;
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar-cli-hint {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--muted-solid);
+  white-space: normal;
+}
+.topbar-cli-hint code { font-size: inherit; overflow-wrap: anywhere; }
+/* verdi:workbench-only:end */
+/* verdi:workbench-only:begin */
+/* ---------- the index's call to action, list view and keyboard
+   (spec/index-v2 ac-4, ac-6; SI-366 (7), (10), (11), (14), (23)(c);
+   handoff README "Screen 2 — Index") ----------
+   The call to action sits beside an accepted feature's move: a mono
+   pending-tinted link into the wall, or the dashed unproven mark when
+   coverage could not be read. Tokens only; meaning never by colour alone
+   (Wave 6 §5.2): the link's words say what is unclaimed. */
+.dir-cta {
+  margin-top: 0.1875rem;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+}
+.dir-cta-link {
+  display: inline-block;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 4px;
+  background: var(--st-pending-tint);
+  color: var(--st-pending);
+  font-weight: 700;
+  text-decoration: none;
+}
+.dir-cta-link::after { content: " \203A"; }
+.dir-cta-link:hover { text-decoration: underline; }
+.dir-cta-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The list view (ac-6; SI-366 (7)): the same four sections, stacked, each
+   card a row that wraps — title and ref, then the chips, links, move and
+   call to action along the line, a disclosure on its own line — under
+   the same headings, counts, where and move lines, so the two views
+   read the same labels. Chosen by the directory's data-view, which the
+   server writes from ?view=list and the bar's toggle switches in
+   place. */
+.home-directory[data-view="list"] .dir-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.home-directory[data-view="list"] .dir-group .dir-cards {
+  gap: 0;
+  padding: 0.25rem 0.5rem 0.375rem;
+}
+.home-directory[data-view="list"] .dir-cards .dir-entry,
+.home-directory[data-view="list"] .dir-cards .dir-entry:last-child {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  padding: 0.4375rem 0.5rem 0.375rem;
+  border: 0;
+  border-left: 3px solid var(--st-pending);
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.home-directory[data-view="list"] .dir-cards .dir-entry:last-child { border-bottom: 0; }
+.home-directory[data-view="list"] .dir-cards .dir-entry:hover {
+  background: var(--card);
+  box-shadow: none;
+}
+.home-directory[data-view="list"] .dir-group--accepted-pending-build .dir-entry,
+.home-directory[data-view="list"] .dir-group--active-components .dir-entry { border-left-color: var(--st-evidenced); }
+.home-directory[data-view="list"] .dir-group--terminal .dir-entry { border-left-color: var(--st-nosignal); }
+.home-directory[data-view="list"] .dir-cards .dir-entry[data-disclosed="true"] { border-left-style: dashed; border-left-color: var(--st-pending); }
+.home-directory[data-view="list"] .dir-card-title { flex: 1 1 14rem; }
+.home-directory[data-view="list"] .dir-meta,
+.home-directory[data-view="list"] .dir-move,
+.home-directory[data-view="list"] .dir-cta { margin-top: 0; }
+.home-directory[data-view="list"] .dir-cards .dir-disclosed { flex-basis: 100%; }
+.home-directory[data-view="list"] .dir-group .dir-archived { margin: 0 0.5rem 0.375rem; }
+/* The archived fold's matched mark (F7BR-1): how many folded cards the
+   pressed filter selects, written by the script beside the fold's count
+   while a filter other than everything is active. */
+.dir-archived > summary .dir-archived-matched { margin-left: 0.375rem; color: var(--st-pending); }
 /* verdi:workbench-only:end */
