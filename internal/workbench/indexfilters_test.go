@@ -25,7 +25,7 @@ func filterFixtureCards(t *testing.T) []cardFacts {
 		{Ref: "spec/live-component", Source: refindex.SourceDefault, StatusGroup: refindex.StatusGroupActiveComponents, SpecStatus: "active", Zone: refindex.ZoneActive, Date: daysBeforeNow(40)},
 	}
 	return homeCards(t.TempDir(), entries, cardContext{
-		review: reviewConsultation{configured: true, inReview: map[string][]string{"design/reviewed-draft": {"5"}}},
+		review: reviewConsultation{configured: true, kind: ForgeGitLab, inReview: map[string][]string{"design/reviewed-draft": {"5"}}},
 		now:    datesNow,
 	})
 }

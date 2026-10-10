@@ -1,8 +1,9 @@
 // The directory home's in-review feed (spec/directory-home dc-4): the
 // adapters behind workbench.OpenMRLister, the consumer-defined port the
 // home page's per-render forge consultation goes through, each listing
-// every open MR's source branch and forge-native id. Three
-// implementations, mirroring reviewfeed.go's wiring states exactly:
+// every open MR's source branch and forge-native id (the in-review chip
+// names the request's number; spec/workbench-redesign dc-4, SI-376 (2)).
+// Three implementations, mirroring reviewfeed.go's wiring states exactly:
 //
 //   - forgeOpenMRs: the real forge adapter (forge.Forge.ListOpenMRs, the
 //     one branch-scoped MR-listing mechanism this repo already ships).
@@ -32,6 +33,31 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/workbench"
 )
+
+// homeOpenMRs is serve.go's in-review wiring for the directory home
+// (spec/directory-home dc-4), in the review feed's precedence order: the
+// live forge, else the hermetic harness feed (feedURL, VERDI_OPENMR_FEED's
+// loopback URL), else — a forge configured but unreachable — the
+// always-erroring lister whose disclosed reason the home page renders as
+// its "MR status unavailable" notice (I-1(b)). With none of the three, no
+// forge is configured: the lister is nil and the chips are silently,
+// legitimately absent. The kind is the configured forge as
+// forgeBestEffort resolved it — the notation the chip writes a request's
+// number in; the chip discloses the number for any kind it has no
+// notation for, the empty one included.
+func homeOpenMRs(forgePort forge.Forge, configuredKind, root, feedURL string) (workbench.OpenMRLister, workbench.ForgeKind) {
+	kind := workbench.ForgeKind(configuredKind)
+	switch {
+	case forgePort != nil:
+		return newForgeOpenMRs(forgePort, root), kind
+	case feedURL != "":
+		return httpOpenMRFeed{url: feedURL}, kind
+	case configuredKind != "":
+		return unavailableOpenMRs{reason: reviewUnavailableReason(configuredKind)}, kind
+	default:
+		return nil, kind
+	}
+}
 
 // forgeOpenMRs adapts forge.Forge.ListOpenMRs onto workbench.OpenMRLister:
 // the source branch and forge-native id (forge.OpenMR.ID, read as is) of

@@ -6,8 +6,10 @@ package main
 //
 //   - GET  /openmrs        the hermetic open-MR feed `verdi serve` consults
 //     per render (VERDI_OPENMR_FEED): one open MR whose source branch is
-//     design/refi-decline-flow, so exactly that directory entry chips
-//     "in review" (ac-2). Strict JSON, the httpOpenMRFeed shape.
+//     design/refi-decline-flow, so exactly that directory entry chips in
+//     review (ac-2), naming the request's number in the showcase store's
+//     GitLab notation, "MR !9 open" (spec/workbench-redesign dc-4). Strict
+//     JSON, the httpOpenMRFeed shape.
 //   - POST /outage         flips the feed to 503 until reset — the "forge
 //     unreachable" degradation (ac-2's disclosed absence).
 //   - POST /outage/reset   restores the canned feed (spec/index-v2, ledger
@@ -88,8 +90,10 @@ import (
 // value via e2e/ports.ts's mirror of the same derivation.
 
 // openMRFeedJSON is the canned happy-path feed: the board suite's design
-// branch carries the one open MR.
-const openMRFeedJSON = `[{"id":"mr-9","source_branch":"design/refi-decline-flow","title":"Refinancing decline flow"}]` + "\n"
+// branch carries the one open MR. Its id is in the forge-native form
+// forge.OpenMR.ID carries (a GitLab IID, as the showcase store's forge:
+// gitlab names), so the chip can state it.
+const openMRFeedJSON = `[{"id":"9","source_branch":"design/refi-decline-flow","title":"Refinancing decline flow"}]` + "\n"
 
 // controlServer holds the toggleable feed state, the store the
 // delete-branch endpoint mutates, and the lazily-started empty-glance

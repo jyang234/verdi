@@ -4,8 +4,10 @@
 // status per spec/workbench-directory dc-2, every entry status-chipped and
 // linked per the ratified address grammars (dc-3), disclosed by source, and
 // chipped "in review" from a per-render, non-blocking forge consultation
-// (dc-4). The index itself is CONSUMED through the sibling ref-index
-// story's seam (refindex.ComputeIndex) — this file performs no git ref
+// (dc-4), the chip naming the open request's number
+// (spec/workbench-redesign dc-4; indexreviewchip.go). The index itself is
+// CONSUMED through the sibling ref-index story's seam
+// (refindex.ComputeIndex) — this file performs no git ref
 // enumeration of its own and holds no second copy of the grouping rules
 // (dc-2): grouping keys off each entry's StatusGroup field, never its
 // address or on-disk path.
@@ -76,6 +78,14 @@ type HomeDeps struct {
 	// to the disclosed "MR status unavailable" notice, never a blocked or
 	// partial directory.
 	OpenMRs OpenMRLister
+
+	// ForgeKind is the store's configured forge (indexreviewchip.go), as
+	// `verdi serve`'s forge wiring resolves it: the notation the
+	// in-review chip writes an open request's number in (dc-4). The zero
+	// value, like any kind the chip has no notation for, still chips the
+	// draft in review and discloses the number instead of guessing a
+	// notation. It is read only beside a non-nil OpenMRs.
+	ForgeKind ForgeKind
 
 	// Model is the store's resolved operating model
 	// (spec/vocabulary-surfaces ac-2): the status chips this page renders
@@ -326,7 +336,8 @@ func writeNoticeEntry(buf *bytes.Buffer, c cardFacts) {
 // writeCardMeta renders the card's chip row: the status badge (label is
 // the model's display word for it, "" when no rename differs), the source
 // chip, the age chip (SI-366 (13)), and the in-review chip when the forge
-// lists an open MR from the draft's branch (dc-4; SI-366 (3)).
+// lists an open MR from the draft's branch (dc-4; SI-366 (3)), naming the
+// request's number (SI-376 (2); indexreviewchip.go).
 func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
 	buf.WriteString(`<div class="dir-meta">`)
 	if c.entry.SpecStatus != "" {
@@ -340,7 +351,17 @@ func writeCardMeta(buf *bytes.Buffer, c cardFacts, statusLabel string) {
 	case reviewOpen:
 		// dc-4: chipped from the forge port's open-MR listing — the
 		// disclosed second source, never part of the index computation.
-		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
+		// The chip names the open request and no review state; a number it
+		// cannot state is disclosed in its text and its title.
+		buf.WriteString(` <span class="badge badge-open dir-inreview"`)
+		if c.reviewChip.title != "" {
+			buf.WriteString(` title="`)
+			buf.WriteString(stdhtml.EscapeString(c.reviewChip.title))
+			buf.WriteString(`"`)
+		}
+		buf.WriteString(`>`)
+		buf.WriteString(stdhtml.EscapeString(c.reviewChip.text))
+		buf.WriteString(`</span>`)
 	case reviewUnavailable:
 		// SI-366 (4): the forge could not be consulted this render, so
 		// whether this branch is in review is unknown — said on the card

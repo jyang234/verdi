@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -155,8 +156,9 @@ func TestDirectoryHome_Integration_HTTPFeed(t *testing.T) {
 	}))
 
 	h := workbench.NewHandlerWithHome(t.TempDir(), workbench.Deps{}, workbench.HomeDeps{
-		Index:   func(context.Context) ([]refindex.Entry, error) { return entries, nil },
-		OpenMRs: httpOpenMRFeed{url: srv.URL},
+		Index:     func(context.Context) ([]refindex.Entry, error) { return entries, nil },
+		OpenMRs:   httpOpenMRFeed{url: srv.URL},
+		ForgeKind: workbench.ForgeGitLab,
 	})
 
 	get := func() string {
@@ -176,6 +178,9 @@ func TestDirectoryHome_Integration_HTTPFeed(t *testing.T) {
 	if !strings.Contains(up, `data-testid="dir-entry-mr-draft"`) {
 		t.Fatalf("feed up: missing the chipped entry; got: %s", up)
 	}
+	if !strings.Contains(up, `<span class="badge badge-open dir-inreview">MR !9 open</span>`) {
+		t.Fatalf("feed up: the chip must name the merge request's number in GitLab notation; got: %s", up)
+	}
 
 	srv.Close() // the forge double becomes unreachable
 
@@ -190,5 +195,81 @@ func TestDirectoryHome_Integration_HTTPFeed(t *testing.T) {
 		if !strings.Contains(down, `data-testid="dir-entry-`+name+`"`) {
 			t.Fatalf("feed down: entry %s missing — the refs-computed directory must still render fully", name)
 		}
+	}
+}
+
+// TestDirectoryHome_Integration_ForgeAdapter is the live adapter's path to
+// the chip: the real forgeOpenMRs over the hermetic forge fake, on a
+// GitHub store, names the lowest open pull request from the draft's
+// branch and counts the rest; an open pull request the forge lists with no
+// number still chips its draft and discloses the number.
+func TestDirectoryHome_Integration_ForgeAdapter(t *testing.T) {
+	t.Parallel()
+	f := fake.New()
+	f.SeedOpenMR("main", forge.OpenMR{ID: "31", SourceBranch: "design/mr-draft", Title: "MR draft"})
+	f.SeedOpenMR("main", forge.OpenMR{ID: "4", SourceBranch: "design/mr-draft", Title: "MR draft, earlier"})
+	f.SeedOpenMR("main", forge.OpenMR{SourceBranch: "design/unnumbered", Title: "Unnumbered"})
+	entries := []refindex.Entry{
+		{Ref: "spec/mr-draft", Source: refindex.SourceBoth, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},
+		{Ref: "spec/unnumbered", Source: refindex.SourceLocal, StatusGroup: refindex.StatusGroupDraftsInProgress, SpecStatus: "draft"},
+	}
+	h := workbench.NewHandlerWithHome(t.TempDir(), workbench.Deps{}, workbench.HomeDeps{
+		Index:     func(context.Context) ([]refindex.Entry, error) { return entries, nil },
+		OpenMRs:   newForgeOpenMRs(f, resolvableDefaultBranchRoot(t)),
+		ForgeKind: workbench.ForgeGitHub,
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `<span class="badge badge-open dir-inreview">PR #4 open · +1</span>`) {
+		t.Fatalf("want the lowest pull request named and the other counted; got: %s", body)
+	}
+	if !strings.Contains(body, `">in review · number unavailable</span>`) {
+		t.Fatalf("want the unnumbered pull request's draft chipped with its number disclosed; got: %s", body)
+	}
+	if got := strings.Count(body, "dir-inreview"); got != 2 {
+		t.Fatalf("in-review chips = %d, want 2 (one per draft with an open pull request)", got)
+	}
+}
+
+// TestHomeOpenMRs is serve.go's in-review wiring (spec/directory-home dc-4,
+// in the review feed's precedence order) and the forge kind it hands the
+// chip: the live forge, else the harness feed, else — a forge configured
+// but unreachable — the always-erroring lister, else nothing. The kind is
+// always the configured one, as forgeBestEffort resolved it.
+func TestHomeOpenMRs(t *testing.T) {
+	t.Parallel()
+	live := fake.New()
+	tests := []struct {
+		name       string
+		port       forge.Forge
+		configured string
+		feedURL    string
+		wantType   string
+		wantKind   workbench.ForgeKind
+	}{
+		{"a live GitHub forge", live, "github", "", "*main.forgeOpenMRs", workbench.ForgeGitHub},
+		{"a live GitLab forge wins over the harness feed", live, "gitlab", "http://127.0.0.1:9/openmrs", "*main.forgeOpenMRs", workbench.ForgeGitLab},
+		{"the harness feed on a GitLab store", nil, "gitlab", "http://127.0.0.1:9/openmrs", "main.httpOpenMRFeed", workbench.ForgeGitLab},
+		{"the harness feed with no forge configured: no kind", nil, "", "http://127.0.0.1:9/openmrs", "main.httpOpenMRFeed", ""},
+		{"a configured, unreachable GitHub forge", nil, "github", "", "main.unavailableOpenMRs", workbench.ForgeGitHub},
+		{"no forge configured: no lister", nil, "", "", "<nil>", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lister, kind := homeOpenMRs(tt.port, tt.configured, t.TempDir(), tt.feedURL)
+			if got := fmt.Sprintf("%T", lister); got != tt.wantType {
+				t.Fatalf("lister = %s, want %s", got, tt.wantType)
+			}
+			if tt.wantType == "<nil>" && lister != nil {
+				t.Fatalf("no forge configured must leave HomeDeps.OpenMRs nil (the silent absence), got %#v", lister)
+			}
+			if kind != tt.wantKind {
+				t.Fatalf("kind = %q, want %q", kind, tt.wantKind)
+			}
+		})
 	}
 }
