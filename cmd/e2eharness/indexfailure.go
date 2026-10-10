@@ -73,8 +73,10 @@ func provisionIndexFailureStore(ctx context.Context, parent string) (string, err
 	}); err != nil {
 		return "", err
 	}
+	if err := initRepo(ctx, root, false); err != nil {
+		return "", err
+	}
 	steps := [][]string{
-		{"init", "--quiet", "--initial-branch=main"},
 		{"add", "-A"},
 		{"commit", "--quiet", "--no-verify", "-m", "index-failure store: an intact and an undecodable spec"},
 	}
@@ -87,7 +89,7 @@ func provisionIndexFailureStore(ctx context.Context, parent string) (string, err
 	// A bare local origin whose HEAD names main (emptyglance.go's
 	// load-bearing reasoning): the default branch resolves, so the
 	// default-branch walk reads — and fails on — the undecodable spec.
-	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := initRepo(ctx, originDir, true); err != nil {
 		return "", err
 	}
 	for _, args := range [][]string{
