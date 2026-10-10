@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Request } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { CONTROL_URL } from "./fixtures";
 
 // The New story dialog (spec/new-story-dialog-v2; ledger SI-369): the
@@ -287,6 +288,58 @@ test.describe("new-story-dialog", () => {
     await expect(dialog).toBeHidden();
   });
 
+  // Not an obligation's producer: the open dialog's fit at 320 px and at
+  // 200 % zoom (Wave 6 §5). The 200 % zoom is a 720 × 450 viewport at
+  // deviceScaleFactor 2 — the CSS viewport a 1440 × 900 window lays out
+  // at 200 % browser zoom — so the dialog's own media queries and vh
+  // lengths read what a zoomed reader's browser gives them. CSS zoom on
+  // the body would leave the viewport at its unzoomed size, so neither
+  // the narrow nor the short-screen rule would apply, and it would test
+  // a layout no reader sees.
+  test("The open dialog at 320 px and at 200 % zoom", async ({ page, browser }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await expectDialogFitsAndReaches(page, "320 px");
+
+    const zoomed = await browser.newContext({ viewport: { width: 720, height: 450 }, deviceScaleFactor: 2 });
+    try {
+      await expectDialogFitsAndReaches(await zoomed.newPage(), "200 % zoom");
+    } finally {
+      await zoomed.close();
+    }
+  });
+
+  // Not an obligation's producer: axe (the wcag2a/aa scan 50, 87 and 89
+  // run), scoped to the open dialog, finds nothing serious or critical
+  // while Create is gated — on open, and with the grammar report showing
+  // — or once it is enabled, in light and in dark. A lesser finding is
+  // logged as a disclosure, never hidden.
+  test("The open dialog under axe, gated and enabled", async ({ page }) => {
+    const dialog = page.locator("#create-dialog");
+    const name = page.getByTestId("create-name");
+    const create = page.getByTestId("create-ok");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await openFeatureWall(page);
+      await page.getByTestId("create-spec-btn").click();
+      await expect(dialog).toBeVisible();
+      await expect(create).toBeDisabled();
+      expect(await seriousAxeFindings(page, `${scheme}, gated on open`)).toEqual([]);
+
+      await name.fill("Escrow-Refund");
+      await expect(name).toHaveAttribute("aria-invalid", "true");
+      await expect(create).toBeDisabled();
+      expect(await seriousAxeFindings(page, `${scheme}, gated by a grammar break`)).toEqual([]);
+
+      await name.fill(PREFILL_NAME);
+      await page.getByTestId(`create-ac-${UNCOVERED}`).check();
+      await expect(create).toBeEnabled();
+      expect(await seriousAxeFindings(page, `${scheme}, enabled`)).toEqual([]);
+
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+    }
+  });
+
   // ac-4. LAST in this file (SI-369 (17)): the fixture starts once per
   // harness run and is never reset, and this is the one test that presses
   // Create, under a name nothing else uses. Every snapshot is this test's
@@ -414,4 +467,92 @@ async function fillReadyDialog(page: Page): Promise<void> {
   await page.getByTestId("create-field-Outcome").fill(CREATE_OUTCOME);
   await expect(page.getByTestId("create-ok")).toBeEnabled();
   await expect(page.getByTestId("create-status")).toHaveText(`cuts design/${CREATE_NAME} · claims ${UNCOVERED}`);
+}
+
+// expectDialogFitsAndReaches opens the dialog on the fixture wall at the
+// page's viewport and holds it to Wave 6 §5: with the grammar report
+// showing and again once Create is enabled with every criterion claimed
+// (the longest status line), the dialog lies inside the viewport with no
+// horizontal scroll of its own or of the page; and the name field, every
+// criterion's checkbox, Create and Cancel are each wholly in view, never
+// clipped, once scrolled to.
+async function expectDialogFitsAndReaches(page: Page, what: string): Promise<void> {
+  await openFeatureWall(page);
+  await page.getByTestId("create-spec-btn").click();
+  const dialog = page.locator("#create-dialog");
+  await expect(dialog).toBeVisible();
+  const name = page.getByTestId("create-name");
+
+  await name.fill("Escrow-Surplus-Refund-Threshold-Notice");
+  await expect(name).toHaveAttribute("aria-invalid", "true");
+  await expectDialogFits(page, `${what}, grammar report`);
+
+  await name.fill("escrow-surplus-refund-threshold-notice");
+  for (const ac of CRITERIA) {
+    await page.getByTestId(`create-ac-${ac}`).check();
+  }
+  await expect(page.getByTestId("create-ok")).toBeEnabled();
+  await expectDialogFits(page, `${what}, enabled`);
+
+  const controls = [
+    name,
+    ...CRITERIA.map((ac) => page.getByTestId(`create-ac-${ac}`)),
+    page.getByTestId("create-ok"),
+    page.getByTestId("create-cancel"),
+  ];
+  for (const control of controls) {
+    await control.scrollIntoViewIfNeeded();
+    await expect(control, what).toBeVisible();
+    await expect(control, what).toBeInViewport({ ratio: 1 });
+  }
+  await expectDialogFits(page, `${what}, scrolled`);
+
+  await page.getByTestId("create-cancel").click();
+  await expect(dialog).toBeHidden();
+}
+
+// expectDialogFits holds the open dialog inside the viewport, with no
+// horizontal scroll of the page, the dialog, or its scrolling body.
+async function expectDialogFits(page: Page, what: string): Promise<void> {
+  const fit = await page.locator("#create-dialog").evaluate((d) => {
+    const r = d.getBoundingClientRect();
+    const body = d.querySelector(".create-body") as HTMLElement;
+    const root = document.documentElement;
+    return {
+      left: r.left,
+      right: r.right,
+      top: r.top,
+      bottom: r.bottom,
+      width: root.clientWidth,
+      height: root.clientHeight,
+      page: root.scrollWidth - root.clientWidth,
+      dialog: d.scrollWidth - d.clientWidth,
+      body: body.scrollWidth - body.clientWidth,
+    };
+  });
+  console.log(`fit: ${what}: ${JSON.stringify(fit)}`);
+  expect(fit.left, `${what}: dialog left edge`).toBeGreaterThanOrEqual(0);
+  expect(fit.right, `${what}: dialog right edge`).toBeLessThanOrEqual(fit.width);
+  expect(fit.top, `${what}: dialog top edge`).toBeGreaterThanOrEqual(0);
+  expect(fit.bottom, `${what}: dialog bottom edge`).toBeLessThanOrEqual(fit.height);
+  expect(fit.page, `${what}: the page's horizontal scroll`).toBeLessThanOrEqual(0);
+  expect(fit.dialog, `${what}: the dialog's horizontal scroll`).toBeLessThanOrEqual(0);
+  expect(fit.body, `${what}: the dialog body's horizontal scroll`).toBeLessThanOrEqual(0);
+}
+
+// seriousAxeFindings scans the open dialog alone and returns its serious
+// and critical findings; lesser ones are logged as disclosures.
+async function seriousAxeFindings(page: Page, what: string) {
+  const results = await new AxeBuilder({ page }).include("#create-dialog").withTags(["wcag2a", "wcag2aa"]).analyze();
+  const findings = results.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    nodes: v.nodes.length,
+    targets: v.nodes.slice(0, 3).map((n) => n.target.join(" ")),
+  }));
+  const lesser = findings.filter((f) => f.impact !== "serious" && f.impact !== "critical");
+  if (lesser.length > 0) {
+    console.log(`disclosed: ${what}: lesser axe findings in the dialog ${JSON.stringify(lesser)}`);
+  }
+  return findings.filter((f) => f.impact === "serious" || f.impact === "critical");
 }
